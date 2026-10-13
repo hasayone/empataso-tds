@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"log/slog"
 	"strings"
@@ -31,7 +32,7 @@ func put(t *testing.T, c *Client, key, val string) {
 
 func putTTL(t *testing.T, c *Client, key, val string, ttl time.Duration) {
 	t.Helper()
-	got, err := c.GetCached(key, ttl, func() (string, error) { return val, nil })
+	got, err := c.GetCached(context.Background(), key, ttl, func(context.Context) (string, error) { return val, nil })
 	if err != nil || got != val {
 		t.Fatalf("GetCached(%q): got %q, %v", key, got, err)
 	}
@@ -84,7 +85,7 @@ func TestBudgetRefusesInsteadOfEvicting(t *testing.T) {
 	}
 	calls := 0
 	for i := 0; i < 2; i++ {
-		c.GetCached("c", time.Minute, func() (string, error) { calls++; return v, nil })
+		c.GetCached(context.Background(), "c", time.Minute, func(context.Context) (string, error) { calls++; return v, nil })
 	}
 	if calls != 2 {
 		t.Fatalf("a refused key must load every time, loaded %d of 2", calls)
