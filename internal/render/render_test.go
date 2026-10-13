@@ -21,6 +21,19 @@ func TestExpandKeyPath(t *testing.T) {
 	}
 }
 
+func TestExpandCurlyKeitaroMacros(t *testing.T) {
+	var subs [15]string
+	subs[0] = "one"
+	subs[5] = "KEEP"
+	got := Expand("https://o/?c={subid}&k={keyword}&g={country}&a={sub_id_1}&z={sub_id_6}&no={sub_id_16}", MacroDeps{
+		CID: "abc123", Key: "buy now", Country: "es", SubIDs: subs,
+	})
+	want := "https://o/?c=abc123&k=buy+now&g=es&a=one&z=KEEP&no={sub_id_16}"
+	if got != want {
+		t.Fatalf("curly macros:\n got=%s\nwant=%s", got, want)
+	}
+}
+
 func TestExpandCountryCity(t *testing.T) {
 	got := Expand("https://x/?c=[()COUNTRY()]&t=[()CITY()]", MacroDeps{Country: "ru", City: "moscow"})
 	if got != "https://x/?c=ru&t=moscow" {

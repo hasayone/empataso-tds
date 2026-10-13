@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>KuzTDS</title>
+<title>EmpatASO</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='6' fill='%234f46e5'/><text x='16' y='22' font-size='18' text-anchor='middle' fill='white' font-family='sans-serif' font-weight='700'>E</text></svg>">
 <script>try{var t=localStorage.getItem('kuztds-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <style>
   /* Tokens: light on :root, dark under [data-theme=dark] or the system
@@ -103,6 +104,7 @@
   .fld{display:flex;flex-direction:column;gap:6px;margin-bottom:14px;min-width:0}
   .fld>label,.lbl{font-size:12.5px;font-weight:600;color:var(--muted)}
   .fld input,.fld select{width:100%}
+  .chk input[type=checkbox]{width:16px;height:16px;min-width:16px;padding:0;border:0;box-shadow:none;background:transparent}
   .hint{font-size:12px;color:var(--subtle);line-height:1.45}
   .g2{display:grid;grid-template-columns:1fr 1fr;gap:0 14px} .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 14px}
   .chk{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:13.5px;cursor:pointer}
@@ -124,7 +126,10 @@
   .chip.any{background:transparent;border-style:dashed;color:var(--subtle)}
   .chip.hit{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)} .chip.hit .k{color:var(--bad)}
   .chip.warn{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)} .chip.warn .k{color:var(--warn)} .chip svg.ic{width:13px;height:13px}
-  .dot{width:8px;height:8px;border-radius:50%;flex:none;background:var(--subtle)} .dot.on{background:var(--ok)} .dot.bad{background:var(--bad)} .dot.warn{background:var(--warn)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;background:var(--subtle);vertical-align:middle} .dot.on{background:var(--ok)} .dot.bad{background:var(--bad)} .dot.warn{background:var(--warn)}
+  .flowsum{position:sticky;bottom:0;z-index:25;display:flex;flex-wrap:wrap;gap:16px;align-items:center;margin-top:12px;padding:10px 14px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow-1)}
+  .flowsum b{font-variant-numeric:tabular-nums}
+  th .link{font:inherit;font-weight:650;color:inherit}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow-1)}
   .pad{padding:16px 18px}
   .state{padding:40px 16px;text-align:center;color:var(--muted)}
@@ -251,6 +256,15 @@
   .mini .no{width:16px;height:16px;border-radius:5px;background:var(--surface-2);font-size:10.5px;font-weight:700;display:grid;place-items:center;flex:none}
   .fcard.new{align-items:center;justify-content:center;border-style:dashed;box-shadow:none;background:transparent;color:var(--muted);min-height:180px;font-weight:600}
   .fcard.new:hover{color:var(--accent);border-color:var(--accent);transform:none}
+  .vseg{display:inline-flex;border:1px solid var(--border);border-radius:var(--r-sm);overflow:hidden;background:var(--surface)}
+  .vseg button{height:32px;padding:0 12px;border:0;border-radius:0;background:transparent;box-shadow:none;color:var(--muted);font-weight:600}
+  .vseg button+button{border-left:1px solid var(--border)}
+  .vseg button.on{background:var(--accent-soft);color:var(--accent)}
+  .ftable tr.off td{opacity:.72}
+  .ftable td.acts,.ftable th.acts{width:44px;text-align:right}
+  .ftable tfoot td{font-weight:650;border-top:1px solid var(--border);background:var(--surface)}
+  .urlcell{display:flex;align-items:center;gap:4px}
+  .urlcell a{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
   /* ---- flows: the canvas ---- */
   .fstats{display:flex;gap:22px;flex-wrap:wrap;color:var(--muted);font-size:13px} .fstats b{color:var(--fg);font-variant-numeric:tabular-nums;margin-right:4px}
@@ -324,6 +338,11 @@
   .tag button{width:18px;height:18px;padding:0;border:none;background:transparent;box-shadow:none;color:inherit;opacity:.65;border-radius:4px}
   .tag button:hover{opacity:1;background:var(--surface-3)} .tag svg.ic{width:12px;height:12px}
   .tags input.tin{flex:1;min-width:90px;width:auto;height:22px;padding:0 2px;border:none;box-shadow:none;background:transparent}
+  .tags{position:relative}
+  .chits{position:absolute;z-index:30;left:0;right:0;top:100%;margin-top:4px;max-height:220px;overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);box-shadow:var(--shadow-2)}
+  .chits button{display:flex;width:100%;text-align:left;gap:8px;padding:6px 10px;border:none;background:transparent;box-shadow:none;border-radius:0}
+  .chits button:hover{background:var(--surface-2)}
+  .bulkbar{display:flex;gap:8px;align-items:center;margin-bottom:10px}
   /* output variants and page rewrites: one row each */
   .vars{display:flex;flex-direction:column;gap:6px;margin-bottom:6px}
   .var{display:grid;grid-template-columns:18px minmax(0,1fr) 26px;gap:6px;align-items:start}
@@ -391,7 +410,13 @@ const qa=(s,r=document)=>Array.from(r.querySelectorAll(s));
 const esc=(s)=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 // country flag (emoji) by 2-letter ISO code: ru → 🇷🇺. Empty otherwise.
 const flag=(cc)=>{cc=String(cc||'').trim().toUpperCase();if(!/^[A-Z]{2}$/.test(cc))return '';return String.fromCodePoint(...[...cc].map(c=>0x1F1E6+c.charCodeAt(0)-65))};
-const when=(iso)=>new Date(iso).toLocaleString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+function uiLocale(){return {ru:'ru-RU',uk:'uk-UA',en:'en-US'}[uiLang()]||'en-US'}
+function when(iso){
+  const d=new Date(iso); if(!+d) return '';
+  const o={month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'};
+  try{o.timeZone=uiTz()}catch(e){}
+  return d.toLocaleString(uiLocale(), o);
+}
 const fmt=(n)=>(+n||0).toLocaleString('en-US');
 const money=(n)=>'$'+(+n||0).toFixed(2);
 const pct=(a,b)=>b?((a||0)/b*100).toFixed(1)+'%':'—';
@@ -399,17 +424,75 @@ const firstLine=(s)=>String(s||'').split(/\|\|\||\n/)[0].trim();
 const clone=(o)=>JSON.parse(JSON.stringify(o));
 const dash=(s)=>(!s||s==='-')?'':s;
 function ago(iso){
-  const t=new Date(iso).getTime(); if(!t||t<0)return 'never';
-  const s=Math.round((Date.now()-t)/1000), a=Math.abs(s), w=s<0?'in ':'', z=s<0?'':' ago';
-  if(a<5)return 'just now';
-  const u=a<60?[a,'s']:a<3600?[Math.round(a/60),'min']:a<86400?[Math.round(a/3600),'h']:[Math.round(a/86400),'d'];
-  return w+u[0]+' '+u[1]+z;
+  const t=new Date(iso).getTime(); if(!t||t<0)return tr('never');
+  const s=Math.round((Date.now()-t)/1000), a=Math.abs(s);
+  if(a<5)return tr('just now');
+  const u=a<60?[a,tr('s')]:a<3600?[Math.round(a/60),tr('min')]:a<86400?[Math.round(a/3600),tr('h')]:[Math.round(a/86400),tr('d')];
+  return s<0?tr('in')+' '+u[0]+' '+u[1]:u[0]+' '+u[1]+' '+tr('ago');
 }
 
 let CSRF='', USER='', ENGINE='', HOURS=24, RENDER=0;
-const PERIODS={24:'24 hours',168:'7 days',720:'30 days'};
-const periodLabel=()=>PERIODS[HOURS]||HOURS+' h';
-function rangeQS(){const to=new Date(),from=new Date(to-HOURS*3600*1000);return `from=${from.toISOString()}&to=${to.toISOString()}`}
+const LANG_KEY='kuztds-lang', GEO_KEY='kuztds-geo-default', RANGE_KEY='kuztds-range', TZ_KEY='kuztds-tz';
+const PERIOD_IDS=['today','yesterday','week','7d','month','prevmonth','30d','year','all','dates','times'];
+let RANGE={id:'today'};
+try{const raw=localStorage.getItem(RANGE_KEY); if(raw){const o=JSON.parse(raw); if(o&&PERIOD_IDS.includes(o.id)) RANGE=o}}catch(e){}
+function uiLang(){try{const v=localStorage.getItem(LANG_KEY); if(v==='ru'||v==='uk'||v==='en') return v}catch(e){} return 'en'}
+function defaultGeo(){try{const v=localStorage.getItem(GEO_KEY); if(v==='db'||v==='cf') return v}catch(e){} return 'cf'}
+function uiTz(){
+  try{const v=localStorage.getItem(TZ_KEY); if(v) return v}catch(e){}
+  try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'UTC'}catch(e){return 'UTC'}
+}
+function tr(k){
+  const lang=uiLang();
+  if(typeof I18N!=='undefined'&&I18N[lang]&&I18N[lang][k]) return I18N[lang][k];
+  if(typeof PHRASE!=='undefined'&&PHRASE[lang]&&PHRASE[lang][k]) return PHRASE[lang][k];
+  if(typeof I18N!=='undefined'&&I18N.en&&I18N.en[k]) return I18N.en[k];
+  return k;
+}
+function applyLang(lang){
+  if(lang!=='ru'&&lang!=='uk'&&lang!=='en') lang='en';
+  try{localStorage.setItem(LANG_KEY, lang)}catch(e){}
+  document.documentElement.lang=lang;
+  paintChrome(); themeChanged(); if(typeof syncSaveBar==='function') syncSaveBar(); render();
+}
+function applyTz(tz){
+  try{localStorage.setItem(TZ_KEY, tz)}catch(e){}
+  syncHours(); PERF=null; render();
+}
+function periodLabel(){return tr('period.'+ (RANGE.id||'today'))}
+function syncHours(){
+  let span=null;
+  if((RANGE.id==='dates'||RANGE.id==='times')&&RANGE.from&&RANGE.to) span={from:new Date(RANGE.from),to:new Date(RANGE.to)};
+  if(!span||!(+span.to>+span.from)) span=periodSpan(RANGE.id==='dates'||RANGE.id==='times'?'today':(RANGE.id||'today'), new Date(), uiTz());
+  HOURS=Math.max(1, Math.round((+span.to-+span.from)/3600000));
+}
+function rangeBounds(){
+  if((RANGE.id==='dates'||RANGE.id==='times')&&RANGE.from&&RANGE.to){
+    const from=new Date(RANGE.from), to=new Date(RANGE.to);
+    if(+to>+from) return {from,to};
+  }
+  return periodSpan(RANGE.id==='dates'||RANGE.id==='times'?'today':(RANGE.id||'today'), new Date(), uiTz());
+}
+function rangeQS(){const s=rangeBounds(); return `from=${encodeURIComponent(s.from.toISOString())}&to=${encodeURIComponent(s.to.toISOString())}`}
+function applyRange(id, extra){
+  RANGE={id, from:extra&&extra.from||RANGE.from, to:extra&&extra.to||RANGE.to};
+  try{localStorage.setItem(RANGE_KEY, JSON.stringify(RANGE))}catch(e){}
+  syncHours(); paintChrome(); PERF=null; render();
+}
+function openCustom(id){
+  RANGE.id=id;
+  const box=q('#range-fields'); if(!box) return;
+  box.hidden=false;
+  const typ=id==='times'?'datetime-local':'date';
+  q('#range-a').type=typ; q('#range-b').type=typ;
+}
+function paintChrome(){
+  document.title='EmpatASO';
+  document.documentElement.lang=uiLang();
+  paintNav();
+  const b=q('#period'); if(b) b.textContent=periodLabel();
+}
+syncHours();
 
 /* ---------- API ---------- */
 async function call(method,path,body){
@@ -434,7 +517,7 @@ function toggleTheme(){
   themeChanged();
 }
 function themeChanged(){
-  qa('[data-theme-btn]').forEach(b=>{b.innerHTML=icon(isDark()?'sun':'moon');b.title=isDark()?'Light theme':'Dark theme'});
+  qa('[data-theme-btn]').forEach(b=>{b.innerHTML=icon(isDark()?'sun':'moon');b.title=isDark()?tr('Light theme'):tr('Dark theme')});
   if(q('#chart'))drawChart(q('#chart'),CH.pts);
   drawWires();
 }
@@ -449,6 +532,11 @@ const IC={
   lists:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   tools:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4z"/>',
   automation:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  networks:'<circle cx="6" cy="7" r="2.2"/><circle cx="18" cy="7" r="2.2"/><circle cx="12" cy="17" r="2.2"/><path d="M8 8.2 10.5 15M16 8.2 13.5 15"/>',
+  sources:'<path d="M4 7h16M4 12h10M4 17h13"/>',
+  offers:'<path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.2" fill="currentColor"/>',
+  domains:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.8 3.8 6 3.8 9s-1.3 6.2-3.8 9c-2.5-2.8-3.8-6-3.8-9s1.3-6.2 3.8-9z"/>',
+  report:'<path d="M4 19V5M4 19h16M8 15v-4M12 15V8M16 15v-6"/>',
   settings:'<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
   logout:'<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>',
   sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
@@ -486,7 +574,7 @@ function ask(title,text,okLabel,danger){
   return new Promise(res=>{
     const sc=$('<div class="scrim" style="z-index:74"></div>');
     const m=$(`<div class="modal" role="dialog"><h3>${esc(title)}</h3><p>${esc(text||'')}</p>
-      <div class="row"><div class="spacer"></div><button data-no>Cancel</button><button data-yes class="${danger?'danger':'primary'}">${esc(okLabel||'OK')}</button></div></div>`);
+      <div class="row"><div class="spacer"></div><button data-no>${tr('Cancel')}</button><button data-yes class="${danger?'danger':'primary'}">${esc(okLabel||tr('OK'))}</button></div></div>`);
     const done=(v)=>{sc.remove();m.remove();document.removeEventListener('keydown',key,true);res(v)};
     const key=(e)=>{if(e.key==='Escape'){e.stopPropagation();done(false)}if(e.key==='Enter'){e.stopPropagation();done(true)}};
     sc.onclick=()=>done(false); q('[data-no]',m).onclick=()=>done(false); q('[data-yes]',m).onclick=()=>done(true);
@@ -543,33 +631,56 @@ function markDirty(){syncSaveBar()}
 function syncSaveBar(){
   let bar=q('#savebar');
   if(!anyDirty()){if(bar)bar.remove();return}
-  const what=[flowsDirty()?'flows':'',cronDirty()?'automation':''].filter(Boolean).join(' and ');
+  const what=[flowsDirty()?tr('flows'):'',cronDirty()?tr('automation'):''].filter(Boolean).join(' '+tr('and')+' ');
   if(!bar){
     bar=$(`<div class="savebar" id="savebar"><span class="dot warn"></span><span id="dirty"></span>
-      <button class="discard" id="discard">Discard</button><button class="primary" id="saveall">Save<kbd>⌘S</kbd></button></div>`);
+      <button class="discard" id="discard"></button><button class="primary" id="saveall"></button></div>`);
     document.body.appendChild(bar);
     q('#saveall',bar).onclick=saveAll;
     q('#discard',bar).onclick=async()=>{
-      if(!await ask('Discard changes?','Everything changed since the last save will be lost.','Discard',true))return;
+      if(!await ask(tr('Discard changes?'),tr('Everything changed since the last save will be lost.'),tr('Discard'),true))return;
       if(flowsDirty())GROUPS=JSON.parse(SAVED);
       if(cronDirty())CRON=JSON.parse(CRON_SAVED);
       closeDrawer(); syncSaveBar(); render();
     };
   }
-  q('#dirty',bar).textContent='Unsaved changes in '+what;
+  q('#discard',bar).textContent=tr('Discard');
+  q('#saveall',bar).innerHTML=tr('Save')+'<kbd>⌘S</kbd>';
+  q('#dirty',bar).textContent=tr('Unsaved changes in ')+what;
 }
 async function saveAll(){
   if(DRAWER&&DRAWER.commit)DRAWER.commit();
   try{
     if(flowsDirty())await saveFlows();
     if(cronDirty())await saveCron();
-    toast('Saved');
+    toast(tr('Saved'));
   }catch(e){toast(e.message,true)}
   syncSaveBar();
 }
 
 /* ---------- shell and routing ---------- */
-const NAV=[['dashboard','Dashboard'],['flows','Flows'],['logs','Logs'],['conversions','Conversions'],['keywords','Keywords'],['lists','Lists'],['tools','Tools'],['automation','Automation']];
+const NAV=[['dashboard','nav.dashboard'],['flows','nav.flows'],['offers','nav.offers'],['logs','nav.logs'],['conversions','nav.conversions'],['report','nav.report'],['keywords','nav.keywords'],['lists','nav.lists'],['tools','nav.tools'],['networks','nav.networks'],['sources','nav.sources'],['domains','nav.domains'],['automation','nav.automation']];
+const NAV_KEY='kuztds-nav';
+function navState(){
+  const known=NAV.map(x=>x[0]);
+  let order=known.slice(), hidden={};
+  try{
+    const s=JSON.parse(localStorage.getItem(NAV_KEY)||'');
+    if(s&&Array.isArray(s.order)){
+      const allow=new Set(known);
+      order=s.order.filter(id=>allow.has(id));
+      known.forEach(id=>{if(!order.includes(id)) order.push(id)});
+      if(s.hidden&&typeof s.hidden==='object') hidden=s.hidden;
+    }
+  }catch(e){}
+  return {order,hidden};
+}
+function saveNav(st){try{localStorage.setItem(NAV_KEY,JSON.stringify({order:st.order,hidden:st.hidden}))}catch(e){}}
+function paintNav(){
+  const nav=q('#nav'); if(!nav) return;
+  const st=navState(), page=route().page;
+  nav.innerHTML=st.order.filter(id=>!st.hidden[id]).map(id=>`<a href="#/${id}" data-t="${id}" class="${page===id?'active':''}">${icon(id)}<span>${tr('nav.'+id)}</span></a>`).join('');
+}
 function route(){
   const h=location.hash.replace(/^#\/?/,''), i=h.indexOf('/');
   const page=i<0?h:h.slice(0,i), arg=i<0?'':decodeURIComponent(h.slice(i+1));
@@ -584,14 +695,14 @@ async function boot(){
 function loginView(msg=''){
   closeDrawer(); closeMenu(); const sb=q('#savebar'); if(sb)sb.remove();
   const el=$(`<div class="login-wrap"><div class="card login">
-    <div class="row" style="margin-bottom:20px"><div class="logo">K</div><b style="font-size:16px">KuzTDS</b><div class="spacer"></div><button class="icon ghost" data-theme-btn></button></div>
-    <div class="fld"><label for="l">Username</label><input id="l" autocomplete="username"></div>
-    <div class="fld"><label for="p">Password</label><input id="p" type="password" autocomplete="current-password"></div>
-    <button class="primary" id="go" style="width:100%;height:36px">Sign in</button>
+    <div class="row" style="margin-bottom:20px"><div class="logo">E</div><b style="font-size:16px">EmpatASO</b><div class="spacer"></div><button class="icon ghost" data-theme-btn></button></div>
+    <div class="fld"><label for="l">${tr('Username')}</label><input id="l" autocomplete="username"></div>
+    <div class="fld"><label for="p">${tr('Password')}</label><input id="p" type="password" autocomplete="current-password"></div>
+    <button class="primary" id="go" style="width:100%;height:36px">${tr('Sign in')}</button>
     <div class="bad" style="text-align:center;min-height:20px;margin-top:10px;font-size:13px">${esc(msg)}</div></div></div>`);
   const submit=async()=>{
     try{await call('POST','/api/login',{login:q('#l').value,password:q('#p').value});boot()}
-    catch(e){loginView(e.status===429?'Too many attempts, try again later':'Invalid login or password')}
+    catch(e){loginView(e.status===429?tr('Too many attempts, try again later'):tr('Invalid login or password'))}
   };
   q('#go',el).onclick=submit;
   qa('input',el).forEach(i=>i.onkeydown=e=>{if(e.key==='Enter')submit()});
@@ -600,28 +711,39 @@ function loginView(msg=''){
   setTimeout(()=>{const l=q('#l');if(l)l.focus()},0);
 }
 async function logout(){
-  if(anyDirty()&&!await ask('Log out?','There are unsaved changes; they will be lost.','Log out',true))return;
+  if(anyDirty()&&!await ask(tr('Log out?'),tr('There are unsaved changes; they will be lost.'),tr('Log out'),true))return;
   await call('POST','/api/logout').catch(()=>{});
   GROUPS=null; CRON=null; loginView();
 }
 function app(user){
-  const navItem=([k,l])=>`<a href="#/${k}" data-t="${k}">${icon(k)}<span>${l}</span></a>`;
   const root=$(`<div>
     <header class="top">
-      <a class="brand" href="#/dashboard"><div class="logo">K</div><span>KuzTDS</span></a>
-      <nav class="nav" id="nav">${NAV.map(navItem).join('')}</nav>
+      <a class="brand" href="#/dashboard"><div class="logo">E</div><span>EmpatASO</span></a>
+      <nav class="nav" id="nav"></nav>
       <div class="right">
-        <select id="period" title="Period for every number on the page">${Object.keys(PERIODS).map(h=>`<option value="${h}">${PERIODS[h]}</option>`).join('')}</select>
+        <button class="ghost" id="period" type="button" title="Period"></button>
+        <span id="range-fields" hidden><input id="range-a"><input id="range-b"><button type="button" class="sm" id="range-ok">OK</button></span>
         <button class="icon ghost" id="theme" data-theme-btn></button>
         <button class="ghost" id="userbtn" style="padding:0 6px 0 4px"><span class="avatar">${esc((user||'a')[0])}</span>${icon('down')}</button>
       </div>
     </header>
     <main id="view"></main></div>`);
-  q('#period',root).value=HOURS;
-  q('#period',root).onchange=e=>{HOURS=+e.target.value;PERF=null;render()};
+  q('#period',root).onclick=e=>{
+    e.stopPropagation();
+    menu(e.currentTarget, PERIOD_IDS.map(id=>({label:tr('period.'+id), on:()=>id==='dates'||id==='times'?openCustom(id):applyRange(id)})));
+  };
+  q('#range-ok',root).onclick=()=>{
+    const a=q('#range-a',root).value, b=q('#range-b',root).value;
+    if(!a||!b){toast(tr('period.need'),true);return}
+    const from=wallToDate(a, uiTz(), false);
+    const to=wallToDate(b, uiTz(), RANGE.id==='dates');
+    if(!(+to>+from)){toast(tr('period.need'),true);return}
+    q('#range-fields',root).hidden=true;
+    applyRange(RANGE.id,{from:from.toISOString(),to:to.toISOString()});
+  };
   q('#theme',root).onclick=toggleTheme;
-  q('#userbtn',root).onclick=e=>{e.stopPropagation();menu(e.currentTarget,[{cap:user},{label:'Settings',icon:'settings',on:()=>go('settings')},'-',{label:'Log out',icon:'logout',on:logout}])};
-  const a=q('#app'); a.innerHTML=''; a.appendChild(root); themeChanged();
+  q('#userbtn',root).onclick=e=>{e.stopPropagation();menu(e.currentTarget,[{cap:user},{label:tr('menu.settings'),icon:'settings',on:()=>go('settings')},'-',{label:tr('menu.logout'),icon:'logout',on:logout}])};
+  const a=q('#app'); a.innerHTML=''; a.appendChild(root); paintChrome(); themeChanged();
   if(!location.hash)history.replaceState(null,'','#/dashboard');
   render();
 }
@@ -656,7 +778,7 @@ function perfOf(g,stream){const o=zero();perfRows(g).forEach(r=>{if(stream==null
 const BDT={country:'Countries',device:'Devices',os:'OS',browser:'Browsers',domain:'Sources',org:'Networks'};
 let PSORT={k:'hits',d:-1}, CH={pts:[],x:[]};
 async function dashboard(_,live){
-  view().innerHTML=stateHTML('Loading…');
+  view().innerHTML=stateHTML(tr('Loading…'));
   const [sum,ts,groups]=await Promise.all([
     get('/api/stats/summary?'+rangeQS(),null),
     get('/api/stats/timeseries?'+rangeQS()+'&step='+(HOURS>48?86400:3600),[]),
@@ -669,26 +791,26 @@ async function dashboard(_,live){
   const conv=PERF.reduce((a,r)=>a+(r.conv||0),0), profit=PERF.reduce((a,r)=>a+(r.profit||0),0);
   const kpi=(v,l,s,c)=>`<div class="card kpi"><div class="l"><span>${l}</span><span>${s||''}</span></div><div class="v ${c||''}">${v}</div></div>`;
   view().innerHTML=`
-    <div class="ph"><h1>Dashboard</h1><span class="sub">${periodLabel()}</span></div>
+    <div class="ph"><h1>${tr('Dashboard')}</h1><span class="sub">${periodLabel()}</span></div>
     <div class="kpis">
-      ${kpi(fmt(total),'Visits')}
-      ${kpi(fmt(uniq),'Unique',pct(uniq,total))}
-      ${kpi(fmt(bots),'Bots',pct(bots,total),'warn')}
-      ${kpi(fmt(conv),'Conversions')}
-      ${kpi(money(profit),'Profit','','ok')}
-      ${kpi(pct(conv,total),'CR','conv / visits')}
+      ${kpi(fmt(total),tr('Visits'))}
+      ${kpi(fmt(uniq),tr('Unique'),pct(uniq,total))}
+      ${kpi(fmt(bots),tr('Bots'),pct(bots,total),'warn')}
+      ${kpi(fmt(conv),tr('Conversions'))}
+      ${kpi(money(profit),tr('Profit'),'','ok')}
+      ${kpi(pct(conv,total),tr('CR'),tr('conv / visits'))}
     </div>
     <div class="card pad" style="margin-bottom:14px">
-      <div class="ch"><b>Visits over time</b><span class="hint">${HOURS>48?'daily':'hourly'}</span><div class="spacer"></div>
-        <span class="lg"><i></i>total</span><span class="lg"><i class="sw-uniq"></i>unique</span><span class="lg"><i class="sw-bots"></i>bots</span></div>
+      <div class="ch"><b>${tr('Visits over time')}</b><span class="hint">${HOURS>48?tr('daily'):tr('hourly')}</span><div class="spacer"></div>
+        <span class="lg"><i></i>${tr('total')}</span><span class="lg"><i class="sw-uniq"></i>${tr('unique')}</span><span class="lg"><i class="sw-bots"></i>${tr('bots')}</span></div>
       <div class="cwrap"><canvas id="chart"></canvas><div class="ctip" id="ctip" hidden></div></div>
     </div>
     <div class="card pad">
-      <div class="ch"><b>Performance by flow and stream</b><span class="hint">click a column to sort, a row to open the flow</span><div class="spacer"></div><button class="sm" id="perfcsv">Export CSV</button></div>
+      <div class="ch"><b>${tr('Performance by flow and stream')}</b><span class="hint">${tr('click a column to sort, a row to open the flow')}</span><div class="spacer"></div><button class="sm" id="perfcsv">${tr('Export CSV')}</button></div>
       <div id="perfwrap"></div>
     </div>
-    <h2>Who visits</h2>
-    <div class="bds">${Object.keys(BDT).map(d=>`<div class="card pad bd" data-bd="${d}"><div class="bt">${BDT[d]}</div><div id="bd-${d}" class="bars"><span class="muted">…</span></div></div>`).join('')}</div>`;
+    <h2>${tr('Who visits')}</h2>
+    <div class="bds">${Object.keys(BDT).map(d=>`<div class="card pad bd" data-bd="${d}"><div class="bt">${tr(BDT[d])}</div><div id="bd-${d}" class="bars"><span class="muted">…</span></div></div>`).join('')}</div>`;
   drawChart(q('#chart'),pts); bindChartHover(q('#chart'));
   renderPerf(groups||[]);
   q('#perfcsv').onclick=()=>exportPerf(groups||[]);
@@ -700,7 +822,7 @@ async function loadBreakdown(dim){
   // A dimension the store does not have (no network columns yet) hides its card.
   if(kv===null){const c=box.closest('[data-bd]');if(c)c.remove();return}
   const rows=kv.filter(x=>x.key&&x.key!=='-');
-  if(!rows.length){box.innerHTML='<span class="muted">no data</span>';return}
+  if(!rows.length){box.innerHTML='<span class="muted">'+tr('no data')+'</span>';return}
   const max=Math.max(...rows.map(x=>x.count));
   box.innerHTML=rows.map(x=>`<div><span class="k" title="${esc(x.key)}">${dim==='country'?`<span class="flag">${flag(x.key)}</span>`:''}${esc(x.key)}</span><span class="tr"><i style="width:${Math.max(2,Math.round(x.count/max*100))}%"></i></span><span class="n">${fmt(x.count)}</span></div>`).join('');
 }
@@ -732,12 +854,12 @@ function perfSorted(groups){
 function renderPerf(groups){
   const wrap=q('#perfwrap'); if(!wrap)return;
   const tree=perfSorted(groups);
-  if(!tree.length){wrap.innerHTML=stateHTML('No traffic in this period');return}
+  if(!tree.length){wrap.innerHTML=stateHTML(tr('No traffic in this period'));return}
   const th=(key,label,cls)=>`<th class="${cls||''} ${PSORT.k===key?'sorted':''}" data-sort="${key}">${label}${PSORT.k===key&&key!=='name'?(PSORT.d<0?' ▾':' ▴'):''}</th>`;
   const cells=r=>`<td class="num">${fmt(r.hits)}</td><td class="num">${fmt(r.unique)}</td><td class="num ${r.bots?'warn':''}">${fmt(r.bots)}</td><td class="num ${r.conv?'ok':''}">${fmt(r.conv)}</td><td class="num">${r.profit?money(r.profit):'—'}</td><td class="num">${pct(r.conv,r.hits)}</td>`;
-  const body=tree.map(n=>`<tr class="grp ${n.known?'click':''}" data-open="${n.known?esc(n.id):''}"><td>${esc(n.id)}${n.name?` <span class="muted">${esc(n.name)}</span>`:''}${n.known?'':' <span class="pill">not in config</span>'}</td>${cells(n.tot)}</tr>`+
-    n.rows.map(r=>`<tr class="str ${n.known?'click':''}" data-open="${n.known?esc(n.id):''}"><td>${r.stream==='-'?'<i class="muted">no match → default</i>':esc(r.stream)}</td>${cells(r)}</tr>`).join('')).join('');
-  wrap.innerHTML=`<div class="tw"><table class="perft"><thead><tr>${th('name','Flow / stream')}${th('hits','Hits','num')}${th('unique','Unique','num')}${th('bots','Bots','num')}${th('conv','Conv','num')}${th('profit','Profit','num')}${th('cr','CR','num')}</tr></thead><tbody>${body}</tbody></table></div>`;
+  const body=tree.map(n=>`<tr class="grp ${n.known?'click':''}" data-open="${n.known?esc(n.id):''}"><td>${esc(n.id)}${n.name?` <span class="muted">${esc(n.name)}</span>`:''}${n.known?'':' <span class="pill">'+tr('not in config')+'</span>'}</td>${cells(n.tot)}</tr>`+
+    n.rows.map(r=>`<tr class="str ${n.known?'click':''}" data-open="${n.known?esc(n.id):''}"><td>${r.stream==='-'?'<i class="muted">'+tr('no match → default')+'</i>':esc(r.stream)}</td>${cells(r)}</tr>`).join('')).join('');
+  wrap.innerHTML=`<div class="tw"><table class="perft"><thead><tr>${th('name',tr('Flow / stream'))}${th('hits',tr('Hits'),'num')}${th('unique',tr('Unique'),'num')}${th('bots',tr('Bots'),'num')}${th('conv',tr('Conv'),'num')}${th('profit',tr('Profit'),'num')}${th('cr',tr('CR'),'num')}</tr></thead><tbody>${body}</tbody></table></div>`;
   qa('th[data-sort]',wrap).forEach(h=>h.onclick=()=>{
     const key=h.dataset.sort;
     if(PSORT.k===key&&key!=='name')PSORT.d=-PSORT.d; else PSORT={k:key,d:-1};
@@ -769,7 +891,7 @@ function drawChart(cv,pts,hover){
   const c={total:cssVar('--chart-total'),bots:cssVar('--chart-bots'),grid:cssVar('--border'),text:cssVar('--muted'),ring:cssVar('--surface')};
   const dpr=window.devicePixelRatio||1, W=cv.clientWidth||600, H=260;
   cv.width=W*dpr; cv.height=H*dpr; const g=cv.getContext('2d'); g.scale(dpr,dpr); g.clearRect(0,0,W,H);
-  if(!pts.length){CH={pts:[],x:[]};g.fillStyle=c.text;g.font='13px system-ui,sans-serif';g.fillText('No data for the period',12,24);return}
+  if(!pts.length){CH={pts:[],x:[]};g.fillStyle=c.text;g.font='13px system-ui,sans-serif';g.fillText(tr('No data for the period'),12,24);return}
   const L=48,R=12,T=14,B=26,w=W-L-R,h=H-T-B;
   const max=Math.max(1,...pts.map(p=>p.total));
   const x=i=>L+(pts.length<2?w/2:i/(pts.length-1)*w), y=v=>T+h-(v||0)/max*h;
@@ -780,7 +902,9 @@ function drawChart(cv,pts,hover){
   pts.forEach((p,i)=>{if(i%step===0||i===pts.length-1){
     if(i===pts.length-1&&i%step!==0&&(pts.length-1)%step<step/2)return; // the last label would sit on its neighbour
     const d=new Date(p.ts);g.textAlign=i===0?'left':(i===pts.length-1?'right':'center');
-    g.fillText(HOURS>48?d.toLocaleDateString('en-US',{month:'short',day:'numeric'}):d.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit'}),x(i),H-8)}});
+    const tick=HOURS>48?{month:'short',day:'numeric'}:{hour:'2-digit',minute:'2-digit'};
+    try{tick.timeZone=uiTz()}catch(e){}
+    g.fillText(HOURS>48?d.toLocaleDateString(uiLocale(),tick):d.toLocaleTimeString(uiLocale(),tick),x(i),H-8)}});
   const path=(key)=>{g.beginPath();pts.forEach((p,i)=>{i?g.lineTo(x(i),y(p[key])):g.moveTo(x(i),y(p[key]))})};
   const grd=g.createLinearGradient(0,T,0,T+h);grd.addColorStop(0,c.total+'40');grd.addColorStop(1,c.total+'05');
   path('total');g.lineTo(x(pts.length-1),T+h);g.lineTo(x(0),T+h);g.closePath();g.fillStyle=grd;g.fill();
@@ -800,7 +924,7 @@ function bindChartHover(cv){
     let i=0,best=1e9; CH.x.forEach((X,j)=>{const d=Math.abs(X-mx);if(d<best){best=d;i=j}});
     drawChart(cv,pts,i); const p=pts[i];
     tip.hidden=false;
-    tip.innerHTML=`<div class="t">${when(p.ts)}</div><div><i></i>total<b>${fmt(p.total)}</b></div><div><i class="sw-uniq"></i>unique<b>${fmt(p.unique)}</b></div><div><i class="sw-bots"></i>bots<b>${fmt(p.bots)}</b></div>`;
+    tip.innerHTML=`<div class="t">${when(p.ts)}</div><div><i></i>${tr('total')}<b>${fmt(p.total)}</b></div><div><i class="sw-uniq"></i>${tr('unique')}<b>${fmt(p.unique)}</b></div><div><i class="sw-bots"></i>${tr('bots')}<b>${fmt(p.bots)}</b></div>`;
     tip.style.left=Math.max(0,Math.min(CH.x[i]+12,r.width-tip.offsetWidth-4))+'px';
   };
   cv.onmouseleave=()=>{tip.hidden=true;drawChart(cv,CH.pts)};
@@ -943,7 +1067,259 @@ function dayList(days){
 }
 // Macros in an already escaped output stand out from the text around them.
 const macroHTML=(h)=>String(h).replace(/\[(?:\(\))?[A-Z][A-Z0-9_]*(?:\(\))?(?:-[^\]\s<>]*)?\]/g,'<span class="mac">$&</span>');
+const COUNTRY_PACK=[
+'ad|Andorra|Андорра|Андорра','ae|United Arab Emirates|ОАЭ|ОАЕ','af|Afghanistan|Афганистан|Афганістан',
+'al|Albania|Албания|Албанія','am|Armenia|Армения|Вірменія','ar|Argentina|Аргентина|Аргентина',
+'at|Austria|Австрия|Австрія','au|Australia|Австралия|Австралія','az|Azerbaijan|Азербайджан|Азербайджан',
+'ba|Bosnia and Herzegovina|Босния и Герцеговина|Боснія і Герцеговина','be|Belgium|Бельгия|Бельгія',
+'bg|Bulgaria|Болгария|Болгарія','br|Brazil|Бразилия|Бразилія','by|Belarus|Беларусь|Білорусь',
+'ca|Canada|Канада|Канада','ch|Switzerland|Швейцария|Швейцарія','cl|Chile|Чили|Чилі',
+'cn|China|Китай|Китай','co|Colombia|Колумбия|Колумбія','cy|Cyprus|Кипр|Кіпр',
+'cz|Czechia|Чехия|Чехія','de|Germany|Германия|Німеччина','dk|Denmark|Дания|Данія',
+'ee|Estonia|Эстония|Естонія','eg|Egypt|Египет|Єгипет','es|Spain|Испания|Іспанія',
+'fi|Finland|Финляндия|Фінляндія','fr|France|Франция|Франція','gb|United Kingdom|Великобритания|Велика Британія',
+'ge|Georgia|Грузия|Грузія','gr|Greece|Греция|Греція','hk|Hong Kong|Гонконг|Гонконг',
+'hr|Croatia|Хорватия|Хорватія','hu|Hungary|Венгрия|Угорщина','id|Indonesia|Индонезия|Індонезія',
+'ie|Ireland|Ирландия|Ірландія','il|Israel|Израиль|Ізраїль','in|India|Индия|Індія',
+'it|Italy|Италия|Італія','jp|Japan|Япония|Японія','kg|Kyrgyzstan|Киргизия|Киргизстан',
+'kr|South Korea|Южная Корея|Південна Корея','kz|Kazakhstan|Казахстан|Казахстан','lt|Lithuania|Литва|Литва',
+'lu|Luxembourg|Люксембург|Люксембург','lv|Latvia|Латвия|Латвія','md|Moldova|Молдова|Молдова',
+'mx|Mexico|Мексика|Мексика','nl|Netherlands|Нидерланды|Нідерланди','no|Norway|Норвегия|Норвегія',
+'nz|New Zealand|Новая Зеландия|Нова Зеландія','pl|Poland|Польша|Польща','pt|Portugal|Португалия|Португалія',
+'ro|Romania|Румыния|Румунія','rs|Serbia|Сербия|Сербія','ru|Russia|Россия|Росія',
+'se|Sweden|Швеция|Швеція','sg|Singapore|Сингапур|Сінгапур','si|Slovenia|Словения|Словенія',
+'sk|Slovakia|Словакия|Словаччина','th|Thailand|Таиланд|Таїланд','tr|Turkey|Турция|Туреччина',
+'ua|Ukraine|Украина|Україна','us|United States|США|США','uz|Uzbekistan|Узбекистан|Узбекистан',
+'vn|Vietnam|Вьетнам|Вʼєтнам','za|South Africa|ЮАР|ПАР'
+];
+const COUNTRIES=COUNTRY_PACK.map(line=>{const [code,en,ru,uk]=line.split('|'); return {code,en,ru,uk}});
+function findCountries(q){
+  q=String(q||'').trim().toLowerCase();
+  if(!q) return [];
+  const hits=COUNTRIES.filter(c=>c.code===q || c.en.toLowerCase().includes(q) || c.ru.toLowerCase().includes(q) || c.uk.toLowerCase().includes(q));
+  hits.sort((a,b)=>(a.code===q?0:1)-(b.code===q?0:1) || a.en.localeCompare(b.en));
+  return hits.slice(0,12);
+}
+function countryLabel(code, lang){
+  const c=COUNTRIES.find(x=>x.code===String(code||'').toLowerCase());
+  if(!c) return String(code||'');
+  if(lang==='ru') return c.ru||c.en;
+  if(lang==='uk') return c.uk||c.en;
+  return c.en;
+}
+function countryCode(raw){
+  const q=String(raw||'').trim();
+  if(!q) return '';
+  const low=q.toLowerCase();
+  const hits=findCountries(q);
+  const exact=hits.find(c=>c.code===low || c.en.toLowerCase()===low || c.ru.toLowerCase()===low || c.uk.toLowerCase()===low);
+  if(exact) return exact.code;
+  if(/^[a-z]{2}$/i.test(q) && COUNTRIES.some(c=>c.code===low)) return low;
+  if(hits.length===1) return hits[0].code;
+  return '';
+}
+function zonedParts(date, tz){
+  const dtf=new Intl.DateTimeFormat('en-US',{timeZone:tz,hourCycle:'h23',weekday:'short',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  const o={};
+  dtf.formatToParts(date).forEach(p=>{if(p.type!=='literal') o[p.type]=p.value});
+  let h=+o.hour; if(h===24) h=0;
+  const wd={Sun:0,Mon:1,Tue:2,Wed:3,Thu:4,Fri:5,Sat:6}[o.weekday];
+  return {y:+o.year, m:+o.month, d:+o.day, h, min:+o.minute, s:+o.second, wd};
+}
+function zonedDate(y,m,d,h,min,s,tz){
+  const wall=Date.UTC(y,m-1,d,h||0,min||0,s||0);
+  const off=ms=>{const p=zonedParts(new Date(ms), tz); return Date.UTC(p.y,p.m-1,p.d,p.h,p.min,p.s)-ms};
+  let utc=wall-off(wall);
+  utc=wall-off(utc);
+  return new Date(utc);
+}
+function addCal(y,m,d,days){
+  const n=new Date(Date.UTC(y,m-1,d+days));
+  return {y:n.getUTCFullYear(), m:n.getUTCMonth()+1, d:n.getUTCDate()};
+}
+function wallToDate(v, tz, nextDay){
+  const m=/^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2}))?/.exec(v||'');
+  if(!m) return null;
+  let y=+m[1], mo=+m[2], d=+m[3], h=m[4]?+m[4]:0, mi=m[5]?+m[5]:0;
+  if(nextDay && !m[4]){const a=addCal(y,mo,d,1); y=a.y; mo=a.m; d=a.d}
+  if(!tz){
+    if(m[4]) return new Date(v);
+    return new Date(y, mo-1, d, h, mi, 0, 0);
+  }
+  return zonedDate(y, mo, d, h, mi, 0, tz);
+}
+function periodSpan(id, now, tz){
+  const end=new Date(now);
+  if(!tz){
+    const sod=(d)=>{const x=new Date(d); x.setHours(0,0,0,0); return x};
+    switch(id){
+      case 'today': return {from:sod(end), to:end};
+      case 'yesterday': {const y=sod(end); y.setDate(y.getDate()-1); return {from:y, to:sod(end)};}
+      case 'week': {const s=sod(end); const day=(s.getDay()+6)%7; s.setDate(s.getDate()-day); return {from:s, to:end};}
+      case '7d': return {from:new Date(+end-7*86400000), to:end};
+      case 'month': {const s=sod(end); s.setDate(1); return {from:s, to:end};}
+      case 'prevmonth': {const s=sod(end); s.setDate(1); const p=new Date(s); p.setMonth(p.getMonth()-1); return {from:p, to:s};}
+      case '30d': return {from:new Date(+end-30*86400000), to:end};
+      case 'year': {const s=sod(end); s.setMonth(0,1); return {from:s, to:end};}
+      case 'all': return {from:new Date('2000-01-01T00:00:00Z'), to:end};
+      default: return {from:new Date(+end-24*3600000), to:end};
+    }
+  }
+  const p=zonedParts(end, tz), sod=(y,m,d)=>zonedDate(y,m,d,0,0,0,tz), today=sod(p.y,p.m,p.d);
+  switch(id){
+    case 'today': return {from:today, to:end};
+    case 'yesterday': {const a=addCal(p.y,p.m,p.d,-1); return {from:sod(a.y,a.m,a.d), to:today};}
+    case 'week': {const a=addCal(p.y,p.m,p.d,-(p.wd+6)%7); return {from:sod(a.y,a.m,a.d), to:end};}
+    case '7d': return {from:new Date(+end-7*86400000), to:end};
+    case 'month': return {from:sod(p.y,p.m,1), to:end};
+    case 'prevmonth': {const prev=p.m===1?{y:p.y-1,m:12}:{y:p.y,m:p.m-1}; return {from:sod(prev.y,prev.m,1), to:sod(p.y,p.m,1)};}
+    case '30d': return {from:new Date(+end-30*86400000), to:end};
+    case 'year': return {from:sod(p.y,1,1), to:end};
+    case 'all': return {from:new Date('2000-01-01T00:00:00Z'), to:end};
+    default: return {from:new Date(+end-24*3600000), to:end};
+  }
+}
 // ---- pure: end ----
+
+const I18N={
+en:{
+'nav.dashboard':'Dashboard','nav.flows':'Campaigns','nav.offers':'Offers','nav.logs':'Logs','nav.conversions':'Conversions','nav.keywords':'Keywords','nav.lists':'Lists','nav.tools':'Tools','nav.networks':'Networks','nav.sources':'Sources','nav.domains':'Domains','nav.report':'Report','nav.automation':'Automation',
+'menu.settings':'Settings','menu.logout':'Log out',
+'period.today':'Today','period.yesterday':'Yesterday','period.week':'This week','period.7d':'Last 7 days','period.month':'This month','period.prevmonth':'Previous month','period.30d':'Last 30 days','period.year':'This year','period.all':'All time','period.dates':'Date range','period.times':'Time range','period.need':'Pick both ends of the range',
+'settings.country':'Country','settings.lang':'Interface language','settings.search':'Find a country','settings.geo':'Default source for a new flow','settings.geo.cf':'CDN header','settings.geo.db':'Geo database','settings.hint':'Search matches the code and the English, Russian and Ukrainian names at once.','settings.tz':'Statistics timezone','settings.tz.find':'Find a timezone','settings.tz.hint':'Periods and times in reports use this zone. The visitor’s own zone is unchanged.',
+'flows.title':'Campaigns','flows.table':'Table','flows.cards':'Cards','flows.search':'Search campaigns and streams…','flows.new':'New campaign','flows.bulk.on':'Enable','flows.bulk.off':'Disable','flows.bulk.dup':'Duplicate','flows.bulk.del':'Delete','flows.bulk.n':'selected','flows.col.id':'Campaign','flows.col.num':'No.','flows.col.name':'Campaign name','flows.col.url':'URL','flows.col.streams':'Streams','flows.page':'Per page','flows.page.custom':'Custom','flows.state':'State','flows.state.all':'All','flows.state.on':'On','flows.state.off':'Off','flows.state.hits':'With visits','flows.sum':'Total','flows.sum.sel':'Selected','flows.visits':'visits','flows.bots':'bots','flows.conv':'conv','flows.profit':'profit','flows.nostreams':'No streams — every visitor gets the default','flows.more':'more','flows.streams':'streams','flows.log.clicks':'Click log','flows.log.conv':'Conversion log','tester.ip':'IP address','tester.country':'Country','tester.lang':'Language','tester.referer':'Referer','tester.key':'Keyword','tester.query':'URL parameters','tester.hint':'Uses the campaigns on screen, saved or not. Impression limits, bot checks and the antiflood depend on live traffic and are not simulated.','src.title':'Traffic sources','src.new':'New source','src.our':'Our name','src.theirs':'Name in the link','src.empty':'No sources yet','src.link':'Campaign link','log.traffic':'Traffic','log.postbacks':'Postbacks and S2S','log.system':'System','log.outcome':'Outcome','log.direction':'Direction','rep.title':'Report','rep.csv':'Download CSV','rep.empty':'Nothing in this period',
+'conv.title':'Conversions','conv.subid':'Subid','conv.status':'Status','conv.campaign':'Campaign','conv.stream':'Stream','conv.offer':'Offer','conv.landing':'Landing','conv.network':'Network','conv.source':'Source','conv.columns':'Columns','conv.all':'All',
+'net.title':'Networks','net.create':'New network','net.name':'Name','net.url':'Postback URL','net.param':'Offer parameters','net.template':'Template','net.save':'Save','net.empty':'No networks yet','net.copy':'Copy','net.hint':'A note for the partner cabinet. The tracker does not call this URL.',
+'off.title':'Offers','off.new':'New offer','off.name':'Name','off.group':'Group','off.url':'URL','off.local':'Local','off.empty':'No offers yet','off.allnets':'All networks','off.allgroups':'All groups','off.visits':'Visits','off.conv':'Conv','off.revenue':'Revenue',
+'dom.title':'Domains','dom.new':'New domain','dom.host':'Host','dom.role':'Role','dom.role.admin':'Admin','dom.role.links':'Campaign links','dom.role.both':'Admin and links','dom.primary':'Primary for links','dom.check':'Check','dom.ok':'OK','dom.fail':'Not OK','dom.empty':'No domains yet','dom.forlink':'Link domain','dom.default':'Primary domain','dom.admin':'Admin address',
+'nav.card':'Top bar','nav.card.hint':'Hidden items still open from a direct link. Settings stay in the user menu.',
+'conv.click':'Click time','conv.ip':'IP','conv.revenue':'Revenue','conv.when':'Conversion time',
+'stream.offer':'Offer','stream.offer.none':'No offer','stream.network':'Affiliate network','stream.network.none':'No network','ed.identity':'Identity','ed.default':'Default — when no stream matches','ed.visitors':'Visitors','ed.flood':'Antiflood','ed.links':'Links','ed.settings':'Campaign settings','ed.stream':'Stream','ed.onoff':'Stream on / off','ed.name':'stream name','ed.close':'Close'
+},
+ru:{
+'nav.dashboard':'Сводка','nav.flows':'Кампании','nav.offers':'Офферы','nav.logs':'Журнал','nav.conversions':'Конверсии','nav.keywords':'Ключевые слова','nav.lists':'Списки','nav.tools':'Инструменты','nav.networks':'Сети','nav.sources':'Источники','nav.domains':'Домены','nav.report':'Отчёт','nav.automation':'Автоматизация',
+'menu.settings':'Настройки','menu.logout':'Выйти',
+'period.today':'Сегодня','period.yesterday':'Вчера','period.week':'Текущая неделя','period.7d':'Последние 7 дней','period.month':'Текущий месяц','period.prevmonth':'Предыдущий месяц','period.30d':'Последние 30 дней','period.year':'Текущий год','period.all':'За всё время','period.dates':'Интервал дат','period.times':'Интервал времени','period.need':'Укажите оба края интервала',
+'settings.country':'Страна','settings.lang':'Язык интерфейса','settings.search':'Найти страну','settings.geo':'Источник страны для нового потока','settings.geo.cf':'Заголовок CDN','settings.geo.db':'Гео-база','settings.hint':'Поиск сразу по коду и по английскому, русскому и украинскому имени.','settings.tz':'Часовой пояс статистики','settings.tz.find':'Найти часовой пояс','settings.tz.hint':'Периоды и время в отчётах считаются в этом поясе. Пояс самого посетителя не меняется.',
+'flows.title':'Кампании','flows.table':'Таблица','flows.cards':'Карточки','flows.search':'Поиск кампаний и потоков…','flows.new':'Новая кампания','flows.bulk.on':'Включить','flows.bulk.off':'Выключить','flows.bulk.dup':'Дублировать','flows.bulk.del':'Удалить','flows.bulk.n':'выбрано','flows.col.id':'Кампания','flows.col.num':'№','flows.col.name':'Имя кампании','flows.col.url':'URL','flows.col.streams':'Потоки','flows.page':'На странице','flows.page.custom':'Своё','flows.state':'Состояние','flows.state.all':'Все','flows.state.on':'Включённые','flows.state.off':'Выключенные','flows.state.hits':'С визитами','flows.sum':'Всего','flows.sum.sel':'Выбранные','flows.visits':'визиты','flows.bots':'боты','flows.conv':'конверсии','flows.profit':'прибыль','flows.nostreams':'Нет потоков — каждый посетитель получает ответ по умолчанию','flows.more':'ещё','flows.streams':'потоков','flows.log.clicks':'Лог кликов','flows.log.conv':'Лог конверсий','tester.ip':'IP-адрес','tester.country':'Страна','tester.lang':'Язык','tester.referer':'Реферер','tester.key':'Ключевое слово','tester.query':'Параметры URL','tester.hint':'Берёт кампании с экрана, сохранённые или нет. Лимиты показов, проверка ботов и антифлуд зависят от живого трафика и здесь не считаются.','src.title':'Источники трафика','src.new':'Новый источник','src.our':'Имя у нас','src.theirs':'Имя в ссылке','src.empty':'Источников пока нет','src.link':'Ссылка кампании','log.traffic':'Трафик','log.postbacks':'Postbacks и S2S','log.system':'Системный','log.outcome':'Исход','log.direction':'Направление','rep.title':'Отчёт','rep.csv':'Скачать CSV','rep.empty':'За этот период пусто',
+'conv.title':'Конверсии','conv.subid':'Subid','conv.status':'Статус','conv.campaign':'Кампания','conv.stream':'Поток','conv.offer':'Оффер','conv.landing':'Лендинг','conv.network':'Сеть','conv.source':'Источник','conv.columns':'Столбцы','conv.all':'Все',
+'net.title':'Сети','net.create':'Новая сеть','net.name':'Имя','net.url':'Postback URL','net.param':'Параметры оффера','net.template':'Шаблон','net.save':'Сохранить','net.empty':'Сетей пока нет','net.copy':'Копировать','net.hint':'Заметка для кабинета сети. Трекер этот адрес не вызывает.',
+'off.title':'Офферы','off.new':'Новый оффер','off.name':'Имя','off.group':'Группа','off.url':'URL','off.local':'Локальный','off.empty':'Офферов пока нет','off.allnets':'Все сети','off.allgroups':'Все группы','off.visits':'Визиты','off.conv':'Конверсии','off.revenue':'Доход',
+'dom.title':'Домены','dom.new':'Новый домен','dom.host':'Хост','dom.role':'Роль','dom.role.admin':'Админка','dom.role.links':'Ссылки кампаний','dom.role.both':'Админка и ссылки','dom.primary':'Основной для ссылок','dom.check':'Проверить','dom.ok':'ОК','dom.fail':'Не ОК','dom.empty':'Доменов пока нет','dom.forlink':'Домен ссылки','dom.default':'Основной домен','dom.admin':'Адрес админки',
+'nav.card':'Верхняя панель','nav.card.hint':'Скрытый пункт всё равно открывается по прямой ссылке. Настройки остаются в меню пользователя.',
+'conv.click':'Время клика','conv.ip':'IP','conv.revenue':'Доход','conv.when':'Время конверсии',
+'stream.offer':'Оффер','stream.offer.none':'Без оффера','stream.network':'Партнёрская сеть','stream.network.none':'Без сети','ed.identity':'Кампания','ed.default':'По умолчанию — если ни один поток не подошёл','ed.visitors':'Посетители','ed.flood':'Антифлуд','ed.links':'Ссылки','ed.settings':'Настройки кампании','ed.stream':'Поток','ed.onoff':'Поток включён','ed.name':'имя потока','ed.close':'Закрыть'
+},
+uk:{
+'nav.dashboard':'Зведення','nav.flows':'Кампанії','nav.offers':'Офери','nav.logs':'Журнал','nav.conversions':'Конверсії','nav.keywords':'Ключові слова','nav.lists':'Списки','nav.tools':'Інструменти','nav.networks':'Мережі','nav.sources':'Джерела','nav.domains':'Домени','nav.report':'Звіт','nav.automation':'Автоматизація',
+'menu.settings':'Налаштування','menu.logout':'Вийти',
+'period.today':'Сьогодні','period.yesterday':'Вчора','period.week':'Поточний тиждень','period.7d':'Останні 7 днів','period.month':'Поточний місяць','period.prevmonth':'Попередній місяць','period.30d':'Останні 30 днів','period.year':'Поточний рік','period.all':'За весь час','period.dates':'Інтервал дат','period.times':'Інтервал часу','period.need':'Вкажіть обидва краї інтервалу',
+'settings.country':'Країна','settings.lang':'Мова інтерфейсу','settings.search':'Знайти країну','settings.geo':'Джерело країни для нового потоку','settings.geo.cf':'Заголовок CDN','settings.geo.db':'Гео-база','settings.hint':'Пошук одразу за кодом і за англійською, російською та українською назвою.','settings.tz':'Часовий пояс статистики','settings.tz.find':'Знайти часовий пояс','settings.tz.hint':'Періоди й час у звітах рахуються в цьому поясі. Пояс самого відвідувача не змінюється.',
+'flows.title':'Кампанії','flows.table':'Таблиця','flows.cards':'Картки','flows.search':'Пошук кампаній і потоків…','flows.new':'Нова кампанія','flows.bulk.on':'Увімкнути','flows.bulk.off':'Вимкнути','flows.bulk.dup':'Дублювати','flows.bulk.del':'Видалити','flows.bulk.n':'обрано','flows.col.id':'Кампанія','flows.col.num':'№','flows.col.name':'Назва кампанії','flows.col.url':'URL','flows.col.streams':'Потоки','flows.page':'На сторінці','flows.page.custom':'Своє','flows.state':'Стан','flows.state.all':'Усі','flows.state.on':'Увімкнені','flows.state.off':'Вимкнені','flows.state.hits':'З візитами','flows.sum':'Разом','flows.sum.sel':'Обрані','flows.visits':'візити','flows.bots':'боти','flows.conv':'конверсії','flows.profit':'прибуток','flows.nostreams':'Немає потоків — кожен відвідувач отримує відповідь за замовчуванням','flows.more':'ще','flows.streams':'потоків','flows.log.clicks':'Лог кліків','flows.log.conv':'Лог конверсій','tester.ip':'IP-адреса','tester.country':'Країна','tester.lang':'Мова','tester.referer':'Реферер','tester.key':'Ключове слово','tester.query':'Параметри URL','tester.hint':'Бере кампанії з екрана, збережені чи ні. Ліміти показів, перевірка ботів і антифлуд залежать від живого трафіку і тут не рахуються.','src.title':'Джерела трафіку','src.new':'Нове джерело','src.our':'Ім’я у нас','src.theirs':'Ім’я в посиланні','src.empty':'Джерел ще немає','src.link':'Посилання кампанії','log.traffic':'Трафік','log.postbacks':'Postbacks і S2S','log.system':'Системний','log.outcome':'Результат','log.direction':'Напрям','rep.title':'Звіт','rep.csv':'Завантажити CSV','rep.empty':'За цей період порожньо',
+'conv.title':'Конверсії','conv.subid':'Subid','conv.status':'Статус','conv.campaign':'Кампанія','conv.stream':'Потік','conv.offer':'Офер','conv.landing':'Лендінг','conv.network':'Мережа','conv.source':'Джерело','conv.columns':'Стовпці','conv.all':'Усі',
+'net.title':'Мережі','net.create':'Нова мережа','net.name':'Назва','net.url':'Postback URL','net.param':'Параметри офера','net.template':'Шаблон','net.save':'Зберегти','net.empty':'Мереж ще немає','net.copy':'Копіювати','net.hint':'Нотатка для кабінету мережі. Трекер цю адресу не викликає.',
+'off.title':'Офери','off.new':'Новий офер','off.name':'Назва','off.group':'Група','off.url':'URL','off.local':'Локальний','off.empty':'Оферів ще немає','off.allnets':'Усі мережі','off.allgroups':'Усі групи','off.visits':'Візити','off.conv':'Конверсії','off.revenue':'Дохід',
+'dom.title':'Домени','dom.new':'Новий домен','dom.host':'Хост','dom.role':'Роль','dom.role.admin':'Адмінка','dom.role.links':'Посилання кампаній','dom.role.both':'Адмінка і посилання','dom.primary':'Основний для посилань','dom.check':'Перевірити','dom.ok':'ОК','dom.fail':'Не ОК','dom.empty':'Доменів ще немає','dom.forlink':'Домен посилання','dom.default':'Основний домен','dom.admin':'Адреса адмінки',
+'nav.card':'Верхня панель','nav.card.hint':'Прихований пункт все одно відкривається за прямим посиланням. Налаштування лишаються в меню користувача.',
+'conv.click':'Час кліку','conv.ip':'IP','conv.revenue':'Дохід','conv.when':'Час конверсії',
+'stream.offer':'Офер','stream.offer.none':'Без офера','stream.network':'Партнерська мережа','stream.network.none':'Без мережі','ed.identity':'Кампанія','ed.default':'За замовчуванням — якщо жоден потік не підійшов','ed.visitors':'Відвідувачі','ed.flood':'Антифлуд','ed.links':'Посилання','ed.settings':'Налаштування кампанії','ed.stream':'Потік','ed.onoff':'Потік увімкнено','ed.name':'назва потоку','ed.close':'Закрити'
+}
+};
+
+const PHRASE={
+ru:{
+'Dashboard':'Сводка','Visits':'Визиты','Unique':'Уникальные','Bots':'Боты','Conversions':'Конверсии','Profit':'Прибыль','CR':'CR','conv / visits':'конв. / визиты',
+'Visits over time':'Визиты по времени','daily':'по дням','hourly':'по часам','total':'всего','unique':'уникальные','bots':'боты',
+'Performance by flow and stream':'Результат по потокам и веткам','click a column to sort, a row to open the flow':'столбец сортирует, строка открывает поток','Export CSV':'Экспорт CSV','Who visits':'Кто заходит',
+'Countries':'Страны','Devices':'Устройства','OS':'ОС','Browsers':'Браузеры','Sources':'Источники','Networks':'Сети','no data':'нет данных','No traffic in this period':'За этот период трафика нет',
+'Flow / stream':'Поток / ветка','Hits':'Хиты','Conv':'Конв.','not in config':'нет в конфигурации','no match → default':'нет совпадения → по умолчанию','No data for the period':'Нет данных за период','Loading…':'Загрузка…',
+'Settings':'Настройки','Password':'Пароль','Current password':'Текущий пароль','New password (6 characters or more)':'Новый пароль (от 6 символов)','New password again':'Новый пароль ещё раз','Change password':'Сменить пароль',
+'Appearance':'Оформление','Theme':'Тема','This installation':'Эта установка','Signed in as':'Вход выполнен как','Engine':'Движок','Switch to light':'Светлая тема','Switch to dark':'Тёмная тема',
+'The new passwords do not match':'Новые пароли не совпадают','Password changed':'Пароль изменён',
+'Username':'Имя','Sign in':'Войти','Discard':'Отменить','Save':'Сохранить','Unsaved changes in ':'Несохранённые изменения: ','flows':'потоки','automation':'автоматизация','and':'и',
+'Discard changes?':'Отменить изменения?','Everything changed since the last save will be lost.':'Всё, что изменено после последнего сохранения, пропадёт.','Saved':'Сохранено','Cancel':'Отмена','OK':'ОК',
+'Flow':'Поток','Name':'Имя','Streams':'Ветки','More':'Ещё','Open':'Открыть','Turn off':'Выключить','Turn on':'Включить','Duplicate':'Дублировать','Delete':'Удалить',
+'No flows yet':'Потоков пока нет','Nothing matches':'Ничего не найдено','Nothing matches these filters':'По этим фильтрам ничего нет',
+'Logs':'Журнал','IP address':'IP-адрес','humans and bots':'люди и боты','humans only':'только люди','bots only':'только боты','Apply':'Применить','Reset':'Сбросить','Newer':'Новее','Older':'Старее',
+'Search…':'Поиск…','Select all':'Выбрать все','Clear':'Очистить','No values in this period':'За период значений нет','The log is not available — is ClickHouse connected?':'Журнал недоступен — ClickHouse подключён?',
+'Time':'Время','Stream':'Ветка','Country':'Страна','Device':'Устройство','OS / browser':'ОС / браузер','Brand':'Бренд','Visit':'Визит','IP':'IP','Keyword':'Ключевое слово','Output':'Вывод','unique':'уникальный','repeat':'повтор','of':'из',
+'Keywords':'Ключевые слова','collected per flow and day':'собраны по потоку и дню','Show':'Показать','Lists':'Списки','.dat files in the data directory':'файлы .dat в каталоге данных','Save list':'Сохранить список',
+'Tools':'Инструменты','what the engine learns from an IP address':'что движок узнаёт по IP-адресу','Geo databases':'Гео-базы','Database':'База','State':'Состояние','Built':'Собрана','File':'Файл','loaded':'загружена','not downloaded yet':'ещё не скачана',
+'Automation':'Автоматизация','the cron service':'служба cron','Telegram':'Telegram','Send a test':'Отправить тест','Bot token':'Токен бота','Chat ID':'ID чата',
+'Light theme':'Светлая тема','Dark theme':'Тёмная тема','just now':'только что','never':'никогда','ago':'назад','in':'через','s':'с','min':'мин','h':'ч','d':'д',
+'HTTP redirect':'HTTP-редирект','302 to a URL':'302 на адрес','Show text':'Показать текст','plain text or HTML as is':'текст или HTML как есть','JavaScript':'JavaScript','run a script in the page':'скрипт на странице',
+'Proxy a page':'Проксировать страницу','fetch a URL and serve it':'скачать адрес и отдать его','Another flow':'Другой поток','hand the visitor on':'передать посетителя','Stop':'Стоп','empty response':'пустой ответ',
+'Meta refresh':'Meta refresh','JS redirect':'JS-редирект','Iframe':'Iframe','JS selection':'JS-выбор','Iframe selection':'Выбор в iframe','HTML page':'HTML-страница',
+'Under construction':'На обслуживании','403 Forbidden':'403 Forbidden','404 Not found':'404 Not found','500 Server error':'500 Server error','API response':'Ответ API','Raw output':'Сырой вывод',
+'at random':'случайно','in turn per visitor':'по очереди для посетителя','evenly in turn':'равномерно по очереди','variants':'вариантов',
+'City':'Город','Region':'Регион','Time zone':'Часовой пояс','ASN':'ASN','Organization':'Организация','Mobile operator':'Оператор','IP list':'Список IP','Device type':'Тип устройства',
+'Browser':'Браузер','Yandex Browser':'Яндекс.Браузер','Language':'Язык','Referer':'Реферер','Referer present':'Есть реферер','Source domain':'Домен источника','Keyword':'Ключевое слово','URL parameter':'Параметр URL','User-Agent':'User-Agent','Unique':'Уникальность','Days of week':'Дни недели','Impression limit':'Лимит показов',
+'Geo':'Гео','Network':'Сеть','Request':'Запрос',
+'UA signatures':'Сигнатуры UA','Empty UA':'Пустой UA','Empty referer':'Пустой реферер','Empty language':'Пустой язык','IPv6':'IPv6','PTR lookup':'Проверка PTR','UA blacklist':'Чёрный список UA',
+'Google IPs':'IP Google','Yandex IPs':'IP Яндекса','Bing IPs':'IP Bing','Baidu IPs':'IP Baidu','Mail.ru IPs':'IP Mail.ru','Yahoo IPs':'IP Yahoo','Other bot IPs':'Прочие IP ботов',
+'URL':'URL','Text':'Текст','Script':'Скрипт','HTML':'HTML',
+'There is no flow':'Нет потока','All flows':'Все потоки','Drag to reorder':'Перетащите, чтобы изменить порядок','On':'Вкл','Off':'Выкл','matched':'совпало','would match':'совпало бы','open flow':'открыть поток','no such flow':'такого потока нет','sent on':'ушло','conv':'конв.','default':'по умолчанию',
+'Switch flow':'Сменить поток','Flow on / off':'Поток вкл / выкл','active':'активен','alias':'алиас','Copy link':'Копировать ссылку','Test a visitor':'Проверить посетителя','Visitor':'Посетитель','Add a stream':'Добавить ветку','No stream matched':'Ни одна ветка не подошла','everyone left over gets the flow\'s default':'остальным отдаётся ответ потока по умолчанию',
+'visits':'визитов','conversions':'конверсий','profit':'прибыль','Tried top to bottom — the first match wins. Drag':'Сверху вниз — срабатывает первое совпадение. Перетащите',
+'to reorder.':'чтобы изменить порядок.','Delete flow':'Удалить поток','Duplicate flow':'Дублировать поток','Clear logged visits':'Очистить журнал визитов','Done':'Готово','Note':'Заметка','Type':'Тип','Content-Type':'Content-Type',
+'Send the visitor to flow':'Отправить посетителя в поток','Country comes from':'Страна берётся из','CDN header first':'сначала заголовок CDN','geo database first':'сначала гео-база','Unique by':'Уникальность по','IP address':'IP-адрес','cookie':'cookie','…within, hours':'…за часов',
+'Device':'Устройство','returning':'повторный','Run':'Запустить','Which variant a visit gets':'Какой вариант получит визит','a random one':'случайный','the next one for each visitor (cookie)':'следующий для каждого посетителя (cookie)','the next one in turn, evenly for everyone':'следующий по очереди, поровну для всех',
+'Bots get':'Боты получают','the same as humans':'то же, что люди','Content-Type for bots':'Content-Type для ботов','the flow’s':'как у потока','Advanced':'Дополнительно','Show chance, % (JavaScript types)':'Шанс показа, % (типы JavaScript)',
+'Fallback when the fetch fails':'Запасной вариант, если запрос не удался','New flow':'Новый поток','Status':'Статус','Source':'Источник','City':'Город',
+'look up':'проверить','Routing':'Маршрутизация','Where from':'Откуда','bot':'бот','Click ID':'Click ID','default (no stream matched)':'по умолчанию (ветка не подошла)',
+'the engine cannot use it and this condition never matches':'движок не может это применить, условие никогда не сработает','Remove':'Убрать','this is what stopped the test visitor':'это остановило тестового посетителя',
+'Use a list of words':'Список слов','Use a regular expression':'Регулярное выражение','API key':'Ключ API','Flag at, verdicts':'Порог, вердиктов','Also check':'Также проверить','Alert below, % free':'Сигнал, если свободно меньше, %','Paths (empty = data directory)':'Пути (пусто = каталог данных)','Keep keyword files, days':'Хранить файлы ключей, дней','Message':'Сообщение',
+'Generic S2S':'Обычный S2S','clickid, goal, sum':'clickid, goal, sum','Create':'Создать','Delete network':'Удалить сеть','No networks yet':'Сетей пока нет',
+'Too many attempts, try again later':'Слишком много попыток, попробуйте позже','Invalid login or password':'Неверный логин или пароль','Log out?':'Выйти?','There are unsaved changes; they will be lost.':'Есть несохранённые изменения, они пропадут.','Log out':'Выйти',
+'Delete flows?':'Удалить потоки?','They are removed when you save.':'Они удалятся, когда вы сохраните.','Flows':'Потоки','Edit':'Изменить','Move to flow':'Перенести в поток','Moved to':'Перенесено в','Choose a flow…':'Выберите поток…','from ?q=':'из ?q=','from search engines':'из поисковиков','Run now':'Запустить сейчас','Bot IP lists':'Списки IP ботов','Disk space':'Место на диске','Keyword cleanup':'Очистка ключевых слов','Conversion alerts':'Оповещения о конверсиях','VirusTotal':'VirusTotal','Network':'Сеть','In lists':'В списках','Running…':'Выполняется…','done':'готово','failed':'ошибка','next':'далее','off':'выкл','Bot IP lists':'Списки IP ботов','Download fresh crawler ranges into the .dat lists the bot checks use.':'Скачивает свежие диапазоны краулеров в .dat-списки, которыми пользуются проверки ботов.','Download the MaxMind-format City and ASN databases. The engine reloads them by itself.':'Скачивает базы City и ASN в формате MaxMind. Движок подхватывает их сам.','Check the domains your streams send visitors to; a flagged domain is about to get browser warnings.':'Проверяет домены, куда ветки отправляют посетителей. Помеченный домен скоро получит предупреждение браузера.','Warn when the disk is nearly full — a full disk stops lists and logs from being written.':'Предупреждает, когда диск почти полон. Полный диск останавливает запись списков и журнала.','Delete collected keyword files after a number of days.':'Удаляет собранные файлы ключевых слов через заданное число дней.','Send every new conversion to Telegram.':'Отправляет каждую новую конверсию в Telegram.','Change the fetched page — find → replace':'Изменить загруженную страницу — найти → заменить','Change the page for bots — find → replace':'Изменить страницу для ботов — найти → заменить','Separation file (.dat, lines “key;output”)':'Файл разделения (.dat, строки «ключ;вывод»)','URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])':'URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])','Regexp (/…/, first group)':'Регулярное выражение (/…/, первая группа)','Cache, seconds':'Кеш, секунды','Code (macros allowed)':'Код (макросы можно)','Probability, %':'Вероятность, %','ID — the link is':'ID — ссылка','Aliases — other IDs that open this flow':'Алиасы — другие ID этого потока','…within, hours':'…за часов','More than, requests':'Больше, запросов','Within, seconds':'За, секунд','— choose a flow —':'— выберите поток —','There is no other flow yet. Create one first.':'Другого потока ещё нет. Сначала создайте его.','Country (as the CDN reports it)':'Страна (как сообщает CDN)','Language':'Язык','Any letter case; macros work in both.':'Регистр не важен, макросы работают в обеих частях.','what this stream is for — shown on the canvas':'зачем эта ветка — видно на схеме','for you, shown in reports':'для вас, видно в отчётах'
+},
+uk:{
+'Dashboard':'Зведення','Visits':'Візити','Unique':'Унікальні','Bots':'Боти','Conversions':'Конверсії','Profit':'Прибуток','CR':'CR','conv / visits':'конв. / візити',
+'Visits over time':'Візити за часом','daily':'по днях','hourly':'по годинах','total':'усього','unique':'унікальні','bots':'боти',
+'Performance by flow and stream':'Результат за потоками і гілками','click a column to sort, a row to open the flow':'стовпець сортує, рядок відкриває потік','Export CSV':'Експорт CSV','Who visits':'Хто заходить',
+'Countries':'Країни','Devices':'Пристрої','OS':'ОС','Browsers':'Браузери','Sources':'Джерела','Networks':'Мережі','no data':'немає даних','No traffic in this period':'За цей період трафіку немає',
+'Flow / stream':'Потік / гілка','Hits':'Хіти','Conv':'Конв.','not in config':'немає в конфігурації','no match → default':'немає збігу → за замовчуванням','No data for the period':'Немає даних за період','Loading…':'Завантаження…',
+'Settings':'Налаштування','Password':'Пароль','Current password':'Поточний пароль','New password (6 characters or more)':'Новий пароль (від 6 символів)','New password again':'Новий пароль ще раз','Change password':'Змінити пароль',
+'Appearance':'Вигляд','Theme':'Тема','This installation':'Ця установка','Signed in as':'Вхід виконано як','Engine':'Рушій','Switch to light':'Світла тема','Switch to dark':'Темна тема',
+'The new passwords do not match':'Нові паролі не збігаються','Password changed':'Пароль змінено',
+'Username':'Ім’я','Sign in':'Увійти','Discard':'Скасувати','Save':'Зберегти','Unsaved changes in ':'Незбережені зміни: ','flows':'потоки','automation':'автоматизація','and':'і',
+'Discard changes?':'Скасувати зміни?','Everything changed since the last save will be lost.':'Усе, що змінено після останнього збереження, зникне.','Saved':'Збережено','Cancel':'Скасувати','OK':'ОК',
+'Flow':'Потік','Name':'Назва','Streams':'Гілки','More':'Ще','Open':'Відкрити','Turn off':'Вимкнути','Turn on':'Увімкнути','Duplicate':'Дублювати','Delete':'Видалити',
+'No flows yet':'Потоків ще немає','Nothing matches':'Нічого не знайдено','Nothing matches these filters':'За цими фільтрами нічого немає',
+'Logs':'Журнал','IP address':'IP-адреса','humans and bots':'люди і боти','humans only':'лише люди','bots only':'лише боти','Apply':'Застосувати','Reset':'Скинути','Newer':'Новіші','Older':'Старіші',
+'Search…':'Пошук…','Select all':'Обрати всі','Clear':'Очистити','No values in this period':'За період значень немає','The log is not available — is ClickHouse connected?':'Журнал недоступний — ClickHouse підключено?',
+'Time':'Час','Stream':'Гілка','Country':'Країна','Device':'Пристрій','OS / browser':'ОС / браузер','Brand':'Бренд','Visit':'Візит','IP':'IP','Keyword':'Ключове слово','Output':'Вивід','unique':'унікальний','repeat':'повтор','of':'з',
+'Keywords':'Ключові слова','collected per flow and day':'зібрані за потоком і днем','Show':'Показати','Lists':'Списки','.dat files in the data directory':'файли .dat у каталозі даних','Save list':'Зберегти список',
+'Tools':'Інструменти','what the engine learns from an IP address':'що рушій дізнається з IP-адреси','Geo databases':'Гео-бази','Database':'База','State':'Стан','Built':'Зібрана','File':'Файл','loaded':'завантажена','not downloaded yet':'ще не завантажена',
+'Automation':'Автоматизація','the cron service':'служба cron','Telegram':'Telegram','Send a test':'Надіслати тест','Bot token':'Токен бота','Chat ID':'ID чату',
+'Light theme':'Світла тема','Dark theme':'Темна тема','just now':'щойно','never':'ніколи','ago':'тому','in':'через','s':'с','min':'хв','h':'год','d':'д',
+'HTTP redirect':'HTTP-редирект','302 to a URL':'302 на адресу','Show text':'Показати текст','plain text or HTML as is':'текст або HTML як є','JavaScript':'JavaScript','run a script in the page':'скрипт на сторінці',
+'Proxy a page':'Проксувати сторінку','fetch a URL and serve it':'завантажити адресу і віддати її','Another flow':'Інший потік','hand the visitor on':'передати відвідувача','Stop':'Стоп','empty response':'порожня відповідь',
+'Meta refresh':'Meta refresh','JS redirect':'JS-редирект','Iframe':'Iframe','JS selection':'JS-вибір','Iframe selection':'Вибір в iframe','HTML page':'HTML-сторінка',
+'Under construction':'На обслуговуванні','403 Forbidden':'403 Forbidden','404 Not found':'404 Not found','500 Server error':'500 Server error','API response':'Відповідь API','Raw output':'Сирий вивід',
+'at random':'випадково','in turn per visitor':'по черзі для відвідувача','evenly in turn':'рівномірно по черзі','variants':'варіантів',
+'City':'Місто','Region':'Регіон','Time zone':'Часовий пояс','ASN':'ASN','Organization':'Організація','Mobile operator':'Оператор','IP list':'Список IP','Device type':'Тип пристрою',
+'Browser':'Браузер','Yandex Browser':'Яндекс.Браузер','Language':'Мова','Referer':'Реферер','Referer present':'Є реферер','Source domain':'Домен джерела','URL parameter':'Параметр URL','User-Agent':'User-Agent','Days of week':'Дні тижня','Impression limit':'Ліміт показів',
+'Geo':'Гео','Network':'Мережа','Request':'Запит',
+'UA signatures':'Сигнатури UA','Empty UA':'Порожній UA','Empty referer':'Порожній реферер','Empty language':'Порожня мова','IPv6':'IPv6','PTR lookup':'Перевірка PTR','UA blacklist':'Чорний список UA',
+'Google IPs':'IP Google','Yandex IPs':'IP Яндекса','Bing IPs':'IP Bing','Baidu IPs':'IP Baidu','Mail.ru IPs':'IP Mail.ru','Yahoo IPs':'IP Yahoo','Other bot IPs':'Інші IP ботів',
+'URL':'URL','Text':'Текст','Script':'Скрипт','HTML':'HTML',
+'There is no flow':'Немає потоку','All flows':'Усі потоки','Drag to reorder':'Перетягніть, щоб змінити порядок','On':'Увімк','Off':'Вимк','matched':'збіглось','would match':'збіглося б','open flow':'відкрити потік','no such flow':'такого потоку немає','sent on':'пішло','conv':'конв.','default':'за замовчуванням',
+'Switch flow':'Змінити потік','Flow on / off':'Потік увімк / вимк','active':'активний','alias':'аліас','Copy link':'Копіювати посилання','Test a visitor':'Перевірити відвідувача','Visitor':'Відвідувач','Add a stream':'Додати гілку','No stream matched':'Жодна гілка не підійшла','everyone left over gets the flow\'s default':'решті віддається відповідь потоку за замовчуванням',
+'visits':'візитів','conversions':'конверсій','profit':'прибуток','Tried top to bottom — the first match wins. Drag':'Згори вниз — спрацьовує перший збіг. Перетягніть',
+'to reorder.':'щоб змінити порядок.','Delete flow':'Видалити потік','Duplicate flow':'Дублювати потік','Clear logged visits':'Очистити журнал візитів','Done':'Готово','Note':'Нотатка','Type':'Тип','Content-Type':'Content-Type',
+'Send the visitor to flow':'Надіслати відвідувача в потік','Country comes from':'Країна береться з','CDN header first':'спочатку заголовок CDN','geo database first':'спочатку гео-база','Unique by':'Унікальність за','cookie':'cookie','…within, hours':'…за годин',
+'returning':'повторний','Run':'Запустити','Which variant a visit gets':'Який варіант отримає візит','a random one':'випадковий','the next one for each visitor (cookie)':'наступний для кожного відвідувача (cookie)','the next one in turn, evenly for everyone':'наступний по черзі, порівну для всіх',
+'Bots get':'Боти отримують','the same as humans':'те саме, що люди','Content-Type for bots':'Content-Type для ботів','the flow’s':'як у потоку','Advanced':'Додатково','Show chance, % (JavaScript types)':'Шанс показу, % (типи JavaScript)',
+'Fallback when the fetch fails':'Запасний варіант, якщо запит не вдався','New flow':'Новий потік','Status':'Статус','Source':'Джерело',
+'look up':'перевірити','Routing':'Маршрутизація','Where from':'Звідки','bot':'бот','Click ID':'Click ID','default (no stream matched)':'за замовчуванням (гілка не підійшла)',
+'the engine cannot use it and this condition never matches':'рушій не може це застосувати, умова ніколи не спрацює','Remove':'Прибрати','this is what stopped the test visitor':'це зупинило тестового відвідувача',
+'Use a list of words':'Список слів','Use a regular expression':'Регулярний вираз','API key':'Ключ API','Flag at, verdicts':'Поріг, вердиктів','Also check':'Також перевірити','Alert below, % free':'Сигнал, якщо вільно менше, %','Paths (empty = data directory)':'Шляхи (порожньо = каталог даних)','Keep keyword files, days':'Зберігати файли ключів, днів','Message':'Повідомлення',
+'Generic S2S':'Звичайний S2S','clickid, goal, sum':'clickid, goal, sum','Create':'Створити','Delete network':'Видалити мережу','No networks yet':'Мереж ще немає',
+'Too many attempts, try again later':'Забагато спроб, спробуйте пізніше','Invalid login or password':'Невірний логін або пароль','Log out?':'Вийти?','There are unsaved changes; they will be lost.':'Є незбережені зміни, вони зникнуть.','Log out':'Вийти',
+'Delete flows?':'Видалити потоки?','They are removed when you save.':'Вони видаляться, коли ви збережете.','Flows':'Потоки','Edit':'Змінити','Move to flow':'Перенести в потік','Moved to':'Перенесено в','Choose a flow…':'Оберіть потік…','from ?q=':'з ?q=','from search engines':'з пошуковиків','Run now':'Запустити зараз','Bot IP lists':'Списки IP ботів','Disk space':'Місце на диску','Keyword cleanup':'Очищення ключових слів','Conversion alerts':'Сповіщення про конверсії','VirusTotal':'VirusTotal','Network':'Мережа','In lists':'У списках','Running…':'Виконується…','done':'готово','failed':'помилка','next':'далі','off':'вимк','Bot IP lists':'Списки IP ботів','Download fresh crawler ranges into the .dat lists the bot checks use.':'Завантажує свіжі діапазони краулерів у .dat-списки, якими користуються перевірки ботів.','Download the MaxMind-format City and ASN databases. The engine reloads them by itself.':'Завантажує бази City і ASN у форматі MaxMind. Рушій підхоплює їх сам.','Check the domains your streams send visitors to; a flagged domain is about to get browser warnings.':'Перевіряє домени, куди гілки надсилають відвідувачів. Позначений домен незабаром отримає попередження браузера.','Warn when the disk is nearly full — a full disk stops lists and logs from being written.':'Попереджає, коли диск майже повний. Повний диск зупиняє запис списків і журналу.','Delete collected keyword files after a number of days.':'Видаляє зібрані файли ключових слів через задану кількість днів.','Send every new conversion to Telegram.':'Надсилає кожну нову конверсію в Telegram.','Change the fetched page — find → replace':'Змінити завантажену сторінку — знайти → замінити','Change the page for bots — find → replace':'Змінити сторінку для ботів — знайти → замінити','Separation file (.dat, lines “key;output”)':'Файл розділення (.dat, рядки «ключ;вивід»)','URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])':'URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])','Regexp (/…/, first group)':'Регулярний вираз (/…/, перша група)','Cache, seconds':'Кеш, секунди','Code (macros allowed)':'Код (макроси можна)','Probability, %':'Ймовірність, %','ID — the link is':'ID — посилання','Aliases — other IDs that open this flow':'Аліаси — інші ID цього потоку','…within, hours':'…за годин','More than, requests':'Більше, запитів','Within, seconds':'За, секунд','— choose a flow —':'— оберіть потік —','There is no other flow yet. Create one first.':'Іншого потоку ще немає. Спочатку створіть його.','Country (as the CDN reports it)':'Країна (як повідомляє CDN)','Any letter case; macros work in both.':'Регістр не важливий, макроси працюють в обох частинах.','what this stream is for — shown on the canvas':'навіщо ця гілка — видно на схемі','for you, shown in reports':'для вас, видно у звітах'
+}
+};
 
 const TYPES={
   http_redirect:['HTTP redirect','302 to a URL'],
@@ -958,12 +1334,12 @@ const TYPES={
   '500_server_error':['500 Server error',''],api:['API response',''],show_out:['Raw output',''],
 };
 const QUICK=['http_redirect','show_text','javascript','curl','group','stop'];
-const typeLabel=(t)=>(TYPES[t]||[t||'—'])[0];
+const typeLabel=(t)=>tr((TYPES[t]||[t||'—'])[0]);
 // Types that serve a fixed answer and ignore the output field.
 const NOOUT=new Set(['stop','403_forbidden','404_not_found','500_server_error','under_construction']);
 // Types whose output is a URL (one line); the rest carry text, code or HTML.
 const URLISH=new Set(['http_redirect','meta_refresh','js_redirect','iframe_redirect','js_selection','iframe_selection','curl']);
-const outLabel=(t)=>URLISH.has(t)?'URL':({show_text:'Text',javascript:'Script',show_page_html:'HTML'}[t]||'Output');
+const outLabel=(t)=>tr(URLISH.has(t)?'URL':({show_text:'Text',javascript:'Script',show_page_html:'HTML'}[t]||'Output'));
 const outPH=(t)=>t==='http_redirect'?'https://example.com/?sub=[CID]&kw=[KEY]':URLISH.has(t)?'https://example.com/':'';
 const HEADERS=['text/html','text/plain','application/javascript'];
 const opt=(v,l,cur)=>`<option value="${esc(v)}"${String(cur)===String(v)?' selected':''}>${esc(l)}</option>`;
@@ -1021,17 +1397,17 @@ function configured(r,c){
 // "country ru, us", "organization contains amazon, google +5".
 function condChips(s,hit){
   const r=s.rules||{}, out=[];
-  const chip=(c,head,v,full,warn)=>out.push(`<span class="chip ${hit===c.k?'hit':warn?'warn':''}" title="${esc(c.l+' '+full+(warn?' — '+warn+'; the engine cannot use it and this condition never matches':''))}">${warn?icon('alert'):''}${head?`<span class="k">${esc(head)}</span>`:''}<span class="v">${esc(v)}</span></span>`);
+  const chip=(c,head,v,full,warn)=>out.push(`<span class="chip ${hit===c.k?'hit':warn?'warn':''}" title="${esc(tr(c.l)+' '+full+(warn?' — '+tr(warn)+'; '+tr('the engine cannot use it and this condition never matches'):''))}">${warn?icon('alert'):''}${head?`<span class="k">${esc(head)}</span>`:''}<span class="v">${esc(v)}</span></span>`);
   const few=(ws,show)=>ws.slice(0,3).map(show||(w=>w)).join(', ')+(ws.length>3?' +'+(ws.length-3):'');
   COND.forEach(c=>{
     if(!configured(r,c))return;
-    const lc=c.l.toLowerCase();
+    const lc=tr(c.l).toLowerCase();
     switch(c.kind){
       case 'list':{
         const f=r[c.k], L=listForm(f,c.rx), [yes,no]=condOps(c.m,L.form), neg=f.flag===1;
         const head=lc+(neg?' '+(no==='is not'?'not':no):(yes==='is'?'':' '+yes));
         if(L.form==='regex'){chip(c,head,L.raw,(neg?no:yes)+' '+L.raw,rxProblem(L.raw));break}
-        chip(c,head,few(L.words,w=>c.k==='country'&&flag(w)?flag(w)+' '+w:w),(neg?no:yes)+' '+L.words.join(', '));
+        chip(c,head,few(L.words,w=>c.k==='country'&&flag(w)?flag(w)+' '+countryLabel(w, uiLang()):w),(neg?no:yes)+' '+L.words.join(', '));
         break}
       case 'device':{const ok=['computer','phone','tablet'].filter(d=>!r[d]);chip(c,lc,ok.join(', ')||'none','is '+(ok.join(', ')||'none'));break}
       case 'ops':{const o=r.operators,v=Object.keys(o).map(k=>(o[k]===2?'':'not ')+k);chip(c,lc,few(v),v.join(', '));break}
@@ -1078,67 +1454,243 @@ async function saveFlows(){
 }
 const newStream=(n)=>({name:'stream'+n,status:true,rules:{},out:{redirect:'http_redirect',out:'',chance:100,distribution:'random'},bots:{redirect:'skip',header:'text/html'}});
 function uniqueName(base,taken){let n=base,i=2;while(taken.includes(n)){n=base+'_'+i++}return n}
+function nextNum(){
+  let max=0;
+  (GROUPS||[]).forEach(g=>{ if(+g.num>max) max=+g.num });
+  return max+1;
+}
+function ensureNums(){
+  if(!GROUPS) return;
+  let changed=false;
+  GROUPS.forEach(g=>{ if(!(+g.num>=1)){ g.num=nextNum(); changed=true } });
+  if(changed) markDirty();
+}
 function newFlow(){
+  ensureNums();
   const ids=GROUPS.map(g=>g.id); let n=GROUPS.length+1; while(ids.includes('flow'+n))n++;
-  GROUPS.push({id:'flow'+n,name:'',status:true,redirect:'stop',header:'text/html',out:'',geo:'cf',
+  GROUPS.push({id:'flow'+n,num:nextNum(),name:'',status:true,redirect:'stop',header:'text/html',out:'',geo:defaultGeo(),
     uniq_method:'ip',uniq_seconds:86400,firewall:{enabled:false,queries:100,seconds:60},streams:[]});
   OPEN_SETTINGS=true; markDirty(); go('flows/flow'+n);
 }
-function duplicateFlow(g){
-  const c=clone(g); c.id=uniqueName(g.id+'_copy',GROUPS.map(x=>x.id)); c.aliases=[]; if(c.name)c.name+=' (copy)';
-  GROUPS.splice(GROUPS.indexOf(g)+1,0,c); markDirty(); go('flows/'+encodeURIComponent(c.id));
+function takenNames(){const t=[]; GROUPS.forEach(g=>{t.push(g.id); (g.aliases||[]).forEach(a=>t.push(a))}); return t}
+function duplicateFlow(g, stay){
+  ensureNums();
+  const c=clone(g); c.id=uniqueName(g.id+'_copy',takenNames()); c.aliases=[]; c.num=nextNum(); if(c.name)c.name+=' (copy)';
+  GROUPS.splice(GROUPS.indexOf(g)+1,0,c); markDirty();
+  if(stay) return c;
+  go('flows/'+encodeURIComponent(c.id));
 }
 async function deleteFlow(g){
   const refs=GROUPS.filter(x=>x!==g&&linkTargets(x).some(t=>t===g.id||(g.aliases||[]).includes(t))).map(x=>x.id);
   const extra=refs.length?' It is the destination of streams in: '+refs.join(', ')+'.':'';
-  if(!await ask('Delete flow "'+g.id+'"?','The flow and its '+(g.streams||[]).length+' stream(s) will be removed when you save.'+extra,'Delete',true))return;
+  if(!await ask(tr('Delete flow')+' "'+g.id+'"?',tr('They are removed when you save.')+extra,tr('Delete'),true))return;
   GROUPS.splice(GROUPS.indexOf(g),1); markDirty(); go('flows');
 }
 
 /* ---------- the list ---------- */
 let FQ='', OPEN_SETTINGS=false;
+const FLOW_VIEW_KEY='kuztds-flows-view';
+const FLOW_PAGE_KEY='kuztds-flows-page';
+const FLOW_PRESETS=[10,25,50,100,1000];
+let FLOW_VIEW='table', FLOW_PICK=new Set(), FLOW_PAGE=1000, FLOW_STATE='all', FLOW_SORT={k:'',dir:-1}, FLOW_PAGE_I=0;
+try{
+  const raw=localStorage.getItem(FLOW_PAGE_KEY);
+  if(raw!=null&&raw!==''){ const n=+raw; if(n>=1&&n<=5000) FLOW_PAGE=n }
+}catch(e){}
+try{const saved=localStorage.getItem(FLOW_VIEW_KEY); if(saved==='grid'||saved==='table')FLOW_VIEW=saved}catch(e){}
+function setFlowView(v){
+  FLOW_VIEW=v==='grid'?'grid':'table';
+  try{localStorage.setItem(FLOW_VIEW_KEY,FLOW_VIEW)}catch(e){}
+  qa('[data-flow-view]').forEach(b=>b.classList.toggle('on',b.dataset.flowView===FLOW_VIEW));
+  paintFlowCards();
+}
+function flowPageSize(){
+  const custom=!FLOW_PRESETS.includes(FLOW_PAGE);
+  const opts=FLOW_PRESETS.map(n=>`<option value="${n}" ${!custom&&FLOW_PAGE===n?'selected':''}>${n}</option>`).join('');
+  return `<label class="hint">${tr('flows.page')}</label><select id="fpage">${opts}<option value="custom" ${custom?'selected':''}>${tr('flows.page.custom')}</option></select><input id="fpage-n" type="number" min="1" max="5000" value="${FLOW_PAGE}" style="width:72px"${custom?'':' hidden'}>`;
+}
 async function flows(arg,live){
   if(arg)return flowPage(arg,live);
-  if(GROUPS===null||PERF===null)view().innerHTML=stateHTML('Loading…');
-  await Promise.all([ensureGroups(true),loadPerf()]);
+  if(GROUPS===null||PERF===null)view().innerHTML=stateHTML(tr('Loading…'));
+  await Promise.all([ensureGroups(true),loadPerf(),ensureDomains()]);
+  ensureNums();
   if(!live())return;
   view().innerHTML=`
-    <div class="ph"><h1>Flows</h1><span class="sub">${GROUPS.length} · traffic for ${periodLabel()}</span><div class="spacer"></div>
-      <input id="fq" placeholder="Search flows and streams…" style="width:260px" value="${esc(FQ)}" autocomplete="off">
-      <button class="primary" id="newflow">${icon('plus')}New flow</button></div>
-    <div class="fgrid" id="fgrid"></div>`;
+    <div class="ph"><h1>${tr('flows.title')}</h1><span class="sub">${GROUPS.length} · ${periodLabel()}</span><div class="spacer"></div>
+      <label class="hint">${tr('flows.state')}</label>
+      <select id="fstate">${['all','on','off','hits'].map(k=>`<option value="${k}" ${FLOW_STATE===k?'selected':''}>${tr('flows.state.'+k)}</option>`).join('')}</select>
+      ${flowPageSize()}
+      <div class="vseg" role="group" aria-label="${tr('flows.title')}">
+        <button type="button" data-flow-view="table" class="${FLOW_VIEW==='table'?'on':''}">${tr('flows.table')}</button>
+        <button type="button" data-flow-view="grid" class="${FLOW_VIEW==='grid'?'on':''}">${tr('flows.cards')}</button>
+      </div>
+      <input id="fq" placeholder="${esc(tr('flows.search'))}" style="width:260px" value="${esc(FQ)}" autocomplete="off">
+      <button class="primary" id="newflow">${icon('plus')}${tr('flows.new')}</button></div>
+    <div id="fgrid"></div><div id="flowsum" class="flowsum"></div>`;
   q('#newflow').onclick=newFlow;
-  q('#fq').oninput=e=>{FQ=e.target.value;paintFlowCards()};
+  q('#fq').oninput=e=>{FQ=e.target.value; FLOW_PAGE_I=0; paintFlowCards()};
+  q('#fstate').onchange=e=>{FLOW_STATE=e.target.value; FLOW_PAGE_I=0; paintFlowCards()};
+  q('#fpage').onchange=e=>{
+    const box=q('#fpage-n');
+    if(e.target.value==='custom'){box.hidden=false; box.focus(); return}
+    box.hidden=true;
+    FLOW_PAGE=+e.target.value; FLOW_PAGE_I=0;
+    try{localStorage.setItem(FLOW_PAGE_KEY,String(FLOW_PAGE))}catch(err){}
+    box.value=FLOW_PAGE; paintFlowCards();
+  };
+  q('#fpage-n').onchange=e=>{
+    let n=+e.target.value; if(!(n>=1)) n=1000; if(n>5000) n=5000;
+    FLOW_PAGE=n; FLOW_PAGE_I=0; e.target.value=n;
+    try{localStorage.setItem(FLOW_PAGE_KEY,String(n))}catch(err){}
+    paintFlowCards();
+  };
+  qa('[data-flow-view]').forEach(b=>b.onclick=()=>setFlowView(b.dataset.flowView));
   paintFlowCards();
+}
+function flowMetric(g,k){
+  if(k==='streams') return (g.streams||[]).length;
+  const p=perfOf(g,null);
+  return +p[k]||0;
+}
+function flowTotals(list){
+  const s={hits:0,bots:0,conv:0,profit:0};
+  list.forEach(g=>{const p=perfOf(g,null); s.hits+=p.hits||0; s.bots+=p.bots||0; s.conv+=p.conv||0; s.profit+=p.profit||0});
+  return s;
+}
+function campaignRows(){
+  const t=FQ.trim().toLowerCase();
+  let rows=GROUPS.filter(g=>{
+    const text=!t||[g.id,g.name,...(g.aliases||[]),...(g.streams||[]).map(s=>s.name)].some(x=>String(x||'').toLowerCase().includes(t));
+    if(!text) return false;
+    if(FLOW_STATE==='on') return !!g.status;
+    if(FLOW_STATE==='off') return !g.status;
+    if(FLOW_STATE==='hits') return perfOf(g,null).hits>0;
+    return true;
+  });
+  const allow=new Set(rows.map(g=>g.id));
+  [...FLOW_PICK].forEach(id=>{if(!allow.has(id)) FLOW_PICK.delete(id)});
+  if(FLOW_SORT.k){
+    const k=FLOW_SORT.k, d=FLOW_SORT.dir||1;
+    rows=rows.slice().sort((a,b)=>{
+      if(k==='name') return campaignLabel(a).localeCompare(campaignLabel(b))*d;
+      return (flowMetric(a,k)-flowMetric(b,k))*d;
+    });
+  }
+  return rows;
+}
+function paintFlowSum(rows){
+  const box=q('#flowsum'); if(!box) return;
+  const pages=Math.max(1,Math.ceil(rows.length/FLOW_PAGE));
+  if(FLOW_PAGE_I>=pages) FLOW_PAGE_I=pages-1;
+  box.innerHTML=`<div class="spacer"></div>
+    <button type="button" class="sm" id="fprev" ${FLOW_PAGE_I<=0?'disabled':''}>${tr('Newer')}</button>
+    <span class="hint">${FLOW_PAGE_I+1} / ${pages}</span>
+    <button type="button" class="sm" id="fnext" ${FLOW_PAGE_I>=pages-1?'disabled':''}>${tr('Older')}</button>`;
+  const prev=q('#fprev'), next=q('#fnext');
+  if(prev) prev.onclick=()=>{if(FLOW_PAGE_I>0){FLOW_PAGE_I--; paintFlowCards()}};
+  if(next) next.onclick=()=>{if(FLOW_PAGE_I<pages-1){FLOW_PAGE_I++; paintFlowCards()}};
 }
 function paintFlowCards(){
   const grid=q('#fgrid'); if(!grid)return;
   const t=FQ.trim().toLowerCase();
-  const hit=(g)=>!t||[g.id,g.name,...(g.aliases||[]),...(g.streams||[]).map(s=>s.name)].some(x=>String(x||'').toLowerCase().includes(t));
-  const base=(ENGINE||'').replace(/\/$/,'');
-  const cards=GROUPS.filter(hit).map(g=>{
+  const rows=campaignRows();
+  const pages=Math.max(1,Math.ceil(rows.length/FLOW_PAGE));
+  if(FLOW_PAGE_I>=pages) FLOW_PAGE_I=pages-1;
+  const page=rows.slice(FLOW_PAGE_I*FLOW_PAGE, (FLOW_PAGE_I+1)*FLOW_PAGE);
+  const bind=(root)=>{
+    qa('[data-g]',root).forEach(c=>{
+      const g=GROUPS[+c.dataset.g];
+      const open=()=>go('flows/'+encodeURIComponent(g.id));
+      c.onclick=e=>{if(e.target.closest('[data-pick],[data-url],[data-copy]'))return; open()};
+      c.onkeydown=e=>{if(e.key==='Enter'&&!e.target.closest('[data-pick],[data-url],[data-copy]'))open()};
+      const more=q('[data-more]',c);
+      if(more)more.onclick=e=>{e.stopPropagation();menu(e.currentTarget,[
+        {label:tr('Open'),icon:'arrow',on:open},
+        {label:tr('flows.log.clicks'),icon:'logs',on:()=>go('logs/'+encodeURIComponent(g.id))},
+        {label:tr('flows.log.conv'),icon:'conversions',on:()=>go('conversions/'+encodeURIComponent(g.id))},
+        {label:g.status?tr('Turn off'):tr('Turn on'),icon:'play',on:()=>{g.status=!g.status;markDirty();paintFlowCards()}},
+        {label:tr('Duplicate'),icon:'dup',on:()=>duplicateFlow(g)},'-',
+        {label:tr('Delete'),icon:'trash',danger:true,on:()=>deleteFlow(g)}])};
+    });
+  };
+  if(FLOW_VIEW==='table'){
+    const allOn=rows.length>0&&rows.every(g=>FLOW_PICK.has(g.id));
+    const sortTh=(k,label,num)=>`<th${num?' class="num"':''}><button type="button" class="link" data-sort="${k}">${label}${FLOW_SORT.k===k?(FLOW_SORT.dir<0?' ↓':' ↑'):''}</button></th>`;
+    const body=page.map(g=>{
+      const p=perfOf(g,null), st=g.streams||[], gi=GROUPS.indexOf(g), url=campaignURL(g);
+      return `<tr class="click ${g.status?'':'off'}" data-g="${gi}" tabindex="0">
+        <td><input type="checkbox" data-pick="${esc(g.id)}" ${FLOW_PICK.has(g.id)?'checked':''}></td>
+        <td class="num">${+g.num||''}</td>
+        <td class="ell"><span class="dot ${g.status?'on':''}"></span> ${esc(campaignLabel(g))}</td>
+        <td><div class="urlcell"><a class="mono" href="${esc(url)}" target="_blank" rel="noreferrer" data-url>${esc(url)}</a><button type="button" class="icon sm ghost" data-copy="${esc(url)}" title="${tr('src.link')}">${icon('copy')}</button></div></td>
+        <td class="num">${st.length}</td>
+        <td class="num">${fmt(p.hits)}</td>
+        <td class="num ${p.bots?'warn':''}">${fmt(p.bots)}</td>
+        <td class="num ${p.conv?'ok':''}">${fmt(p.conv)}</td>
+        <td class="num">${p.profit?money(p.profit):'—'}</td>
+        <td class="acts"><button class="icon sm ghost" data-more title="${tr('More')}">${icon('more')}</button></td>
+      </tr>`;
+    }).join('');
+    const basis=FLOW_PICK.size?rows.filter(g=>FLOW_PICK.has(g.id)):rows;
+    const sum=flowTotals(basis);
+    const foot=`<tfoot><tr><td></td><td></td><td></td><td></td><td></td><td class="num">${fmt(sum.hits)}</td><td class="num">${fmt(sum.bots)}</td><td class="num">${fmt(sum.conv)}</td><td class="num">${sum.profit?money(sum.profit):'—'}</td><td></td></tr></tfoot>`;
+    grid.className='';
+    const empty=!body&&!t;
+    const bar=FLOW_PICK.size?`<div class="bulkbar"><b>${FLOW_PICK.size}</b> ${tr('flows.bulk.n')}
+      <button type="button" id="bulk-on">${tr('flows.bulk.on')}</button>
+      <button type="button" id="bulk-off">${tr('flows.bulk.off')}</button>
+      <button type="button" id="bulk-dup">${tr('flows.bulk.dup')}</button>
+      <button type="button" class="danger" id="bulk-del">${tr('flows.bulk.del')}</button></div>`:'';
+    grid.innerHTML=empty
+      ?`<div class="state">${tr('No flows yet')}</div>`
+      :`${bar}<div class="tw"><table class="ftable"><thead><tr><th><input type="checkbox" data-pick="*" ${allOn?'checked':''} aria-label="${rows.length}"> <span class="hint">${FLOW_PICK.size}/${rows.length}</span></th><th>${tr('flows.col.num')}</th>${sortTh('name',tr('flows.col.name'),false)}${`<th>${tr('flows.col.url')}</th>`}${sortTh('streams',tr('flows.col.streams'),true)}${sortTh('hits',tr('Visits'),true)}${sortTh('bots',tr('Bots'),true)}${sortTh('conv',tr('Conv'),true)}${sortTh('profit',tr('Profit'),true)}<th class="acts"></th></tr></thead><tbody>${body||`<tr><td colspan="10">${tr('Nothing matches')} “${esc(FQ)}”</td></tr>`}</tbody>${body?foot:''}</table></div>`;
+    bind(grid);
+    qa('[data-copy]',grid).forEach(b=>b.onclick=e=>{e.stopPropagation(); copyText(b.dataset.copy,b)});
+    qa('[data-pick]',grid).forEach(box=>{
+      box.onclick=e=>e.stopPropagation();
+      box.onchange=()=>{
+        if(box.dataset.pick==='*') rows.forEach(g=>box.checked?FLOW_PICK.add(g.id):FLOW_PICK.delete(g.id));
+        else if(box.checked) FLOW_PICK.add(box.dataset.pick); else FLOW_PICK.delete(box.dataset.pick);
+        paintFlowCards();
+      };
+    });
+    const picked=()=>GROUPS.filter(g=>FLOW_PICK.has(g.id));
+    const bon=q('#bulk-on',grid); if(bon) bon.onclick=()=>{picked().forEach(g=>{g.status=true}); FLOW_PICK.clear(); markDirty(); paintFlowCards()};
+    const boff=q('#bulk-off',grid); if(boff) boff.onclick=()=>{picked().forEach(g=>{g.status=false}); FLOW_PICK.clear(); markDirty(); paintFlowCards()};
+    const bdup=q('#bulk-dup',grid); if(bdup) bdup.onclick=()=>{picked().forEach(g=>duplicateFlow(g,true)); FLOW_PICK.clear(); paintFlowCards()};
+    const bdel=q('#bulk-del',grid); if(bdel) bdel.onclick=async()=>{
+      const list=picked();
+      if(!list.length) return;
+      if(!await ask(tr('Delete flows?'),tr('They are removed when you save.'),tr('Delete'),true)) return;
+      const drop=new Set(list);
+      for(let i=GROUPS.length-1;i>=0;i--) if(drop.has(GROUPS[i])) GROUPS.splice(i,1);
+      FLOW_PICK.clear(); markDirty(); paintFlowCards();
+    };
+    qa('[data-sort]',grid).forEach(b=>b.onclick=e=>{
+      e.stopPropagation();
+      const k=b.dataset.sort;
+      if(FLOW_SORT.k===k) FLOW_SORT.dir=-FLOW_SORT.dir; else {FLOW_SORT.k=k; FLOW_SORT.dir=k==='name'?1:-1}
+      FLOW_PAGE_I=0; paintFlowCards();
+    });
+    paintFlowSum(rows);
+    return;
+  }
+  grid.className='fgrid';
+  const cards=page.map(g=>{
     const p=perfOf(g,null), st=g.streams||[], gi=GROUPS.indexOf(g), links=linkTargets(g);
     const lines=st.slice(0,4).map((s,i)=>{const o=s.out||{};return `<div class="ln"><span class="no">${i+1}</span><span class="dot ${s.status?'on':''}"></span><b>${esc(s.name||'stream')}</b>${icon('arrow')}<span class="to">${o.redirect==='group'?'flow '+esc(o.out||'?'):esc(typeLabel(o.redirect))}</span></div>`}).join('');
     return `<div class="card fcard ${g.status?'':'off'}" data-g="${gi}" tabindex="0">
-      <div class="hd"><span class="dot ${g.status?'on':''}"></span><span class="id ell">${esc(g.id)}</span>${g.status?'':'<span class="pill">off</span>'}<div class="spacer"></div>
-        <button class="icon sm ghost" data-more title="More">${icon('more')}</button></div>
-      <div class="muted ell" style="margin-top:-8px">${esc(g.name||base+'/'+g.id)}</div>
-      <div class="stats"><div><b>${fmt(p.hits)}</b><span>visits</span></div><div><b class="${p.bots?'warn':''}">${fmt(p.bots)}</b><span>bots</span></div><div><b class="${p.conv?'ok':''}">${fmt(p.conv)}</b><span>conv</span></div><div><b>${p.profit?money(p.profit):'—'}</b><span>profit</span></div></div>
-      <div class="mini">${lines||'<div class="ln">No streams — every visitor gets the default</div>'}${st.length>4?`<div class="ln">+ ${st.length-4} more</div>`:''}</div>
-      <div class="row wrap">${links.map(l=>`<span class="pill acc">${icon('arrow')}${esc(l)}</span>`).join('')}<div class="spacer"></div><span class="hint">${st.length} stream${st.length===1?'':'s'}</span></div>
+      <div class="hd"><span class="dot ${g.status?'on':''}"></span><span class="id ell">${esc((g.num?g.num+' · ':'')+campaignLabel(g))}</span><div class="spacer"></div>
+        <button class="icon sm ghost" data-more title="${tr('More')}">${icon('more')}</button></div>
+      <div class="muted ell" style="margin-top:-8px">${esc(campaignURL(g))}</div>
+      <div class="stats"><div><b>${fmt(p.hits)}</b><span>${tr('flows.visits')}</span></div><div><b class="${p.bots?'warn':''}">${fmt(p.bots)}</b><span>${tr('flows.bots')}</span></div><div><b class="${p.conv?'ok':''}">${fmt(p.conv)}</b><span>${tr('flows.conv')}</span></div><div><b>${p.profit?money(p.profit):'—'}</b><span>${tr('flows.profit')}</span></div></div>
+      <div class="mini">${lines||'<div class="ln">'+tr('flows.nostreams')+'</div>'}${st.length>4?`<div class="ln">+ ${st.length-4} ${tr('flows.more')}</div>`:''}</div>
+      <div class="row wrap">${links.map(l=>`<span class="pill acc">${icon('arrow')}${esc(l)}</span>`).join('')}<div class="spacer"></div><span class="hint">${st.length} ${tr('flows.streams')}</span></div>
     </div>`}).join('');
-  grid.innerHTML=cards+(t?'':`<button class="card fcard new" id="newflow2">${icon('plus')} New flow</button>`)+(t&&!cards?`<div class="state">Nothing matches “${esc(FQ)}”</div>`:'');
+  grid.innerHTML=cards+(t?'':`<button class="card fcard new" id="newflow2">${icon('plus')} ${tr('flows.new')}</button>`)+(t&&!cards?`<div class="state">${tr('Nothing matches')} “${esc(FQ)}”</div>`:'');
   const n2=q('#newflow2'); if(n2)n2.onclick=newFlow;
-  qa('.fcard[data-g]',grid).forEach(c=>{
-    const g=GROUPS[+c.dataset.g];
-    const open=()=>go('flows/'+encodeURIComponent(g.id));
-    c.onclick=open; c.onkeydown=e=>{if(e.key==='Enter')open()};
-    q('[data-more]',c).onclick=e=>{e.stopPropagation();menu(e.currentTarget,[
-      {label:'Open',icon:'arrow',on:open},
-      {label:g.status?'Turn off':'Turn on',icon:'play',on:()=>{g.status=!g.status;markDirty();paintFlowCards()}},
-      {label:'Duplicate',icon:'dup',on:()=>duplicateFlow(g)},'-',
-      {label:'Delete',icon:'trash',danger:true,on:()=>deleteFlow(g)}])};
-  });
+  bind(grid);
+  paintFlowSum(rows);
 }
 
 /* ---------- one flow: the canvas ---------- */
@@ -1147,11 +1699,11 @@ let SIM=null;            // last simulation result for CUR, or null
 let TESTER=false;        // the "test a visitor" form is open
 let EDIT=-1;             // index of the stream open in the drawer, -1 = none
 async function flowPage(id,live){
-  if(GROUPS===null||PERF===null)view().innerHTML=stateHTML('Loading…');
-  await Promise.all([ensureGroups(),loadPerf()]);
+  if(GROUPS===null||PERF===null)view().innerHTML=stateHTML(tr('Loading…'));
+  await Promise.all([ensureGroups(),loadPerf(),ensureDomains()]);
   if(!live())return;
   const g=groupById(id);
-  if(!g){view().innerHTML=`<div class="state">There is no flow “${esc(id)}”. <a href="#/flows">All flows</a></div>`;return}
+  if(!g){view().innerHTML=`<div class="state">${tr('There is no flow')} “${esc(id)}”. <a href="#/flows">${tr('All flows')}</a></div>`;return}
   if(CUR!==g){SIM=null;CUR=g}
   EDIT=-1;
   renderFlow();
@@ -1159,7 +1711,7 @@ async function flowPage(id,live){
 }
 function renderFlow(){
   const g=CUR, v=view(); if(!g||!v)return;
-  const p=perfOf(g,null), base=(ENGINE||'').replace(/\/$/,''), url=base+'/'+g.id, st=g.streams||[], fb=perfOf(g,'-');
+  const p=perfOf(g,null), url=campaignURL(g), st=g.streams||[], fb=perfOf(g,'-');
   const step=SIM&&SIM.path&&SIM.path[0];
   const share=(n)=>p.hits?Math.round(n/p.hits*100)+'%':'';
   const lbl=(n)=>`<span class="flowlbl"><b>${fmt(n)}</b>${p.hits?' · '+share(n):''}</span>`;
@@ -1167,64 +1719,66 @@ function renderFlow(){
     const sp=perfOf(g,s.name), o=s.out||{}, bt=s.bots||{}, r=step&&step.streams[i];
     let verdict='', hit='';
     if(r&&r.on){
-      if(r.match)verdict=step.selected===s.name&&step.streams.findIndex(x=>x.on&&x.match)===i?`<span class="verdict y">${icon('check')}matched</span>`:'<span class="verdict m">would match</span>';
-      else{hit=r.why;verdict=`<span class="verdict n">${icon('x')}${esc((condOf(r.why)||{l:r.why}).l)}</span>`}
+      if(r.match)verdict=step.selected===s.name&&step.streams.findIndex(x=>x.on&&x.match)===i?`<span class="verdict y">${icon('check')}${tr('matched')}</span>`:'<span class="verdict m">'+tr('would match')+'</span>';
+      else{hit=r.why;verdict=`<span class="verdict n">${icon('x')}${esc(tr((condOf(r.why)||{l:r.why}).l))}</span>`}
     }
     const nv=variantsOf(o.out), isLink=o.redirect==='group';
     return `<div class="frow srow" data-s="${i}">
       <div class="node ${s.status?'':'off'} ${EDIT===i?'sel':''}" data-node="${i}">
-        <span class="grip" data-grip title="Drag to reorder">${icon('grip')}</span>
-        <div class="hd"><span class="no">${i+1}</span><span class="nm" title="${esc(s.name)}">${esc(s.name||'stream '+(i+1))}</span>${verdict}</div>
-        <div class="acts"><label class="sw" title="${s.status?'On':'Off'}"><input type="checkbox" data-toggle ${s.status?'checked':''}><i></i></label>
-          <button class="icon sm ghost" data-more title="More">${icon('more')}</button></div>
+        <span class="grip" data-grip title="${tr('Drag to reorder')}">${icon('grip')}</span>
+        <div class="hd"><span class="no">${i+1}</span><span class="nm" title="${esc(s.name)}">${esc(s.name||tr('Stream')+' '+(i+1))}</span>${verdict}</div>
+        <div class="acts"><label class="sw" title="${s.status?tr('On'):tr('Off')}"><input type="checkbox" data-toggle ${s.status?'checked':''}><i></i></label>
+          <button class="icon sm ghost" data-more title="${tr('More')}">${icon('more')}</button></div>
         <div class="chips">${condChips(s,hit)}</div>
         ${s.comment?`<div class="note" title="${esc(s.comment)}">${esc(s.comment)}</div>`:''}
       </div>
       ${lbl(sp.hits)}
       <div class="dest" data-dest="${i}">
-        <div class="meta"><span class="pill acc">${esc(typeLabel(o.redirect))}</span>${nv>1&&!isLink?`<span class="pill">${nv} variants · ${esc(DIST[o.distribution]||DIST.random)}</span>`:''}
-          ${bt.redirect&&bt.redirect!=='skip'?`<span class="pill warn">${icon('bot')}bots → ${esc(typeLabel(bt.redirect))}</span>`:''}</div>
-        ${isLink?`<div class="row"><b>${esc(o.out||'—')}</b>${groupById((o.out||'').trim())?`<button class="link" data-goto="${esc((o.out||'').trim())}">open flow ${icon('arrow')}</button>`:'<span class="pill bad">no such flow</span>'}</div>`
+        <div class="meta"><span class="pill acc">${esc(typeLabel(o.redirect))}</span>${nv>1&&!isLink?`<span class="pill">${nv} ${tr('variants')} · ${esc(tr(DIST[o.distribution]||DIST.random))}</span>`:''}
+          ${bt.redirect&&bt.redirect!=='skip'?`<span class="pill warn">${icon('bot')}${tr('bots')} → ${esc(typeLabel(bt.redirect))}</span>`:''}</div>
+        ${isLink?`<div class="row"><b>${esc(o.out||'—')}</b>${groupById((o.out||'').trim())?`<button class="link" data-goto="${esc((o.out||'').trim())}">${tr('open flow')} ${icon('arrow')}</button>`:'<span class="pill bad">'+tr('no such flow')+'</span>'}</div>`
           :outHTML(o.redirect,o.out)}
-        ${sp.hits?`<div class="hint num">${isLink?fmt(sp.hits)+' sent on':fmt(sp.bots)+' bots · '+fmt(sp.conv)+' conv'+(sp.profit?' · '+money(sp.profit):'')}</div>`:''}
+        ${sp.hits?`<div class="hint num">${isLink?fmt(sp.hits)+' '+tr('sent on'):fmt(sp.bots)+' '+tr('bots')+' · '+fmt(sp.conv)+' '+tr('conv')+(sp.profit?' · '+money(sp.profit):'')}</div>`:''}
       </div></div>`}).join('');
-  const dflt=step&&step.selected==='-'?`<span class="verdict y">${icon('check')}default</span>`:'';
+  const dflt=step&&step.selected==='-'?`<span class="verdict y">${icon('check')}${tr('default')}</span>`:'';
   v.innerHTML=`
     <div class="ph" style="align-items:flex-start">
-      <a class="row muted" href="#/flows" style="height:34px">${icon('back')}Flows</a>
+      <a class="row muted" href="#/flows" style="height:34px">${icon('back')}${tr('flows.title')}</a>
       <div class="title">
-        <div class="row wrap"><h1>${esc(g.id)}</h1><button class="icon sm ghost" id="switch" title="Switch flow">${icon('down')}</button>
-          <label class="sw" title="Flow on / off"><input type="checkbox" id="gstatus" ${g.status?'checked':''}><i></i></label>
-          ${g.status?'<span class="pill ok">active</span>':'<span class="pill">off</span>'}
-          ${(g.aliases||[]).map(a=>`<span class="chip"><span class="k">alias</span><span class="v">${esc(a)}</span></span>`).join('')}
+        <div class="row wrap"><h1>${esc(g.id)}</h1><button class="icon sm ghost" id="switch" title="${tr('flows.title')}">${icon('down')}</button>
+          <label class="sw" title="${tr('Flow on / off')}"><input type="checkbox" id="gstatus" ${g.status?'checked':''}><i></i></label>
+          ${g.status?'<span class="pill ok">'+tr('active')+'</span>':'<span class="pill">'+tr('off')+'</span>'}
+          ${(g.aliases||[]).map(a=>`<span class="chip"><span class="k">${tr('alias')}</span><span class="v">${esc(a)}</span></span>`).join('')}
           ${g.name?`<span class="muted">${esc(g.name)}</span>`:''}</div>
-        <div class="row" style="margin-top:4px;min-width:0">${icon('link')}<a class="mono ell" href="${esc(url)}" target="_blank" rel="noreferrer">${esc(url)}</a><button class="icon sm ghost" id="copylink" title="Copy link">${icon('copy')}</button></div>
+        <div class="row" style="margin-top:4px;min-width:0">${icon('link')}<a class="mono ell" href="${esc(url)}" target="_blank" rel="noreferrer">${esc(url)}</a><button class="icon sm ghost" id="copylink" title="${tr('Copy link')}">${icon('copy')}</button></div>
       </div>
-      <button id="testbtn" class="${TESTER?'primary':''}">${icon('target')}Test a visitor</button>
-      <button id="gset">${icon('settings')}Settings</button>
-      <button class="primary" id="addstream">${icon('plus')}Stream</button>
+      <button id="testbtn" class="${TESTER?'primary':''}">${icon('target')}${tr('Test a visitor')}</button>
+      <button id="gclicks">${tr('flows.log.clicks')}</button>
+      <button id="gconv">${tr('flows.log.conv')}</button>
+      <button id="gset">${icon('settings')}${tr('Settings')}</button>
+      <button class="primary" id="addstream">${icon('plus')}${tr('Stream')}</button>
     </div>
     <div id="tester"></div>
     <div class="canvas" id="canvas">
       <svg id="wires"></svg>
-      <div class="frow"><div class="entry" id="entry">${icon('play')}<span>Visitor</span><span class="mono ell">/${esc(g.id)}</span><b class="num">${fmt(p.hits)}</b></div></div>
+      <div class="frow"><div class="entry" id="entry">${icon('play')}<span>${tr('Visitor')}</span><span class="mono ell">/${esc(g.id)}</span><b class="num">${fmt(p.hits)}</b></div></div>
       ${rows}
-      <div class="frow"><button class="addrow ghost sm" id="addstream2">${icon('plus')}Add a stream</button></div>
+      <div class="frow"><button class="addrow ghost sm" id="addstream2">${icon('plus')}${tr('Add a stream')}</button></div>
       <div class="frow" id="fbrow">
-        <div class="node fb" id="fbnode"><div class="hd"><span class="nm">No stream matched</span>${dflt}</div><div class="hint">everyone left over gets the flow's default</div></div>
+        <div class="node fb" id="fbnode"><div class="hd"><span class="nm">${tr('No stream matched')}</span>${dflt}</div><div class="hint">${tr("everyone left over gets the flow's default")}</div></div>
         ${lbl(fb.hits)}
-        <div class="dest fb" id="fbdest"><div class="meta"><span class="pill">${esc(typeLabel(g.redirect||'stop'))}</span>${g.redirect!=='group'&&variantsOf(g.out)>1?`<span class="pill">${variantsOf(g.out)} variants · ${DIST.random}</span>`:''}</div>
-          ${g.redirect==='group'?`<div class="row"><b>${esc(g.out||'—')}</b>${groupById((g.out||'').trim())?`<button class="link" data-goto="${esc((g.out||'').trim())}">open flow ${icon('arrow')}</button>`:'<span class="pill bad">no such flow</span>'}</div>`
+        <div class="dest fb" id="fbdest"><div class="meta"><span class="pill">${esc(typeLabel(g.redirect||'stop'))}</span>${g.redirect!=='group'&&variantsOf(g.out)>1?`<span class="pill">${variantsOf(g.out)} ${tr('variants')} · ${tr(DIST.random)}</span>`:''}</div>
+          ${g.redirect==='group'?`<div class="row"><b>${esc(g.out||'—')}</b>${groupById((g.out||'').trim())?`<button class="link" data-goto="${esc((g.out||'').trim())}">${tr('open flow')} ${icon('arrow')}</button>`:'<span class="pill bad">'+tr('no such flow')+'</span>'}</div>`
             :outHTML(g.redirect||'stop',g.out)}</div>
       </div>
     </div>
-    <div class="fstats" style="margin-top:14px"><span><b>${fmt(p.hits)}</b>visits</span><span><b>${fmt(p.unique)}</b>unique</span><span><b>${fmt(p.bots)}</b>bots</span><span><b>${fmt(p.conv)}</b>conversions</span><span><b>${money(p.profit)}</b>profit</span><span><b>${pct(p.conv,p.hits)}</b>CR</span><span>${periodLabel()}</span>
-      <div class="spacer"></div><span class="hint">Tried top to bottom — the first match wins. Drag ${icon('grip')} to reorder.</span></div>`;
+    <div class="fstats" style="margin-top:14px"><span><b>${fmt(p.hits)}</b>${tr('visits')}</span><span><b>${fmt(p.unique)}</b>${tr('unique')}</span><span><b>${fmt(p.bots)}</b>${tr('bots')}</span><span><b>${fmt(p.conv)}</b>${tr('conversions')}</span><span><b>${money(p.profit)}</b>${tr('profit')}</span><span><b>${pct(p.conv,p.hits)}</b>${tr('CR')}</span><span>${periodLabel()}</span>
+      <div class="spacer"></div><span class="hint">${tr('Tried top to bottom — the first match wins. Drag')} ${icon('grip')} ${tr('to reorder.')}</span></div>`;
   // header
   q('#gstatus').onchange=e=>{g.status=e.target.checked;markDirty();renderFlow()};
   q('#copylink').onclick=()=>copyText(url,q('#copylink'));
-  q('#switch').onclick=e=>{e.stopPropagation();menu(e.currentTarget,[{cap:'Flows'},...GROUPS.map(x=>({label:x.id+(x===g?'  ✓':''),on:()=>go('flows/'+encodeURIComponent(x.id))})),'-',{label:'New flow',icon:'plus',on:newFlow}])};
-  q('#gset').onclick=openFlowSettings; q('#fbdest').onclick=e=>{if(!e.target.closest('[data-goto]'))openFlowSettings('default')};
+  q('#switch').onclick=e=>{e.stopPropagation();menu(e.currentTarget,[{cap:tr('Flows')},...GROUPS.map(x=>({label:x.id+(x===g?'  ✓':''),on:()=>go('flows/'+encodeURIComponent(x.id))})),'-',{label:tr('New flow'),icon:'plus',on:newFlow}])};
+  q('#gset').onclick=openFlowSettings; q('#gclicks').onclick=()=>go('logs/'+encodeURIComponent(g.id)); q('#gconv').onclick=()=>go('conversions/'+encodeURIComponent(g.id)); q('#fbdest').onclick=e=>{if(!e.target.closest('[data-goto]'))openFlowSettings('default')};
   q('#addstream').onclick=addStream; q('#addstream2').onclick=addStream;
   q('#testbtn').onclick=()=>{TESTER=!TESTER;if(!TESTER)SIM=null;renderFlow()};
   qa('[data-goto]').forEach(b=>b.onclick=e=>{e.stopPropagation();go('flows/'+encodeURIComponent(b.dataset.goto))});
@@ -1247,14 +1801,14 @@ function copyText(text,btn){
 function streamMenu(anchor,i){
   const g=CUR, s=g.streams[i], others=GROUPS.filter(x=>x!==g);
   menu(anchor,[
-    {label:'Edit',icon:'settings',on:()=>openStream(i)},
-    {label:'Duplicate',icon:'dup',on:()=>{const c=clone(s);c.name=uniqueName(s.name+'_copy',g.streams.map(x=>x.name));g.streams.splice(i+1,0,c);SIM=null;markDirty();renderFlow()}},
-    ...(others.length?[{cap:'Move to flow'},...others.map(x=>({label:x.id,icon:'move',on:()=>{g.streams.splice(i,1);x.streams=x.streams||[];x.streams.push(s);SIM=null;markDirty();renderFlow();toast('Moved to '+x.id)}}))]:[]),
-    '-',{label:'Delete',icon:'trash',danger:true,on:()=>deleteStream(i)}]);
+    {label:tr('Edit'),icon:'settings',on:()=>openStream(i)},
+    {label:tr('Duplicate'),icon:'dup',on:()=>{const c=clone(s);c.name=uniqueName(s.name+'_copy',g.streams.map(x=>x.name));g.streams.splice(i+1,0,c);SIM=null;markDirty();renderFlow()}},
+    ...(others.length?[{cap:tr('Move to flow')},...others.map(x=>({label:x.id,icon:'move',on:()=>{g.streams.splice(i,1);x.streams=x.streams||[];x.streams.push(s);SIM=null;markDirty();renderFlow();toast(tr('Moved to')+' '+x.id)}}))]:[]),
+    '-',{label:tr('Delete'),icon:'trash',danger:true,on:()=>deleteStream(i)}]);
 }
 async function deleteStream(i){
   const g=CUR, s=g.streams[i];
-  if(!await ask('Delete stream "'+(s.name||'')+'"?','It will be removed when you save.','Delete',true))return;
+  if(!await ask(tr('Delete')+' "'+(s.name||'')+'"?',tr('They are removed when you save.'),tr('Delete'),true))return;
   closeDrawer(); g.streams.splice(i,1); SIM=null; markDirty(); renderFlow();
 }
 function addStream(){
@@ -1366,18 +1920,18 @@ function paintTester(){
     const trail=SIM.path.map(s=>`${esc(s.group)} → ${s.selected==='-'?'<i>default</i>':'<b>'+esc(s.selected)+'</b>'}`).join(' &nbsp;›&nbsp; ');
     res=`<div class="tres">${c('country',v.country)}${c('city',v.city)}${c('region',v.region)}${c('utc',v.utc)}${c('asn',v.asn?'AS'+v.asn:'')}${c('org',v.org)}${c('operator',v.operator)}${c('device',v.device)}${c('os',v.os)}${c('browser',v.browser)}${c('brand',v.brand)}
       <div class="spacer"></div><span>${trail}</span><span class="pill ${last.error?'bad':'acc'}">${esc(last.error||typeLabel(last.redirect))}</span></div>
-      <div class="hint" style="margin-top:8px">Uses the flows as they are on screen, saved or not. Impression limits, bot checks and the antiflood depend on live traffic and are not simulated.</div>`;
+      <div class="hint" style="margin-top:8px">${tr('tester.hint')}</div>`;
   }
   box.innerHTML=`<div class="card tester">
     <div class="grid">
-      ${f('ip','IP address','8.8.8.8',TV.ip)}
-      <div class="fld"><label>Device</label>${sel('tv_ua',Object.keys(UAS).map(k=>opt(k,k,TV.ua)).join(''))}</div>
-      ${f('country','Country (as the CDN reports it)','us',TV.country)}
-      ${f('lang','Language','en',TV.lang)}
-      ${f('referer','Referer','https://www.google.com/',TV.referer)}
-      ${f('key','Keyword (?q=)','buy shoes',TV.key)}
-      ${f('query','URL parameters','utm_source=fb&sub1=42',TV.query)}
-      <div class="fld"><label>&nbsp;</label><div class="row"><label class="chk" style="margin:0;white-space:nowrap"><input type="checkbox" id="tv_repeat" ${TV.repeat?'checked':''}>returning</label><div class="spacer"></div><button class="primary" id="tv_run">${icon('play')}Run</button></div></div>
+      ${f('ip',tr('tester.ip'),'8.8.8.8',TV.ip)}
+      <div class="fld"><label>${tr('Device')}</label>${sel('tv_ua',Object.keys(UAS).map(k=>opt(k,k,TV.ua)).join(''))}</div>
+      <div class="fld"><label>${tr('tester.country')}</label><input id="tv_country" value="${esc(TV.country)}" placeholder="us" autocomplete="off"><select id="tv_country_list"><option value="">${tr('flows.state.all')}</option>${COUNTRIES.map(c=>`<option value="${c.code}" ${TV.country===c.code?'selected':''}>${esc(countryLabel(c.code, uiLang()))}</option>`).join('')}</select></div>
+      ${f('lang',tr('tester.lang'),'en',TV.lang)}
+      ${f('referer',tr('tester.referer'),'https://www.google.com/',TV.referer)}
+      ${f('key',tr('tester.key'),'buy shoes',TV.key)}
+      ${f('query',tr('tester.query'),'utm_source=fb&sub1=42',TV.query)}
+      <div class="fld"><label>&nbsp;</label><div class="row"><label class="chk" style="margin:0;white-space:nowrap"><input type="checkbox" id="tv_repeat" ${TV.repeat?'checked':''}>${tr('returning')}</label><div class="spacer"></div><button class="primary" id="tv_run">${icon('play')}${tr('Run')}</button></div></div>
     </div>${res}</div>`;
   const read=()=>{['ip','country','lang','referer','key','query'].forEach(k=>TV[k]=q('#tv_'+k).value.trim());TV.ua=q('#tv_ua').value;TV.repeat=q('#tv_repeat').checked};
   const run=async()=>{
@@ -1389,21 +1943,24 @@ function paintTester(){
     }catch(e){toast(e.message,true)}
   };
   q('#tv_run').onclick=run;
+  const countryList=q('#tv_country_list',box);
+  if(countryList) countryList.onchange=()=>{const code=countryList.value; if(code){q('#tv_country',box).value=code; TV.country=code}};
   qa('input:not([type=checkbox])',box).forEach(i=>i.onkeydown=e=>{if(e.key==='Enter')run()});
 }
 
 /* ---------- stream editor (drawer) ---------- */
+let OFFERS=null, NETS=null;
 let COND_OPEN=new Set();   // conditions added in this drawer but not filled in yet
 let COND_RX=new Set();     // conditions edited as a regular expression in this drawer
 function openStream(i,focus){
   const g=CUR, s=g.streams[i]; if(!s)return;
   EDIT=i; COND_OPEN=new Set(); COND_RX=new Set();
   const el=$(`<aside class="drawer" id="sdrawer">
-    <div class="dh"><span class="pill acc">#${i+1}</span><input class="name" id="s_name" placeholder="stream name" autocomplete="off">
-      <label class="sw" title="Stream on / off"><input type="checkbox" id="s_status"><i></i></label>
-      <button class="icon ghost" id="s_close" title="Close (Esc)">${icon('x')}</button></div>
+    <div class="dh"><span class="pill acc">#${i+1}</span><input class="name" id="s_name" placeholder="${tr('ed.name')}" autocomplete="off">
+      <label class="sw" title="${tr('ed.onoff')}"><input type="checkbox" id="s_status"><i></i></label>
+      <button class="icon ghost" id="s_close" title="${tr('ed.close')}">${icon('x')}</button></div>
     <div class="db" id="s_body"></div>
-    <div class="df"><button class="danger" id="s_del">${icon('trash')}Delete</button><div class="spacer"></div><button class="primary" id="s_done">Done</button></div></aside>`);
+    <div class="df"><button class="danger" id="s_del">${icon('trash')}${tr('Delete')}</button><div class="spacer"></div><button class="primary" id="s_done">${tr('Done')}</button></div></aside>`);
   drawer(el,()=>{EDIT=-1;if(CUR===g&&q('#canvas'))renderFlow()});
   DRAWER.commit=collectStream;
   q('#s_name',el).value=s.name||''; q('#s_status',el).checked=!!s.status;
@@ -1414,6 +1971,12 @@ function openStream(i,focus){
   const onEdit=()=>{collectStream();SIM=null;markDirty();clearTimeout(t);t=setTimeout(()=>{if(EDIT>=0&&q('#canvas'))renderFlow()},180)};
   el.addEventListener('input',onEdit); el.addEventListener('change',onEdit);
   paintStream();
+  if(!OFFERS||!NETS){
+    Promise.all([get('/api/offers',[]), get('/api/affiliate-networks',[])]).then(([o,n])=>{
+      OFFERS=o||[]; NETS=n||[];
+      if(EDIT===i&&q('#s_body')) paintStream();
+    });
+  }
   renderFlow();
   if(focus==='name'){const f=q('#s_name',el);f.focus({preventScroll:true});f.select()}
   if(focus==='then'){const b=q('#s_body',el),sec=q('#sec-then',el);b.scrollTop=sec.offsetTop-b.offsetTop-8}
@@ -1424,6 +1987,9 @@ function paintStream(){
   const keep=body.scrollTop, was=new Set(qa('details.sec[open]',body).map(x=>x.id));
   const shown=COND.filter(c=>configured(r,c)||COND_OPEN.has(c.k));
   const red=o.redirect||'http_redirect', bred=bt.redirect||'skip', others=GROUPS.filter(x=>x!==g);
+  const offerNow=(o.offers&&o.offers[0]&&o.offers[0].id)||'';
+  const netRec=(OFFERS||[]).find(x=>x.id===offerNow);
+  const netNow=netRec?(netRec.network_id||''):'';
   const nbots=BOTCHK.filter(([id])=>bt[id]).length, nv=variantsOf(o.out);
   const advOn=!!((o.chance&&o.chance!==100)||o.header||sp.enabled||rm.enabled||am.enabled);
   const hitK=SIM&&SIM.path[0].streams[EDIT]&&SIM.path[0].streams[EDIT].why;
@@ -1435,57 +2001,61 @@ function paintStream(){
     </div>
     <div class="sec" id="sec-then">
       <div class="st"><span class="n">2</span>Then</div>
-      <div class="types">${QUICK.map(t=>`<button type="button" class="type ${red===t?'on':''}" data-type="${t}">${TYPES[t][0]}<small>${TYPES[t][1]}</small></button>`).join('')}</div>
-      <div class="g2"><div class="fld"><label>Type</label>${sel('s_redirect',Object.keys(TYPES).map(t=>opt(t,TYPES[t][0],red)).join(''))}</div></div>
+      <div class="types">${QUICK.map(t=>`<button type="button" class="type ${red===t?'on':''}" data-type="${t}">${tr(TYPES[t][0])}<small>${tr(TYPES[t][1])}</small></button>`).join('')}</div>
+      <div class="g2"><div class="fld"><label>${tr('Type')}</label>${sel('s_redirect',Object.keys(TYPES).map(t=>opt(t,typeLabel(t),red)).join(''))}</div></div>
+      <div class="g2">
+        <div class="fld"><label>${tr('stream.offer')}</label><select id="s_offer">${opt('',tr('stream.offer.none'),offerNow)}${(OFFERS||[]).map(x=>opt(x.id,x.name||x.id,offerNow)).join('')}</select></div>
+        <div class="fld"><label>${tr('stream.network')}</label><select id="s_net">${opt('',tr('stream.network.none'),netNow)}${(NETS||[]).map(x=>opt(x.id,x.name||x.id,netNow)).join('')}</select></div>
+      </div>
       ${red==='group'
-        ?`<div class="fld"><label>Send the visitor to flow</label>${others.length?sel('s_group','<option value="">— choose a flow —</option>'+others.map(x=>opt(x.id,x.id+(x.name?' — '+x.name:''),(o.out||'').trim())).join('')):'<div class="hint">There is no other flow yet. Create one first.</div>'}
+        ?`<div class="fld"><label>${tr('Send the visitor to flow')}</label>${others.length?sel('s_group','<option value="">'+tr('— choose a flow —')+'</option>'+others.map(x=>opt(x.id,x.id+(x.name?' — '+x.name:''),(o.out||'').trim())).join('')):'<div class="hint">'+tr('There is no other flow yet. Create one first.')+'</div>'}
             <div class="hint">Its streams are tried with the same visitor; the log shows the flow that finally served them.</div></div>`
         :NOOUT.has(red)?`<div class="hint">A fixed answer — there is nothing to fill in.</div>`
         :`<div class="fld"><label>${outLabel(red)}</label>${variantsField('s_outv',o.out,!URLISH.has(red),outPH(red),'s_distw')}
             <div class="hint">Macros: [KEY] [CID] [IP] [COUNTRY] [CITY] [REGION] [LANG] [DEVICE] [OPERATOR] [DOMAIN] [ASN] [ORG] [TIMEZONE] [UTC] [PAR-1..5] [PATH] [RANDNUM-a-b] [RANDLINE-(file)-n] [REMOTE]</div></div>
-          <div class="fld" id="s_distw" ${nv<2?'hidden':''}><label>Which variant a visit gets</label>${sel('s_dist',opt('random','a random one',o.distribution||'random')+opt('rotator','the next one for each visitor (cookie)',o.distribution)+opt('evenly','the next one in turn, evenly for everyone',o.distribution))}</div>
-          ${red==='curl'?`<div class="fld"><label>Change the fetched page — find → replace</label>${rewriteField('s_rw',s.curl)}<div class="hint">Any letter case; macros work in both.</div></div>`:''}`}
+          <div class="fld" id="s_distw" ${nv<2?'hidden':''}><label>${tr('Which variant a visit gets')}</label>${sel('s_dist',opt('random',tr('a random one'),o.distribution||'random')+opt('rotator',tr('the next one for each visitor (cookie)'),o.distribution)+opt('evenly',tr('the next one in turn, evenly for everyone'),o.distribution))}</div>
+          ${red==='curl'?`<div class="fld"><label>${tr('Change the fetched page — find → replace')}</label>${rewriteField('s_rw',s.curl)}<div class="hint">${tr('Any letter case; macros work in both.')}</div></div>`:''}`}
     </div>
     <details class="sec" id="sec-bots" ${was.has('sec-bots')||bred!=='skip'||nbots?'open':''}>
       <summary><span class="n">3</span>Bots<span class="hint" style="font-weight:400">${nbots?nbots+' signal'+(nbots===1?'':'s'):'no detection'} · ${bred!=='skip'?'get '+esc(typeLabel(bred)):'same as humans'}</span></summary>
       <div class="lbl" style="margin-bottom:8px">Treat as a bot when</div>
-      <div class="togs">${BOTCHK.map(([id,l])=>`<label class="tog"><input type="checkbox" id="b_${id}" ${bt[id]?'checked':''}>${l}</label>`).join('')}</div>
+      <div class="togs">${BOTCHK.map(([id,l])=>`<label class="tog"><input type="checkbox" id="b_${id}" ${bt[id]?'checked':''}>${tr(l)}</label>`).join('')}</div>
       <div class="g2">
-        <div class="fld"><label>Bots get</label>${sel('b_redirect',opt('skip','the same as humans',bred)+Object.keys(TYPES).filter(t=>t!=='group').map(t=>opt(t,TYPES[t][0],bred)).join(''))}</div>
-        ${bred==='skip'?'':`<div class="fld"><label>Content-Type for bots</label>${sel('b_header',HEADERS.map(x=>opt(x,x,bt.header||'text/html')).join(''))}</div>`}
+        <div class="fld"><label>${tr('Bots get')}</label>${sel('b_redirect',opt('skip',tr('the same as humans'),bred)+Object.keys(TYPES).filter(t=>t!=='group').map(t=>opt(t,typeLabel(t),bred)).join(''))}</div>
+        ${bred==='skip'?'':`<div class="fld"><label>${tr('Content-Type for bots')}</label>${sel('b_header',HEADERS.map(x=>opt(x,x,bt.header||'text/html')).join(''))}</div>`}
       </div>
       ${bred==='skip'||NOOUT.has(bred)?'':`<div class="fld"><label>${outLabel(bred)} for bots</label>${variantsField('b_outv',bt.out,!URLISH.has(bred),outPH(bred))}<div class="hint">Several variants are chosen the same way as for people.</div></div>`}
-      ${bred==='curl'?`<div class="fld"><label>Change the page for bots — find → replace</label>${rewriteField('b_rw',s.b_curl)}</div>`:''}
+      ${bred==='curl'?`<div class="fld"><label>${tr('Change the page for bots — find → replace')}</label>${rewriteField('b_rw',s.b_curl)}</div>`:''}
       <label class="chk"><input type="checkbox" id="b_save_ip" ${bt.save_ip?'checked':''}>add detected bot IPs to the search-engine lists</label>
     </details>
     <details class="sec" id="sec-adv" ${was.has('sec-adv')||advOn?'open':''}>
       <summary>Advanced<span class="hint" style="font-weight:400">chance · content type · separation · [REMOTE] · API</span></summary>
       <div class="g2">
-        <div class="fld"><label>Show chance, % (JavaScript types)</label><input type="number" id="s_chance" min="0" max="100" value="${o.chance==null?100:o.chance}"></div>
-        <div class="fld"><label>Content-Type</label>${sel('s_header',opt('','the flow’s',o.header||'')+HEADERS.map(x=>opt(x,x,o.header||'')).join(''))}</div>
+        <div class="fld"><label>${tr('Show chance, % (JavaScript types)')}</label><input type="number" id="s_chance" min="0" max="100" value="${o.chance==null?100:o.chance}"></div>
+        <div class="fld"><label>${tr('Content-Type')}</label>${sel('s_header',opt('',tr('the flow’s'),o.header||'')+HEADERS.map(x=>opt(x,x,o.header||'')).join(''))}</div>
       </div>
       <label class="chk"><input type="checkbox" id="sep_en" ${sp.enabled?'checked':''}>Separation: replace the output by keyword</label>
-      <div class="fld"><label>Separation file (.dat, lines “key;output”)</label><input id="sep_file" value="${esc(sp.file||'')}" placeholder="separation.dat"></div>
+      <div class="fld"><label>${tr('Separation file (.dat, lines “key;output”)')}</label><input id="sep_file" value="${esc(sp.file||'')}" placeholder="separation.dat"></div>
       <label class="chk"><input type="checkbox" id="rm_en" ${rm.enabled?'checked':''}>[REMOTE]: fetch a value from a URL</label>
-      <div class="fld"><label>URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])</label><input id="rm_url" class="mono" value="${esc(rm.url||'')}"></div>
+      <div class="fld"><label>${tr('URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])')}</label><input id="rm_url" class="mono" value="${esc(rm.url||'')}"></div>
       <div class="g2">
-        <div class="fld"><label>Regexp (/…/, first group)</label><input id="rm_re" class="mono" value="${esc(rm.regexp||'')}"></div>
-        <div class="fld"><label>Cache, seconds</label><input type="number" id="rm_cache" value="${rm.cache||0}"></div>
+        <div class="fld"><label>${tr('Regexp (/…/, first group)')}</label><input id="rm_re" class="mono" value="${esc(rm.regexp||'')}"></div>
+        <div class="fld"><label>${tr('Cache, seconds')}</label><input type="number" id="rm_cache" value="${rm.cache||0}"></div>
       </div>
-      <div class="fld"><label>Fallback when the fetch fails</label><input id="rm_res" class="mono" value="${esc(rm.reserved||'')}"></div>
+      <div class="fld"><label>${tr('Fallback when the fetch fails')}</label><input id="rm_res" class="mono" value="${esc(rm.reserved||'')}"></div>
       <label class="chk"><input type="checkbox" id="am_en" ${am.enabled?'checked':''}>API: return a mac code</label>
       <div class="g2">
-        <div class="fld"><label>Code (macros allowed)</label><input id="am_code" class="mono" value="${esc(am.code||'')}"></div>
-        <div class="fld"><label>Probability, %</label><input type="number" id="am_prob" value="${am.prob||0}"></div>
+        <div class="fld"><label>${tr('Code (macros allowed)')}</label><input id="am_code" class="mono" value="${esc(am.code||'')}"></div>
+        <div class="fld"><label>${tr('Probability, %')}</label><input type="number" id="am_prob" value="${am.prob||0}"></div>
       </div>
     </details>
-    <div class="sec"><div class="fld" style="margin:0"><label>Note</label><input id="s_comment" value="${esc(s.comment||'')}" placeholder="what this stream is for — shown on the canvas"></div></div>`;
+    <div class="sec"><div class="fld" style="margin:0"><label>${tr('Note')}</label><input id="s_comment" value="${esc(s.comment||'')}" placeholder="${tr('what this stream is for — shown on the canvas')}"></div></div>`;
   body.scrollTop=keep;
   // Structure changes: commit what is on screen, change the model, paint again.
   q('#addcond',body).onclick=e=>{
     e.stopPropagation();
     const have=new Set(qa('.crow',body).map(x=>x.dataset.cond));
-    const node=$(`<div class="addmenu">${COND_GROUPS.map(gr=>`<div class="grp"><div class="cap">${gr}</div>${COND.filter(c=>c.g===gr).map(c=>`<button data-c="${c.k}" ${have.has(c.k)?'disabled':''}>${c.l}</button>`).join('')}</div>`).join('')}</div>`);
+    const node=$(`<div class="addmenu">${COND_GROUPS.map(gr=>`<div class="grp"><div class="cap">${tr(gr)}</div>${COND.filter(c=>c.g===gr).map(c=>`<button data-c="${c.k}" ${have.has(c.k)?'disabled':''}>${tr(c.l)}</button>`).join('')}</div>`).join('')}</div>`);
     const m=menu(e.currentTarget,[{node}]);
     qa('[data-c]',m).forEach(b=>b.onclick=()=>{
       closeMenu(); collectStream(); COND_OPEN.add(b.dataset.c); paintStream();
@@ -1508,7 +2078,7 @@ function paintStream(){
   q('#s_redirect',body).addEventListener('change',()=>setTimeout(paintStream,0));
   q('#b_redirect',body).addEventListener('change',()=>setTimeout(paintStream,0));
   const addop=q('#addop',body); if(addop)addop.onclick=()=>{q('#ops',body).insertAdjacentHTML('beforeend',oprow('',1));bindOps()};
-  bindOps(); bindTags(body); bindVariants(body); bindRewrite(body);
+  bindOps(); bindTags(body); bindVariants(body); bindRewrite(body); bindOfferNet(body);
 }
 function condRow(c,r,hit){
   let b='';
@@ -1523,13 +2093,13 @@ function condRow(c,r,hit){
         const w=L.words.map(reEsc).join('|'), cur=L.form!=='words'?L.raw:!L.words.length?'':c.m==='dom'?'/^(?:'+w+')$/i':'/'+w+'/i', bad=cur?rxProblem(cur):'';
         b+=`<input class="g mono" id="f_${c.k}_rx" value="${esc(cur)}" placeholder="/^Mozilla.*Android/i" autocomplete="off" spellcheck="false">
           <div class="hint bad" data-rxbad ${bad?'':'hidden'}>${esc(bad)}</div>
-          <div class="hint">A regular expression between slashes; <code>i</code> after the last one ignores letter case. <button type="button" class="link" data-rxoff="${c.k}" ${!cur||altWords(cur)?'':'hidden'}>Use a list of words</button></div>`;
+          <div class="hint">A regular expression between slashes; <code>i</code> after the last one ignores letter case. <button type="button" class="link" data-rxoff="${c.k}" ${!cur||altWords(cur)?'':'hidden'}>${tr('Use a list of words')}</button></div>`;
       }else{
         b+=tagField('f_'+c.k+'_t',L.words,c.ph,{form:L.form,orig:L.form==='alt'?L.raw:'',flags:L.flags,cc:c.k==='country'});
         // Text is compared in any letter case — unless the words are stored as an expression without i.
         const searching=c.m==='has'||(c.m==='dom'&&L.form==='alt');
         const notes=[c.hint,searching?(L.form==='alt'&&!L.flags.includes('i')?'letter case matters':'any letter case'):''].filter(Boolean).join(' · ');
-        b+=`<div class="hint">${esc(notes)}${c.rx?`${notes?' · ':''}<button type="button" class="link" data-rxon="${c.k}">Use a regular expression</button>`:''}</div>`;
+        b+=`<div class="hint">${esc(notes)}${c.rx?`${notes?' · ':''}<button type="button" class="link" data-rxon="${c.k}">${tr('Use a regular expression')}</button>`:''}</div>`;
       }
       break}
     case 'device':b=['computer','phone','tablet'].map(d=>`<label class="tog"><input type="checkbox" id="d_${d}" ${r[d]?'':'checked'}>${d}s</label>`).join('')+'<div class="hint">checked = allowed</div>';break;
@@ -1539,7 +2109,7 @@ function condRow(c,r,hit){
     case 'schedule':{const d=(r.schedule&&r.schedule.days)||[];b=WEEK.map(i=>`<label class="tog"><input type="checkbox" class="schd" data-d="${i}" ${d[i]?'checked':''}>${DAYS[i]}</label>`).join('')+'<div class="hint">the stream works on the checked days</div>';break}
     case 'limit':{const l=r.limit||{};b=`<input type="number" id="lim_count" value="${l.count||0}" style="width:110px">${sel('lim_type',opt(1,'per day',l.type||1)+opt(2,'per period of',l.type))}<input type="number" id="lim_sec" value="${l.seconds||0}" style="width:110px"><span class="muted">seconds</span><div class="hint">“per day” resets at UTC midnight; a period of 0 means 24 h</div>`;break}
   }
-  return `<div class="crow ${hit?'hit':''}" data-cond="${c.k}"><div class="cl">${c.l}${hit?' — this is what stopped the test visitor':''}</div><button class="icon sm ghost cx" data-rm="${c.k}" title="Remove" type="button">${icon('x')}</button><div class="cv">${b}</div></div>`;
+  return `<div class="crow ${hit?'hit':''}" data-cond="${c.k}"><div class="cl">${tr(c.l)}${hit?' — '+tr('this is what stopped the test visitor'):''}</div><button class="icon sm ghost cx" data-rm="${c.k}" title="${tr('Remove')}" type="button">${icon('x')}</button><div class="cv">${b}</div></div>`;
 }
 function resetCond(r,k){
   const c=condOf(k); if(!c||!r)return;
@@ -1564,7 +2134,11 @@ function tagField(id,words,ph,o){
   o=o||{};
   return `<div class="tags" id="${id}" data-form="${o.form||'words'}" data-orig="${esc(o.orig||'')}" data-flags="${esc(o.flags||'')}" ${o.cc?'data-cc':''}>${words.map(w=>tagHTML(w,o.cc)).join('')}<input class="tin" placeholder="${esc(words.length?'':ph||'')}" autocomplete="off" spellcheck="false"></div>`;
 }
-const tagHTML=(w,cc)=>`<span class="tag" data-v="${esc(w)}">${cc&&flag(w)?flag(w)+' ':''}<span>${esc(w)}</span><button type="button" data-tx title="Remove">${icon('x')}</button></span>`;
+const tagHTML=(w,cc)=>{
+  const name=cc?countryLabel(w, uiLang()):w;
+  const tip=cc?String(w||'').toUpperCase():'';
+  return `<span class="tag" data-v="${esc(w)}" ${tip?`title="${esc(tip)}"`:''}>${cc&&flag(w)?flag(w)+' ':''}<span>${esc(name)}</span><button type="button" data-tx title="Remove">${icon('x')}</button></span>`;
+};
 // Words stored as an expression without i are compared in their letter case:
 // there "Buy" and "buy" are two words.
 const tagCS=(t)=>t.dataset.form==='alt'&&!(t.dataset.flags||'').includes('i');
@@ -1579,11 +2153,29 @@ function bindTags(root){
   qa('.tags',root).forEach(t=>{
     const inp=q('.tin',t);
     const commit=()=>{
-      const add=tagNew(t);
-      if(!inp.value.trim())return false;
-      add.forEach(v=>inp.insertAdjacentHTML('beforebegin',tagHTML(v,t.hasAttribute('data-cc'))));
-      inp.value=''; inp.placeholder=''; return true;
+      const cc=t.hasAttribute('data-cc');
+      let add=tagNew(t);
+      if(cc) add=add.map(countryCode).filter(Boolean);
+      if(!add.length) return false;
+      add.forEach(v=>inp.insertAdjacentHTML('beforebegin',tagHTML(v,cc)));
+      inp.value=''; inp.placeholder='';
+      const hits=q('.chits',t); if(hits) hits.remove();
+      return true;
     };
+    if(t.hasAttribute('data-cc')){
+      inp.addEventListener('input',()=>{
+        let box=q('.chits',t);
+        if(!box){inp.insertAdjacentHTML('afterend','<div class="chits"></div>'); box=q('.chits',t)}
+        const hits=findCountries(inp.value);
+        box.hidden=!inp.value.trim()||!hits.length;
+        box.innerHTML=hits.map(c=>`<button type="button" data-ccode="${c.code}">${flag(c.code)} ${esc(countryLabel(c.code, uiLang()))}</button>`).join('');
+        box.onmousedown=e=>e.preventDefault();
+        qa('[data-ccode]',box).forEach(b=>b.onclick=()=>{
+          inp.value=b.dataset.ccode;
+          if(commit()) changed(t);
+        });
+      });
+    }
     t.onclick=e=>{
       const x=e.target.closest('[data-tx]');
       if(x){x.closest('.tag').remove();changed(t);inp.focus();return}
@@ -1655,6 +2247,23 @@ function readLF(c){
   if(!t)return{flag:0,values:[],raw:''};
   return listValue(+fl.value,t.dataset.form,tagValues(t),'',t.dataset.orig,t.dataset.flags);
 }
+function bindOfferNet(body){
+  const offer=q('#s_offer',body), net=q('#s_net',body);
+  if(!offer||!net) return;
+  offer.addEventListener('change',()=>{
+    const rec=(OFFERS||[]).find(x=>x.id===offer.value);
+    net.value=rec?(rec.network_id||''):'';
+  });
+  net.addEventListener('change',()=>{
+    const oid=offer.value;
+    const rec=(OFFERS||[]).find(x=>x.id===oid);
+    if(!oid||!rec) return;
+    const nid=net.value;
+    if((rec.network_id||'')===nid) return;
+    rec.network_id=nid;
+    call('PUT','/api/offers/'+encodeURIComponent(oid), rec).catch(err=>toast(err.message,true));
+  });
+}
 function collectStream(){
   const d=q('#sdrawer'); if(!d||!CUR||EDIT<0)return;
   const s=CUR.streams[EDIT]; if(!s)return;
@@ -1665,7 +2274,13 @@ function collectStream(){
   const red=val('s_redirect'), prev=s.out||{};
   // A field that is not on screen (the type does not use it) keeps its value.
   s.out={redirect:red,out:red==='group'?(v('s_group')?val('s_group'):(prev.redirect==='group'?prev.out:'')):(v('s_outv')?readVariants(v('s_outv')):(prev.redirect==='group'?'':prev.out||'')),
-    chance:+val('s_chance')||0,distribution:v('s_dist')?val('s_dist'):(prev.distribution||'random'),header:val('s_header')};
+    chance:+val('s_chance')||0,distribution:v('s_dist')?val('s_dist'):(prev.distribution||'random'),header:val('s_header'),
+    offers:prev.offers||[], landings:prev.landings||[]};
+  if(v('s_offer')&&OFFERS){
+    const oid=val('s_offer');
+    const prevId=(prev.offers&&prev.offers[0]&&prev.offers[0].id)||'';
+    if(oid!==prevId) s.out.offers=oid?[{id:oid,share:100}]:[];
+  }
   s.separation={enabled:on('sep_en'),file:val('sep_file').trim()};
   const r={};
   COND.filter(c=>c.kind==='list').forEach(c=>{r[c.k]=has(c.k)?readLF(c):{flag:0,values:[],raw:''}});
@@ -1691,57 +2306,65 @@ function collectStream(){
 }
 
 /* ---------- flow settings (drawer) ---------- */
+function domainOpts(g){
+  const list=linkDomains();
+  return `<option value="">${esc(tr('dom.default'))}</option>`+list.map(d=>opt(d.id, (d.host||d.id)+(d.primary?' · '+tr('dom.primary'):''), g.domain_id||'')).join('');
+}
 function openFlowSettings(focus){
-  const g=CUR, base=(ENGINE||'').replace(/\/$/,''), fw=g.firewall||{}, others=GROUPS.filter(x=>x!==g);
+  const g=CUR, base=campaignBase(g), fw=g.firewall||{}, others=GROUPS.filter(x=>x!==g);
   const hours=(g.uniq_seconds||86400)/3600;
   const paint=()=>`
-    <div class="sec"><div class="st">Identity</div>
+    <div class="sec"><div class="st">${tr('ed.identity')}</div>
       <div class="g2">
-        <div class="fld"><label>ID — the link is ${esc(base)}/<b>ID</b></label><input id="g_id" value="${esc(g.id)}" autocomplete="off"></div>
-        <div class="fld"><label>Name</label><input id="g_name" value="${esc(g.name||'')}" placeholder="for you, shown in reports"></div>
+        <div class="fld"><label>${tr('ID — the link is')} ${esc(base)}/<b>ID</b></label><input id="g_id" value="${esc(g.id)}" autocomplete="off"></div>
+        <div class="fld"><label>${tr('Name')}</label><input id="g_name" value="${esc(g.name||'')}" placeholder="${tr('for you, shown in reports')}"></div>
+        <div class="fld"><label>${tr('src.title')}</label><select id="g_source"><option value=""></option></select></div>
+        <div class="fld"><label>${tr('dom.forlink')}</label><select id="g_domain">${domainOpts(g)}</select></div>
+        <div class="fld"><label>${tr('src.link')}</label><input id="g_srclink" class="mono" readonly value="${esc(campaignURL(g))}"></div>
       </div>
-      <div class="fld"><label>Aliases — other IDs that open this flow</label>${tagField('g_aliases',g.aliases||[],'another-id',{})}</div>
+      <div class="fld"><label>${tr('Aliases — other IDs that open this flow')}</label>${tagField('g_aliases',g.aliases||[],'another-id',{})}</div>
     </div>
-    <div class="sec" id="sec-default"><div class="st">Default — when no stream matches</div>
+    <div class="sec" id="sec-default"><div class="st">${tr('ed.default')}</div>
       <div class="g2">
-        <div class="fld"><label>Type</label>${sel('g_redirect',Object.keys(TYPES).map(t=>opt(t,TYPES[t][0],g.redirect||'stop')).join(''))}</div>
-        <div class="fld"><label>Content-Type</label>${sel('g_header',HEADERS.map(x=>opt(x,x,g.header||'text/html')).join(''))}</div>
+        <div class="fld"><label>${tr('Type')}</label>${sel('g_redirect',Object.keys(TYPES).map(t=>opt(t,typeLabel(t),g.redirect||'stop')).join(''))}</div>
+        <div class="fld"><label>${tr('Content-Type')}</label>${sel('g_header',HEADERS.map(x=>opt(x,x,g.header||'text/html')).join(''))}</div>
       </div>
       ${g.redirect==='group'
-        ?`<div class="fld"><label>Send the visitor to flow</label>${sel('g_group','<option value="">— choose a flow —</option>'+others.map(x=>opt(x.id,x.id+(x.name?' — '+x.name:''),(g.out||'').trim())).join(''))}</div>`
+        ?`<div class="fld"><label>${tr('Send the visitor to flow')}</label>${sel('g_group','<option value="">'+tr('— choose a flow —')+'</option>'+others.map(x=>opt(x.id,x.id+(x.name?' — '+x.name:''),(g.out||'').trim())).join(''))}</div>`
         :NOOUT.has(g.redirect||'stop')?`<div class="hint">A fixed answer — there is nothing to fill in.</div>`
         :`<div class="fld"><label>${outLabel(g.redirect)}</label>${variantsField('g_outv',g.out,!URLISH.has(g.redirect),outPH(g.redirect))}<div class="hint">With several variants, a random one is served.</div></div>`}
     </div>
-    <div class="sec"><div class="st">Visitors</div>
+    <div class="sec"><div class="st">${tr('ed.visitors')}</div>
       <div class="g3">
-        <div class="fld"><label>Country comes from</label>${sel('g_geo',opt('cf','CDN header first',g.geo==='cf'?'cf':'db')+opt('db','geo database first',g.geo==='cf'?'cf':'db'))}</div>
-        <div class="fld"><label>Unique by</label>${sel('g_uniq',opt('ip','IP address',g.uniq_method||'ip')+opt('cookie','cookie',g.uniq_method))}</div>
-        <div class="fld"><label>…within, hours</label><input type="number" id="g_uniqh" min="0" step="any" value="${+hours.toFixed(2)}"></div>
+        <div class="fld"><label>${tr('Country comes from')}</label>${sel('g_geo',opt('cf',tr('CDN header first'),g.geo==='cf'?'cf':'db')+opt('db',tr('geo database first'),g.geo==='cf'?'cf':'db'))}</div>
+        <div class="fld"><label>${tr('Unique by')}</label>${sel('g_uniq',opt('ip',tr('IP address'),g.uniq_method||'ip')+opt('cookie',tr('cookie'),g.uniq_method))}</div>
+        <div class="fld"><label>${tr('…within, hours')}</label><input type="number" id="g_uniqh" min="0" step="any" value="${+hours.toFixed(2)}"></div>
       </div>
       <div class="hint" style="margin:-6px 0 12px">The other source is the fallback. City, region, time zone and network always come from the database.</div>
       <label class="chk"><input type="checkbox" id="g_savekeys" ${g.save_keys?'checked':''}>Collect keywords (?q=)</label>
       <label class="chk"><input type="checkbox" id="g_savekeys_se" ${g.save_keys_se?'checked':''}>Collect keywords from search-engine referers</label>
     </div>
-    <div class="sec"><div class="st">Antiflood</div>
+    <div class="sec"><div class="st">${tr('ed.flood')}</div>
       <label class="chk"><input type="checkbox" id="fw_en" ${fw.enabled?'checked':''}>Block an IP that sends too many requests</label>
       <div class="g2">
-        <div class="fld"><label>More than, requests</label><input type="number" id="fw_q" value="${fw.queries||100}"></div>
-        <div class="fld"><label>Within, seconds</label><input type="number" id="fw_s" value="${fw.seconds||60}"></div>
+        <div class="fld"><label>${tr('More than, requests')}</label><input type="number" id="fw_q" value="${fw.queries||100}"></div>
+        <div class="fld"><label>${tr('Within, seconds')}</label><input type="number" id="fw_s" value="${fw.seconds||60}"></div>
       </div>
     </div>
-    <div class="sec"><div class="st">Links</div>
+    <div class="sec"><div class="st">${tr('ed.links')}</div>
       <dl class="kv">
         ${[g.id,...(g.aliases||[])].filter(Boolean).map(id=>`<dt>link</dt><dd><a class="mono" href="${esc(base+'/'+id)}" target="_blank" rel="noreferrer">${esc(base+'/'+id)}</a></dd>`).join('')}
         <dt>with a keyword</dt><dd><code>${esc(base+'/'+g.id+'?q=KEYWORD')}</code></dd>
         <dt>with parameters</dt><dd><code>${esc(base+'/'+g.id+'?p1=a&p2=b')}</code> → [PAR-1] [PAR-2]</dd>
         <dt>postback</dt><dd><code>${esc(base+'/?pb=KEY&cid=[CID]&profit=1.50')}</code></dd>
+        <dt>/postback</dt><dd><code>${esc(base+'/postback?subid={subid}&status={status}&payout={payout}')}</code></dd>
       </dl>
     </div>
     <div class="sec"><div class="st bad">Danger zone</div>
-      <div class="row wrap"><button id="g_dup">${icon('dup')}Duplicate flow</button><button id="g_clr">Clear logged visits</button><button class="danger" id="g_del">${icon('trash')}Delete flow</button></div>
+      <div class="row wrap"><button id="g_dup">${icon('dup')}${tr('Duplicate flow')}</button><button id="g_clr">${tr('Clear logged visits')}</button><button class="danger" id="g_del">${icon('trash')}${tr('Delete flow')}</button></div>
     </div>`;
-  const el=$(`<aside class="drawer" id="gdrawer"><div class="dh"><span class="t grow">Flow settings</span><button class="icon ghost" id="g_close" title="Close (Esc)">${icon('x')}</button></div>
-    <div class="db" id="g_body"></div><div class="df"><div class="spacer"></div><button class="primary" id="g_done">Done</button></div></aside>`);
+  const el=$(`<aside class="drawer" id="gdrawer"><div class="dh"><span class="t grow">${tr('ed.settings')}</span><button class="icon ghost" id="g_close" title="${tr('ed.close')}">${icon('x')}</button></div>
+    <div class="db" id="g_body"></div><div class="df"><div class="spacer"></div><button class="primary" id="g_done">${tr('Done')}</button></div></aside>`);
   drawer(el,()=>{if(CUR===g&&q('#canvas'))renderFlow()});
   DRAWER.commit=collectFlow;
   const bind=()=>{
@@ -1751,11 +2374,24 @@ function openFlowSettings(focus){
     q('#g_dup',b).onclick=()=>{closeDrawer();duplicateFlow(g)};
     q('#g_del',b).onclick=()=>{closeDrawer();deleteFlow(g)};
     q('#g_clr',b).onclick=async()=>{
-      if(!await ask('Clear logged visits of "'+g.id+'"?','Statistics of this flow will be deleted from the log. This cannot be undone.','Clear',true))return;
+      if(!await ask(tr('Clear logged visits')+' "'+g.id+'"?',tr('Statistics of this flow will be deleted from the log. This cannot be undone.'),tr('Clear'),true))return;
       try{await call('DELETE','/api/logs?group='+encodeURIComponent(g.id));PERF=null;toast('Logs marked for deletion')}catch(e){toast(e.message,true)}
     };
   };
   bind();
+  get('/api/traffic-sources',[]).then(list=>{
+    const sel=q('#g_source',el); if(!sel) return;
+    sel.innerHTML='<option value=""></option>'+(list||[]).map(s=>opt(s.id, s.name||s.id, g.source_id||'')).join('');
+    sel.dataset.ready='1';
+    const paintLink=()=>{
+      const src=(list||[]).find(s=>s.id===sel.value);
+      const box=q('#g_srclink',el); if(box) box.value=sourceCampaignLink(g, src);
+    };
+    sel.addEventListener('change', paintLink);
+    const dom=q('#g_domain',el);
+    if(dom) dom.addEventListener('change', ()=>{g.domain_id=dom.value; paintLink()});
+    paintLink();
+  });
   q('#g_close',el).onclick=closeDrawer; q('#g_done',el).onclick=closeDrawer;
   const onEdit=()=>{collectFlow();SIM=null;markDirty()};
   el.addEventListener('input',onEdit); el.addEventListener('change',onEdit);
@@ -1767,6 +2403,8 @@ function collectFlow(){
   const v=id=>q('#'+id,d), val=id=>{const e=v(id);return e?e.value:''}, on=id=>{const e=v(id);return !!(e&&e.checked)};
   const was=g.id;
   g.id=val('g_id').trim(); g.name=val('g_name').trim();
+  const srcSel=v('g_source'); if(srcSel&&srcSel.dataset.ready) g.source_id=srcSel.value;
+  const domSel=v('g_domain'); if(domSel) g.domain_id=domSel.value;
   g.aliases=v('g_aliases')?tagValues(v('g_aliases')):(g.aliases||[]);
   const prev=g.redirect; g.redirect=val('g_redirect'); g.header=val('g_header');
   g.out=g.redirect==='group'?(v('g_group')?val('g_group'):(prev==='group'?g.out:'')):(v('g_outv')?readVariants(v('g_outv')):(prev==='group'?'':g.out||''));
@@ -1782,9 +2420,27 @@ function collectFlow(){
 }
 
 /* ---------- LOGS ---------- */
-let logOffset=0, LOGF={}, LOGVALS={}, LOGROWS=[];
+let logOffset=0, LOGF={}, LOGVALS={}, LOGROWS=[], LOG_TAB='traffic', LOG_CAMPAIGN='';
 const LOGDIMS=[['group','Flow'],['stream','Stream'],['country','Country'],['device','Device'],['os','OS'],['browser','Browser'],['brand','Brand']];
 const LOGPAGE=100;
+function campaignLabel(g){return (g&&(g.name||g.id))||''}
+function linkDomains(){return (DOMAINS||[]).filter(d=>d.role==='links'||d.role==='both')}
+function campaignBase(g){
+  const list=linkDomains();
+  let d=g&&g.domain_id?list.find(x=>x.id===g.domain_id):null;
+  if(!d) d=list.find(x=>x.primary)||list[0];
+  if(d&&d.host) return 'https://'+String(d.host).replace(/^https?:\/\//,'').replace(/\/$/,'');
+  return (ENGINE||'').replace(/\/$/,'');
+}
+function campaignURL(g){return campaignBase(g)+'/'+encodeURIComponent(g.id)}
+let DOMAINS=[];
+async function ensureDomains(){DOMAINS=await get('/api/domains',[])||[]; return DOMAINS}
+function sourceCampaignLink(g, src){
+  const base=campaignURL(g);
+  if(!src||!src.parameters) return base;
+  const parts=Object.keys(src.parameters).map(k=>String(src.parameters[k]||'').trim()).filter(Boolean).map(name=>encodeURIComponent(name)+'=');
+  return parts.length?base+'?'+parts.join('&'):base;
+}
 function logQS(){
   const qs=new URLSearchParams();
   LOGDIMS.forEach(([k])=>{const v=[...(LOGF[k]||[])];if(v.length)qs.set(k,v.join(','))});
@@ -1792,20 +2448,31 @@ function logQS(){
   const bot=q('#f-bot');if(bot&&bot.value)qs.set(bot.value,'1');
   return qs;
 }
-async function logs(_,live){
+async function logs(arg,live){
   logOffset=0; LOGF={}; LOGDIMS.forEach(([k])=>LOGF[k]=new Set());
+  LOG_CAMPAIGN='';
+  if(arg){
+    await ensureGroups();
+    const g=groupById(arg);
+    if(g){ LOG_CAMPAIGN=g.id; if(g.name) LOGF.group=new Set([g.name]); }
+  }
+  const tabs=['traffic','postbacks','system'].map(k=>`<button type="button" data-logtab="${k}" class="${LOG_TAB===k?'primary':''}">${tr('log.'+k)}</button>`).join('');
   view().innerHTML=`
-    <div class="ph"><h1>Logs</h1><span class="sub">${periodLabel()}</span><div class="spacer"></div><button id="export">Export CSV</button></div>
+    <div class="ph"><h1>${tr('Logs')}${LOG_CAMPAIGN?' · '+esc(LOG_CAMPAIGN):''}</h1><span class="sub">${periodLabel()}</span><div class="spacer"></div>${tabs}<button id="export">${tr('Export CSV')}</button></div>
     <div class="toolbar">
       <span id="lfilters" style="display:contents"></span>
-      <input id="f-ip" placeholder="IP address" style="width:150px">
-      <select id="f-bot"><option value="">humans and bots</option><option value="humans">humans only</option><option value="bots">bots only</option></select>
-      <button class="primary" id="apply">Apply</button><button class="ghost" id="reset">Reset</button>
+      <input id="f-ip" placeholder="${tr('IP address')}" style="width:150px">
+      <select id="f-bot"><option value="">${tr('humans and bots')}</option><option value="humans">${tr('humans only')}</option><option value="bots">${tr('bots only')}</option></select>
+      <button class="primary" id="apply">${tr('Apply')}</button><button class="ghost" id="reset">${tr('Reset')}</button>
     </div>
-    <div id="logwrap">${stateHTML('Loading…')}</div>
-    <div class="row" style="margin-top:14px"><button id="prev">${icon('back')}Newer</button><span id="pageinfo" class="muted"></span><button id="next">Older${icon('arrow')}</button></div>`;
+    <div id="logwrap">${stateHTML(tr('Loading…'))}</div>
+    <div class="row" style="margin-top:14px"><button id="prev">${icon('back')}${tr('Newer')}</button><span id="pageinfo" class="muted"></span><button id="next">${tr('Older')}${icon('arrow')}</button></div>`;
   q('#apply').onclick=()=>{logOffset=0;loadLogs()};
-  q('#reset').onclick=()=>{LOGDIMS.forEach(([k])=>LOGF[k].clear());q('#f-ip').value='';q('#f-bot').value='';buildLogFilters();logOffset=0;loadLogs()};
+  q('#reset').onclick=()=>{ if(LOG_CAMPAIGN){LOG_CAMPAIGN=''; go('logs'); return} LOGDIMS.forEach(([k])=>LOGF[k].clear());q('#f-ip').value='';q('#f-bot').value='';buildLogFilters();logOffset=0;loadLogs()};
+  if(LOG_TAB!=='traffic'){const tb=q('.toolbar'); if(tb) tb.hidden=true; const pager=q('#prev'); if(pager&&pager.parentElement) pager.parentElement.hidden=true}
+  qa('[data-logtab]').forEach(b=>b.onclick=()=>{LOG_TAB=b.dataset.logtab; logs(route().arg, ()=>true)});
+  if(LOG_TAB==='postbacks'){loadPostbackLog(); return}
+  if(LOG_TAB==='system'){loadSystemLog(); return}
   q('#f-bot').onchange=()=>{logOffset=0;loadLogs()};
   q('#f-ip').onkeydown=e=>{if(e.key==='Enter'){logOffset=0;loadLogs()}};
   q('#export').onclick=()=>window.open('/api/logs/export?'+logQS()+'&'+rangeQS(),'_blank');
@@ -1818,18 +2485,18 @@ async function logs(_,live){
 function buildLogFilters(){
   const box=q('#lfilters'); if(!box)return;
   box.innerHTML='';
-  LOGDIMS.forEach(([k,label])=>box.appendChild(msel(k,label,LOGVALS[k]||[])));
+  LOGDIMS.forEach(([k,label])=>box.appendChild(msel(k,tr(label),LOGVALS[k]||[])));
 }
 // msel: a dropdown with checkboxes; values come from the data of the period.
 function msel(key,label,values){
   const el=$(`<div class="msel" data-k="${key}">
     <button class="msel-btn" type="button"><span>${esc(label)}</span><span class="cnt"></span>${icon('down')}</button>
     <div class="msel-pop">
-      <input class="msel-search" placeholder="Search…">
-      <div class="msel-tools"><button class="sm ghost" data-all="1" type="button">Select all</button><button class="sm ghost" data-none="1" type="button">Clear</button></div>
+      <input class="msel-search" placeholder="${tr('Search…')}">
+      <div class="msel-tools"><button class="sm ghost" data-all="1" type="button">${tr('Select all')}</button><button class="sm ghost" data-none="1" type="button">${tr('Clear')}</button></div>
       <div class="msel-list">${
         values.length?values.map(v=>`<label><input type="checkbox" value="${esc(v)}" ${LOGF[key].has(v)?'checked':''}><span>${esc(v)}</span></label>`).join('')
-        :'<div class="msel-empty">No values in this period</div>'}</div>
+        :'<div class="msel-empty">'+tr('No values in this period')+'</div>'}</div>
     </div></div>`);
   const btn=q('.msel-btn',el), pop=q('.msel-pop',el), search=q('.msel-search',el);
   const sync=()=>{const n=LOGF[key].size;q('.cnt',el).textContent=n?n:'';el.classList.toggle('on',n>0)};
@@ -1848,18 +2515,18 @@ async function loadLogs(){
   const wrap=q('#logwrap'); if(!wrap)return;
   const r=await get('/api/logs?'+qs+'&'+rangeQS(),null);
   if(!q('#logwrap'))return;
-  if(!r||!r.rows){wrap.innerHTML=stateHTML('The log is not available — is ClickHouse connected?','err');return}
+  if(!r||!r.rows){wrap.innerHTML=stateHTML(tr('The log is not available — is ClickHouse connected?'),'err');return}
   LOGROWS=r.rows;
-  if(!r.rows.length){wrap.innerHTML=`<div class="card">${stateHTML('Nothing matches these filters')}</div>`;q('#pageinfo').textContent='';q('#prev').disabled=logOffset===0;q('#next').disabled=true;return}
+  if(!r.rows.length){wrap.innerHTML=`<div class="card">${stateHTML(tr('Nothing matches these filters'))}</div>`;q('#pageinfo').textContent='';q('#prev').disabled=logOffset===0;q('#next').disabled=true;return}
   const rows=r.rows.map((x,i)=>`<tr class="click" data-i="${i}">
     <td>${when(x.ts)}</td><td>${esc(x.group)}</td><td>${esc(x.stream)}</td>
     <td><span class="flag">${flag(x.country)}</span>${esc(x.country)}</td><td>${esc(x.device)}</td>
     <td>${esc(x.os)} ${esc(x.browser)}</td><td>${esc(x.brand)}</td>
-    <td>${x.bot&&x.bot!=='-'?`<span class="pill warn">${esc(x.bot)}</span>`:(x.uniq?'<span class="pill ok">unique</span>':'<span class="pill">repeat</span>')}</td>
+    <td>${x.bot&&x.bot!=='-'?`<span class="pill warn">${esc(x.bot)}</span>`:(x.uniq?'<span class="pill ok">'+tr('unique')+'</span>':'<span class="pill">'+tr('repeat')+'</span>')}</td>
     <td class="mono">${esc(x.ip)}</td><td class="ell">${esc(x.keyword)}</td><td class="ell mono">${esc(x.out)}</td></tr>`).join('');
-  wrap.innerHTML=`<div class="tw"><table><thead><tr><th>Time</th><th>Flow</th><th>Stream</th><th>Country</th><th>Device</th><th>OS / browser</th><th>Brand</th><th>Visit</th><th>IP</th><th>Keyword</th><th>Output</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  wrap.innerHTML=`<div class="tw"><table><thead><tr><th>${tr('Time')}</th><th>${tr('Flow')}</th><th>${tr('Stream')}</th><th>${tr('Country')}</th><th>${tr('Device')}</th><th>${tr('OS / browser')}</th><th>${tr('Brand')}</th><th>${tr('Visit')}</th><th>${tr('IP')}</th><th>${tr('Keyword')}</th><th>${tr('Output')}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
   qa('tr[data-i]',wrap).forEach(tr=>tr.onclick=()=>logDetail(LOGROWS[+tr.dataset.i]));
-  q('#pageinfo').textContent=`${fmt(logOffset+1)}–${fmt(logOffset+r.rows.length)} of ${fmt(r.total)}`;
+  q('#pageinfo').textContent=`${fmt(logOffset+1)}–${fmt(logOffset+r.rows.length)} ${tr('of')} ${fmt(r.total)}`;
   q('#prev').disabled=logOffset===0;
   q('#next').disabled=logOffset+r.rows.length>=r.total;
 }
@@ -1883,36 +2550,111 @@ function logDetail(x){
 }
 
 /* ---------- CONVERSIONS ---------- */
-async function conversions(_,live){
-  view().innerHTML=`<div class="ph"><h1>Conversions</h1><span class="sub">${periodLabel()}</span><div class="spacer"></div><span id="pb-total" class="muted"></span></div>
-    <div class="toolbar"><select id="pb-group"><option value="">All flows</option></select></div><div id="pb-wrap">${stateHTML('Loading…')}</div>`;
-  q('#pb-group').onchange=loadPostbacks;
+const PB_COLS_KEY='kuztds-pb-cols';
+let PB={group:'',status:'',stream:'',offer:'',landing:'',source:'',network:'',cid:''};
+let PB_COLS={cid:true};
+try{const saved=JSON.parse(localStorage.getItem(PB_COLS_KEY)||''); if(saved&&typeof saved==='object') PB_COLS=saved}catch(e){}
+function pbQuery(){
+  const q=[rangeQS()];
+  const add=(k,v)=>{if(v) q.push(encodeURIComponent(k)+'='+encodeURIComponent(v))};
+  add('group',PB.group); add('status',PB.status); add('stream',PB.stream);
+  add('offer',PB.offer); add('landing',PB.landing); add('source',PB.source);
+  add('network',PB.network); add('cid',PB.cid);
+  return q.join('&');
+}
+function rememberCols(){try{localStorage.setItem(PB_COLS_KEY, JSON.stringify(PB_COLS))}catch(e){}}
+async function loadPostbackLog(){
+  const wrap=q('#logwrap'); if(!wrap) return;
+  wrap.innerHTML=stateHTML(tr('Loading…'));
+  const rows=await get('/api/postback-log?'+rangeQS(),[]);
+  if(!q('#logwrap')) return;
+  if(!rows||!rows.length){wrap.innerHTML=`<div class="card">${stateHTML(tr('rep.empty'))}</div>`; return}
+  wrap.innerHTML=`<div class="tw"><table><thead><tr><th>${tr('Time')}</th><th>subid</th><th>${tr('Status')}</th><th class="num">${tr('Profit')}</th><th>${tr('log.outcome')}</th><th>${tr('log.direction')}</th></tr></thead><tbody>${
+    rows.map(r=>`<tr><td class="mono">${when(r.ts)}</td><td class="mono">${esc(r.subid||'')}</td><td>${esc(r.status||'')}</td><td class="num">${money(r.payout||0)}</td><td>${esc(r.outcome||'')}</td><td>${esc(r.direction||'')}</td></tr>`).join('')
+  }</tbody></table></div>`;
+}
+async function loadSystemLog(){
+  const wrap=q('#logwrap'); if(!wrap) return;
+  const rows=await get('/api/notices',[]);
+  if(!q('#logwrap')) return;
+  if(!rows||!rows.length){wrap.innerHTML=`<div class="card">${stateHTML(tr('rep.empty'))}</div>`; return}
+  wrap.innerHTML=`<div class="tw"><table><thead><tr><th>${tr('log.system')}</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="mono">${esc(r)}</td></tr>`).join('')}</tbody></table></div>`;
+}
+async function conversions(arg,live){
+  if(arg){
+    await ensureGroups();
+    const g=groupById(arg);
+    PB.group=g&&g.name?g.name:'';
+    PB.campaignId=g?g.id:'';
+  }else if(PB.campaignId){ PB.group=''; PB.campaignId=''; }
+  view().innerHTML=`<div class="ph"><h1>${tr('conv.title')}${PB.campaignId?' · '+esc(PB.campaignId):''}</h1><span class="sub">${periodLabel()}</span><div class="spacer"></div><button id="pb-reset">${tr('Reset')}</button><span id="pb-total" class="muted"></span></div>
+    <div class="toolbar">
+      <input id="pb-cid" placeholder="${esc(tr('conv.subid'))}" value="${esc(PB.cid)}" style="width:140px">
+      <select id="pb-status"><option value="">${esc(tr('conv.status'))}</option>${['lead','sale','rejected','rebill'].map(s=>opt(s,s,PB.status)).join('')}</select>
+      <select id="pb-group"><option value="">${esc(tr('conv.campaign'))}</option></select>
+      <select id="pb-stream"><option value="">${esc(tr('conv.stream'))}</option></select>
+      <select id="pb-offer"><option value="">${esc(tr('conv.offer'))}</option></select>
+      <select id="pb-landing"><option value="">${esc(tr('conv.landing'))}</option></select>
+      <select id="pb-network"><option value="">${esc(tr('conv.network'))}</option></select>
+      <select id="pb-source"><option value="">${esc(tr('conv.source'))}</option></select>
+    </div>
+    <div class="toolbar" id="pb-cols"></div>
+    <div id="pb-wrap">${stateHTML(tr('Loading…'))}</div>`;
+  const cols=['cid',...Array.from({length:12},(_,i)=>'s'+(i+1))];
+  q('#pb-cols').innerHTML=`<span class="hint">${tr('conv.columns')}</span>`+cols.map(k=>{
+    const label=k==='cid'?tr('conv.subid'):'Sub ID '+k.slice(1);
+    return `<label class="tog"><input type="checkbox" data-col="${k}" ${PB_COLS[k]?'checked':''}>${esc(label)}</label>`;
+  }).join('');
+  const read=()=>{
+    PB.cid=q('#pb-cid').value.trim(); PB.status=q('#pb-status').value; PB.group=q('#pb-group').value;
+    PB.stream=q('#pb-stream').value; PB.offer=q('#pb-offer').value; PB.landing=q('#pb-landing').value;
+    PB.network=q('#pb-network').value; PB.source=q('#pb-source').value;
+    qa('[data-col]').forEach(c=>{PB_COLS[c.dataset.col]=c.checked}); rememberCols();
+    loadPostbacks();
+  };
+  q('#pb-reset').onclick=()=>{PB.group=''; PB.campaignId=''; if(location.hash.indexOf('#/conversions/')===0) go('conversions'); else {const s=q('#pb-group'); if(s) s.value=''; loadPostbacks()}};
+  qa('#pb-cid,select',view()).forEach(el=>{el.onchange=read; if(el.id==='pb-cid') el.oninput=read});
+  qa('[data-col]').forEach(c=>c.onchange=read);
   loadPostbacks();
-  // Postbacks carry the flow's display name — that is what the engine writes with a conversion.
-  const gs=await ensureGroups().catch(()=>[]);
-  const s=q('#pb-group'); if(!s||!live())return;
-  gs.forEach(g=>{if(g.name)s.insertAdjacentHTML('beforeend',opt(g.name,g.id+' — '+g.name,''))});
+  const [gs, offers, lands, nets, sources]=await Promise.all([
+    ensureGroups().catch(()=>[]), get('/api/offers',[]), get('/api/landings',[]), get('/api/affiliate-networks',[]), get('/api/traffic-sources',[])
+  ]);
+  if(!live()||!q('#pb-group')) return;
+  const fill=(id,rows,value)=>{const s=q(id); if(!s) return; rows.forEach(x=>{if(x&&x.id) s.insertAdjacentHTML('beforeend', opt(x.id, x.name||x.id, value))})};
+  gs.forEach(g=>{if(g.name) q('#pb-group').insertAdjacentHTML('beforeend', opt(g.name, g.id+' — '+g.name, PB.group))});
+  const streams=[]; gs.forEach(g=>(g.streams||[]).forEach(s=>{if(s.name) streams.push({id:s.name,name:g.id+' / '+s.name})}));
+  fill('#pb-stream', streams, PB.stream);
+  fill('#pb-offer', offers||[], PB.offer);
+  fill('#pb-landing', lands||[], PB.landing);
+  fill('#pb-network', nets||[], PB.network);
+  fill('#pb-source', sources||[], PB.source);
 }
 async function loadPostbacks(){
-  const g=q('#pb-group').value;
-  const r=await get('/api/postbacks?'+rangeQS()+(g?'&group='+encodeURIComponent(g):''),null);
+  const r=await get('/api/postbacks?'+pbQuery(),null);
   const wrap=q('#pb-wrap'); if(!wrap)return;
   if(!r||!r.rows){wrap.innerHTML=stateHTML('Conversions are not available — is ClickHouse connected?','err');return}
-  q('#pb-total').innerHTML=`${fmt(r.rows.length)} conversion${r.rows.length===1?'':'s'} · profit <b class="ok">${money(r.total)}</b>`;
+  q('#pb-total').innerHTML=`${fmt(r.rows.length)} · <b class="ok">${money(r.total)}</b>`;
   if(!r.rows.length){wrap.innerHTML=`<div class="card">${stateHTML('No conversions in this period')}</div>`;return}
-  wrap.innerHTML=`<div class="tw"><table><thead><tr><th>Time</th><th>Flow</th><th>Stream</th><th>Source</th><th>Device</th><th>Country</th><th>City</th><th class="num">Profit</th><th>Click ID</th></tr></thead><tbody>${
-    r.rows.map(x=>`<tr><td>${when(x.ts)}</td><td>${esc(x.group)}</td><td>${esc(x.stream)}</td><td class="ell">${esc(x.domain)}</td><td>${esc(x.device)}</td><td><span class="flag">${flag(x.country)}</span>${esc(x.country)}</td><td>${esc(x.city)}</td><td class="num ok">${money(x.profit)}</td><td class="mono">${esc(x.cid)}</td></tr>`).join('')}</tbody></table></div>`;
+  const extra=[];
+  if(PB_COLS.cid) extra.push(['cid', tr('conv.subid')]);
+  for(let i=1;i<=12;i++) if(PB_COLS['s'+i]) extra.push(['s'+i, 'Sub ID '+i]);
+  wrap.innerHTML=`<div class="tw"><table><thead><tr><th>${tr('Time')}</th><th>${tr('Flow')}</th><th>${tr('Stream')}</th><th>${tr('Status')}</th><th>${tr('Source')}</th><th>${tr('Device')}</th><th>${tr('Country')}</th><th>${tr('City')}</th><th class="num">${tr('Profit')}</th>${extra.map(([,l])=>`<th>${esc(tr(l))}</th>`).join('')}</tr></thead><tbody>${
+    r.rows.map(x=>{
+      const subs=x.subs||[];
+      const cells=extra.map(([k])=>`<td class="mono">${esc(k==='cid'?x.cid:(subs[+k.slice(1)-1]||''))}</td>`).join('');
+      return `<tr><td>${when(x.ts)}</td><td>${esc(x.group)}</td><td>${esc(x.stream)}</td><td>${esc(x.status||'')}</td><td class="ell">${esc(x.domain)}</td><td>${esc(x.device)}</td><td><span class="flag">${flag(x.country)}</span>${esc(countryLabel(x.country, uiLang())||x.country)}</td><td>${esc(x.city)}</td><td class="num ok">${money(x.profit)}</td>${cells}</tr>`;
+    }).join('')}</tbody></table></div>`;
 }
 
 /* ---------- KEYWORDS ---------- */
 async function keywords(_,live){
   const today=new Date().toISOString().slice(0,10);
-  view().innerHTML=`<div class="ph"><h1>Keywords</h1><span class="sub">collected per flow and day</span></div>
+  view().innerHTML=`<div class="ph"><h1>${tr('Keywords')}</h1><span class="sub">${tr('collected per flow and day')}</span></div>
     <div class="toolbar">
-      <select id="k-group"><option value="">Choose a flow…</option></select>
+      <select id="k-group"><option value="">${tr('Choose a flow…')}</option></select>
       <input id="k-date" type="date" value="${today}">
-      <select id="k-se"><option value="0">from ?q=</option><option value="1">from search engines</option></select>
-      <button class="primary" id="k-go">Show</button></div>
+      <select id="k-se"><option value="0">${tr('from ?q=')}</option><option value="1">${tr('from search engines')}</option></select>
+      <button class="primary" id="k-go">${tr('Show')}</button></div>
     <textarea id="k-data" spellcheck="false" class="code" readonly placeholder="Choose a flow and a day"></textarea>
     <p class="hint">Turn collection on in a flow's settings: “Collect keywords”.</p>`;
   q('#k-go').onclick=loadKeys; q('#k-group').onchange=loadKeys; q('#k-date').onchange=loadKeys; q('#k-se').onchange=loadKeys;
@@ -1931,11 +2673,11 @@ async function loadKeys(){
 /* ---------- LISTS (.dat) ---------- */
 let LIST='';
 async function lists(_,live){
-  view().innerHTML=stateHTML('Loading…');
+  view().innerHTML=stateHTML(tr('Loading…'));
   const names=await get('/api/lists',[])||[];
   if(!live())return;
   if(!names.includes(LIST))LIST=names[0]||'';
-  view().innerHTML=`<div class="ph"><h1>Lists</h1><span class="sub">.dat files in the data directory</span><div class="spacer"></div><button class="primary" id="lsave" ${LIST?'':'disabled'}>Save list</button></div>
+  view().innerHTML=`<div class="ph"><h1>${tr('Lists')}</h1><span class="sub">${tr('.dat files in the data directory')}</span><div class="spacer"></div><button class="primary" id="lsave" ${LIST?'':'disabled'}>${tr('Save list')}</button></div>
     <div class="row wrap" id="lnames" style="margin-bottom:12px">${names.map(n=>`<button class="sm ${n===LIST?'primary':''}" data-n="${esc(n)}">${esc(n)}</button>`).join('')||'<span class="muted">No lists in the data directory</span>'}</div>
     <textarea id="ldata" spellcheck="false" class="code"></textarea>
     <p class="hint">IP lists take one address, CIDR or range per line. In wap.dat a “# name” line names the operator of the ranges below it. Signature files hold one substring per line. The engine picks changes up on its reload interval; bot IP lists can be refreshed automatically in <a href="#/automation">Automation</a>.</p>`;
@@ -1955,7 +2697,7 @@ async function loadList(){
 let LOOKUP='';
 async function tools(arg,live){
   if(arg)LOOKUP=arg;
-  view().innerHTML=`<div class="ph"><h1>Tools</h1><span class="sub">what the engine learns from an IP address</span></div>
+  view().innerHTML=`<div class="ph"><h1>${tr('Tools')}</h1><span class="sub">${tr('what the engine learns from an IP address')}</span></div>
     <div class="toolbar"><input id="lk-ip" placeholder="IP address, v4 or v6" style="width:280px" value="${esc(LOOKUP)}" autocomplete="off"><button class="primary" id="lk-go">${icon('keywords')}Look up</button></div>
     <div id="lk-out"></div>`;
   const run=async()=>{
@@ -1974,8 +2716,8 @@ async function tools(arg,live){
         <div class="card pad"><div class="bd"><div class="bt">In lists</div></div>
           ${(r.lists||[]).length?r.lists.map(l=>`<span class="pill warn" style="margin:0 6px 6px 0">${esc(l.list)}${l.label?' · '+esc(l.label):''}</span>`).join(''):'<span class="muted">Not in any .dat list</span>'}</div>
       </div>
-      <h2>Geo databases</h2>
-      ${dbs.length?`<div class="tw"><table><thead><tr><th>Database</th><th>State</th><th>Built</th><th>File</th></tr></thead><tbody>${dbs.map(d=>`<tr><td>${esc(d.type||'—')}</td><td>${d.loaded?'<span class="pill ok">loaded</span>':'<span class="pill warn">not downloaded yet</span>'}</td><td>${d.loaded?esc(new Date(d.built).toISOString().slice(0,10)):'—'}</td><td class="mono ell" style="max-width:520px" title="${esc(d.path)}">${esc(d.path)}</td></tr>`).join('')}</tbody></table></div>`
+      <h2>${tr('Geo databases')}</h2>
+      ${dbs.length?`<div class="tw"><table><thead><tr><th>${tr('Database')}</th><th>${tr('State')}</th><th>${tr('Built')}</th><th>${tr('File')}</th></tr></thead><tbody>${dbs.map(d=>`<tr><td>${esc(d.type||'—')}</td><td>${d.loaded?'<span class="pill ok">'+tr('loaded')+'</span>':'<span class="pill warn">'+tr('not downloaded yet')+'</span>'}</td><td>${d.loaded?esc(new Date(d.built).toISOString().slice(0,10)):'—'}</td><td class="mono ell" style="max-width:520px" title="${esc(d.path)}">${esc(d.path)}</td></tr>`).join('')}</tbody></table></div>`
         :`<div class="banner"><span class="dot warn"></span><div>No geo database is configured, so location and network are unknown and those conditions never match. Set <code>KUZTDS_GEO_DB</code> and <code>KUZTDS_ASN_DB</code> for the engine, the admin and the cron service, then let <a href="#/automation">Automation</a> download them.</div></div>`}`;
     }catch(e){out.innerHTML=`<div class="card">${stateHTML(e.message,'err')}</div>`}
   };
@@ -1996,7 +2738,7 @@ const JOBINFO={
 const getPath=(o,p)=>p.split('.').reduce((a,k)=>a==null?a:a[k],o);
 function setPath(o,p,v){const ks=p.split('.'),last=ks.pop();const t=ks.reduce((a,k)=>a[k],o);t[last]=v}
 async function automation(_,live){
-  if(!CRONST)view().innerHTML=stateHTML('Loading…');
+  if(!CRONST)view().innerHTML=stateHTML(tr('Loading…'));
   const st=await call('GET','/api/cron'); if(!live())return;
   CRONST=st;
   if(CRON===null||!cronDirty()){CRON=st.config;CRON_SAVED=JSON.stringify(CRON)}
@@ -2024,7 +2766,7 @@ function jobBody(job){
         <select data-p="ip_lists.sources.${i}.mode">${opt('replace','replace',s.mode||'replace')+opt('merge','merge',s.mode)}</select>
         <button class="icon sm ghost" data-del="ip_lists.sources.${i}" title="Remove">${icon('x')}</button></div>`).join('')}
       <div class="row"><button class="sm" data-add="ip_lists">${icon('plus')}Source</button></div>
-      <div class="hint">A target is the list to write (ip_google → ip_google.dat). Plain lists and the JSON Google and Bing publish are understood. Leave the target empty for a file with “# google”, “# yandex”… sections. A source that returns nothing never empties a list.</div>`;
+      <div class="hint">A target is the list to write (ip_google → ip_google.dat). Plain lists and a prefixes JSON (ipv4Prefix / ipv6Prefix) are understood. Leave the target empty for a file with “# google”, “# yandex”… sections. A source that returns nothing never empties a list.</div>`;
     case 'geo_db':return `${CRONST.geo_paths.city||CRONST.geo_paths.asn?'':`<div class="banner"><span class="dot warn"></span><div>Nowhere to put the databases: set <code>KUZTDS_GEO_DB</code> and <code>KUZTDS_ASN_DB</code> (file paths) for the engine, the admin and the cron service.</div></div>`}
       <div class="lbl">Sources</div>${(c.sources||[]).map((s,i)=>`<div class="srcrow" style="grid-template-columns:84px 1fr 1fr 26px">
         ${inp(`geo_db.sources.${i}.url`,'placeholder="https://…" class="mono full"')}
@@ -2033,34 +2775,34 @@ function jobBody(job){
         <button class="icon sm ghost" data-del="geo_db.sources.${i}" title="Remove">${icon('x')}</button></div>`).join('')}
       <div class="row"><button class="sm" data-add="geo_db">${icon('plus')}Source</button></div>
       <div class="hint">The defaults are MaxMind's GeoLite2 (free account: the account ID and a license key). Any URL serving an .mmdb, .mmdb.gz or .tar.gz works — DB-IP Lite, for one. A download is checked before it replaces the working database.</div>`;
-    case 'virustotal':return `<div class="g2"><div class="fld"><label>API key</label>${inp('virustotal.api_key','type="password" autocomplete="new-password" placeholder="from virustotal.com"')}</div>
-        <div class="fld"><label>Flag at, verdicts</label><input type="number" min="1" data-p="virustotal.threshold" data-t="int" value="${c.threshold||1}"></div></div>
+    case 'virustotal':return `<div class="g2"><div class="fld"><label>${tr('API key')}</label>${inp('virustotal.api_key','type="password" autocomplete="new-password" placeholder="from virustotal.com"')}</div>
+        <div class="fld"><label>${tr('Flag at, verdicts')}</label><input type="number" min="1" data-p="virustotal.threshold" data-t="int" value="${c.threshold||1}"></div></div>
       ${chk('virustotal.from_groups','Check every domain found in stream outputs')}
-      <div class="fld"><label>Also check</label><textarea data-p="virustotal.domains" data-t="lines" class="mono" style="min-height:52px" placeholder="one domain per line">${esc((c.domains||[]).join('\n'))}</textarea></div>
+      <div class="fld"><label>${tr('Also check')}</label><textarea data-p="virustotal.domains" data-t="lines" class="mono" style="min-height:52px" placeholder="one domain per line">${esc((c.domains||[]).join('\n'))}</textarea></div>
       ${chk('virustotal.disable_streams','Switch off streams that send to a flagged domain')}
       <div class="hint">The public API allows four requests a minute, so a pass over many domains takes a while.</div>`;
-    case 'disk':return `<div class="g2"><div class="fld"><label>Alert below, % free</label><input type="number" min="1" max="99" data-p="disk.min_free_percent" data-t="int" value="${c.min_free_percent||10}"></div>
-        <div class="fld"><label>Paths (empty = data directory)</label><textarea data-p="disk.paths" data-t="lines" class="mono" style="min-height:32px" placeholder="/var/lib/clickhouse">${esc((c.paths||[]).join('\n'))}</textarea></div></div>`;
-    case 'cleanup':return `<div class="fld" style="max-width:220px"><label>Keep keyword files, days</label><input type="number" min="0" data-p="cleanup.keys_days" data-t="int" value="${c.keys_days||0}"></div>
+    case 'disk':return `<div class="g2"><div class="fld"><label>${tr('Alert below, % free')}</label><input type="number" min="1" max="99" data-p="disk.min_free_percent" data-t="int" value="${c.min_free_percent||10}"></div>
+        <div class="fld"><label>${tr('Paths (empty = data directory)')}</label><textarea data-p="disk.paths" data-t="lines" class="mono" style="min-height:32px" placeholder="/var/lib/clickhouse">${esc((c.paths||[]).join('\n'))}</textarea></div></div>`;
+    case 'cleanup':return `<div class="fld" style="max-width:220px"><label>${tr('Keep keyword files, days')}</label><input type="number" min="0" data-p="cleanup.keys_days" data-t="int" value="${c.keys_days||0}"></div>
       <div class="hint">Visits in the log expire on their own (ClickHouse TTL).</div>`;
-    case 'conversions':return `<div class="fld"><label>Message</label>${inp('conversions.template','class="mono"')}
+    case 'conversions':return `<div class="fld"><label>${tr('Message')}</label>${inp('conversions.template','class="mono"')}
       <div class="hint">[PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [CID]. The cron service needs the ClickHouse connection.</div></div>`;
   }
   return '';
 }
 function paintAutomation(){
   const v=view(), tgOK=!!(CRON.telegram.token&&CRON.telegram.chat_id);
-  v.innerHTML=`<div class="ph"><h1>Automation</h1><span class="sub">the cron service</span><div class="spacer"></div><span id="cronstate"></span></div>
+  v.innerHTML=`<div class="ph"><h1>${tr('Automation')}</h1><span class="sub">${tr('the cron service')}</span><div class="spacer"></div><span id="cronstate"></span></div>
     <div id="cronbanner"></div>
     <div class="jobs" id="jobs">
-      <div class="card job"><div class="hd">${icon('send')}<b>Telegram</b><div class="spacer"></div><button class="sm" data-run="telegram_test" ${tgOK?'':'disabled'}>Send a test</button></div>
+      <div class="card job"><div class="hd">${icon('send')}<b>${tr('Telegram')}</b><div class="spacer"></div><button class="sm" data-run="telegram_test" ${tgOK?'':'disabled'}>${tr('Send a test')}</button></div>
         <div class="muted">Where alerts go. Create a bot with @BotFather, add it to a chat, and put the chat's ID here.</div>
-        <div class="g2"><div class="fld"><label>Bot token</label>${inp('telegram.token','type="password" autocomplete="new-password" placeholder="123456:ABC…"')}</div>
-          <div class="fld"><label>Chat ID</label>${inp('telegram.chat_id','placeholder="-1001234567890"')}</div></div>
+        <div class="g2"><div class="fld"><label>${tr('Bot token')}</label>${inp('telegram.token','type="password" autocomplete="new-password" placeholder="123456:ABC…"')}</div>
+          <div class="fld"><label>${tr('Chat ID')}</label>${inp('telegram.chat_id','placeholder="-1001234567890"')}</div></div>
         <div class="status" data-st="telegram_test"></div></div>
       ${CRONST.jobs.map(job=>`<div class="card job" data-job="${job}">
-        <div class="hd"><label class="sw"><input type="checkbox" data-p="${job}.enabled" data-t="bool" ${CRON[job].enabled?'checked':''}><i></i></label><b>${JOBINFO[job][0]}</b><div class="spacer"></div><button class="sm" data-run="${job}">${icon('play')}Run now</button></div>
-        <div class="muted">${JOBINFO[job][1]}</div>
+        <div class="hd"><label class="sw"><input type="checkbox" data-p="${job}.enabled" data-t="bool" ${CRON[job].enabled?'checked':''}><i></i></label><b>${tr(JOBINFO[job][0])}</b><div class="spacer"></div><button class="sm" data-run="${job}">${icon('play')}${tr('Run now')}</button></div>
+        <div class="muted">${tr(JOBINFO[job][1])}</div>
         ${jobBody(job)}
         <div class="row wrap">${interval(job)}</div>
         <div class="status" data-st="${job}"></div></div>`).join('')}
@@ -2095,40 +2837,176 @@ function paintCronStatus(){
     const job=el.dataset.st, j=(st.status.jobs||{})[job], on=job!=='telegram_test'&&CRON[job]&&CRON[job].enabled;
     if(!j||!j.last_run||new Date(j.last_run).getFullYear()<2000){el.innerHTML=job==='telegram_test'?'':`<span class="dot"></span><span class="msg muted">${j&&j.running?'Running…':'Has not run yet'}</span>`;el.hidden=job==='telegram_test';return}
     el.hidden=false;
-    el.innerHTML=`<span class="dot ${j.running?'warn':j.ok?'on':'bad'}"></span><span class="msg">${j.running?'Running… ':''}<b>${ago(j.last_run)}</b> · ${esc(j.message||(j.ok?'done':'failed'))}${on&&j.next_run&&new Date(j.next_run).getFullYear()>2000?` <span class="muted">· next ${ago(j.next_run)}</span>`:''}</span>`;
+    el.innerHTML=`<span class="dot ${j.running?'warn':j.ok?'on':'bad'}"></span><span class="msg">${j.running?tr('Running…')+' ':''}<b>${ago(j.last_run)}</b> · ${esc(j.message||(j.ok?tr('done'):tr('failed')))}${on&&j.next_run&&new Date(j.next_run).getFullYear()>2000?` <span class="muted">· ${tr('next')} ${ago(j.next_run)}</span>`:''}</span>`;
   });
 }
 
 /* ---------- SETTINGS ---------- */
+function tzOptions(filter){
+  let all=['UTC'];
+  try{all=Intl.supportedValuesOf('timeZone')}catch(e){}
+  const cur=uiTz();
+  const pin=['UTC','Europe/Kyiv','Europe/Moscow','Europe/Warsaw','Europe/Berlin','Europe/London','America/New_York','Asia/Almaty'];
+  const list=[cur,...pin.filter(z=>z!==cur&&all.includes(z)),...all.filter(z=>z!==cur&&pin.indexOf(z)<0)];
+  const f=String(filter||'').toLowerCase();
+  return list.filter(z=>!f||z.toLowerCase().includes(f));
+}
 function settings(){
-  view().innerHTML=`<div class="ph"><h1>Settings</h1></div>
+  view().innerHTML=`<div class="ph"><h1>${tr('Settings')}</h1></div>
     <div class="bds" style="grid-template-columns:repeat(auto-fit,minmax(340px,440px))">
-    <div class="card pad"><div class="bd"><div class="bt">Password</div></div>
-      <div class="fld"><label>Current password</label><input type="password" id="pw-old" autocomplete="current-password"></div>
-      <div class="fld"><label>New password (6 characters or more)</label><input type="password" id="pw-new" autocomplete="new-password"></div>
-      <div class="fld"><label>New password again</label><input type="password" id="pw-new2" autocomplete="new-password"></div>
-      <button class="primary" id="pw-save">Change password</button>
-      <p class="hint" style="margin-bottom:0">Stored as an argon2id hash in <code>KUZTDS_ADMIN_PASSWORD_FILE</code>. Without that variable the change lasts until the admin restarts.</p></div>
-    <div class="card pad"><div class="bd"><div class="bt">Appearance</div></div>
-      <div class="row"><span>Theme</span><div class="spacer"></div><button id="theme2"></button></div>
-      <div class="bd" style="margin-top:22px"><div class="bt">This installation</div></div>
-      <dl class="kv"><dt>Signed in as</dt><dd>${esc(USER)}</dd><dt>Engine</dt><dd class="mono">${esc(ENGINE||'—')}</dd></dl></div>
+    <div class="card pad"><div class="bd"><div class="bt">${tr('Password')}</div></div>
+      <div class="fld"><label>${tr('Current password')}</label><input type="password" id="pw-old" autocomplete="current-password"></div>
+      <div class="fld"><label>${tr('New password (6 characters or more)')}</label><input type="password" id="pw-new" autocomplete="new-password"></div>
+      <div class="fld"><label>${tr('New password again')}</label><input type="password" id="pw-new2" autocomplete="new-password"></div>
+      <button class="primary" id="pw-save">${tr('Change password')}</button>
+      <p class="hint" style="margin-bottom:0">Stored as an argon2id hash in <code>KUZTDS_ADMIN_PASSWORD_FILE</code>.</p></div>
+    <div class="card pad"><div class="bd"><div class="bt">${tr('Appearance')}</div></div>
+      <div class="row"><span>${tr('Theme')}</span><div class="spacer"></div><button id="theme2"></button></div>
+      <div class="bd" style="margin-top:22px"><div class="bt">${tr('This installation')}</div></div>
+      <dl class="kv"><dt>${tr('Signed in as')}</dt><dd>${esc(USER)}</dd><dt>${tr('Engine')}</dt><dd class="mono">${esc(ENGINE||'—')}</dd></dl></div>
+    <div class="card pad" id="country-card"><div class="bd"><div class="bt">${tr('settings.country')}</div></div>
+      <div class="fld"><label>${tr('settings.lang')}</label>
+        <select id="clang">${opt('en','English',uiLang())+opt('ru','Русский',uiLang())+opt('uk','Українська',uiLang())}</select></div>
+      <div class="fld"><label>${tr('settings.search')}</label>
+        <input id="cfind" autocomplete="off" placeholder="исп, ісп, spain, es">
+        <div class="chits" id="chits-set" style="position:static;margin-top:6px"></div>
+        <p class="hint">${tr('settings.hint')}</p></div>
+      <div class="fld"><label>${tr('settings.geo')}</label>
+        <select id="cgeo">${opt('cf',tr('settings.geo.cf'),defaultGeo())+opt('db',tr('settings.geo.db'),defaultGeo())}</select></div>
+    </div>
+    <div class="card pad"><div class="bd"><div class="bt">${tr('settings.tz')}</div></div>
+      <div class="fld"><label>${tr('settings.tz.find')}</label>
+        <input id="tzfind" autocomplete="off">
+        <select id="ctz" size="8" style="width:100%;margin-top:6px"></select>
+        <p class="hint">${tr('settings.tz.hint')}</p></div>
+    </div>
     </div>`;
-  const tb=q('#theme2'), lbl=()=>{tb.innerHTML=icon(isDark()?'sun':'moon')+(isDark()?'Switch to light':'Switch to dark')};
+  q('#clang').onchange=()=>applyLang(q('#clang').value);
+  q('#cgeo').onchange=()=>{try{localStorage.setItem(GEO_KEY,q('#cgeo').value)}catch(e){}};
+  const paintTz=()=>{
+    const box=q('#ctz'); if(!box) return;
+    const cur=uiTz();
+    box.innerHTML=tzOptions(q('#tzfind').value).slice(0,100).map(z=>opt(z,z,cur)).join('');
+  };
+  q('#tzfind').oninput=paintTz;
+  q('#ctz').onchange=()=>{if(q('#ctz').value) applyTz(q('#ctz').value)};
+  paintTz();
+  q('#cfind').oninput=()=>{
+    const hits=findCountries(q('#cfind').value);
+    q('#chits-set').innerHTML=hits.map(c=>`<button type="button" data-pickc="${c.code}" title="${esc(c.code.toUpperCase())}">${flag(c.code)} ${esc(countryLabel(c.code, uiLang()))}</button>`).join('');
+    qa('[data-pickc]',q('#chits-set')).forEach(b=>b.onclick=()=>{q('#cfind').value=countryLabel(b.dataset.pickc, uiLang()); q('#cfind').dispatchEvent(new Event('input'))});
+  };
+  const tb=q('#theme2'), lbl=()=>{tb.innerHTML=icon(isDark()?'sun':'moon')+(isDark()?tr('Switch to light'):tr('Switch to dark'))};
   lbl(); tb.onclick=()=>{toggleTheme();lbl()};
   q('#pw-save').onclick=async()=>{
     const o=q('#pw-old').value,n=q('#pw-new').value,n2=q('#pw-new2').value;
-    if(n!==n2){toast('The new passwords do not match',true);return}
+    if(n!==n2){toast(tr('The new passwords do not match'),true);return}
     try{
       const j=await call('POST','/api/password',{old:o,new:n});
       if(j&&j.csrf)CSRF=j.csrf;   // the session is reissued on a password change
-      toast('Password changed'); qa('input[type=password]',view()).forEach(i=>i.value='');
+      toast(tr('Password changed')); qa('input[type=password]',view()).forEach(i=>i.value='');
     }catch(e){toast(e.message,true)}
   };
 }
 
 /* ---------- wiring ---------- */
-const PAGES={dashboard,flows,logs,conversions,keywords,lists,tools,automation,settings};
+function enginePostback(status){
+  const base=(ENGINE||'').replace(/\/$/,'');
+  return base+'/postback?subid={subid}&status='+(status||'{status}')+'&payout={payout}';
+}
+const NET_TEMPLATES=[
+  {id:'s2s',label:'Generic S2S',url:'',param:'',query:'sub1={subid}'},
+  {id:'click',label:'clickid, goal, sum',url:'https://example.com/postback?clickid={subid}&goal={status}&sum={payout}',param:'offer_id',query:''}
+];
+async function networks(_,live){
+  const rows=await get('/api/affiliate-networks',[]);
+  if(!live()) return;
+  view().innerHTML=`<div class="ph"><h1>${tr('net.title')}</h1><div class="spacer"></div>
+      <button type="button" id="nlead">status=lead</button>
+      <button type="button" id="nsale">status=sale</button></div>
+    <div class="bds" style="grid-template-columns:minmax(280px,420px) 1fr">
+      <div class="card pad">
+        <div class="fld"><label>${tr('net.template')}</label><select id="ntpl">${NET_TEMPLATES.map(t=>opt(t.id,t.label,'s2s')).join('')}</select></div>
+        <div class="fld"><label>id</label><input id="nid" autocomplete="off"></div>
+        <div class="fld"><label>${tr('net.name')}</label><input id="nname" autocomplete="off"></div>
+        <div class="fld"><label>${tr('net.url')}</label><input id="nurl" class="mono" autocomplete="off"></div>
+        <div class="fld"><label>${tr('net.param')}</label><input id="nparam" autocomplete="off" placeholder="sub1={subid}"></div>
+        <button class="primary" id="nsave">${tr('net.save')}</button>
+      </div>
+      <div class="tw"><table><thead><tr><th>id</th><th>${tr('net.name')}</th><th>${tr('net.url')}</th><th></th></tr></thead><tbody id="nrows">${
+        (rows||[]).map(n=>`<tr><td class="mono">${esc(n.id)}</td><td>${esc(n.name)}</td><td class="ell mono">${esc(n.postback_url||'')}</td><td><button class="sm danger" data-ndel="${esc(n.id)}">${icon('trash')}</button></td></tr>`).join('')||`<tr><td colspan="4">${tr('net.empty')}</td></tr>`
+      }</tbody></table></div>
+    </div>`;
+  const applyTpl=()=>{const t=NET_TEMPLATES.find(x=>x.id===q('#ntpl').value)||NET_TEMPLATES[0]; q('#nurl').value=t.id==='s2s'?enginePostback('{status}'):t.url; q('#nparam').value=t.query||t.param};
+  applyTpl(); q('#ntpl').onchange=applyTpl;
+  q('#nlead').onclick=()=>copyText(enginePostback('lead'), q('#nlead'));
+  q('#nsale').onclick=()=>copyText(enginePostback('sale'), q('#nsale'));
+  q('#nsave').onclick=async()=>{
+    const body={id:q('#nid').value.trim(), name:q('#nname').value.trim(), status:true, postback_url:q('#nurl').value.trim(), offer_query:q('#nparam').value.trim()};
+    try{await call('POST','/api/affiliate-networks', body); toast(tr('Saved')); render()}
+    catch(e){toast(e.message,true)}
+  };
+  qa('[data-ndel]').forEach(b=>b.onclick=async()=>{
+    if(!await ask(tr('Delete network')+' '+b.dataset.ndel+'?','',tr('Delete'),true)) return;
+    try{await call('DELETE','/api/affiliate-networks/'+encodeURIComponent(b.dataset.ndel)); render()}
+    catch(e){toast(e.message,true)}
+  });
+}
+const SRC_KEYS=['keyword',...Array.from({length:15},(_,i)=>'sub_id_'+(i+1))];
+async function sources(_,live){
+  const rows=await get('/api/traffic-sources',[]);
+  if(!live()) return;
+  const blank=()=>Object.fromEntries(SRC_KEYS.map(k=>[k,'']));
+  let draft={id:'',name:'',parameters:blank()};
+  const paint=()=>{
+    view().innerHTML=`<div class="ph"><h1>${tr('src.title')}</h1><div class="spacer"></div><button class="primary" id="src-new">${tr('src.new')}</button></div>
+      <div class="bds" style="grid-template-columns:minmax(280px,460px) 1fr">
+        <div class="card pad">
+          <div class="fld"><label>id</label><input id="sid" value="${esc(draft.id)}" autocomplete="off"></div>
+          <div class="fld"><label>${tr('net.name')}</label><input id="sname" value="${esc(draft.name)}" autocomplete="off"></div>
+          ${SRC_KEYS.map(k=>`<div class="g2"><div class="fld"><label>${tr('src.our')}</label><input value="${esc(k)}" readonly></div><div class="fld"><label>${tr('src.theirs')}</label><input data-src="${k}" value="${esc(draft.parameters[k]||'')}" autocomplete="off"></div></div>`).join('')}
+          <button class="primary" id="ssave">${tr('net.save')}</button>
+        </div>
+        <div class="tw"><table><thead><tr><th>id</th><th>${tr('net.name')}</th><th></th></tr></thead><tbody>${
+          (rows||[]).map(s=>`<tr><td class="mono">${esc(s.id)}</td><td>${esc(s.name||'')}</td><td><button class="sm" data-sedit="${esc(s.id)}">${tr('Open')}</button> <button class="sm danger" data-sdel="${esc(s.id)}">${icon('trash')}</button></td></tr>`).join('')||`<tr><td colspan="3">${tr('src.empty')}</td></tr>`
+        }</tbody></table></div>
+      </div>`;
+    q('#src-new').onclick=()=>{draft={id:'',name:'',parameters:blank()}; paint()};
+    q('#ssave').onclick=async()=>{
+      const parameters={};
+      qa('[data-src]').forEach(el=>{const v=el.value.trim(); if(v) parameters[el.dataset.src]=v});
+      const body={id:q('#sid').value.trim(), name:q('#sname').value.trim(), parameters};
+      const exists=(rows||[]).some(s=>s.id===body.id);
+      try{
+        await call(exists?'PUT':'POST', exists?'/api/traffic-sources/'+encodeURIComponent(body.id):'/api/traffic-sources', body);
+        toast(tr('Saved')); render();
+      }catch(e){toast(e.message,true)}
+    };
+    qa('[data-sedit]').forEach(b=>b.onclick=()=>{
+      const s=(rows||[]).find(x=>x.id===b.dataset.sedit); if(!s) return;
+      draft={id:s.id,name:s.name||'',parameters:Object.assign(blank(), s.parameters||{})}; paint();
+    });
+    qa('[data-sdel]').forEach(b=>b.onclick=async()=>{
+      if(!await ask(tr('Delete')+' '+b.dataset.sdel+'?','',tr('Delete'),true)) return;
+      try{await call('DELETE','/api/traffic-sources/'+encodeURIComponent(b.dataset.sdel)); render()}catch(e){toast(e.message,true)}
+    });
+  };
+  paint();
+}
+async function report(_,live){
+  const rows=await get('/api/report?'+rangeQS(),[]);
+  if(!live()) return;
+  const body=(rows||[]).map(r=>`<tr><td>${esc(r.group||'')}</td><td>${esc(r.stream||'')}</td><td>${esc(r.country||'')}</td><td>${esc(r.offer||'')}</td><td>${esc(r.source||'')}</td><td class="num">${fmt(r.hits)}</td><td class="num">${fmt(r.bots)}</td><td class="num">${fmt(r.conv)}</td><td class="num">${r.profit?money(r.profit):'—'}</td></tr>`).join('');
+  view().innerHTML=`<div class="ph"><h1>${tr('rep.title')}</h1><span class="sub">${periodLabel()}</span><div class="spacer"></div><button id="rcsv">${tr('rep.csv')}</button></div>
+    <div class="tw"><table><thead><tr><th>${tr('conv.campaign')}</th><th>${tr('conv.stream')}</th><th>${tr('Country')}</th><th>${tr('conv.offer')}</th><th>${tr('conv.source')}</th><th class="num">${tr('Visits')}</th><th class="num">${tr('Bots')}</th><th class="num">${tr('Conv')}</th><th class="num">${tr('Profit')}</th></tr></thead><tbody>${body||`<tr><td colspan="9">${tr('rep.empty')}</td></tr>`}</tbody></table></div>`;
+  q('#rcsv').onclick=()=>{
+    const head=['campaign','stream','country','offer','source','visits','bots','conv','profit'];
+    const lines=[head.join(',')].concat((rows||[]).map(r=>[r.group,r.stream,r.country,r.offer,r.source,r.hits,r.bots,r.conv,r.profit].map(v=>'"'+String(v??'').replaceAll('"','""')+'"').join(',')));
+    const blob=new Blob([lines.join('\n')],{type:'text/csv'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='report.csv'; a.click();
+  };
+}
+const PAGES={dashboard,flows,logs,conversions,report,keywords,lists,tools,networks,sources,automation,settings};
 window.addEventListener('hashchange',render);
 document.addEventListener('click',()=>{closeMenu();qa('.msel.open').forEach(m=>m.classList.remove('open'))});
 document.addEventListener('keydown',e=>{

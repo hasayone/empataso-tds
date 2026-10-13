@@ -13,10 +13,12 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
 	"github.com/egerkuzma/kuztds/internal/admin"
+	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/geo"
 	"github.com/egerkuzma/kuztds/internal/security"
 	"github.com/egerkuzma/kuztds/internal/store"
@@ -64,6 +66,11 @@ func main() {
 	if f := os.Getenv("KUZTDS_GROUPS_FILE"); f != "" {
 		cfg.Groups = admin.NewFileGroups(f)
 		log.Info("groups file", "path", f)
+		dir := filepath.Dir(f)
+		cfg.Offers = admin.NewJSONStore[config.Offer](getenv("KUZTDS_OFFERS_FILE", filepath.Join(dir, "offers.json")))
+		cfg.Landings = admin.NewJSONStore[config.Landing](getenv("KUZTDS_LANDINGS_FILE", filepath.Join(dir, "landings.json")))
+		cfg.Sources = admin.NewJSONStore[config.TrafficSource](getenv("KUZTDS_SOURCES_FILE", filepath.Join(dir, "sources.json")))
+		cfg.Networks = admin.NewJSONStore[config.AffiliateNetwork](getenv("KUZTDS_NETWORKS_FILE", filepath.Join(dir, "networks.json")))
 	}
 
 	// .dat lists (IP, WAP operators, signatures) — editor.

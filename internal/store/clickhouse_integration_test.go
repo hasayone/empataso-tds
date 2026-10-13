@@ -54,6 +54,7 @@ func TestCHRoundTrip(t *testing.T) {
 		// clean up the test group's events and postbacks
 		_ = ch.conn.Exec(ctx, "ALTER TABLE events DELETE WHERE group_name = ?", group)
 		_ = ch.conn.Exec(ctx, "ALTER TABLE postbacks DELETE WHERE group_name = ?", group)
+		_ = ch.conn.Exec(ctx, "ALTER TABLE conversions DELETE WHERE group_name = ?", group)
 	})
 
 	events := []logbuf.Event{
@@ -133,11 +134,11 @@ func TestCHRoundTrip(t *testing.T) {
 	}
 
 	// Postback for cid_a.
-	if err := ch.RecordPostback(ctx, "cid_a", 2.5); err != nil {
+	if _, err := ch.RecordPostback(ctx, "cid_a", 2.5, ""); err != nil {
 		t.Fatalf("RecordPostback: %v", err)
 	}
 	// nonexistent cid → error.
-	if err := ch.RecordPostback(ctx, "nope_cid", 1.0); err == nil {
+	if _, err := ch.RecordPostback(ctx, "nope_cid", 1.0, ""); err == nil {
 		t.Error("RecordPostback for an unknown cid must return an error")
 	}
 	time.Sleep(200 * time.Millisecond)
@@ -197,6 +198,26 @@ func TestCHRoundTrip(t *testing.T) {
 	}
 	if s2 := got["s2"]; s2.Hits != 1 || s2.Bots != 1 || s2.Conv != 0 {
 		t.Errorf("Performance s2 = %+v, expected 1 hit, 1 bot, 0 conv", s2)
+	}
+	if _, err := ch.RecordPostback(ctx, "cid_a", 1, "lead"); err != nil {
+		t.Fatalf("lead: %v", err)
+	}
+	if _, err := ch.RecordPostback(ctx, "cid_a", 9, "sale"); err != nil {
+		t.Fatalf("sale: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	pb, _, err = ch.Postbacks(ctx, from, to, group, 100)
+	if err != nil {
+		t.Fatalf("Postbacks after status: %v", err)
+	}
+	seen := map[string]float64{}
+	for _, row := range pb {
+		if row.CID == "cid_a" {
+			seen[row.Status] = row.Profit
+		}
+	}
+	if seen["lead"] != 1 || seen["sale"] != 9 {
+		t.Fatalf("lead payout 1 and sale payout 9, got %v", seen)
 	}
 
 	// DeleteGroupLogs keys on group_id: after the mutation the group's rows are gone.

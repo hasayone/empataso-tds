@@ -11,5 +11,6 @@ var indexHTML []byte
 // serveUI serves the embedded SPA at the root.
 func serveUI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	_, _ = w.Write(indexHTML)
 }

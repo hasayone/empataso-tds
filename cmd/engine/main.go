@@ -53,7 +53,8 @@ var ipLists = []string{
 const shutdownPhase = 10 * time.Second
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	notices := newNoticeRing(200)
+	log := slog.New(&noticeHandler{Handler: slog.NewJSONHandler(os.Stdout, nil), ring: notices})
 
 	dataDir := getenv("KUZTDS_DATA_DIR", "./data")
 	addr := getenv("KUZTDS_LISTEN", ":8080")
@@ -152,6 +153,8 @@ func main() {
 	if groups != nil {
 		go newGroupsWatcher(groupsFile, groups, lists, seps, log, known).watch(ctx, reload)
 	}
+	offers, landings, sources, networks := openCatalogs(groupsFile, log)
+	go reloadCatalogs(ctx, reload, offers, landings, sources, networks)
 
 	// ClickHouse logs (phase 4): asynchronous batch writes. Optional.
 	var logs *logbuf.Buffer
@@ -178,12 +181,17 @@ func main() {
 
 	d := &engineDeps{
 		log: log, lists: lists, sigs: sigs, seps: seps, geores: geores, counters: counters,
-		groups: groups, logs: logs, chConn: chConn, fetcher: fetcher,
+		groups: groups, offers: offers, landings: landings, sources: sources, networks: networks,
+		outbound: make(chan outboundJob, 64),
+		logs:     logs, chConn: chConn, fetcher: fetcher,
 		dataDir: dataDir, keysDir: keysDir, postbackKey: postbackKey, apiKey: apiKey,
 		trashMode: trashMode, trashURL: trashURL, curlCacheMin: curlCacheMin,
 	}
+	go d.serveOutbound(ctx)
 
 	mux := http.NewServeMux()
+	mux.HandleFunc("/postback", d.postback)
+	mux.HandleFunc("/internal/notices", serveNotices(notices))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		// Body stays exactly "ok" for existing probes; the loss counter rides
 		// along in a header so it can be scraped without a metrics endpoint.

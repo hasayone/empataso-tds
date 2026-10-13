@@ -257,3 +257,73 @@ func TestSelect_NoStreamMatches(t *testing.T) {
 		t.Errorf("no stream must match, got %v", s)
 	}
 }
+
+func TestFilterOrMatchesAnyCondition(t *testing.T) {
+	s := stream("or", config.Rules{
+		Country: list(config.FlagB, "es", "es"),
+		Key:     list(config.FlagB, "sale", "sale"),
+	})
+	s.FilterOr = true
+	v := baseVisitor()
+	v.Country = "ru"
+	v.Key = "sale"
+	if why := Why(&s, v, Deps{}); why != "" {
+		t.Fatalf("filter_or should pass on the keyword, got %q", why)
+	}
+	v.Key = "other"
+	if why := Why(&s, v, Deps{}); why == "" {
+		t.Fatal("filter_or should fail when every condition fails")
+	}
+	s.FilterOr = false
+	v.Key = "sale"
+	if why := Why(&s, v, Deps{}); why != "country" {
+		t.Fatalf("without filter_or the country still blocks, got %q", why)
+	}
+}
+
+func TestSelectWeightDoesNotAlwaysPickFirst(t *testing.T) {
+	g := &config.Group{Weight: true, Streams: []config.Stream{
+		{Name: "first", Status: true, Weight: 1},
+		{Name: "second", Status: true, Weight: 99},
+	}}
+	deps := Deps{Roll: func(n int) int { return 5 }}
+	s, ok := Select(g, baseVisitor(), deps)
+	if !ok || s.Name != "second" {
+		t.Fatalf("weight roll 5 = %v, want second", s)
+	}
+	deps.Roll = func(n int) int { return 0 }
+	s, ok = Select(g, baseVisitor(), deps)
+	if !ok || s.Name != "first" {
+		t.Fatalf("weight roll 0 = %v, want first", s)
+	}
+}
+
+func TestResolveOutOfferAndLandingStep(t *testing.T) {
+	cat := Catalogs{
+		Offers: map[string]config.Offer{
+			"o1": {ID: "o1", URL: "https://offer.example/a", Status: true},
+			"o2": {ID: "o2", URL: "https://offer.example/b", Status: true},
+		},
+		Landings: map[string]config.Landing{
+			"l1":  {ID: "l1", URL: "https://land.example/", Status: true},
+			"php": {ID: "php", URL: "/var/land/index.php", Status: true, Local: true},
+		},
+	}
+	one := &config.Stream{Out: config.Output{Offers: []config.ShareRef{{ID: "o1", Share: 1}}}}
+	_, out := ResolveOut(one, cat, false, "stop", "", nil)
+	if out != "https://offer.example/a" {
+		t.Fatalf("single offer = %s", out)
+	}
+	both := &config.Stream{Out: config.Output{
+		Landings: []config.ShareRef{{ID: "l1", Share: 1}, {ID: "php", Share: 50}},
+		Offers:   []config.ShareRef{{ID: "o1", Share: 1}, {ID: "o2", Share: 9}},
+	}}
+	_, out = ResolveOut(both, cat, false, "http_redirect", "", func(int) int { return 0 })
+	if out != "https://land.example/" {
+		t.Fatalf("first step = %s, want landing", out)
+	}
+	_, out = ResolveOut(both, cat, true, "http_redirect", "", func(int) int { return 5 })
+	if out != "https://offer.example/b" {
+		t.Fatalf("offer step = %s, want second share", out)
+	}
+}

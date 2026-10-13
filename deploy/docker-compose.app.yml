@@ -1,0 +1,115 @@
+# Локальные процессы KuzTDS: engine (:8080), admin (:8090) и cron.
+# ClickHouse и Redis поднимает deploy/docker-compose.yml, это другой проект.
+# Запуск из каталога tds, когда инфраструктура уже работает:
+#   docker compose -f deploy/docker-compose.app.yml up -d --build
+name: kuztds-app
+
+services:
+  engine:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: kuztds:local
+    container_name: kuztds-engine
+    command: ["engine"]
+    ports:
+      - "8080:8080"
+    stop_grace_period: 30s
+    restart: unless-stopped
+    environment:
+      KUZTDS_LISTEN: ":8080"
+      KUZTDS_DATA_DIR: /var/lib/kuztds/data
+      KUZTDS_KEYS_DIR: /var/lib/kuztds/keys
+      KUZTDS_GROUPS_FILE: /var/lib/kuztds/groups.json
+      KUZTDS_CRON_FILE: /var/lib/kuztds/cron.json
+      KUZTDS_GEO_DB: /var/lib/kuztds/geo/city.mmdb
+      KUZTDS_ASN_DB: /var/lib/kuztds/geo/asn.mmdb
+      KUZTDS_REDIS_ADDR: redis:6379
+      KUZTDS_REDIS_PASSWORD: ""
+      KUZTDS_CLICKHOUSE_ADDR: clickhouse:9000
+      KUZTDS_CLICKHOUSE_DB: kuztds
+      KUZTDS_CLICKHOUSE_USER: kuztds
+      KUZTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    volumes:
+      - kuztds_state:/var/lib/kuztds
+    networks:
+      - tdsnet
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/healthz"]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+      start_period: 15s
+
+  admin:
+    image: kuztds:local
+    container_name: kuztds-admin
+    command: ["admin"]
+    ports:
+      - "8090:8090"
+    stop_grace_period: 15s
+    restart: unless-stopped
+    environment:
+      KUZTDS_ADMIN_LISTEN: ":8090"
+      KUZTDS_ADMIN_USER: ${KUZTDS_ADMIN_USER:-admin}
+      KUZTDS_ADMIN_PASSWORD: ${KUZTDS_ADMIN_PASSWORD:-}
+      KUZTDS_ADMIN_COOKIE_SECURE: "false"
+      KUZTDS_ADMIN_PASSWORD_FILE: /var/lib/kuztds/admin.hash
+      KUZTDS_ENGINE_URL: http://engine:8080
+      KUZTDS_DATA_DIR: /var/lib/kuztds/data
+      KUZTDS_KEYS_DIR: /var/lib/kuztds/keys
+      KUZTDS_GROUPS_FILE: /var/lib/kuztds/groups.json
+      KUZTDS_CRON_FILE: /var/lib/kuztds/cron.json
+      KUZTDS_GEO_DB: /var/lib/kuztds/geo/city.mmdb
+      KUZTDS_ASN_DB: /var/lib/kuztds/geo/asn.mmdb
+      KUZTDS_REDIS_ADDR: redis:6379
+      KUZTDS_REDIS_PASSWORD: ""
+      KUZTDS_CLICKHOUSE_ADDR: clickhouse:9000
+      KUZTDS_CLICKHOUSE_DB: kuztds
+      KUZTDS_CLICKHOUSE_USER: kuztds
+      KUZTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    volumes:
+      - kuztds_state:/var/lib/kuztds
+    networks:
+      - tdsnet
+    depends_on:
+      engine:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8090/api/health"]
+      interval: 10s
+      timeout: 3s
+      retries: 8
+      start_period: 40s
+
+  cron:
+    image: kuztds:local
+    container_name: kuztds-cron
+    command: ["cron"]
+    restart: unless-stopped
+    environment:
+      KUZTDS_DATA_DIR: /var/lib/kuztds/data
+      KUZTDS_KEYS_DIR: /var/lib/kuztds/keys
+      KUZTDS_GROUPS_FILE: /var/lib/kuztds/groups.json
+      KUZTDS_CRON_FILE: /var/lib/kuztds/cron.json
+      KUZTDS_GEO_DB: /var/lib/kuztds/geo/city.mmdb
+      KUZTDS_ASN_DB: /var/lib/kuztds/geo/asn.mmdb
+      KUZTDS_CLICKHOUSE_ADDR: clickhouse:9000
+      KUZTDS_CLICKHOUSE_DB: kuztds
+      KUZTDS_CLICKHOUSE_USER: kuztds
+      KUZTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+    volumes:
+      - kuztds_state:/var/lib/kuztds
+    networks:
+      - tdsnet
+    depends_on:
+      engine:
+        condition: service_healthy
+
+networks:
+  tdsnet:
+    external: true
+    name: deploy_default
+
+volumes:
+  kuztds_state:

@@ -1,0 +1,15 @@
+.git
+.github
+bin
+data
+coverage.*
+*.exe
+*.mmdb
+*.db
+*.db-wal
+*.db-shm
+*.out
+*.test
+.env
+.env.*
+!.env.example

@@ -38,6 +38,9 @@ type StatsProvider interface {
 	Performance(ctx context.Context, from, to time.Time) ([]store.PerfRow, error)
 	Logs(ctx context.Context, f store.LogFilter) ([]store.LogRow, int64, error)
 	Postbacks(ctx context.Context, from, to time.Time, group string, limit int) ([]store.PostbackRow, float64, error)
+	QueryPostbacks(ctx context.Context, q store.PostbackQuery) ([]store.PostbackRow, float64, error)
+	PostbackLog(ctx context.Context, from, to time.Time, limit int) ([]store.PostbackLogRow, error)
+	Slice(ctx context.Context, from, to time.Time) ([]store.SliceRow, error)
 	DeleteGroupLogs(ctx context.Context, group string) error
 }
 
@@ -76,6 +79,10 @@ type Config struct {
 	Sessions     security.SessionStore
 	Stats        StatsProvider
 	Groups       GroupsStore
+	Offers       *JSONStore[config.Offer]
+	Landings     *JSONStore[config.Landing]
+	Sources      *JSONStore[config.TrafficSource]
+	Networks     *JSONStore[config.AffiliateNetwork]
 	Lists        ListsStore
 	Keys         KeysReader
 	Limiter      LoginLimiter
@@ -245,10 +252,19 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/logs/export", s.auth(http.HandlerFunc(s.handleLogsExport)))
 	mux.Handle("DELETE /api/logs", s.auth(http.HandlerFunc(s.handleDeleteLogs)))
 	mux.Handle("GET /api/postbacks", s.auth(http.HandlerFunc(s.handlePostbacks)))
+	mux.Handle("GET /api/postback-log", s.auth(http.HandlerFunc(s.handlePostbackLog)))
+	mux.Handle("GET /api/notices", s.auth(http.HandlerFunc(s.handleNotices)))
+	mux.Handle("GET /api/report", s.auth(http.HandlerFunc(s.handleReport)))
 	mux.Handle("GET /api/keys", s.auth(http.HandlerFunc(s.handleKeys)))
 
 	mux.Handle("GET /api/groups", s.auth(http.HandlerFunc(s.handleGroupsGet)))
 	mux.Handle("PUT /api/groups", s.auth(http.HandlerFunc(s.handleGroupsSave)))
+	registerOffers(s, mux)
+	registerLandings(s, mux)
+	registerSources(s, mux)
+	registerNetworks(s, mux)
+	mux.Handle("GET /api/campaigns/{id}/postbacks", s.auth(http.HandlerFunc(s.handleCampaignPostbacksGet)))
+	mux.Handle("PUT /api/campaigns/{id}/postbacks", s.auth(http.HandlerFunc(s.handleCampaignPostbacksPut)))
 
 	mux.Handle("GET /api/lists", s.auth(http.HandlerFunc(s.handleListsIndex)))
 	mux.Handle("GET /api/lists/{name}", s.auth(http.HandlerFunc(s.handleListRead)))
@@ -691,13 +707,73 @@ func (s *Server) handleDeleteLogs(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+func (s *Server) handlePostbackLog(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Stats == nil {
+		writeJSON(w, http.StatusOK, []store.PostbackLogRow{})
+		return
+	}
+	from, to := parseRange(r)
+	rows, err := s.cfg.Stats.PostbackLog(r.Context(), from, to, atoiDef(r.URL.Query().Get("limit"), 200))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "postback log error")
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Stats == nil {
+		writeJSON(w, http.StatusOK, []store.SliceRow{})
+		return
+	}
+	from, to := parseRange(r)
+	rows, err := s.cfg.Stats.Slice(r.Context(), from, to)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "report error")
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
+func (s *Server) handleNotices(w http.ResponseWriter, r *http.Request) {
+	base := strings.TrimRight(s.cfg.EngineURL, "/")
+	if base == "" {
+		writeJSON(w, http.StatusOK, []string{})
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/internal/notices", nil)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []string{})
+		return
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		writeJSON(w, http.StatusOK, []string{})
+		return
+	}
+	defer resp.Body.Close()
+	var lines []string
+	if err := json.NewDecoder(resp.Body).Decode(&lines); err != nil || lines == nil {
+		lines = []string{}
+	}
+	writeJSON(w, http.StatusOK, lines)
+}
+
 func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Stats == nil {
 		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
 		return
 	}
 	from, to := parseRange(r)
-	rows, total, err := s.cfg.Stats.Postbacks(r.Context(), from, to, r.URL.Query().Get("group"), atoiDef(r.URL.Query().Get("limit"), 200))
+	q := r.URL.Query()
+	rows, total, err := s.cfg.Stats.QueryPostbacks(r.Context(), store.PostbackQuery{
+		From: from, To: to, Group: q.Get("group"), Status: q.Get("status"),
+		Stream: q.Get("stream"), Offer: q.Get("offer"), Landing: q.Get("landing"),
+		Source: q.Get("source"), Network: q.Get("network"), CID: q.Get("cid"),
+		Limit: atoiDef(q.Get("limit"), 200),
+	})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "postbacks error")
 		return

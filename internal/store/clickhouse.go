@@ -20,6 +20,10 @@ type CH struct {
 	// both consult this rather than assume — an INSERT naming a column that is
 	// not there fails as a whole, and that would cost every event.
 	netCols bool
+	// clickCols: events and conversions carry sub_id_1..12 and the offer,
+	// landing, source and network ids. Writes name those columns only after
+	// ensureSchema has seen them, otherwise the whole insert fails.
+	clickCols bool
 }
 
 // OpenCH opens a connection to ClickHouse.
@@ -50,17 +54,79 @@ const netColumns = `ADD COLUMN IF NOT EXISTS asn UInt32,
 	ADD COLUMN IF NOT EXISTS timezone LowCardinality(String),
 	ADD COLUMN IF NOT EXISTS via LowCardinality(String)`
 
+// clickAlter adds sub_id_1..12 and the entity ids to events or conversions.
+func clickAlter() string {
+	parts := make([]string, 0, 16)
+	for i := 1; i <= 12; i++ {
+		parts = append(parts, fmt.Sprintf("ADD COLUMN IF NOT EXISTS sub_id_%d String", i))
+	}
+	for _, name := range []string{"offer_id", "landing_id", "source_id", "network_id"} {
+		parts = append(parts, "ADD COLUMN IF NOT EXISTS "+name+" LowCardinality(String)")
+	}
+	return strings.Join(parts, ", ")
+}
+
+// clickColIn is the SQL list of those column names, for a system.columns check.
+func clickColIn() string {
+	parts := make([]string, 0, 16)
+	for i := 1; i <= 12; i++ {
+		parts = append(parts, fmt.Sprintf("'sub_id_%d'", i))
+	}
+	for _, name := range []string{"offer_id", "landing_id", "source_id", "network_id"} {
+		parts = append(parts, "'"+name+"'")
+	}
+	return strings.Join(parts, ", ")
+}
+
 // ensureSchema brings an older events table up to date and records whether it
 // worked. The ALTER is idempotent and metadata-only, so running it on every
 // start from both the engine and the admin is harmless. If it is refused (a
 // read-only user, say), the client keeps working on the old column set.
 func (c *CH) ensureSchema(ctx context.Context) {
 	_ = c.conn.Exec(ctx, "ALTER TABLE events "+netColumns)
+	_ = c.conn.Exec(ctx, "ALTER TABLE events "+clickAlter())
+	_ = c.conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS conversions (
+		ts DateTime DEFAULT now(),
+		domain String,
+		page String,
+		device LowCardinality(String),
+		operator LowCardinality(String),
+		country LowCardinality(String),
+		city String,
+		profit Float64,
+		group_name LowCardinality(String),
+		stream_name LowCardinality(String),
+		cid String,
+		status LowCardinality(String)
+	) ENGINE = ReplacingMergeTree(ts)
+	PARTITION BY toYYYYMM(ts)
+	ORDER BY (cid, status)
+	TTL ts + INTERVAL 365 DAY`)
+	_ = c.conn.Exec(ctx, "ALTER TABLE conversions "+clickAlter())
+	_ = c.conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS postback_log (
+		ts DateTime DEFAULT now(),
+		subid String,
+		status LowCardinality(String),
+		payout Float64,
+		outcome LowCardinality(String),
+		direction LowCardinality(String)
+	) ENGINE = MergeTree
+	PARTITION BY toYYYYMM(ts)
+	ORDER BY ts
+	TTL ts + INTERVAL 90 DAY`)
 	var n uint64
 	err := c.conn.QueryRow(ctx, `SELECT count() FROM system.columns
 		WHERE database = currentDatabase() AND table = 'events'
 		  AND name IN ('asn', 'org', 'timezone', 'via')`).Scan(&n)
 	c.netCols = err == nil && n == 4
+	var clicks, convClicks uint64
+	err = c.conn.QueryRow(ctx, `SELECT count() FROM system.columns
+		WHERE database = currentDatabase() AND table = 'events'
+		  AND name IN (`+clickColIn()+`)`).Scan(&clicks)
+	errConv := c.conn.QueryRow(ctx, `SELECT count() FROM system.columns
+		WHERE database = currentDatabase() AND table = 'conversions'
+		  AND name IN (`+clickColIn()+`)`).Scan(&convClicks)
+	c.clickCols = err == nil && errConv == nil && clicks == 16 && convClicks == 16
 }
 
 // NetworkColumns reports whether events carry asn/org/timezone/via.
@@ -226,7 +292,11 @@ func (c *CH) Performance(ctx context.Context, from, to time.Time) ([]PerfRow, er
 	}
 	pbs, err := c.conn.Query(ctx,
 		`SELECT group_name, stream_name, count() AS conv, sum(profit) AS profit
-		 FROM postbacks WHERE ts >= ? AND ts < ?
+		 FROM (
+		   SELECT group_name, stream_name, profit, ts FROM postbacks
+		   UNION ALL
+		   SELECT group_name, stream_name, profit, ts FROM conversions
+		 ) WHERE ts >= ? AND ts < ?
 		 GROUP BY group_name, stream_name`, from, to)
 	if err != nil {
 		return nil, err
@@ -458,26 +528,49 @@ func (c *CH) Logs(ctx context.Context, f LogFilter) ([]LogRow, int64, error) {
 	return out, int64(total), rows.Err()
 }
 
-// RecordPostback finds an event by cid and writes a conversion to postbacks.
-// Returns an error if the event is not found.
-func (c *CH) RecordPostback(ctx context.Context, cid string, profit float64) error {
-	var gname, sname, country, city, device, operator, domain, page string
-	err := c.conn.QueryRow(ctx,
-		`SELECT group_name, stream_name, country, city, device, operator, domain, page
-		 FROM events WHERE cid = ? ORDER BY ts DESC LIMIT 1`, cid).
-		Scan(&gname, &sname, &country, &city, &device, &operator, &domain, &page)
+// RecordPostback finds an event by cid and writes one conversion.
+// status is part of the storage key, so a later sale does not replace an earlier lead.
+// The returned group id is the campaign the click belonged to.
+// When the click columns exist, sub ids and offer, landing, source and network
+// are copied from that click. Older clicks leave those fields empty.
+func (c *CH) RecordPostback(ctx context.Context, cid string, profit float64, status string) (string, error) {
+	status = strings.ToLower(strings.TrimSpace(status))
+	var gid, gname, sname, country, city, device, operator, domain, page string
+	sel := `SELECT group_id, group_name, stream_name, country, city, device, operator, domain, page`
+	dest := []any{&gid, &gname, &sname, &country, &city, &device, &operator, &domain, &page}
+	var offer, landing, source, network string
+	subs := make([]string, 12)
+	if c.clickCols {
+		sel += `, offer_id, landing_id, source_id, network_id, ` + subColList()
+		dest = append(dest, &offer, &landing, &source, &network)
+		for i := range subs {
+			dest = append(dest, &subs[i])
+		}
+	}
+	err := c.conn.QueryRow(ctx, sel+` FROM events WHERE cid = ? ORDER BY ts DESC LIMIT 1`, cid).Scan(dest...)
 	if err != nil {
-		return err
+		return "", err
 	}
-	batch, err := c.conn.PrepareBatch(ctx, `INSERT INTO postbacks
-		(domain, page, device, operator, country, city, profit, group_name, stream_name, cid)`)
+	cols := `domain, page, device, operator, country, city, profit, group_name, stream_name, cid, status`
+	row := []any{domain, page, device, operator, country, city, profit, gname, sname, cid, status}
+	if c.clickCols {
+		cols += `, offer_id, landing_id, source_id, network_id, ` + subColList()
+		row = append(row, offer, landing, source, network)
+		for _, s := range subs {
+			row = append(row, s)
+		}
+	}
+	batch, err := c.conn.PrepareBatch(ctx, `INSERT INTO conversions (`+cols+`)`)
 	if err != nil {
-		return err
+		return "", err
 	}
-	if err := batch.Append(domain, page, device, operator, country, city, profit, gname, sname, cid); err != nil {
-		return err
+	if err := batch.Append(row...); err != nil {
+		return "", err
 	}
-	return batch.Send()
+	if err := batch.Send(); err != nil {
+		return "", err
+	}
+	return gid, nil
 }
 
 // PostbackRow — a conversion row.
@@ -492,26 +585,51 @@ type PostbackRow struct {
 	City    string    `json:"city"`
 	Profit  float64   `json:"profit"`
 	CID     string    `json:"cid"`
+	Status  string    `json:"status"`
+	Offer   string    `json:"offer_id,omitempty"`
+	Landing string    `json:"landing_id,omitempty"`
+	Source  string    `json:"source_id,omitempty"`
+	Network string    `json:"network_id,omitempty"`
+	Subs    []string  `json:"subs,omitempty"`
+}
+
+// PostbackQuery filters the conversion journal.
+// CID is the click id, shown in the admin as subid.
+// Offer, landing, source and network match only after those columns exist.
+type PostbackQuery struct {
+	From, To                                                    time.Time
+	Group, Status, Stream, Offer, Landing, Source, Network, CID string
+	Limit                                                       int
 }
 
 // Postbacks returns conversions over a period (optional group filter) and the total profit.
 func (c *CH) Postbacks(ctx context.Context, from, to time.Time, group string, limit int) ([]PostbackRow, float64, error) {
-	where := "ts >= ? AND ts < ?"
-	args := []any{from, to}
-	if group != "" {
-		where += " AND group_name = ?"
-		args = append(args, group)
+	return c.QueryPostbacks(ctx, PostbackQuery{From: from, To: to, Group: group, Limit: limit})
+}
+
+// QueryPostbacks returns conversions matching q and the total profit.
+// A filter on offer, landing, source or network yields no rows when those
+// columns are not on the table yet, instead of failing the query.
+func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow, float64, error) {
+	if !c.clickCols && (q.Offer != "" || q.Landing != "" || q.Source != "" || q.Network != "") {
+		return []PostbackRow{}, 0, nil
 	}
+	q.Status = strings.ToLower(strings.TrimSpace(q.Status))
+	where, args := postbackWhere(q, c.clickCols)
 	var total float64
-	if err := c.conn.QueryRow(ctx, "SELECT sum(profit) FROM postbacks WHERE "+where, args...).Scan(&total); err != nil {
+	if err := c.conn.QueryRow(ctx, "SELECT sum(profit) FROM ("+conversionFrom(c.clickCols)+") WHERE "+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
+	limit := q.Limit
 	if limit <= 0 || limit > 1000 {
 		limit = 200
 	}
+	sel := "ts, group_name, stream_name, domain, page, device, country, city, profit, cid, status"
+	if c.clickCols {
+		sel += ", offer_id, landing_id, source_id, network_id, " + subColList()
+	}
 	rows, err := c.conn.Query(ctx,
-		"SELECT ts, group_name, stream_name, domain, page, device, country, city, profit, cid FROM postbacks WHERE "+
-			where+" ORDER BY ts DESC LIMIT ?", append(args, limit)...)
+		"SELECT "+sel+" FROM ("+conversionFrom(c.clickCols)+") WHERE "+where+" ORDER BY ts DESC LIMIT ?", append(args, limit)...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -519,12 +637,76 @@ func (c *CH) Postbacks(ctx context.Context, from, to time.Time, group string, li
 	var out []PostbackRow
 	for rows.Next() {
 		var p PostbackRow
-		if err := rows.Scan(&p.TS, &p.Group, &p.Stream, &p.Domain, &p.Page, &p.Device, &p.Country, &p.City, &p.Profit, &p.CID); err != nil {
+		dest := []any{&p.TS, &p.Group, &p.Stream, &p.Domain, &p.Page, &p.Device, &p.Country, &p.City, &p.Profit, &p.CID, &p.Status}
+		subs := make([]string, 12)
+		if c.clickCols {
+			dest = append(dest, &p.Offer, &p.Landing, &p.Source, &p.Network)
+			for i := range subs {
+				dest = append(dest, &subs[i])
+			}
+		}
+		if err := rows.Scan(dest...); err != nil {
 			return nil, 0, err
+		}
+		if c.clickCols {
+			p.Subs = subs
 		}
 		out = append(out, p)
 	}
 	return out, total, rows.Err()
+}
+
+// postbackWhere builds the period predicate and the optional equality filters.
+// click must be true before offer, landing, source or network are included.
+func postbackWhere(q PostbackQuery, click bool) (string, []any) {
+	where := "ts >= ? AND ts < ?"
+	args := []any{q.From, q.To}
+	add := func(col, val string) {
+		if val == "" {
+			return
+		}
+		where += " AND " + col + " = ?"
+		args = append(args, val)
+	}
+	add("group_name", q.Group)
+	add("status", q.Status)
+	add("stream_name", q.Stream)
+	add("cid", q.CID)
+	if click {
+		add("offer_id", q.Offer)
+		add("landing_id", q.Landing)
+		add("source_id", q.Source)
+		add("network_id", q.Network)
+	}
+	return where, args
+}
+
+func subColList() string {
+	parts := make([]string, 12)
+	for i := 1; i <= 12; i++ {
+		parts[i-1] = fmt.Sprintf("sub_id_%d", i)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// conversionFrom is the old postbacks table plus one row per cid and status.
+// click adds empty entity columns on the old table so the union lines up.
+func conversionFrom(click bool) string {
+	base := `ts, domain, page, device, operator, country, city, profit, group_name, stream_name, cid`
+	if !click {
+		return `SELECT ` + base + `, '' AS status FROM postbacks
+		UNION ALL
+		SELECT ` + base + `, status FROM conversions`
+	}
+	emptyParts := []string{"'' AS offer_id", "'' AS landing_id", "'' AS source_id", "'' AS network_id"}
+	for i := 1; i <= 12; i++ {
+		emptyParts = append(emptyParts, fmt.Sprintf("'' AS sub_id_%d", i))
+	}
+	empty := strings.Join(emptyParts, ", ")
+	ids := `offer_id, landing_id, source_id, network_id, ` + subColList()
+	return `SELECT ` + base + `, '' AS status, ` + empty + ` FROM postbacks
+		UNION ALL
+		SELECT ` + base + `, status, ` + ids + ` FROM conversions`
 }
 
 // InsertEvents inserts a batch of events in a single batch request (lock-free).
@@ -538,6 +720,9 @@ func (c *CH) InsertEvents(ctx context.Context, events []logbuf.Event) error {
 		 counter, cid, postback`
 	if c.netCols {
 		cols += ", asn, org, timezone, via"
+	}
+	if c.clickCols {
+		cols += ", " + subColList() + ", offer_id, landing_id, source_id, network_id"
 	}
 	batch, err := c.conn.PrepareBatch(ctx, "INSERT INTO events ("+cols+")")
 	if err != nil {
@@ -553,6 +738,12 @@ func (c *CH) InsertEvents(ctx context.Context, events []logbuf.Event) error {
 		}
 		if c.netCols {
 			row = append(row, e.ASN, e.Org, e.Timezone, e.Via)
+		}
+		if c.clickCols {
+			for _, s := range e.Subs {
+				row = append(row, s)
+			}
+			row = append(row, e.OfferID, e.LandingID, e.SourceID, e.NetworkID)
 		}
 		if err := batch.Append(row...); err != nil {
 			return fmt.Errorf("clickhouse: append: %w", err)

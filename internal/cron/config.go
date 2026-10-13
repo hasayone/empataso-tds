@@ -144,7 +144,21 @@ func Default() Config {
 	return Config{
 		IPLists: IPLists{EveryMinutes: 24 * 60, Sources: []IPSource{
 			{URL: "https://developers.google.com/static/crawling/ipranges/common-crawlers.json", Target: "ip_google", Mode: "replace"},
+			{URL: "https://developers.google.com/static/crawling/ipranges/special-crawlers.json", Target: "ip_google", Mode: "merge"},
+			{URL: "https://developers.google.com/static/crawling/ipranges/user-triggered-fetchers.json", Target: "ip_google", Mode: "merge"},
 			{URL: "https://www.bing.com/toolbox/bingbot.json", Target: "ip_bing", Mode: "replace"},
+			{URL: "https://search.developer.apple.com/applebot.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://openai.com/gptbot.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://openai.com/searchbot.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://openai.com/chatgpt-user.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://openai.com/adsbot.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://claude.com/crawling/bots.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://www.perplexity.ai/perplexitybot.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://www.perplexity.ai/perplexity-user.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://duckduckgo.com/duckduckbot.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://duckduckgo.com/duckassistbot.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://index.commoncrawl.org/ccbot.json", Target: "ip_others", Mode: "merge"},
+			{URL: "https://api.ahrefs.com/v3/public/crawler-ip-ranges", Target: "ip_others", Mode: "merge"},
 		}},
 		GeoDB: GeoDB{EveryMinutes: 3 * 24 * 60, Sources: []GeoSource{
 			{Kind: "city", URL: "https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz"},

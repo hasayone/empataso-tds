@@ -57,7 +57,13 @@ type Event struct {
 	Timezone  string
 	// Via names the stream that handed the visitor over when the event's
 	// group is not the one they entered through: "<group id>/<stream>".
-	Via string
+	Via       string
+	OfferID   string
+	LandingID string
+	SourceID  string
+	NetworkID string
+	// Subs holds sub_id_1 through sub_id_12. Higher slots stay in memory only.
+	Subs [12]string
 }
 
 // Inserter inserts a batch of events into storage (implemented by store.CH).

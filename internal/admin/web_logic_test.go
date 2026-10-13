@@ -142,5 +142,27 @@ eq(macroHTML('go [KEY] &amp; [PAR-1] [RANDNUM-1-9] [()COUNTRY()]'),
   'go <span class="mac">[KEY]</span> &amp; <span class="mac">[PAR-1]</span> <span class="mac">[RANDNUM-1-9]</span> <span class="mac">[()COUNTRY()]</span>', 'macros');
 eq(macroHTML('[&quot;a&quot;] [lower] [1]'), '[&quot;a&quot;] [lower] [1]', 'not macros');
 
+eq(findCountries('исп').map(c => c.code), ['es'], 'russian spain');
+eq(findCountries('ісп').map(c => c.code), ['es'], 'ukrainian spain');
+eq(findCountries('spain').map(c => c.code), ['es'], 'english spain');
+eq(findCountries('es')[0].code, 'es', 'code es is first');
+eq(countryCode('Испания'), 'es', 'full russian name');
+eq(countryCode('es'), 'es', 'code stays the code');
+eq(countryLabel('es', 'ru'), 'Испания', 'chip name ru');
+eq(countryLabel('es', 'uk'), 'Іспанія', 'chip name uk');
+eq(countryLabel('es', 'en') === 'es', false, 'name is not the code twice');
+const now = new Date('2026-10-13T15:00:00Z');
+const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+eq(ymd(periodSpan('today', now).from), '2026-10-13', 'today');
+eq(ymd(periodSpan('yesterday', now).from), '2026-10-12', 'yesterday');
+eq(ymd(periodSpan('week', now).from), '2026-10-12', 'week starts monday');
+eq(ymd(periodSpan('month', now).from), '2026-10-01', 'month');
+eq(ymd(periodSpan('prevmonth', now).from), '2026-09-01', 'previous month');
+eq(ymd(periodSpan('year', now).from), '2026-01-01', 'year');
+eq(periodSpan('all', now).from.toISOString().slice(0, 4), '2000', 'all time');
+eq(periodSpan('7d', now).from.toISOString(), new Date(+now - 7 * 86400000).toISOString(), 'last 7 days');
+eq(periodSpan('today', new Date('2026-10-13T23:30:00Z'), 'UTC').from.toISOString(), '2026-10-13T00:00:00.000Z', 'utc today');
+eq(periodSpan('today', new Date('2026-10-13T10:00:00Z'), 'Europe/Kyiv').from.toISOString(), '2026-10-12T21:00:00.000Z', 'kyiv today');
+
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `

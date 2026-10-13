@@ -88,8 +88,10 @@ func (r *Runner) updateList(ctx context.Context, src IPSource) ([]string, error)
 	return out, nil
 }
 
-// prefixesFromJSON reads the format Google and Bing publish their crawler
-// ranges in: {"prefixes":[{"ipv4Prefix":"66.249.64.0/27"},{"ipv6Prefix":…}]}.
+// prefixesFromJSON reads the crawler range document
+// {"prefixes":[{"ipv4Prefix":"66.249.64.0/27"},{"ipv6Prefix":…}]}.
+// Google, Bing, Apple, OpenAI, Anthropic, Perplexity, DuckDuckGo,
+// Common Crawl and Ahrefs publish this shape.
 func prefixesFromJSON(b []byte) ([]string, error) {
 	var doc struct {
 		Prefixes []struct {

@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/egerkuzma/kuztds/internal/config"
@@ -33,6 +34,13 @@ type engineDeps struct {
 	geores       geo.Resolver
 	counters     *store.Counters
 	groups       *config.Groups
+	offers       *config.Book[config.Offer]
+	landings     *config.Book[config.Landing]
+	sources      *config.Book[config.TrafficSource]
+	networks     *config.Book[config.AffiliateNetwork]
+	outbound     chan outboundJob
+	sentMu       sync.Mutex
+	sent         map[string]struct{}
 	logs         *logbuf.Buffer
 	chConn       *store.CH
 	fetcher      *fetch.Client
@@ -120,9 +128,13 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		if d.postbackKey != "" && pb == d.postbackKey && d.chConn != nil {
 			cid := r.URL.Query().Get("cid")
 			profit, _ := strconv.ParseFloat(r.URL.Query().Get("profit"), 64)
+			status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
 			if cid != "" {
-				if err := d.chConn.RecordPostback(r.Context(), cid, profit); err != nil {
+				gid, err := d.chConn.RecordPostback(r.Context(), cid, profit, status)
+				if err != nil {
 					d.log.Warn("postback failed", "cid", cid, "err", err)
+				} else {
+					d.fireOutbound(gid, cid, profit, status, r.URL.Query())
 				}
 			}
 		}
@@ -169,7 +181,8 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	// an empty 200 by default, indistinguishable from nothing happening. TDS
 	// links are routinely dressed up as real pages, so the extra segments are
 	// decoration and must not change routing.
-	gid, _, _ := strings.Cut(strings.Trim(r.URL.Path, "/"), "/")
+	gid, rest, _ := strings.Cut(strings.Trim(r.URL.Path, "/"), "/")
+	offerStep := rest == "offer" || strings.HasPrefix(rest, "offer/")
 	if apiMode {
 		gid = apiReq.ID
 	}
@@ -274,6 +287,12 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		Timezone:   g.Timezone,
 		TZOffset:   tzOffset,
 		Query:      r.URL.Query(),
+	}
+	src, _ := d.sourceOf(grp)
+	kw, subs := config.ApplySource(r.URL.Query(), src)
+	if kw != "" {
+		key = kw
+		v.Key = kw
 	}
 	// Output defaults — from the group; the stream overrides them.
 	//
@@ -381,6 +400,13 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 
 	// distribution of out variants (|||): random/rotator/evenly.
 	dist := ""
+	if selStream != nil && !botServed && (len(selStream.Out.Offers) > 0 || len(selStream.Out.Landings) > 0) {
+		redirect, outRaw = router.ResolveOut(selStream, d.catalogs(), offerStep, redirect, outRaw, nil)
+	}
+	offerID, landingID, networkID := clickIDs(selStream, d.catalogs(), outRaw, offerStep)
+	if networkID != "" {
+		outRaw = appendOfferQuery(outRaw, d.offerQuery(networkID))
+	}
 	if selStream != nil {
 		dist = selStream.Out.Distribution
 	}
@@ -391,7 +417,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	md := render.MacroDeps{
 		Key: v.Key, Path: r.Host, IP: ip.String(), Country: country, City: g.City,
 		Region: g.Region, Lang: v.Lang, Device: device, Operator: operator,
-		Domain: v.Domain, UserAgent: ua, CID: cid, Pars: pars,
+		Domain: v.Domain, UserAgent: ua, CID: cid, Pars: pars, SubIDs: subs,
 		ASN: asnText(g.ASN), Org: dashEmpty(g.Org), Timezone: g.Timezone, TZOffset: tzOffset,
 		DataDir: d.dataDir}
 	out := render.Expand(outRaw, md)
@@ -452,6 +478,8 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			OS: info.OS, OSVersion: info.OSVersion, Browser: info.Browser,
 			BrowserV: info.BrowserVer, Brand: info.Brand, CID: cid,
 			ASN: g.ASN, Org: dashEmpty(g.Org), Timezone: dashEmpty(g.Timezone), Via: via,
+			OfferID: offerID, LandingID: landingID, SourceID: grp.SourceID, NetworkID: networkID,
+			Subs: storedSubs(subs),
 		})
 	}
 
@@ -475,6 +503,65 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Kuztds-Stream", streamName)
 	h.Set("X-Kuztds-Uniq", b2yn(unique))
 	res.Write(w)
+}
+
+// clickIDs names the offer or landing whose template equals outRaw.
+// The network id is the one stored on that offer. No match leaves the ids empty.
+func clickIDs(stream *config.Stream, cat router.Catalogs, outRaw string, offerStep bool) (offerID, landingID, networkID string) {
+	if stream == nil || outRaw == "" {
+		return "", "", ""
+	}
+	if !offerStep {
+		for _, ref := range stream.Out.Landings {
+			item, ok := cat.Landings[ref.ID]
+			if ok && item.Status && !item.Local && item.URL == outRaw {
+				return "", ref.ID, ""
+			}
+		}
+	}
+	for _, ref := range stream.Out.Offers {
+		o, ok := cat.Offers[ref.ID]
+		if ok && o.Status && !o.Local && o.URL == outRaw {
+			return ref.ID, "", o.NetworkID
+		}
+	}
+	return "", "", ""
+}
+
+// appendOfferQuery adds the network query to the URL the visitor is sent to.
+// The offer was already named from the URL before this append, so the extra
+// query does not change which offer or network the click belongs to.
+// An address that already has a query keeps it; the new part is joined with &.
+func appendOfferQuery(raw, query string) string {
+	query = strings.TrimSpace(strings.TrimPrefix(query, "?"))
+	if query == "" || raw == "" || !strings.Contains(raw, "://") {
+		return raw
+	}
+	if strings.Contains(raw, "?") {
+		return raw + "&" + strings.TrimPrefix(query, "&")
+	}
+	return raw + "?" + query
+}
+
+// offerQuery is the partner query stored on the network. A disabled network
+// adds nothing. The engine never requests the network postback URL.
+func (d *engineDeps) offerQuery(networkID string) string {
+	if d == nil || d.networks == nil || networkID == "" {
+		return ""
+	}
+	n, ok := d.networks.Get(networkID)
+	if !ok || !n.Status {
+		return ""
+	}
+	return n.OfferQuery
+}
+
+// storedSubs keeps the first twelve sub ids for the click log.
+func storedSubs(subs [config.MaxSubID]string) (out [12]string) {
+	for i := 0; i < len(out) && i < len(subs); i++ {
+		out[i] = subs[i]
+	}
+	return out
 }
 
 // asnText renders an AS number for macros: "" when unknown, so a template

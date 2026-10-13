@@ -35,6 +35,15 @@ func (fakeStats) Logs(context.Context, store.LogFilter) ([]store.LogRow, int64, 
 func (fakeStats) Postbacks(context.Context, time.Time, time.Time, string, int) ([]store.PostbackRow, float64, error) {
 	return []store.PostbackRow{{Profit: 1.5}}, 1.5, nil
 }
+func (fakeStats) QueryPostbacks(context.Context, store.PostbackQuery) ([]store.PostbackRow, float64, error) {
+	return []store.PostbackRow{{Profit: 1.5}}, 1.5, nil
+}
+func (fakeStats) PostbackLog(context.Context, time.Time, time.Time, int) ([]store.PostbackLogRow, error) {
+	return []store.PostbackLogRow{}, nil
+}
+func (fakeStats) Slice(context.Context, time.Time, time.Time) ([]store.SliceRow, error) {
+	return []store.SliceRow{}, nil
+}
 func (fakeStats) DeleteGroupLogs(context.Context, string) error { return nil }
 
 type fakeGroups struct{ saved []config.Group }

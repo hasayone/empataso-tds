@@ -29,9 +29,12 @@ type MacroDeps struct {
 	Operator  string   // [OPERATOR]
 	Domain    string   // [DOMAIN]
 	UserAgent string   // [USERAGENT]
-	CID       string   // [CID]
+	CID       string   // [CID] and {subid}
 	Pars      []string // [PAR-1]..[PAR-5]
-	DataDir   string   // .dat directory for [RANDLINE]/[RANDDFL]
+	SubIDs    [15]string
+	Status    string // {status}
+	Payout    string // {payout}
+	DataDir   string // .dat directory for [RANDLINE]/[RANDDFL]
 	Rng       *rand.Rand
 }
 
@@ -65,6 +68,17 @@ func Expand(s string, d MacroDeps) string {
 	var b strings.Builder
 	b.Grow(len(s))
 	for i := 0; i < len(s); {
+		if s[i] == '{' {
+			val, n := d.curlyAt(s[i:])
+			if n == 0 {
+				b.WriteByte('{')
+				i++
+				continue
+			}
+			b.WriteString(val)
+			i += n
+			continue
+		}
 		if s[i] != '[' {
 			b.WriteByte(s[i])
 			i++
@@ -142,6 +156,59 @@ func (d MacroDeps) scalars() []scalarMacro {
 		out = append(out, scalarMacro{"[PAR-" + strconv.Itoa(i+1) + "]", v})
 	}
 	return out
+}
+
+// curlyAt expands a Keitaro placeholder at the start of s.
+// Unknown names, including sub_id_16 and above, are left untouched.
+func (d MacroDeps) curlyAt(s string) (val string, n int) {
+	end := strings.IndexByte(s, '}')
+	if end <= 1 || end > 24 {
+		return "", 0
+	}
+	name := s[1:end]
+	switch name {
+	case "subid":
+		return d.CID, end + 1
+	case "country":
+		return d.Country, end + 1
+	case "keyword":
+		return url.QueryEscape(d.Key), end + 1
+	case "status":
+		return d.Status, end + 1
+	case "payout":
+		return d.Payout, end + 1
+	default:
+		idx, ok := subIDIndex(name)
+		if !ok {
+			return "", 0
+		}
+		return d.subID(idx), end + 1
+	}
+}
+
+// subIDIndex parses sub_id_1 .. sub_id_15 into a zero-based index.
+func subIDIndex(name string) (int, bool) {
+	n, ok := strings.CutPrefix(name, "sub_id_")
+	if !ok {
+		return 0, false
+	}
+	i, err := strconv.Atoi(n)
+	if err != nil || i < 1 || i > 15 {
+		return 0, false
+	}
+	return i - 1, true
+}
+
+// subID returns the named parameter. The first five fall back to Pars only
+// when the named slot is empty, so an explicit sub_id_6 is never stored there.
+func (d MacroDeps) subID(i int) string {
+	if i >= 0 && i < len(d.SubIDs) && d.SubIDs[i] != "" {
+		return d.SubIDs[i]
+	}
+	if i >= 0 && i < 5 && i < len(d.Pars) {
+		return d.Pars[i]
+	}
+	return ""
 }
 
 // expandScalars replaces only the scalar macros, used for RAND* arguments taken

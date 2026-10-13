@@ -69,6 +69,19 @@ type Group struct {
 	SaveKeys    bool         `json:"save_keys"`    // save keywords
 	SaveKeysSE  bool         `json:"save_keys_se"` // save keywords from search engines
 
+	// Weight, when true, picks among matching streams by Stream.Weight
+	// instead of taking the first match.
+	Weight bool `json:"weight,omitempty"`
+	// Num is the stable number shown in the campaign list. It is not the link.
+	Num int `json:"num,omitempty"`
+	// DomainID picks the parked host used as the public link base.
+	// Empty uses the primary links domain, then the engine URL.
+	DomainID string `json:"domain_id,omitempty"`
+	// SourceID links a traffic source whose parameter map names query keys.
+	SourceID string `json:"source_id,omitempty"`
+	// Postbacks are outbound URLs fired after an inbound conversion.
+	Postbacks []OutboundPostback `json:"postbacks,omitempty"`
+
 	Streams []Stream `json:"streams"`
 }
 
@@ -83,10 +96,15 @@ type FirewallRule struct {
 // The rules are factored out into Rules as data — the router runs them in a loop
 // (declarative rules executed by the router in a loop).
 type Stream struct {
-	Name       string     `json:"name"`
-	Status     bool       `json:"status"`
-	Comment    string     `json:"comment"` // operator's note, not used by the engine
-	Rules      Rules      `json:"rules"`
+	Name    string `json:"name"`
+	Status  bool   `json:"status"`
+	Comment string `json:"comment"` // operator's note, not used by the engine
+	Rules   Rules  `json:"rules"`
+	// FilterOr matches the stream when any one configured filter passes.
+	FilterOr bool `json:"filter_or,omitempty"`
+	// Weight is the campaign-weight share of this stream. Used only when the
+	// group has Weight set.
+	Weight     int        `json:"weight,omitempty"`
 	Out        Output     `json:"out"`
 	Bots       Bots       `json:"bots"`
 	Separation Separation `json:"separation"`
@@ -138,11 +156,13 @@ type Bots struct {
 
 // Output holds the stream output parameters (used at the render phase).
 type Output struct {
-	Redirect     string `json:"redirect"`
-	Out          string `json:"out"`
-	Chance       int    `json:"chance"`
-	Distribution string `json:"distribution"` // random | rotator | evenly (for out with |||)
-	Header       string `json:"header"`       // Content-Type override; empty = the group's
+	Redirect     string     `json:"redirect"`
+	Out          string     `json:"out"`
+	Chance       int        `json:"chance"`
+	Distribution string     `json:"distribution"` // random | rotator | evenly (for out with |||)
+	Header       string     `json:"header"`       // Content-Type override; empty = the group's
+	Offers       []ShareRef `json:"offers,omitempty"`
+	Landings     []ShareRef `json:"landings,omitempty"`
 }
 
 // Separation substitutes the output by a keyword from a .dat file (format "key;out").

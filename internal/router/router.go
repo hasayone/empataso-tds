@@ -13,6 +13,8 @@ import (
 	"sync"
 	"time"
 
+	"math/rand"
+
 	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/geo"
 )
@@ -63,12 +65,20 @@ type Deps struct {
 	IP      IPLister
 	Limiter Limiter
 	Now     func() time.Time // for scheduling; nil → time.Now
+	// Roll returns an integer in [0, n). Nil uses math/rand. Weight selection
+	// and offer shares both call it so tests can force a branch.
+	Roll func(n int) int
 }
 
-// Select returns the first active stream of the group that passed all filters.
+// Select returns the stream that should serve the visitor.
+// Without group weight that is the first active stream that passed every filter.
+// With group weight it is one of the matching streams, drawn by Stream.Weight.
 func Select(g *config.Group, v Visitor, deps Deps) (*config.Stream, bool) {
 	if g == nil {
 		return nil, false
+	}
+	if g.Weight {
+		return selectByWeight(g, v, deps)
 	}
 	for i := range g.Streams {
 		s := &g.Streams[i]
@@ -82,6 +92,66 @@ func Select(g *config.Group, v Visitor, deps Deps) (*config.Stream, bool) {
 	return nil, false
 }
 
+// selectByWeight draws among streams that match with the limit counter held
+// back, then spends the limit only on the stream that was drawn.
+func selectByWeight(g *config.Group, v Visitor, deps Deps) (*config.Stream, bool) {
+	probe := deps
+	probe.Limiter = nil
+	var matched []*config.Stream
+	var weights []int
+	for i := range g.Streams {
+		s := &g.Streams[i]
+		if !s.Status || !matches(s, v, probe) {
+			continue
+		}
+		w := s.Weight
+		if w < 0 {
+			w = 0
+		}
+		matched = append(matched, s)
+		weights = append(weights, w)
+	}
+	for len(matched) > 0 {
+		total := 0
+		for _, w := range weights {
+			if w > 0 {
+				total += w
+			}
+		}
+		n := len(matched)
+		if total > 0 {
+			n = total
+		}
+		idx := PickShare(weights, deps.roll(n))
+		s := matched[idx]
+		if deps.Limiter == nil || !s.Rules.Limit.Enabled || deps.Limiter.Allowed(s.Name, s.Rules.Limit) {
+			return s, true
+		}
+		matched = append(matched[:idx], matched[idx+1:]...)
+		weights = append(weights[:idx], weights[idx+1:]...)
+	}
+	return nil, false
+}
+
+func (d Deps) roll(n int) int {
+	if n <= 1 {
+		return 0
+	}
+	r := 0
+	if d.Roll != nil {
+		r = d.Roll(n)
+	} else {
+		r = rand.Intn(n)
+	}
+	if r < 0 {
+		r = 0
+	}
+	if r >= n {
+		r = r % n
+	}
+	return r
+}
+
 // matches returns true if the visitor passes all of the stream's filters.
 func matches(s *config.Stream, v Visitor, deps Deps) bool { return Why(s, v, deps) == "" }
 
@@ -90,9 +160,20 @@ func matches(s *config.Stream, v Visitor, deps Deps) bool { return Why(s, v, dep
 // config ("country", "ua_text", "device", …), so the admin panel can point at
 // the condition that stopped a visitor.
 //
+// FilterOr changes the combination: any one configured filter is enough.
+// The limit stays an AND in both modes and is still checked last.
+//
 // The limit is checked last and only through deps.Limiter, which consumes the
 // counter: pass a nil Limiter to ask "would it match" without spending it.
 func Why(s *config.Stream, v Visitor, deps Deps) string {
+	if s != nil && s.FilterOr {
+		return whyOr(s, v, deps)
+	}
+	return whyAnd(s, v, deps)
+}
+
+// whyAnd returns the first failing filter, or "" when every filter passes.
+func whyAnd(s *config.Stream, v Visitor, deps Deps) string {
 	r := &s.Rules
 
 	// lang/country — contains semantics).
@@ -456,4 +537,78 @@ func buildRegexp(raw string) *regexp.Regexp {
 		return nil
 	}
 	return re
+}
+
+// whyOr matches when any one configured filter passes. The limit is applied
+// only after that, so a failing filter does not spend the counter and a
+// passing one still cannot exceed it.
+func whyOr(s *config.Stream, v Visitor, deps Deps) string {
+	probe := deps
+	probe.Limiter = nil
+	type one struct {
+		name string
+		on   bool
+		rule config.Rules
+	}
+	r := s.Rules
+	checks := []one{
+		{name: "lang", on: listOn(r.Lang), rule: config.Rules{Lang: r.Lang}},
+		{name: "country", on: listOn(r.Country), rule: config.Rules{Country: r.Country}},
+		{name: "city", on: listOn(r.City), rule: config.Rules{City: r.City}},
+		{name: "region", on: listOn(r.Region), rule: config.Rules{Region: r.Region}},
+		{name: "ua_text", on: listOn(r.UAText), rule: config.Rules{UAText: r.UAText}},
+		{name: "referer_text", on: listOn(r.Referer), rule: config.Rules{Referer: r.Referer}},
+		{name: "key_text", on: listOn(r.Key), rule: config.Rules{Key: r.Key}},
+		{name: "domain_text", on: listOn(r.Domain), rule: config.Rules{Domain: r.Domain}},
+		{name: "os", on: listOn(r.OS), rule: config.Rules{OS: r.OS}},
+		{name: "browser", on: listOn(r.Browser), rule: config.Rules{Browser: r.Browser}},
+		{name: "brand", on: listOn(r.Brand), rule: config.Rules{Brand: r.Brand}},
+		{name: "schedule", on: r.Schedule.Enabled, rule: config.Rules{Schedule: r.Schedule}},
+		{name: "device", on: r.Computer == config.FlagA || r.Phone == config.FlagA || r.Tablet == config.FlagA,
+			rule: config.Rules{Computer: r.Computer, Phone: r.Phone, Tablet: r.Tablet}},
+		{name: "operators", on: len(r.Operators) > 0, rule: config.Rules{Operators: r.Operators}},
+		{name: "unique", on: r.Unique == config.FlagA || r.Unique == config.FlagB, rule: config.Rules{Unique: r.Unique}},
+		{name: "yabrowser", on: r.YaBrowser == config.FlagA || r.YaBrowser == config.FlagB, rule: config.Rules{YaBrowser: r.YaBrowser}},
+		{name: "has_referer", on: r.HasReferer == config.FlagA || r.HasReferer == config.FlagB, rule: config.Rules{HasReferer: r.HasReferer}},
+		{name: "ip_list", on: r.IPList.Flag != config.FlagOff && r.IPList.File != "", rule: config.Rules{IPList: r.IPList}},
+		{name: "asn", on: listOn(r.ASN), rule: config.Rules{ASN: r.ASN}},
+		{name: "org", on: listOn(r.Org), rule: config.Rules{Org: r.Org}},
+		{name: "timezone", on: listOn(r.Timezone), rule: config.Rules{Timezone: r.Timezone}},
+		{name: "get", on: listOn(r.Query), rule: config.Rules{Query: r.Query}},
+	}
+	passed := false
+	first := ""
+	active := 0
+	for _, c := range checks {
+		if !c.on {
+			continue
+		}
+		active++
+		cp := *s
+		cp.FilterOr = false
+		cp.Rules = c.rule
+		if why := whyAnd(&cp, v, probe); why != "" {
+			if first == "" {
+				first = c.name
+			}
+			continue
+		}
+		passed = true
+		break
+	}
+	if active > 0 && !passed {
+		return first
+	}
+	if r.Limit.Enabled && deps.Limiter != nil && !deps.Limiter.Allowed(s.Name, r.Limit) {
+		return "limit"
+	}
+	return ""
+}
+
+// listOn reports whether a list filter is actually applied.
+func listOn(f config.ListFilter) bool {
+	if f.Flag != config.FlagA && f.Flag != config.FlagB {
+		return false
+	}
+	return f.Raw != "" || len(f.Values) > 0
 }

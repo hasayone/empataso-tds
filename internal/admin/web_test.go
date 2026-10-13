@@ -50,6 +50,11 @@ func TestSPAStructure(t *testing.T) {
 	}
 	mustNot(t, html, `class="sidebar"`, "a sidebar — the layout has none")
 	must(t, html, `id="period"`, "period selector")
+	must(t, html, `data-pick`, "flow row checkbox")
+	must(t, html, `id="clang"`, "country language on settings")
+	must(t, html, `Испания`, "russian country name")
+	must(t, html, `/api/affiliate-networks`, "affiliate networks")
+	must(t, html, `period.today`, "period presets")
 	must(t, html, `id="userbtn"`, "user menu")
 	must(t, html, `window.addEventListener('hashchange',render)`, "hash routing")
 
@@ -64,8 +69,11 @@ func TestSPAStructure(t *testing.T) {
 	must(t, html, `/api/stats/performance`, "performance request")
 	must(t, html, `class="perft"`, "performance table")
 
-	// Flows: cards, then a canvas per flow — nodes, destinations, wires, drag handle.
-	must(t, html, `id="fgrid"`, "flow cards")
+	// Flows: table by default, cards on demand, then a canvas per flow.
+	must(t, html, `id="fgrid"`, "flow list")
+	must(t, html, `FLOW_VIEW='table'`, "flows table by default")
+	must(t, html, `kuztds-flows-view`, "remembered flows layout")
+	must(t, html, `data-flow-view="grid"`, "cards layout switch")
 	must(t, html, `class="canvas"`, "flow canvas")
 	must(t, html, `id="wires"`, "wires layer")
 	must(t, html, `data-grip`, "drag handle")

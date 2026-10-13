@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/netip"
@@ -131,9 +132,13 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 }
 
 type simRequest struct {
-	Groups  []config.Group `json:"groups"` // as edited in the browser, saved or not
-	Group   string         `json:"group"`
-	Visitor struct {
+	Groups    []config.Group   `json:"groups"` // as edited in the browser, saved or not
+	Offers    []config.Offer   `json:"offers"`
+	Landings  []config.Landing `json:"landings"`
+	Group     string           `json:"group"`
+	OfferStep bool             `json:"offer_step"`
+	Roll      *int             `json:"roll"`
+	Visitor   struct {
 		IP        string `json:"ip"`
 		UserAgent string `json:"useragent"`
 		Referer   string `json:"referer"`
@@ -232,24 +237,30 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 		ASN: g.ASN, Org: g.Org, Timezone: g.Timezone, TZOffset: vi.UTC, Query: q,
 	}
 	deps := router.Deps{IP: lists} // no Limiter: asking must not spend a limit
+	if req.Roll != nil {
+		roll := *req.Roll
+		deps.Roll = func(n int) int { return roll }
+	}
+	cats := s.simCatalogs(r.Context(), req)
 
 	var path []simStep
 	for hop := 0; ; hop++ {
 		step := simStep{Group: grp.ID, Selected: "-", Redirect: grp.Redirect, Out: grp.Out, Streams: []simStream{}}
+		chosen, _ := router.Select(grp, v, deps)
+		if chosen != nil {
+			step.Selected = chosen.Name
+			if chosen.Out.Redirect != "" {
+				step.Redirect = chosen.Out.Redirect
+			}
+			step.Out = chosen.Out.Out
+			step.Redirect, step.Out = router.ResolveOut(chosen, cats, req.OfferStep, step.Redirect, step.Out, deps.Roll)
+		}
 		for i := range grp.Streams {
 			st := &grp.Streams[i]
 			ss := simStream{Name: st.Name, On: st.Status}
-			// Streams after the winner are still evaluated: "would this one
-			// have matched too" is what explains a surprising order.
 			if st.Status {
 				ss.Why = router.Why(st, v, deps)
 				ss.Match = ss.Why == ""
-				if ss.Match && step.Selected == "-" {
-					step.Selected = st.Name
-					if st.Out.Redirect != "" {
-						step.Redirect, step.Out = st.Out.Redirect, st.Out.Out
-					}
-				}
 			}
 			step.Streams = append(step.Streams, ss)
 		}
@@ -275,6 +286,35 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 		grp = next
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"visitor": vi, "unique": v.Unique, "lang": lang, "path": path})
+}
+
+// simCatalogs builds the offer and landing maps for one simulation.
+// An omitted list is read from the store. A list in the request replaces it,
+// so an unsaved edit can be tried on its own.
+func (s *Server) simCatalogs(ctx context.Context, req simRequest) router.Catalogs {
+	offers := req.Offers
+	if offers == nil && s.cfg.Offers != nil {
+		if list, err := s.cfg.Offers.List(ctx); err == nil {
+			offers = list
+		}
+	}
+	landings := req.Landings
+	if landings == nil && s.cfg.Landings != nil {
+		if list, err := s.cfg.Landings.List(ctx); err == nil {
+			landings = list
+		}
+	}
+	cat := router.Catalogs{
+		Offers:   map[string]config.Offer{},
+		Landings: map[string]config.Landing{},
+	}
+	for _, o := range offers {
+		cat.Offers[o.ID] = o
+	}
+	for _, l := range landings {
+		cat.Landings[l.ID] = l
+	}
+	return cat
 }
 
 // --- cron ---
