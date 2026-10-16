@@ -6522,7 +6522,8 @@ const NET_TEMPLATES=[
   {id:'click',label:'clickid, goal, sum',url:'https://example.com/postback?clickid={subid}&goal={status}&sum={payout}',query:''}
 ];
 let LAND_SORT={k:'',dir:-1};
-const LAND_TEXT=new Set(['html','htm','php','phtml','css','js','mjs','json','txt','xml','svg','md','csv','webmanifest','map','less','scss','sass','vue','ts','tsx','jsx','yml','yaml','ini','conf','log']);
+// Same extension set as server landingTextExt (GET/PUT /api/landings/{id}/files).
+const LAND_TEXT=new Set(['html','htm','php','css','js','txt','json','xml','svg']);
 // landingKind is the catalog label for how a landing is served.
 // row is a landing record. It returns URL, PHP or HTML.
 function landingKind(row){
@@ -6533,7 +6534,6 @@ function landingKind(row){
 // path is the relative path from the file list. It returns true for a known text extension.
 function landingText(path){
   const name=String(path||'').split('/').pop().toLowerCase();
-  if(name==='.htaccess') return true;
   const dot=name.lastIndexOf('.');
   if(dot<0) return false;
   return LAND_TEXT.has(name.slice(dot+1));
@@ -6788,8 +6788,12 @@ async function landings(_,live){
     qa('[data-land]',grid).forEach(row=>row.onclick=e=>{if(e.target.closest('[data-ldel]'))return; openLand(row.dataset.land)});
     qa('[data-ldel]',grid).forEach(b=>b.onclick=async e=>{
       e.stopPropagation();
-      if(!await ask(tr('Delete landing')+' '+b.dataset.ldel+'?','',tr('Delete'),true)) return;
-      try{await call('DELETE','/api/landings/'+encodeURIComponent(b.dataset.ldel)); render()}
+      const id=b.dataset.ldel;
+      const row=(rows||[]).find(r=>String(r.id)===String(id));
+      const name=row&&row.name?String(row.name):'';
+      const title=name?tr('Delete landing')+' «'+name+'» (ID '+id+')?':tr('Delete landing')+' '+id+'?';
+      if(!await ask(title,'',tr('Delete'),true)) return;
+      try{await call('DELETE','/api/landings/'+encodeURIComponent(id)); render()}
       catch(err){toast(err.message,true)}
     });
     bindSort(grid, LAND_SORT, ()=>{if(live()) paintTable()});

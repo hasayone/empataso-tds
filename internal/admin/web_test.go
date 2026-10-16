@@ -707,6 +707,17 @@ func TestCodeEditorAndFilepick(t *testing.T) {
 	must(t, land, "z-index:81", "landing file modal z-index")
 }
 
+// TestLandingTextAndDeleteConfirm checks LAND_TEXT matches server landingTextExt,
+// landingText has no .htaccess shortcut, and delete asks with name and id.
+func TestLandingTextAndDeleteConfirm(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, "const LAND_TEXT=new Set(['html','htm','php','css','js','txt','json','xml','svg'])", "LAND_TEXT matches server landingTextExt")
+	lt := spaBetween(html, "function landingText(path)", "\n// landingFileURL")
+	mustNot(t, lt, ".htaccess", "landingText must not treat .htaccess as text")
+	land := spaBetween(html, "async function landings(", "let NET_SORT")
+	must(t, land, "(ID '+id+')?", "landings delete confirm shows name and id")
+}
+
 // TestSPASettingsPickers — country and timezone search boxes and the settings
 // postback card are gone. The lead URL in the postback popup has no payout,
 // the timezone letter buffer resets after 3 seconds, and theme hover does
