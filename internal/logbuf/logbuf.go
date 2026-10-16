@@ -64,6 +64,15 @@ type Event struct {
 	NetworkID string
 	// Subs holds sub_id_1 through sub_id_12. Higher slots stay in memory only.
 	Subs [12]string
+	// CostCents and CostCur are a price that arrived on the click itself.
+	// Zero means the click has no incoming price and a manual window may include it.
+	CostCents    int64
+	CostCur      string
+	Site         string
+	AdCampaignID string
+	CreativeID   string
+	ExternalID   string
+	XRW          string
 }
 
 // Inserter inserts a batch of events into storage (implemented by store.CH).

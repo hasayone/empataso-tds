@@ -70,6 +70,10 @@ func Do(redirect, out string, o Options) Result {
 		return htmlResult(200, `<!DOCTYPE html><head><meta name="robots" content="noindex,nofollow">`+
 			`<meta http-equiv="content-type" content="text/html; charset=utf-8"></head><body>`+out+`</body></html>`)
 
+	case "show_html_404":
+		// out is already a complete HTML document, so the body is not wrapped.
+		return htmlResult(http.StatusNotFound, out)
+
 	case "under_construction":
 		return htmlResult(200, fmt.Sprintf(`<!DOCTYPE html><head><meta http-equiv="content-type" content="text/html; charset=utf-8">`+
 			`<meta name="robots" content="noindex, nofollow"><title>Under construction</title></head>`+
@@ -95,6 +99,11 @@ func Do(redirect, out string, o Options) Result {
 	case "show_out":
 		b, _ := json.Marshal(map[string]any{"out": out, "type": 1, "mac": o.Mac})
 		return Result{Status: 200, ContentType: "application/json; charset=utf-8", Body: b}
+
+	case "landing":
+		// The engine serves a local landing before Do. This case keeps the
+		// type out of the unknown-redirect default when a caller still asks.
+		return htmlResult(http.StatusOK, out)
 
 	case "stop", "":
 		return Result{Status: 200}

@@ -11,15 +11,37 @@ import (
 	"github.com/egerkuzma/kuztds/internal/store"
 )
 
-// recordingStats captures the last filter Logs was called with.
+// recordingStats captures the last filter Logs was called with and the last breakdown call.
 type recordingStats struct {
 	fakeStats
-	last store.LogFilter
+	last        store.LogFilter
+	bdN         int
+	bdFilteredN int
+	bdDim       string
+	bdConds     []store.Cond
 }
 
 func (r *recordingStats) Logs(_ context.Context, f store.LogFilter) ([]store.LogRow, int64, error) {
 	r.last = f
 	return []store.LogRow{{IP: "1.2.3.4"}}, 1, nil
+}
+
+// Breakdown records an unfiltered breakdown and returns the fake rows.
+// dim is the dimension. It does not fail.
+func (r *recordingStats) Breakdown(ctx context.Context, from, to time.Time, dim string, limit int) ([]store.KV, error) {
+	r.bdN++
+	r.bdDim = dim
+	r.bdConds = nil
+	return r.fakeStats.Breakdown(ctx, from, to, dim, limit)
+}
+
+// BreakdownFiltered records conds and returns the fake rows.
+// dim is the dimension. conds are the event filters. It does not fail.
+func (r *recordingStats) BreakdownFiltered(ctx context.Context, from, to time.Time, dim string, limit int, conds []store.Cond) ([]store.KV, error) {
+	r.bdFilteredN++
+	r.bdDim = dim
+	r.bdConds = append([]store.Cond(nil), conds...)
+	return r.fakeStats.BreakdownFiltered(ctx, from, to, dim, limit, conds)
 }
 
 func serverWithStats(t *testing.T, st StatsProvider) (string, *http.Client) {

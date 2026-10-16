@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,7 @@ func testEnv(t *testing.T, groups *config.Groups, opts ...func(*engineDeps)) htt
 		t.Fatalf("realip: %v", err)
 	}
 	mux := http.NewServeMux()
+	mux.HandleFunc("/l/", d.serveLandingAsset)
 	mux.HandleFunc("/", d.root)
 	return realIP.Middleware(mux)
 }
@@ -303,6 +305,36 @@ func TestSeparation(t *testing.T) {
 
 // --- postback ---
 
+func TestEventCarriesSiteAndXRW(t *testing.T) {
+	gg := group(config.Stream{Name: "s", Status: true,
+		Out: config.Output{Redirect: "show_text", Out: "OK"}})
+	hdr := map[string]string{"User-Agent": uaWinChrome, "X-Requested-With": "com.example.app"}
+	path := "/g1?site=shop&ad_campaign_id=camp&creative_id=cr&external_id=ex"
+
+	h, ins, stop := withClickLog(t, gg, nil)
+	rec := do(t, h, path, "8.8.8.8", hdr)
+	stop()
+	if rec.Code != http.StatusOK || len(ins.events) != 1 {
+		t.Fatalf("status %d events %d", rec.Code, len(ins.events))
+	}
+	ev := ins.events[0]
+	if ev.Site != "shop" || ev.AdCampaignID != "camp" || ev.CreativeID != "cr" || ev.ExternalID != "ex" || ev.XRW != "com.example.app" {
+		t.Fatalf("event site=%q camp=%q cr=%q ex=%q xrw=%q", ev.Site, ev.AdCampaignID, ev.CreativeID, ev.ExternalID, ev.XRW)
+	}
+
+	h, ins, stop = withClickLog(t, gg, func(d *engineDeps) { d.keys = apiKeys{env: "apikey"} })
+	payload := apiRequest{KeyAPI: "apikey", ID: "g1", IP: "8.8.8.8"}
+	q := url.Values{"api": {encodeAPI(t, payload)}, "site": {"shop"}}
+	rec = do(t, h, "/?"+q.Encode(), "8.8.8.8", hdr)
+	stop()
+	if rec.Code != http.StatusOK || len(ins.events) != 1 || ins.events[0].XRW != "" {
+		t.Fatalf("api status %d events %+v", rec.Code, ins.events)
+	}
+	if ins.events[0].Site != "shop" {
+		t.Fatalf("api site %q", ins.events[0].Site)
+	}
+}
+
 func TestPostbackNoCHIs200(t *testing.T) {
 	h := testEnv(t, group(), func(d *engineDeps) { d.postbackKey = "secret" })
 	// chConn nil → just 200, without a panic
@@ -315,7 +347,7 @@ func TestPostbackNoCHIs200(t *testing.T) {
 // --- api mode ---
 
 func TestAPIModeForbiddenWithoutKey(t *testing.T) {
-	h := testEnv(t, group(), func(d *engineDeps) { d.apiKey = "apikey" })
+	h := testEnv(t, group(), func(d *engineDeps) { d.keys = apiKeys{env: "apikey"} })
 	// wrong key → 403
 	payload := apiRequest{KeyAPI: "wrong", ID: "g1", IP: "8.8.8.8"}
 	rec := do(t, h, "/?api="+encodeAPI(t, payload), "8.8.8.8", nil)
@@ -327,7 +359,7 @@ func TestAPIModeForbiddenWithoutKey(t *testing.T) {
 func TestAPIModeServes(t *testing.T) {
 	gg := group(config.Stream{Name: "s", Status: true,
 		Out: config.Output{Redirect: "api", Out: "https://offer.example/?k=[KEY]"}})
-	h := testEnv(t, gg, func(d *engineDeps) { d.apiKey = "apikey" })
+	h := testEnv(t, gg, func(d *engineDeps) { d.keys = apiKeys{env: "apikey"} })
 	payload := apiRequest{KeyAPI: "apikey", ID: "g1", IP: "8.8.8.8", Key: "kw", Uniq: "yes"}
 	rec := do(t, h, "/?api="+encodeAPI(t, payload), "8.8.8.8", nil)
 	if rec.Code != http.StatusOK {

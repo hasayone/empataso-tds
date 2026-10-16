@@ -254,6 +254,11 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 			}
 			step.Out = chosen.Out.Out
 			step.Redirect, step.Out = router.ResolveOut(chosen, cats, req.OfferStep, step.Redirect, step.Out, deps.Roll)
+			if len(chosen.Out.Offers) == 0 && len(chosen.Out.Landings) == 0 {
+				if next, ok := router.ApplyOutShares(step.Out, chosen.Out.OutShares, deps.Roll); ok {
+					step.Out = next
+				}
+			}
 		}
 		for i := range grp.Streams {
 			st := &grp.Streams[i]
@@ -316,8 +321,6 @@ func (s *Server) simCatalogs(ctx context.Context, req simRequest) router.Catalog
 	}
 	return cat
 }
-
-// --- cron ---
 
 // cronState is what the panel shows on the Automation page.
 type cronState struct {

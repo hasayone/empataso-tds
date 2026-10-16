@@ -1,0 +1,13 @@
+# Одноразовый перенос. Не стартует сам и не перезапускается.
+# docker compose -f deploy/docker-compose.yml run --rm --no-deps kt-import
+services:
+  kt-import:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: kt-import:local
+    restart: "no"
+    env_file:
+      - path: ../.env
+        required: false
+    profiles: ["import"]

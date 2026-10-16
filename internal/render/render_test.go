@@ -32,6 +32,11 @@ func TestExpandCurlyKeitaroMacros(t *testing.T) {
 	if got != want {
 		t.Fatalf("curly macros:\n got=%s\nwant=%s", got, want)
 	}
+	subs[0] = "a&b=1"
+	got = Expand("https://o/?a={sub_id_1}&st={status}", MacroDeps{Status: "sale", SubIDs: subs})
+	if strings.Contains(got, "a&b") || !strings.Contains(got, "a%26b%3D1") || !strings.Contains(got, "st=sale") {
+		t.Fatalf("query values not escaped: %s", got)
+	}
 }
 
 func TestExpandCountryCity(t *testing.T) {
@@ -107,6 +112,79 @@ func TestDoHTTPRedirect(t *testing.T) {
 	res.Write(w)
 	if w.Code != 302 || w.Header().Get("Location") != "https://example.com/x" {
 		t.Errorf("Write redirect: code=%d loc=%q", w.Code, w.Header().Get("Location"))
+	}
+}
+
+func TestExpandQueryParamMacros(t *testing.T) {
+	query := func(name string) (string, bool) {
+		switch name {
+		case "bundle_id":
+			return "a b&c", true
+		case "sub_id_1", "subid", "a.b":
+			return "from-query", true
+		default:
+			return "", false
+		}
+	}
+	var subs [15]string
+	subs[0] = "from-sub"
+	d := MacroDeps{CID: "cid-1", SubIDs: subs, Query: query}
+	cases := []struct{ in, want string }{
+		{"{bundle_id}", "a+b%26c"},
+		{"{missing}", "{missing}"},
+		{"{x}", "{x}"},
+		{"{sub_id_1}", "from-sub"},
+		{"{subid}", "cid-1"},
+		{"{a.b}", "{a.b}"},
+		{"pre {color} post", "pre {color} post"},
+	}
+	for _, c := range cases {
+		if got := Expand(c.in, d); got != c.want {
+			t.Errorf("Expand(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	if got := Expand("{bundle_id}", MacroDeps{}); got != "{bundle_id}" {
+		t.Errorf("nil Query must leave {bundle_id}, got %q", got)
+	}
+}
+
+func TestDoShowHTML404(t *testing.T) {
+	const page = "<!DOCTYPE html><html><body>gone</body></html>"
+	r := Do("show_html_404", page, Options{})
+	if r.Status != 404 {
+		t.Errorf("status=%d, want 404", r.Status)
+	}
+	if !strings.Contains(r.ContentType, "text/html") {
+		t.Errorf("content-type %q, want text/html", r.ContentType)
+	}
+	if string(r.Body) != page {
+		t.Errorf("body %q, want the stream output unchanged", r.Body)
+	}
+}
+
+func TestExpandOfferMacro(t *testing.T) {
+	got := Expand("[OFFER] {offer}", MacroDeps{
+		Offer: "/g1/offer?cid=abc&utm=1",
+		Query: func(name string) (string, bool) {
+			if name == "offer" {
+				return "from-query", true
+			}
+			return "", false
+		},
+	})
+	if got != "[OFFER] /g1/offer?cid=abc&utm=1" {
+		t.Fatalf("offer macro = %q", got)
+	}
+}
+
+func TestDoLandingIsAccepted(t *testing.T) {
+	r := Do("landing", "<b>x</b>", Options{})
+	if r.Status != 200 || !strings.Contains(r.ContentType, "text/html") || string(r.Body) != "<b>x</b>" {
+		t.Fatalf("landing = %+v", r)
+	}
+	unknown := Do("not-a-type", "<b>x</b>", Options{})
+	if unknown.Status != 200 || unknown.ContentType != "" || len(unknown.Body) != 0 {
+		t.Fatalf("unknown type = %+v", unknown)
 	}
 }
 

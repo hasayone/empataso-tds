@@ -40,8 +40,6 @@ type Secrets struct {
 	AdminSessionKey    string
 }
 
-// --- stream config model ---
-
 // MaxGroupHops bounds a chain of "group" links (a stream or a default that
 // hands the visitor to another group), so that groups pointing at each other
 // end in the trash answer instead of spinning. The engine enforces it; the
@@ -79,6 +77,15 @@ type Group struct {
 	DomainID string `json:"domain_id,omitempty"`
 	// SourceID links a traffic source whose parameter map names query keys.
 	SourceID string `json:"source_id,omitempty"`
+	// Folder is the operator's grouping label for the campaign list and its filter. The engine ignores it.
+	Folder string `json:"folder,omitempty"`
+	// CostParam and CurrencyParam are the query names for a click price.
+	// CostToken and CurrencyToken are written into the campaign link as the
+	// values the traffic source replaces, for example {price}.
+	CostParam     string `json:"cost_param,omitempty"`
+	CostToken     string `json:"cost_token,omitempty"`
+	CurrencyParam string `json:"currency_param,omitempty"`
+	CurrencyToken string `json:"currency_token,omitempty"`
 	// Postbacks are outbound URLs fired after an inbound conversion.
 	Postbacks []OutboundPostback `json:"postbacks,omitempty"`
 
@@ -163,6 +170,9 @@ type Output struct {
 	Header       string     `json:"header"`       // Content-Type override; empty = the group's
 	Offers       []ShareRef `json:"offers,omitempty"`
 	Landings     []ShareRef `json:"landings,omitempty"`
+	// OutShares is the weight of each part of Out split on "|||".
+	// An empty slice or a non-positive sum keeps Distribution.
+	OutShares []int `json:"out_shares,omitempty"`
 }
 
 // Separation substitutes the output by a keyword from a .dat file (format "key;out").
@@ -258,6 +268,9 @@ type Rules struct {
 	Unique     Flag `json:"unique"`      // 0=unique only,1=non-unique only,2=any
 	YaBrowser  Flag `json:"yabrowser"`   // 0=exclude YaBrowser,1=only it,2=any
 	HasReferer Flag `json:"has_referer"` // 0=require referer,1=require no referer,2=any
+	// Bot is the visitor class from the installation profile.
+	// FlagA keeps bots, FlagB keeps everyone else, FlagOff does not filter.
+	Bot Flag `json:"bot,omitempty"`
 
 	Limit LimitRule `json:"limit"`
 }

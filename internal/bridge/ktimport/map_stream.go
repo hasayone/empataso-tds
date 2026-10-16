@@ -1,0 +1,455 @@
+package ktimport
+
+import (
+	"encoding/json"
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+	"unicode/utf8"
+)
+
+// mapCampaigns превращает кампании в группы.
+//
+// Параметры: src — снимок; losses — уже собранный отчёт. Справочники лежат в получателе.
+// Результат: группы и отчёт вместе с потерями кампаний.
+// Ошибки: нет.
+func (c *mapCtx) mapCampaigns(src Snapshot, losses []Loss) ([]Group, []Loss) {
+	c.aliases = campaignAliases(src.Campaigns)
+	c.seen = map[string]bool{}
+	camps := append([]Campaign(nil), src.Campaigns...)
+	sort.Slice(camps, func(i, j int) bool {
+		if camps[i].Alias == camps[j].Alias {
+			return int(camps[i].ID) < int(camps[j].ID)
+		}
+		return camps[i].Alias < camps[j].Alias
+	})
+	var out []Group
+	for _, camp := range camps {
+		g, extra := c.mapCampaign(camp, src.Streams[strconv.Itoa(int(camp.ID))])
+		out = append(out, g)
+		losses = append(losses, extra...)
+		c.seen[g.ID] = true
+	}
+	return out, losses
+}
+
+// mapCampaign превращает одну кампанию в группу.
+//
+// Параметры: camp — кампания; streams — её потоки. Справочники и занятые id лежат в получателе.
+// Результат: группа и строки отчёта этой кампании.
+// Ошибки: нет.
+func (c *mapCtx) mapCampaign(camp Campaign, streams []KStream) (Group, []Loss) {
+	var losses []Loss
+	c.losses = &losses
+	id, emptyAlias, dupAlias := assignedID(camp.Alias, int(camp.ID), c.seen)
+	status := activeState(camp.State)
+	if emptyAlias {
+		status = false
+		losses = append(losses, Loss{Kind: "disabled", Ref: id, Detail: "у кампании нет alias"})
+	}
+	if dupAlias {
+		status = false
+		losses = append(losses, Loss{Kind: "disabled", Ref: id, Detail: "alias уже занят"})
+	}
+	posts, postLoss := parsePostbacks(camp.Postbacks)
+	if postLoss != "" {
+		kind := "skipped"
+		if strings.Contains(postLoss, "часть") || strings.Contains(postLoss, "заменён") {
+			kind = "approximated"
+		}
+		losses = append(losses, Loss{Kind: kind, Ref: id, Detail: postLoss})
+	}
+	folder, trimmed := trimFolder(groupName(c.groups, int(camp.GroupID), "campaign"))
+	if trimmed {
+		losses = append(losses, Loss{Kind: "approximated", Ref: id, Detail: "имя группы обрезано до 64 символов"})
+	}
+	g := Group{
+		ID: id, Name: camp.Name, Num: int(camp.ID), Status: status, Redirect: "show_text", Out: "",
+		Folder: folder, Weight: strings.EqualFold(camp.Type, "weight"), Postbacks: posts,
+		Streams: c.mapStreams(streams, !status),
+	}
+	if int(camp.DomainID) > 0 {
+		g.DomainID = numID(int(camp.DomainID))
+	}
+	if int(camp.TrafficSourceID) > 0 {
+		g.SourceID = numID(int(camp.TrafficSourceID))
+	}
+	return g, losses
+}
+
+// trimFolder ограничивает подпись папки 64 символами, как админка.
+//
+// Параметры: name — имя группы Keitaro.
+// Результат: подпись и true, если строка была обрезана.
+// Ошибки: нет.
+func trimFolder(name string) (string, bool) {
+	name = strings.TrimSpace(name)
+	if utf8.RuneCountInString(name) <= 64 {
+		return name, false
+	}
+	return string([]rune(name)[:64]), true
+}
+
+// parsePostbacks читает массив исходящих шаблонов кампании.
+//
+// Параметры: raw — JSON postbacks.
+// Результат: шаблоны и текст потери. Пустой текст значит, что терять нечего.
+// Ошибки: нет. Немассив и пустой разбор возвращают прежнюю причину пропуска.
+func parsePostbacks(raw json.RawMessage) ([]Postback, string) {
+	s := strings.TrimSpace(string(raw))
+	if s == "" || s == "null" || s == "[]" {
+		return nil, ""
+	}
+	var arr []struct {
+		URL      string          `json:"url"`
+		Method   string          `json:"method"`
+		Statuses []string        `json:"statuses"`
+		Status   json.RawMessage `json:"status"`
+	}
+	if json.Unmarshal(raw, &arr) != nil {
+		return nil, "исходящие S2S шаблоны не переносятся"
+	}
+	var out []Postback
+	rewritten := false
+	skipped := 0
+	for _, item := range arr {
+		u := strings.TrimSpace(item.URL)
+		if !httpish(u) {
+			skipped++
+			continue
+		}
+		method := strings.ToUpper(strings.TrimSpace(item.Method))
+		if method == "" {
+			method = "GET"
+		}
+		if method != "GET" && method != "POST" {
+			method = "GET"
+			rewritten = true
+		}
+		statuses := append([]string{}, item.Statuses...)
+		if len(statuses) == 0 && len(bytesTrim(item.Status)) > 0 {
+			var many []string
+			var one string
+			if json.Unmarshal(item.Status, &many) == nil {
+				statuses = many
+			} else if json.Unmarshal(item.Status, &one) == nil && strings.TrimSpace(one) != "" {
+				statuses = []string{strings.TrimSpace(one)}
+			}
+		}
+		out = append(out, Postback{URL: u, Method: method, Statuses: statuses})
+	}
+	if len(out) == 0 {
+		return nil, "исходящие S2S шаблоны не переносятся"
+	}
+	if skipped > 0 {
+		return out, "часть исходящих S2S пропущена"
+	}
+	if rewritten {
+		return out, "метод постбэка заменён на GET"
+	}
+	return out, ""
+}
+
+// bytesTrim убирает пробелы у JSON-фрагмента.
+//
+// Параметры: raw — фрагмент.
+// Результат: фрагмент без краевых пробелов.
+// Ошибки: нет.
+func bytesTrim(raw json.RawMessage) string {
+	return strings.TrimSpace(string(raw))
+}
+
+// mapStreams упорядочивает потоки: forced, regular, default.
+//
+// Параметры: streams — потоки кампании; forceOff — выключить все потоки. Справочники и отчёт лежат в получателе.
+// Результат: потоки kuztds, по одному на поток Keitaro.
+// Ошибки: нет.
+func (c *mapCtx) mapStreams(streams []KStream, forceOff bool) []Stream {
+	sorted := append([]KStream(nil), streams...)
+	sort.Slice(sorted, func(i, j int) bool {
+		ri, rj := typeRank(sorted[i].Type), typeRank(sorted[j].Type)
+		if ri != rj {
+			return ri < rj
+		}
+		if int(sorted[i].Position) != int(sorted[j].Position) {
+			return int(sorted[i].Position) < int(sorted[j].Position)
+		}
+		return int(sorted[i].ID) < int(sorted[j].ID)
+	})
+	var out []Stream
+	for _, st := range sorted {
+		out = append(out, c.buildStream(st, forceOff))
+	}
+	if out == nil {
+		out = []Stream{}
+	}
+	return out
+}
+
+// typeRank задаёт порядок типов потока Keitaro.
+//
+// Параметры: t — type потока.
+// Результат: 0 forced, 1 regular и неизвестное, 2 default.
+// Ошибки: нет.
+func typeRank(t string) int {
+	switch strings.ToLower(t) {
+	case "forced":
+		return 0
+	case "default":
+		return 2
+	default:
+		return 1
+	}
+}
+
+// buildStream собирает один поток kuztds без размножения filter_or.
+//
+// Параметры: st — поток; forceOff — выключить поток. Справочники и отчёт лежат в получателе.
+// Результат: поток с FilterOr, долями и правилами.
+// Ошибки: нет.
+func (c *mapCtx) buildStream(st KStream, forceOff bool) Stream {
+	s, extra := streamOutput(st, c.offers, c.landings, c.losses, c.pages, c.aliases)
+	rules, ok, why, flosses := mapFilters(st.Filters, c.lists)
+	ref := streamRef(int(st.ID))
+	for _, l := range flosses {
+		l.Ref = ref
+		*c.losses = append(*c.losses, l)
+	}
+	s.Rules = rules
+	s.FilterOr = st.FilterOr
+	on := !forceOff && !strings.EqualFold(st.State, "disabled") && extra == ""
+	s.Status = on && ok
+	if extra != "" {
+		s.Status = false
+		*c.losses = append(*c.losses, Loss{Kind: "disabled", Ref: ref, Detail: extra})
+	} else if !ok {
+		s.Status = false
+		*c.losses = append(*c.losses, Loss{Kind: "disabled", Ref: ref, Detail: why})
+	}
+	return s
+}
+
+// streamOutput собирает доли, запасной URL и причину выключения.
+//
+// Параметры: st — поток; offers и landings — справочники; losses — отчёт; pages — файлы длинных страниц; aliases — id кампании → id группы.
+// Результат: поток без правил и текст причины. Пустая причина значит, что выход годится.
+// Ошибки: нет.
+func streamOutput(st KStream, offers map[int]Offer, landings map[int]Landing, losses *[]Loss, pages *pageBag, aliases map[int]string) (Stream, string) {
+	s := Stream{
+		Name:    streamTitle(st),
+		Comment: fmt.Sprintf("keitaro_stream_id=%d", int(st.ID)),
+		Out:     Output{Redirect: "show_text", Out: "", Chance: 100},
+	}
+	ref := streamRef(int(st.ID))
+	if int(st.Weight) > 0 {
+		s.Weight = int(st.Weight)
+	}
+	s.Out.Offers = offerRefs(st, offers, losses)
+	s.Out.Landings = landingRefs(st, landings, losses)
+	if localOffer(st, offers, losses) {
+		return s, "локальный PHP не скачивается и не исполняется"
+	}
+	if hasLocalLanding(st, landings) {
+		s.Out.Redirect = "landing"
+		s.Out.Out = ""
+		s.Out.Chance = 100
+		return s, ""
+	}
+	if status404Action(st.ActionType) {
+		payload := strings.TrimSpace(st.ActionPayload)
+		s.Out.Chance = 100
+		if payload == "" {
+			s.Out.Redirect = "404_not_found"
+			s.Out.Out = ""
+			return s, ""
+		}
+		s.Out.Redirect = "show_html_404"
+		s.Out.Out = pageRef("show_html_404", rewriteMacros(payload), pages)
+		return s, ""
+	}
+	if strings.EqualFold(strings.TrimSpace(st.ActionType), "campaign") {
+		redirect, out, approx := campaignAction(st.ActionPayload, aliases)
+		s.Out.Redirect = redirect
+		s.Out.Out = out
+		s.Out.Chance = 100
+		if approx != "" {
+			*losses = append(*losses, Loss{Kind: "approximated", Ref: ref, Detail: approx})
+		}
+		return s, ""
+	}
+	redirect, approx := redirectOf(st.ActionType, st.Schema)
+	fallback := ""
+	if len(s.Out.Offers) > 0 {
+		fallback = firstOfferURL(st, offers)
+	} else if len(s.Out.Landings) > 0 {
+		fallback = firstLandingURL(st, landings)
+	} else if strings.TrimSpace(st.ActionPayload) != "" && !localAction(st.ActionType) && carriesOut(redirect) {
+		fallback = st.ActionPayload
+	}
+	next := rewriteMacros(fallback)
+	s.Out.Redirect = redirect
+	s.Out.Out = next
+	s.Out.Chance = 100
+	if !carriesOut(redirect) {
+		s.Out.Out = ""
+	} else {
+		s.Out.Out = pageRef(redirect, next, pages)
+	}
+	if approx != "" {
+		*losses = append(*losses, Loss{Kind: "approximated", Ref: ref, Detail: approx})
+	}
+	return s, ""
+}
+
+// streamTitle берёт имя потока Keitaro.
+//
+// Параметры: st — поток.
+// Результат: имя без краевых пробелов. Пустое имя становится stream и id потока.
+// Ошибки: нет.
+func streamTitle(st KStream) string {
+	name := strings.TrimSpace(st.Name)
+	if name == "" {
+		return streamRef(int(st.ID))
+	}
+	return name
+}
+
+// streamRef собирает ссылку отчёта на поток.
+//
+// Параметры: id — id потока Keitaro.
+// Результат: строка вида stream 37520.
+// Ошибки: нет.
+func streamRef(id int) string {
+	return fmt.Sprintf("stream %d", id)
+}
+
+// firstOfferURL берёт адрес первого живого внешнего оффера.
+//
+// Параметры: st — поток; offers — справочник.
+// Результат: URL или пустая строка.
+// Ошибки: нет.
+func firstOfferURL(st KStream, offers map[int]Offer) string {
+	for _, ref := range st.Offers {
+		if strings.EqualFold(ref.State, "deleted") {
+			continue
+		}
+		o, ok := offers[int(ref.OfferID)]
+		if !ok || offerLocal(o) {
+			continue
+		}
+		if u := httpURL(o.ActionType, o.ActionPayload); u != "" {
+			return u
+		}
+	}
+	return ""
+}
+
+// firstLandingURL берёт адрес первого живого внешнего лендинга.
+//
+// Параметры: st — поток; landings — справочник.
+// Результат: URL или пустая строка.
+// Ошибки: нет.
+func firstLandingURL(st KStream, landings map[int]Landing) string {
+	for _, ref := range st.Landings {
+		if strings.EqualFold(ref.State, "deleted") {
+			continue
+		}
+		l, ok := landings[int(ref.LandingID)]
+		if !ok || landingLocal(l) {
+			continue
+		}
+		if u := httpURL(l.ActionType, l.ActionPayload); u != "" {
+			return u
+		}
+	}
+	return ""
+}
+
+// hasLocalLanding сообщает, что в потоке есть живой локальный лендинг.
+//
+// Параметры: st — поток; landings — справочник.
+// Результат: true, если ссылка не удалена и лендинг локальный. Файл лендинга не читается и строка отчёта не пишется.
+// Ошибки: нет.
+func hasLocalLanding(st KStream, landings map[int]Landing) bool {
+	for _, ref := range st.Landings {
+		if strings.EqualFold(ref.State, "deleted") {
+			continue
+		}
+		l, ok := landings[int(ref.LandingID)]
+		if ok && landingLocal(l) {
+			return true
+		}
+	}
+	return false
+}
+
+// localOffer сообщает о локальном оффере и не читает его файл.
+//
+// Параметры: st — поток; offers — справочник; losses — отчёт.
+// Результат: true, если в потоке есть локальный оффер.
+// Ошибки: нет.
+func localOffer(st KStream, offers map[int]Offer, losses *[]Loss) bool {
+	found := false
+	for _, ref := range st.Offers {
+		if strings.EqualFold(ref.State, "deleted") {
+			continue
+		}
+		o, ok := offers[int(ref.OfferID)]
+		if !ok || !offerLocal(o) {
+			continue
+		}
+		*losses = append(*losses, Loss{
+			Kind:   "skipped",
+			Ref:    entityRef("offer", int(o.ID)),
+			Detail: fmt.Sprintf("id=%d name=%s type=%s", int(o.ID), o.Name, first(o.OfferType, o.ActionType)),
+		})
+		found = true
+	}
+	return found
+}
+
+// rewriteMacros заменяет известные макросы Keitaro на метки kuztds.
+// Неизвестное имя в фигурных скобках остаётся: движок читает его как параметр URL.
+//
+// Параметры: raw — исходная строка URL или текста.
+// Результат: строка после замены известных макросов.
+// Ошибки: нет.
+func rewriteMacros(raw string) string {
+	return macroRE.ReplaceAllStringFunc(raw, func(m string) string {
+		if next, ok := macroMap[m]; ok {
+			return next
+		}
+		return m
+	})
+}
+
+// unique убирает повторы, сохраняя порядок.
+//
+// Параметры: items — строки.
+// Результат: строки без повторов.
+// Ошибки: нет.
+func unique(items []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, item := range items {
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
+}
+
+// first возвращает первую непустую строку.
+//
+// Параметры: a, b — кандидаты.
+// Результат: a, если он не пуст, иначе b.
+// Ошибки: нет.
+func first(a, b string) string {
+	if strings.TrimSpace(a) != "" {
+		return a
+	}
+	return b
+}

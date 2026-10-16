@@ -71,7 +71,7 @@ func newEng(t *testing.T, groups *config.Groups, h engHarness) http.Handler {
 	seps.Load(separationFiles(groups)...)
 	d := &engineDeps{
 		log: log, lists: lists, sigs: sigs, seps: seps, geores: geo.Nop{}, groups: groups,
-		dataDir: dir, keysDir: dir, postbackKey: "pb", apiKey: "k",
+		dataDir: dir, keysDir: dir, postbackKey: "pb", keys: apiKeys{env: "k"},
 		fetcher: fetch.New("", nil), trashMode: h.trashMode, trashURL: h.trashURL,
 	}
 	if d.trashMode == "" {
@@ -300,6 +300,7 @@ func TestE2E_AllRedirectTypes(t *testing.T) {
 		{"iframe_redirect", "https://if.example", 200, "", "", "if.example"},
 		{"iframe_selection", "https://is.example", 200, "", "", "is.example"},
 		{"show_page_html", "<b>hi</b>", 200, "", "", "<b>hi</b>"},
+		{"show_html_404", "<!DOCTYPE html><p>no</p>", 404, "text/html", "", "<!DOCTYPE html><p>no</p>"},
 		{"under_construction", "", 200, "", "", "404.png"},
 		{"stop", "", 200, "", "", ""},
 		{"403_forbidden", "", 403, "", "", "403"},

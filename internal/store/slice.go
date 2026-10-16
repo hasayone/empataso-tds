@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"fmt"
+	"log"
 	"time"
 )
 
@@ -22,17 +23,57 @@ type SliceRow struct {
 
 // Slice groups visits for the report page.
 // Offer and source stay empty when the click columns are not on the table.
+// It is SliceFiltered with no extra conditions. Errors are the same.
 func (c *CH) Slice(ctx context.Context, from, to time.Time) ([]SliceRow, error) {
+	return c.SliceFiltered(ctx, from, to, nil)
+}
+
+// SliceFiltered groups visits and conversions for the report page.
+// ctx bounds both queries. from and to are the window. conds filter both
+// sides. A condition on a field the conversions table does not have yields
+// visits only: conversions stay zero and that is not an error.
+// A condition on a wave that is not ready on events returns an empty slice
+// without a query. ErrUnknownField and ErrBadCond come from the events side.
+// A failed conversion query is logged, keeps the visit rows and returns a
+// nil error, matching the unfiltered report.
+func (c *CH) SliceFiltered(ctx context.Context, from, to time.Time, conds []Cond) ([]SliceRow, error) {
+	evSQL, evArgs, skip, err := buildWhere(c, "events", conds)
+	if err != nil {
+		return nil, err
+	}
+	if skip {
+		return []SliceRow{}, nil
+	}
+	convOK := true
+	var cvSQL string
+	var cvArgs []any
+	for _, cond := range conds {
+		f, ok := fieldByName(cond.Field)
+		if !ok || f.Conv == "" {
+			convOK = false
+			break
+		}
+	}
+	if convOK {
+		var skipC bool
+		cvSQL, cvArgs, skipC, err = buildWhere(c, "conversions", conds)
+		if err != nil {
+			return nil, err
+		}
+		if skipC {
+			convOK = false
+		}
+	}
 	offer, source, extra := "''", "''", ""
 	if c.clickCols {
 		offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
 	}
 	q := fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s,
 		count() AS hits, countIf(bot != '' AND bot != '-') AS bots
-		FROM events WHERE ts >= ? AND ts < ?
+		FROM events WHERE ts >= ? AND ts < ?`, offer, source) + evSQL + fmt.Sprintf(`
 		GROUP BY group_name, stream_name, country%s
-		ORDER BY hits DESC LIMIT 2000`, offer, source, extra)
-	rows, err := c.conn.Query(ctx, q, from, to)
+		ORDER BY hits DESC LIMIT 2000`, extra)
+	rows, err := c.conn.Query(ctx, q, append([]any{from, to}, evArgs...)...)
 	if err != nil {
 		return nil, err
 	}
@@ -53,28 +94,16 @@ func (c *CH) Slice(ctx context.Context, from, to time.Time) ([]SliceRow, error) 
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	convOffer, convSource, convExtra := "''", "''", ""
-	if c.clickCols {
-		convOffer, convSource, convExtra = "offer_id", "source_id", ", offer_id, source_id"
+	if !convOK {
+		if out == nil {
+			out = []SliceRow{}
+		}
+		return out, nil
 	}
-	cq := fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, count() AS conv, sum(profit) AS profit
-		FROM (
-		  SELECT group_name, stream_name, country, '' AS offer_id, '' AS source_id, profit, ts FROM postbacks
-		  UNION ALL
-		  SELECT group_name, stream_name, country, %s AS offer_id, %s AS source_id, profit, ts FROM conversions
-		) WHERE ts >= ? AND ts < ?
-		GROUP BY group_name, stream_name, country%s`, convOffer, convSource, convOffer, convSource, convExtra)
-	if !c.clickCols {
-		cq = `SELECT group_name, stream_name, country, '' , '', count() AS conv, sum(profit) AS profit
-		FROM (
-		  SELECT group_name, stream_name, country, profit, ts FROM postbacks
-		  UNION ALL
-		  SELECT group_name, stream_name, country, profit, ts FROM conversions
-		) WHERE ts >= ? AND ts < ?
-		GROUP BY group_name, stream_name, country`
-	}
-	pbs, err := c.conn.Query(ctx, cq, from, to)
+	cq := sliceConvSQL(c, cvSQL)
+	pbs, err := c.conn.Query(ctx, cq, append([]any{from, to}, cvArgs...)...)
 	if err != nil {
+		log.Printf("clickhouse: slice conversions: %v", err)
 		return out, nil
 	}
 	defer pbs.Close()
@@ -96,4 +125,26 @@ func (c *CH) Slice(ctx context.Context, from, to time.Time) ([]SliceRow, error) 
 		out = []SliceRow{}
 	}
 	return out, nil
+}
+
+// sliceConvSQL is the conversion half of the period report.
+// c selects the click and ext waves of conversionFrom, so the outer WHERE
+// sees every conversions column, including ones the postbacks table lacks.
+// cvSQL is the extra AND fragment from buildWhere, or empty.
+// The string is a full SELECT. It does not fail.
+func sliceConvSQL(c *CH, cvSQL string) string {
+	offer, source, extra := "''", "''", ""
+	click, ext := false, false
+	if c != nil {
+		click, ext = c.clickCols, c.extConv
+		if c.clickCols {
+			offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
+		}
+	}
+	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, count() AS conv, sum(profit) AS profit
+		FROM (
+		%s
+		) WHERE ts >= ? AND ts < ?%s
+		GROUP BY group_name, stream_name, country%s`,
+		offer, source, conversionFrom(click, ext), cvSQL, extra)
 }

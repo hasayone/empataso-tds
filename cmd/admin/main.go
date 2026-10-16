@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -45,10 +46,14 @@ func main() {
 		SessionTTL:   12 * time.Hour,
 		CookieSecure: getenv("KUZTDS_ADMIN_COOKIE_SECURE", "true") == "true",
 		EngineURL:    getenv("KUZTDS_ENGINE_URL", "http://localhost:8080"),
+		PublicURL:    os.Getenv("KUZTDS_PUBLIC_URL"),
 		PasswordFile: os.Getenv("KUZTDS_ADMIN_PASSWORD_FILE"),
+		APIKeysFile:  os.Getenv("KUZTDS_API_KEYS_FILE"),
 		Sessions:     security.NewMemoryStore(), // overridden by Redis below
 		Limiter:      allowAll{},
 		Log:          log,
+		KeitaroBase:  strings.TrimSpace(os.Getenv("KEITARO_BASE_URL")),
+		KeitaroKey:   os.Getenv("KEITARO_API_KEY"),
 	}
 
 	// Redis: sessions (survive restart) + login rate-limit.
@@ -71,6 +76,22 @@ func main() {
 		cfg.Landings = admin.NewJSONStore[config.Landing](getenv("KUZTDS_LANDINGS_FILE", filepath.Join(dir, "landings.json")))
 		cfg.Sources = admin.NewJSONStore[config.TrafficSource](getenv("KUZTDS_SOURCES_FILE", filepath.Join(dir, "sources.json")))
 		cfg.Networks = admin.NewJSONStore[config.AffiliateNetwork](getenv("KUZTDS_NETWORKS_FILE", filepath.Join(dir, "networks.json")))
+		cfg.Domains = admin.NewJSONStore[config.Domain](getenv("KUZTDS_DOMAINS_FILE", filepath.Join(dir, "domains.json")))
+		cfg.SeqOffers = admin.NewIDSeq(getenv("KUZTDS_OFFER_SEQ_FILE", filepath.Join(dir, "offer_seq.json")))
+		cfg.SeqLandings = admin.NewIDSeq(getenv("KUZTDS_LANDING_SEQ_FILE", filepath.Join(dir, "landing_seq.json")))
+		cfg.SeqSources = admin.NewIDSeq(getenv("KUZTDS_SOURCE_SEQ_FILE", filepath.Join(dir, "source_seq.json")))
+		cfg.SeqNetworks = admin.NewIDSeq(getenv("KUZTDS_NETWORK_SEQ_FILE", filepath.Join(dir, "network_seq.json")))
+		cfg.SeqDomains = admin.NewIDSeq(getenv("KUZTDS_DOMAIN_SEQ_FILE", filepath.Join(dir, "domain_seq.json")))
+		cfg.SpendPath = getenv("KUZTDS_SPEND_FILE", filepath.Join(dir, "spend.json"))
+		cfg.BotPath = getenv("KUZTDS_BOT_FILE", filepath.Join(dir, "bot_protection.json"))
+		cfg.UIPath = getenv("KUZTDS_UI_FILE", filepath.Join(dir, "ui.json"))
+		pagesDir := getenv("KUZTDS_PAGES_DIR", filepath.Join(dir, "pages"))
+		cfg.Pages = admin.NewFilePages(pagesDir)
+		log.Info("pages dir", "path", pagesDir)
+		cfg.Manifest = admin.NewFileManifest(filepath.Join(dir, "keitaro-import.json"))
+		landingsDir := getenv("KUZTDS_LANDINGS_DIR", filepath.Join(dir, "landings"))
+		cfg.LandingFiles = admin.NewFileLandings(landingsDir)
+		log.Info("landings dir", "path", landingsDir)
 	}
 
 	// .dat lists (IP, WAP operators, signatures) — editor.
@@ -106,6 +127,7 @@ func main() {
 			log.Warn("clickhouse not connected, stats disabled", "err", err)
 		} else {
 			cfg.Stats = ch
+			cfg.Warehouse = ch
 			log.Info("clickhouse connected", "addr", a)
 		}
 	}

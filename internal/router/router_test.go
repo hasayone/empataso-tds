@@ -128,6 +128,20 @@ func TestSelect_OperatorRequireAndBlock(t *testing.T) {
 	}
 }
 
+func TestSelect_BotFlag(t *testing.T) {
+	v := baseVisitor()
+	if _, ok := Select(&config.Group{Streams: []config.Stream{stream("s", config.Rules{Bot: config.FlagA})}}, v, Deps{}); ok {
+		t.Error("bots only must cut a human")
+	}
+	v.Bot = true
+	if _, ok := Select(&config.Group{Streams: []config.Stream{stream("s", config.Rules{Bot: config.FlagA})}}, v, Deps{}); !ok {
+		t.Error("bots only must keep a bot")
+	}
+	if _, ok := Select(&config.Group{Streams: []config.Stream{stream("s", config.Rules{Bot: config.FlagB})}}, v, Deps{}); ok {
+		t.Error("humans only must cut a bot")
+	}
+}
+
 func TestSelect_UniqueRefererYaBrowser(t *testing.T) {
 	v := baseVisitor()
 	// non-unique only (FlagB), but the visitor is unique -> cut
@@ -298,6 +312,20 @@ func TestSelectWeightDoesNotAlwaysPickFirst(t *testing.T) {
 	}
 }
 
+func TestApplyOutShares(t *testing.T) {
+	raw := "https://a.example|||https://b.example"
+	if got, ok := ApplyOutShares(raw, nil, func(int) int { return 0 }); ok || got != raw {
+		t.Fatalf("missing shares = %q %v", got, ok)
+	}
+	got, ok := ApplyOutShares(raw, []int{0, 100}, func(int) int { return 0 })
+	if !ok || got != "https://b.example" {
+		t.Fatalf("share = %q %v", got, ok)
+	}
+	if got, ok = ApplyOutShares("only", []int{50, 50}, nil); ok {
+		t.Fatal("single part used shares")
+	}
+}
+
 func TestResolveOutOfferAndLandingStep(t *testing.T) {
 	cat := Catalogs{
 		Offers: map[string]config.Offer{
@@ -325,5 +353,37 @@ func TestResolveOutOfferAndLandingStep(t *testing.T) {
 	_, out = ResolveOut(both, cat, true, "http_redirect", "", func(int) int { return 5 })
 	if out != "https://offer.example/b" {
 		t.Fatalf("offer step = %s, want second share", out)
+	}
+}
+
+func TestResolveOutLocalLanding(t *testing.T) {
+	cat := Catalogs{
+		Offers: map[string]config.Offer{
+			"o1": {ID: "o1", URL: "https://offer.example/a", Status: true},
+		},
+		Landings: map[string]config.Landing{
+			"7":  {ID: "7", Status: true, Local: true, Entry: "index.html"},
+			"l1": {ID: "l1", URL: "https://land.example/", Status: true},
+		},
+	}
+	local := &config.Stream{Out: config.Output{
+		Landings: []config.ShareRef{{ID: "7", Share: 1}},
+		Offers:   []config.ShareRef{{ID: "o1", Share: 1}},
+	}}
+	redirect, out := ResolveOut(local, cat, false, "http_redirect", "", nil)
+	if redirect != "landing" || out != "7" {
+		t.Fatalf("local landing = %s %s", redirect, out)
+	}
+	redirect, out = ResolveOut(local, cat, true, "http_redirect", "", nil)
+	if redirect != "http_redirect" || out != "https://offer.example/a" {
+		t.Fatalf("offer step = %s %s", redirect, out)
+	}
+	typed := &config.Stream{Out: config.Output{
+		Redirect: "landing",
+		Landings: []config.ShareRef{{ID: "l1", Share: 1}},
+	}}
+	redirect, out = ResolveOut(typed, cat, false, "landing", "", nil)
+	if redirect != "landing" || out != "l1" {
+		t.Fatalf("stream redirect landing = %s %s", redirect, out)
 	}
 }

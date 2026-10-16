@@ -3,6 +3,7 @@ FROM golang:1.25-bookworm AS build
 WORKDIR /src
 
 COPY go.mod go.sum ./
+COPY internal/bridge/go.mod internal/bridge/go.mod
 RUN go mod download
 
 COPY . .

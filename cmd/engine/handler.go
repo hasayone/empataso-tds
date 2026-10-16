@@ -47,10 +47,13 @@ type engineDeps struct {
 	dataDir      string
 	keysDir      string
 	postbackKey  string
-	apiKey       string
+	keys         apiKeys
 	trashMode    string
 	trashURL     string
 	curlCacheMin int
+	botPath      string
+	pages        *pageCache
+	landServe    *landingServer
 }
 
 // ipListFiles collects the names of .dat lists referenced by stream ip_list
@@ -134,7 +137,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 				if err != nil {
 					d.log.Warn("postback failed", "cid", cid, "err", err)
 				} else {
-					d.fireOutbound(gid, cid, profit, status, r.URL.Query())
+					d.queueOutbound(gid, cid, profit, status, r.URL.Query())
 				}
 			}
 		}
@@ -146,7 +149,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	var apiReq *apiRequest
 	apiMode := false
 	if a := r.URL.Query().Get("api"); a != "" {
-		req, ok := parseAPIRequest(a, d.apiKey)
+		req, ok := parseAPIRequest(a, d.keys.verify)
 		if !ok {
 			w.WriteHeader(http.StatusForbidden)
 			return
@@ -290,10 +293,18 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	}
 	src, _ := d.sourceOf(grp)
 	kw, subs := config.ApplySource(r.URL.Query(), src)
+	extras := config.SourceExtras(r.URL.Query(), src)
 	if kw != "" {
 		key = kw
 		v.Key = kw
 	}
+	// The installation profile decides the bot flag before a stream is chosen.
+	// The selected stream still decides where a bot is sent.
+	profile := config.Bots{}
+	if d.sigs != nil && d.lists != nil {
+		profile = d.botProfile()
+	}
+	v.Bot = detectBot(d.lists, d.sigs, d.dataDir, ip, ua, refOrEmpty(ref), v.Lang, profile) != detect.BotNone
 	// Output defaults — from the group; the stream overrides them.
 	//
 	// A stream (or a group's default) of type "group" hands the visitor to
@@ -407,19 +418,40 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	if networkID != "" {
 		outRaw = appendOfferQuery(outRaw, d.offerQuery(networkID))
 	}
+	var shares []int
 	if selStream != nil {
 		dist = selStream.Out.Distribution
+		if len(selStream.Out.Offers) == 0 && len(selStream.Out.Landings) == 0 {
+			shares = selStream.Out.OutShares
+		}
 	}
-	outRaw = pickOut(w, r, d.counters, rctx, grp.ID, streamName, outRaw, dist)
+	outRaw = pickOut(w, r, d.counters, rctx, grp.ID, streamName, outRaw, dist, shares)
+	// @page: is inlined after clickIDs has compared the raw reference and
+	// before macro expansion. A missing file stays an empty body of this stream.
+	outRaw = d.applyPage(outRaw)
 
 	// 5) Render the output: macros, api_mac, CURL fetch, or a normal redirect.
 	cid := newCID()
+	if offerStep {
+		if c := r.URL.Query().Get("cid"); reusedCID(c) {
+			cid = c
+		}
+	}
+	q := v.Query
 	md := render.MacroDeps{
 		Key: v.Key, Path: r.Host, IP: ip.String(), Country: country, City: g.City,
 		Region: g.Region, Lang: v.Lang, Device: device, Operator: operator,
 		Domain: v.Domain, UserAgent: ua, CID: cid, Pars: pars, SubIDs: subs,
 		ASN: asnText(g.ASN), Org: dashEmpty(g.Org), Timezone: g.Timezone, TZOffset: tzOffset,
-		DataDir: d.dataDir}
+		DataDir: d.dataDir, Offer: offerStepURL(gid, cid, r.URL.RawQuery),
+		Query: func(n string) (string, bool) {
+			v, ok := q[n]
+			if !ok || len(v) == 0 {
+				return "", false
+			}
+			return v[0], true
+		},
+	}
 	out := render.Expand(outRaw, md)
 	if wantRemote {
 		out = strings.ReplaceAll(out, "[REMOTE]", remoteVal)
@@ -461,13 +493,17 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			res = trashResult(d.trashMode, d.trashURL)
 			d.log.Error("engine: curl fetch failed", "group", grp.ID, "stream", streamName, "url", out)
 		}
-	} else {
+	} else if redirect != "landing" {
 		res = render.Do(redirect, out, render.Options{ContentType: ctype, Path: r.Host,
 			Country: country, City: g.City, Region: g.Region, Device: device,
 			Operator: operator, Bot: bot, Uniq: b2yn(unique), Lang: v.Lang, Mac: mac})
 	}
 
 	// 6) Event log — asynchronous, the response does not wait for the write (phase 4).
+	costCents, costCur, costOK := config.IncomingCost(r.URL.Query(), grp.CostParam, grp.CurrencyParam)
+	if !costOK {
+		costCents, costCur = 0, ""
+	}
 	if d.logs != nil {
 		d.logs.Push(logbuf.Event{
 			Ts: time.Now(), GroupID: grp.ID, GroupName: grp.Name,
@@ -479,7 +515,9 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			BrowserV: info.BrowserVer, Brand: info.Brand, CID: cid,
 			ASN: g.ASN, Org: dashEmpty(g.Org), Timezone: dashEmpty(g.Timezone), Via: via,
 			OfferID: offerID, LandingID: landingID, SourceID: grp.SourceID, NetworkID: networkID,
-			Subs: storedSubs(subs),
+			Subs: storedSubs(subs), CostCents: costCents, CostCur: costCur,
+			Site: extras.Site, AdCampaignID: extras.AdCampaignID, CreativeID: extras.CreativeID,
+			ExternalID: extras.ExternalID, XRW: requestXRW(r, apiMode),
 		})
 	}
 
@@ -502,6 +540,10 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Kuztds-Country", country)
 	h.Set("X-Kuztds-Stream", streamName)
 	h.Set("X-Kuztds-Uniq", b2yn(unique))
+	if redirect == "landing" {
+		d.serveLocalLanding(w, r, strings.TrimSpace(outRaw), md)
+		return
+	}
 	res.Write(w)
 }
 
@@ -514,7 +556,10 @@ func clickIDs(stream *config.Stream, cat router.Catalogs, outRaw string, offerSt
 	if !offerStep {
 		for _, ref := range stream.Out.Landings {
 			item, ok := cat.Landings[ref.ID]
-			if ok && item.Status && !item.Local && item.URL == outRaw {
+			if !ok || !item.Status {
+				continue
+			}
+			if ref.ID == outRaw || (!item.Local && item.URL == outRaw) {
 				return "", ref.ID, ""
 			}
 		}

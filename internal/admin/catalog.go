@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/egerkuzma/kuztds/internal/config"
 )
@@ -62,6 +65,8 @@ func (s *JSONStore[T]) Save(_ context.Context, list []T) error {
 }
 
 var catalogIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+var offerCountryCodeRe = regexp.MustCompile(`^[a-zA-Z]{2}$`)
+var offerCurrencyCodeRe = regexp.MustCompile(`^[a-zA-Z]{3}$`)
 
 func validCatalogID(id string) string {
 	if !catalogIDRe.MatchString(id) {
@@ -74,8 +79,15 @@ func validDestination(id, raw string, local bool) string {
 	if msg := validCatalogID(id); msg != "" {
 		return msg
 	}
-	if !local && strings.TrimSpace(raw) == "" {
+	if local {
+		return ""
+	}
+	u := strings.TrimSpace(raw)
+	if u == "" {
 		return "url required"
+	}
+	if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
+		return "url must be http or https"
 	}
 	return ""
 }
@@ -104,7 +116,39 @@ func validPostback(p config.OutboundPostback) string {
 	if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
 		return "url must be http or https"
 	}
+	if len(p.Statuses) == 0 {
+		return "status required"
+	}
 	return ""
+}
+
+// trimGroupLabel trims spaces and limits a catalog group label to maxFolderRunes runes.
+// An all-space value becomes empty.
+func trimGroupLabel(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(s) <= maxFolderRunes {
+		return s
+	}
+	return string([]rune(s)[:maxFolderRunes])
+}
+
+func prepOffer(o *config.Offer) {
+	o.Group = trimGroupLabel(o.Group)
+}
+
+func prepLanding(o *config.Landing) {
+	o.Group = trimGroupLabel(o.Group)
+}
+
+func prepNetwork(n *config.AffiliateNetwork) {
+	n.Group = trimGroupLabel(n.Group)
+}
+
+func prepSource(src *config.TrafficSource) {
+	src.Group = trimGroupLabel(src.Group)
 }
 
 func registerOffers(s *Server, mux *http.ServeMux) {
@@ -112,6 +156,7 @@ func registerOffers(s *Server, mux *http.ServeMux) {
 		func(o config.Offer) string { return o.ID },
 		func(o *config.Offer, id string) { o.ID = id },
 		validOffer,
+		&catalogHooks[config.Offer]{seq: s.cfg.SeqOffers, floor: s.offerFloor, prep: prepOffer},
 	)
 }
 
@@ -124,6 +169,62 @@ func validOffer(o config.Offer) string {
 			return "network_id: " + msg
 		}
 	}
+	if msg := validOfferCountries(o.Countries); msg != "" {
+		return msg
+	}
+	if msg := validOfferPayoutModel(o.PayoutModel); msg != "" {
+		return msg
+	}
+	if msg := validOfferPayout(o.Payout); msg != "" {
+		return msg
+	}
+	if msg := validOfferPayoutCurrency(o.PayoutCurrency); msg != "" {
+		return msg
+	}
+	return ""
+}
+
+// validOfferCountries checks each entry is a two-letter Latin country code.
+// It returns an empty string when the list is valid, otherwise a client error message.
+func validOfferCountries(codes []string) string {
+	for _, code := range codes {
+		if !offerCountryCodeRe.MatchString(strings.TrimSpace(code)) {
+			return "countries: each code must be 2 letters"
+		}
+	}
+	return ""
+}
+
+// validOfferPayoutModel accepts an empty value, cpa, or cpc.
+// It returns an empty string when valid, otherwise a client error message.
+func validOfferPayoutModel(model string) string {
+	switch strings.ToLower(strings.TrimSpace(model)) {
+	case "", "cpa", "cpc":
+		return ""
+	default:
+		return "payout_model must be cpa or cpc"
+	}
+}
+
+// validOfferPayout rejects negative amounts and non-finite floats.
+// It returns an empty string when valid, otherwise a client error message.
+func validOfferPayout(amount float64) string {
+	if amount < 0 || math.IsNaN(amount) || math.IsInf(amount, 0) {
+		return "payout must not be negative"
+	}
+	return ""
+}
+
+// validOfferPayoutCurrency accepts an empty value or exactly three Latin letters.
+// It returns an empty string when valid, otherwise a client error message.
+func validOfferPayoutCurrency(code string) string {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return ""
+	}
+	if !offerCurrencyCodeRe.MatchString(code) {
+		return "payout_currency must be 3 letters"
+	}
 	return ""
 }
 
@@ -132,6 +233,7 @@ func registerNetworks(s *Server, mux *http.ServeMux) {
 		func(o config.AffiliateNetwork) string { return o.ID },
 		func(o *config.AffiliateNetwork, id string) { o.ID = id },
 		validNetwork,
+		&catalogHooks[config.AffiliateNetwork]{seq: s.cfg.SeqNetworks, floor: s.networkFloor, prep: prepNetwork},
 	)
 }
 
@@ -165,11 +267,24 @@ func validOfferQuery(s string) string {
 	return ""
 }
 
+// validLanding checks a landing id and, for a remote landing, its URL.
+// o is the landing. It returns an empty string when the record is acceptable.
+// It does not return an error; the string is the client message.
+func validLanding(o config.Landing) string {
+	return validDestination(o.ID, o.URL, o.Local)
+}
+
 func registerLandings(s *Server, mux *http.ServeMux) {
 	registerCRUD(s, mux, "/api/landings", s.cfg.Landings,
 		func(o config.Landing) string { return o.ID },
 		func(o *config.Landing, id string) { o.ID = id },
-		func(o config.Landing) string { return validDestination(o.ID, o.URL, o.Local) },
+		validLanding,
+		&catalogHooks[config.Landing]{
+			seq:      s.cfg.SeqLandings,
+			floor:    s.landingFloor,
+			prep:     prepLanding,
+			onDelete: s.removeLandingFiles,
+		},
 	)
 }
 
@@ -178,12 +293,77 @@ func registerSources(s *Server, mux *http.ServeMux) {
 		func(o config.TrafficSource) string { return o.ID },
 		func(o *config.TrafficSource, id string) { o.ID = id },
 		validSource,
+		&catalogHooks[config.TrafficSource]{seq: s.cfg.SeqSources, floor: s.sourceFloor, prep: prepSource},
 	)
+}
+
+func registerDomains(s *Server, mux *http.ServeMux) {
+	registerCRUD(s, mux, "/api/domains", s.cfg.Domains,
+		func(o config.Domain) string { return o.ID },
+		func(o *config.Domain, id string) { o.ID = id },
+		validDomain,
+		&catalogHooks[config.Domain]{seq: s.cfg.SeqDomains, floor: s.domainFloor, prep: prepDomain, tidy: tidyDomains},
+	)
+}
+
+func validDomain(d config.Domain) string {
+	if msg := validCatalogID(d.ID); msg != "" {
+		return msg
+	}
+	host := strings.TrimSpace(d.Host)
+	if host == "" || strings.Contains(host, "://") || strings.ContainsAny(host, " /\\") {
+		return "host required"
+	}
+	switch d.Role {
+	case "admin", "links", "both":
+	default:
+		return "role must be admin, links or both"
+	}
+	return ""
+}
+
+func prepDomain(d *config.Domain) {
+	d.Host = strings.ToLower(strings.TrimSpace(d.Host))
+	if d.Role == "" {
+		d.Role = "both"
+	}
+	d.Group = trimGroupLabel(d.Group)
+}
+
+func tidyDomains(list []config.Domain, id string) []config.Domain {
+	primary := false
+	for _, d := range list {
+		if d.ID == id && d.Primary {
+			primary = true
+		}
+	}
+	if !primary {
+		return list
+	}
+	for i := range list {
+		if list[i].ID != id {
+			list[i].Primary = false
+		}
+	}
+	return list
+}
+
+// catalogHooks assigns a number and tidies the list around one catalog.
+// A nil hooks value keeps the old rule: an empty id is rejected by valid.
+// onDelete runs after the record is removed and the file is saved.
+type catalogHooks[T any] struct {
+	seq      *idSeq
+	floor    func() (int, error)
+	prep     func(*T)
+	tidy     func([]T, string) []T
+	onDelete func(id string)
 }
 
 // registerCRUD mounts list, create, read, replace and delete for one catalog.
 // A nil store answers 503. PUT of an existing id replaces that record in place.
-func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSONStore[T], idOf func(T) string, setID func(*T, string), valid func(T) string) {
+// When hooks carries a counter, an empty id is filled under that counter's lock
+// before validation. An explicit id is left as sent and the counter moves past it.
+func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSONStore[T], idOf func(T) string, setID func(*T, string), valid func(T) string, hooks *catalogHooks[T]) {
 	h := func(next http.HandlerFunc) http.Handler {
 		return s.auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if store == nil {
@@ -207,6 +387,32 @@ func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSON
 			writeErr(w, http.StatusBadRequest, "bad json")
 			return
 		}
+		if hooks != nil && hooks.seq != nil {
+			hooks.seq.mu.Lock()
+			defer hooks.seq.mu.Unlock()
+		}
+		if hooks != nil && hooks.prep != nil {
+			hooks.prep(&item)
+		}
+		if idOf(item) == "" && hooks != nil && hooks.seq != nil {
+			floor := 1
+			if hooks.floor != nil {
+				n, err := hooks.floor()
+				if err != nil {
+					writeErr(w, http.StatusInternalServerError, "read error")
+					return
+				}
+				floor = n
+			}
+			n, err := hooks.seq.take(floor)
+			if err != nil {
+				writeErr(w, http.StatusInternalServerError, "save error")
+				return
+			}
+			setID(&item, strconv.Itoa(n))
+		} else if hooks != nil && hooks.seq != nil {
+			hooks.seq.note(idOf(item))
+		}
 		if msg := valid(item); msg != "" {
 			writeErr(w, http.StatusBadRequest, msg)
 			return
@@ -223,6 +429,9 @@ func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSON
 			}
 		}
 		list = append(list, item)
+		if hooks != nil && hooks.tidy != nil {
+			list = hooks.tidy(list, idOf(item))
+		}
 		if err := store.Save(r.Context(), list); err != nil {
 			writeErr(w, http.StatusInternalServerError, "save error")
 			return
@@ -244,6 +453,10 @@ func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSON
 			return
 		}
 		setID(&item, r.PathValue("id"))
+		if hooks != nil && hooks.prep != nil {
+			hooks.prep(&item)
+			setID(&item, r.PathValue("id"))
+		}
 		if msg := valid(item); msg != "" {
 			writeErr(w, http.StatusBadRequest, msg)
 			return
@@ -265,6 +478,9 @@ func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSON
 			return
 		}
 		list[idx] = item
+		if hooks != nil && hooks.tidy != nil {
+			list = hooks.tidy(list, idOf(item))
+		}
 		if err := store.Save(r.Context(), list); err != nil {
 			writeErr(w, http.StatusInternalServerError, "save error")
 			return
@@ -294,6 +510,9 @@ func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSON
 		if err := store.Save(r.Context(), next); err != nil {
 			writeErr(w, http.StatusInternalServerError, "save error")
 			return
+		}
+		if hooks != nil && hooks.onDelete != nil {
+			hooks.onDelete(id)
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 	}))

@@ -62,29 +62,33 @@ func TestAppendKey(t *testing.T) {
 func TestParseAPIRequest(t *testing.T) {
 	good := `{"key_api":"k","id":"g1","ip":"1.2.3.4"}`
 	enc := base64.StdEncoding.EncodeToString([]byte(good))
-	if r, ok := parseAPIRequest(enc, "k"); !ok || r.ID != "g1" {
+	accept := apiKeys{env: "k"}.verify
+	if r, ok := parseAPIRequest(enc, accept); !ok || r.ID != "g1" {
 		t.Errorf("valid request must parse, got ok=%v", ok)
 	}
 	// wrong key
-	if _, ok := parseAPIRequest(enc, "other"); ok {
+	if _, ok := parseAPIRequest(enc, apiKeys{env: "other"}.verify); ok {
 		t.Error("wrong key must fail")
 	}
 	// empty server key → always rejected
-	if _, ok := parseAPIRequest(enc, ""); ok {
+	if _, ok := parseAPIRequest(enc, apiKeys{}.verify); ok {
 		t.Error("empty server key must fail")
 	}
+	if _, ok := parseAPIRequest(enc, nil); ok {
+		t.Error("nil verify must fail")
+	}
 	// garbage base64
-	if _, ok := parseAPIRequest("!!!notbase64!!!", "k"); ok {
+	if _, ok := parseAPIRequest("!!!notbase64!!!", accept); ok {
 		t.Error("bad base64 must fail")
 	}
 	// valid base64, but not JSON
 	bad := base64.StdEncoding.EncodeToString([]byte("not json"))
-	if _, ok := parseAPIRequest(bad, "k"); ok {
+	if _, ok := parseAPIRequest(bad, accept); ok {
 		t.Error("non-JSON must fail")
 	}
 	// URL-safe base64 is also accepted
 	encURL := base64.URLEncoding.EncodeToString([]byte(good))
-	if _, ok := parseAPIRequest(encURL, "k"); !ok {
+	if _, ok := parseAPIRequest(encURL, accept); !ok {
 		t.Error("url-safe base64 must parse")
 	}
 }

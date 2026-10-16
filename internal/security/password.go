@@ -1,6 +1,4 @@
-// Package security — admin authentication primitives: password hashing (argon2id),
-// random tokens, sessions, and CSRF. Replaces the MD5 password and cookie auth
-// with secure storage of the administrator password.
+// Package security holds password hashing, random tokens, sessions, and CSRF for the admin.
 package security
 
 import (

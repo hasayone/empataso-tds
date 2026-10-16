@@ -10,6 +10,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"testing"
@@ -238,6 +239,94 @@ func TestCHRoundTrip(t *testing.T) {
 	}
 	if _, kept, _ := ch.Logs(ctx, LogFilter{From: from, To: to, Group: []string{group}, Stream: []string{"landed"}, Limit: 10}); kept != 1 {
 		t.Errorf("DeleteGroupLogs removed another group's row: %d left, expected 1", kept)
+	}
+}
+
+// TestCHExtColumns inserts a click with the ext fields, records two
+// conversions and checks the journal, value list and a field filter.
+func TestCHExtColumns(t *testing.T) {
+	ch := chFromEnv(t)
+	defer ch.Close()
+	ctx := context.Background()
+	group := fmt.Sprintf("itest_ext_%d", os.Getpid())
+	cid := fmt.Sprintf("ext_%d", os.Getpid())
+	now := time.Now().UTC().Truncate(time.Second)
+	from := now.Add(-time.Hour)
+	to := now.Add(time.Hour)
+	t.Cleanup(func() {
+		_ = ch.conn.Exec(ctx, "ALTER TABLE events DELETE WHERE group_name = ?", group)
+		_ = ch.conn.Exec(ctx, "ALTER TABLE postbacks DELETE WHERE group_name = ?", group)
+		_ = ch.conn.Exec(ctx, "ALTER TABLE conversions DELETE WHERE group_name = ?", group)
+	})
+	ev := logbuf.Event{
+		Ts: now, GroupID: group, GroupName: group, Stream: "s1", Country: "pl",
+		CID: cid, Site: "exland", XRW: "XMLHttpRequest", IP: "8.8.8.8",
+	}
+	if err := ch.InsertEvents(ctx, []logbuf.Event{ev}); err != nil {
+		t.Fatalf("InsertEvents: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := ch.RecordConversion(ctx, PostbackIn{CID: cid, Profit: 3, Status: "Approved", TID: "T1"}); err != nil {
+		t.Fatalf("RecordConversion: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	rows, _, err := ch.QueryPostbacks(ctx, PostbackQuery{
+		From: from, To: to, Group: group, Limit: 20,
+		Conds: []Cond{{Field: "status", Op: "in", Values: []string{"Sale", "Approved"}}},
+	})
+	if err != nil {
+		t.Fatalf("QueryPostbacks: %v", err)
+	}
+	var approved *PostbackRow
+	for i := range rows {
+		if rows[i].CID == cid && rows[i].Status == "approved" {
+			approved = &rows[i]
+		}
+	}
+	if approved == nil {
+		t.Fatalf("approved row missing: %+v", rows)
+	}
+	if approved.OriginalStatus != "Approved" || approved.Status != "approved" || approved.PrevStatus != "" {
+		t.Fatalf("status fields: %+v", approved)
+	}
+	if approved.ClickTS.Unix() != now.Unix() {
+		t.Fatalf("click_ts %s, want %s", approved.ClickTS, now)
+	}
+	if approved.Site != "exland" || approved.XRW != "XMLHttpRequest" {
+		t.Fatalf("site/xrw: %+v", approved)
+	}
+	if _, err := ch.RecordConversion(ctx, PostbackIn{CID: cid, Profit: 4, Status: "sale", TID: "T2"}); err != nil {
+		t.Fatalf("second conversion: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	rows, _, err = ch.QueryPostbacks(ctx, PostbackQuery{
+		From: from, To: to, Group: group, Limit: 20,
+		Conds: []Cond{{Field: "status", Op: "in", Values: []string{"Sale", "Approved"}}},
+	})
+	if err != nil {
+		t.Fatalf("QueryPostbacks sale: %v", err)
+	}
+	var sale *PostbackRow
+	for i := range rows {
+		if rows[i].CID == cid && rows[i].Status == "sale" {
+			sale = &rows[i]
+		}
+	}
+	if sale == nil || sale.PrevStatus != "approved" {
+		t.Fatalf("sale prev: %+v", sale)
+	}
+	if _, err := ch.Values(ctx, "events", "country", from, to, 50); err != nil {
+		t.Fatalf("Values country: %v", err)
+	}
+	if _, err := ch.Values(ctx, "events", "ip", from, to, 50); !errors.Is(err, ErrBadCond) {
+		t.Fatalf("Values ip: %v", err)
+	}
+	got, _, err := ch.Logs(ctx, LogFilter{
+		From: from, To: to, Group: []string{group}, Limit: 10,
+		Conds: []Cond{{Field: "xrw", Op: "eq", Values: []string{"XMLHttpRequest"}}},
+	})
+	if err != nil || len(got) != 1 || got[0].XRW != "XMLHttpRequest" || got[0].Site != "exland" {
+		t.Fatalf("Logs xrw: %v %+v", err, got)
 	}
 }
 

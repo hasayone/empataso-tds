@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -56,20 +58,23 @@ func (d *engineDeps) sourceOf(grp *config.Group) (*config.TrafficSource, bool) {
 
 // fireOutbound queues the campaign templates that match status.
 // A full queue drops the job so the inbound pixel is never blocked.
-func (d *engineDeps) fireOutbound(groupID, cid string, profit float64, status string, q url.Values) {
+// It reports false only when a matching template existed and none was queued.
+func (d *engineDeps) fireOutbound(groupID, cid string, profit float64, status string, q url.Values) bool {
 	if d == nil || d.outbound == nil || d.groups == nil || groupID == "" {
-		return
+		return true
 	}
 	grp, ok := d.groups.Get(groupID)
 	if !ok {
-		return
+		return true
 	}
 	_, subs := config.ApplySource(q, nil)
 	payout := strconv.FormatFloat(profit, 'f', -1, 64)
+	matched, queued := 0, 0
 	for _, pb := range grp.Postbacks {
 		if !pb.MatchesStatus(status) {
 			continue
 		}
+		matched++
 		method := strings.ToUpper(strings.TrimSpace(pb.Method))
 		if method == "" {
 			method = http.MethodGet
@@ -83,6 +88,7 @@ func (d *engineDeps) fireOutbound(groupID, cid string, profit float64, status st
 		}
 		select {
 		case d.outbound <- job:
+			queued++
 		default:
 			d.notePostback(cid, status, "dropped", "out", profit)
 			if d.log != nil {
@@ -90,12 +96,27 @@ func (d *engineDeps) fireOutbound(groupID, cid string, profit float64, status st
 			}
 		}
 	}
+	if matched == 0 {
+		return true
+	}
+	return queued > 0
 }
 
 // serveOutbound sends queued postbacks until ctx is cancelled.
 // It is the only sender; cron does not run a second one.
 func (d *engineDeps) serveOutbound(ctx context.Context) {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 3 {
+				return errors.New("too many redirects")
+			}
+			if !outboundURLAllowed(req.URL.String()) {
+				return errors.New("redirect blocked")
+			}
+			return nil
+		},
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -162,7 +183,7 @@ func (d *engineDeps) sendOutbound(client *http.Client, job outboundJob) {
 	if d == nil {
 		return
 	}
-	if !strings.HasPrefix(job.URL, "https://") && !strings.HasPrefix(job.URL, "http://") {
+	if !outboundURLAllowed(job.URL) {
 		d.notePostback(job.CID, job.Status, "error", "out", job.Payout)
 		return
 	}
@@ -187,4 +208,30 @@ func (d *engineDeps) sendOutbound(client *http.Client, job outboundJob) {
 	if resp.StatusCode >= 400 && d.log != nil {
 		d.log.Warn("outbound postback rejected", "status", resp.StatusCode)
 	}
+}
+
+// outboundURLAllowed reports whether an outbound postback may be sent to raw.
+// Loopback, link-local, private addresses and the local service names are refused.
+func outboundURLAllowed(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	if u.Scheme != "https" && u.Scheme != "http" {
+		return false
+	}
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	switch host {
+	case "localhost", "clickhouse", "redis", "engine":
+		return false
+	}
+	if host == "" {
+		return false
+	}
+	ip, err := netip.ParseAddr(host)
+	if err != nil {
+		return true
+	}
+	ip = ip.Unmap()
+	return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified()
 }

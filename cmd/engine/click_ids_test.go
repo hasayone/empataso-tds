@@ -33,6 +33,17 @@ func TestClickIDsSkipsInactiveLanding(t *testing.T) {
 	}
 }
 
+func TestClickIDsLocalLandingID(t *testing.T) {
+	s := &config.Stream{Out: config.Output{Landings: []config.ShareRef{{ID: "7", Share: 1}}}}
+	cat := router.Catalogs{Landings: map[string]config.Landing{
+		"7": {ID: "7", Status: true, Local: true, Entry: "index.html"},
+	}}
+	offer, landing, network := clickIDs(s, cat, "7", false)
+	if offer != "" || landing != "7" || network != "" {
+		t.Fatalf("got %s %s %s", offer, landing, network)
+	}
+}
+
 func TestStoredSubsKeepsTwelve(t *testing.T) {
 	var in [config.MaxSubID]string
 	for i := range in {

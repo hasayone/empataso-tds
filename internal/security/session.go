@@ -46,6 +46,10 @@ type Session struct {
 	// (see PasswordFingerprint). A session whose PwFP no longer matches the
 	// current password is rejected.
 	PwFP string
+	// API is true for a request authenticated by the Api-Key header.
+	// That session is not stored: it lives only in the request context.
+	// The json tag keeps it out of Redis, where store.RedisSessions marshals Session.
+	API bool `json:"-"`
 }
 
 // SessionStore stores sessions by token. Implementations: MemoryStore (here) and

@@ -94,7 +94,8 @@ go run ./cmd/cron
 | `KUZTDS_ADMIN_PASSWORD_HASH` | argon2id-хэш пароля |
 | `KUZTDS_ADMIN_PASSWORD_FILE` | файл хэша (приоритетнее; туда пишется смена пароля в UI) |
 | `KUZTDS_ADMIN_COOKIE_SECURE` | флаг Secure для cookie (`true`; локально `false`) |
-| `KUZTDS_ENGINE_URL` | базовый URL движка (для ссылок групп в UI) |
+| `KUZTDS_ENGINE_URL` | адрес, по которому процесс админки зовёт движок |
+| `KUZTDS_PUBLIC_URL` | адрес ссылок в браузере, если он не loopback и не имя `engine`. Пусто или `http://engine:8080` — хост открытой админки и порт движка |
 | `KUZTDS_GROUPS_FILE` / `KUZTDS_DATA_DIR` / `KUZTDS_KEYS_DIR` | те же пути, что у движка |
 | `KUZTDS_REDIS_ADDR` / `KUZTDS_CLICKHOUSE_*` | хранилища (сессии, статистика) |
 | `KUZTDS_GEO_DB` / `KUZTDS_ASN_DB` | те же пути, что у движка — для Tools (проверка IP) и «Test a visitor» |

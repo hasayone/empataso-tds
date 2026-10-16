@@ -40,6 +40,7 @@ type Visitor struct {
 	BrowserVer string
 	Brand      string // Apple, Samsung, ...
 	Unique     bool
+	Bot        bool // true when the installation bot profile marked this visitor
 	IP         netip.Addr
 
 	ASN      uint32     // autonomous system number, 0 = unknown
@@ -282,6 +283,18 @@ func whyAnd(s *config.Stream, v Visitor, deps Deps) string {
 		}
 	}
 
+	// Bot profile. FlagA is bots only, FlagB is humans only.
+	switch r.Bot {
+	case config.FlagA:
+		if !v.Bot {
+			return "bot"
+		}
+	case config.FlagB:
+		if v.Bot {
+			return "bot"
+		}
+	}
+
 	// Presence of a referer.
 	switch r.HasReferer {
 	case config.FlagA: // require a referer
@@ -496,8 +509,6 @@ func matchYaBrowser(ua string) bool {
 	return strings.Contains(l, "yabrowser") || strings.Contains(l, "yandexsearchbrowser")
 }
 
-// --- cache of compiled regexps ---
-
 var reCache sync.Map // string -> *regexp.Regexp (nil on compile error)
 
 // compile translates /pattern/flags into a Go regexp (RE2).
@@ -568,6 +579,7 @@ func whyOr(s *config.Stream, v Visitor, deps Deps) string {
 			rule: config.Rules{Computer: r.Computer, Phone: r.Phone, Tablet: r.Tablet}},
 		{name: "operators", on: len(r.Operators) > 0, rule: config.Rules{Operators: r.Operators}},
 		{name: "unique", on: r.Unique == config.FlagA || r.Unique == config.FlagB, rule: config.Rules{Unique: r.Unique}},
+		{name: "bot", on: r.Bot == config.FlagA || r.Bot == config.FlagB, rule: config.Rules{Bot: r.Bot}},
 		{name: "yabrowser", on: r.YaBrowser == config.FlagA || r.YaBrowser == config.FlagB, rule: config.Rules{YaBrowser: r.YaBrowser}},
 		{name: "has_referer", on: r.HasReferer == config.FlagA || r.HasReferer == config.FlagB, rule: config.Rules{HasReferer: r.HasReferer}},
 		{name: "ip_list", on: r.IPList.Flag != config.FlagOff && r.IPList.File != "", rule: config.Rules{IPList: r.IPList}},

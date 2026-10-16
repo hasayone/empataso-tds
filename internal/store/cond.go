@@ -1,0 +1,141 @@
+package store
+
+import (
+	"errors"
+	"strings"
+)
+
+// Cond is one filter on a journal column.
+// Field is the API name. Op is eq, ne, in or nin.
+// Values are the accepted (eq/in) or rejected (ne/nin) values; an empty
+// value is allowed, an empty list is not.
+type Cond struct {
+	Field  string
+	Op     string
+	Values []string
+}
+
+// ErrUnknownField means the name is not a field, or the field has no column
+// on the table being queried.
+var ErrUnknownField = errors.New("store: unknown field")
+
+// ErrBadCond means the operator is unknown, the value list is empty, or a
+// limit is exceeded (20 conditions, 200 values each).
+var ErrBadCond = errors.New("store: bad condition")
+
+// ErrFieldNotReady means the field exists but its columns are not on the
+// table yet, so a breakdown or value list cannot run.
+var ErrFieldNotReady = errors.New("store: field not ready")
+
+const (
+	maxConds   = 20
+	maxCondVal = 200
+)
+
+// ValidateConds checks conds against the static field list.
+// table is "events" or "conversions". It does not look at readiness or at
+// the database. ErrUnknownField means a name is missing on that table.
+// ErrBadCond means the operator, an empty list, or a limit is wrong.
+// A nil or empty conds is valid and returns nil.
+func ValidateConds(table string, conds []Cond) error {
+	if table != "events" && table != "conversions" {
+		return ErrBadCond
+	}
+	if len(conds) > maxConds {
+		return ErrBadCond
+	}
+	for _, cond := range conds {
+		switch cond.Op {
+		case "eq", "ne", "in", "nin":
+		default:
+			return ErrBadCond
+		}
+		if len(cond.Values) == 0 || len(cond.Values) > maxCondVal {
+			return ErrBadCond
+		}
+		f, ok := fieldByName(cond.Field)
+		if !ok {
+			return ErrUnknownField
+		}
+		if col, _ := f.tableCol(table); col == "" {
+			return ErrUnknownField
+		}
+	}
+	return nil
+}
+
+// buildWhere turns conds into a fragment that can be appended to an existing
+// WHERE. c supplies readiness. table is "events" or "conversions".
+// sql is empty or starts with " AND ". args are the placeholder values, in
+// order. skip is true when a condition names a wave that is not ready: the
+// caller returns an empty result and does not run the query.
+// ErrUnknownField and ErrBadCond come from ValidateConds. A ready check that
+// fails is not an error.
+func buildWhere(c *CH, table string, conds []Cond) (sql string, args []any, skip bool, err error) {
+	if err = ValidateConds(table, conds); err != nil {
+		return "", nil, false, err
+	}
+	if len(conds) == 0 {
+		return "", nil, false, nil
+	}
+	var b strings.Builder
+	for _, cond := range conds {
+		f, _ := fieldByName(cond.Field)
+		col, w := f.tableCol(table)
+		if !c.ready(table, w) {
+			return "", nil, true, nil
+		}
+		expr := columnExpr(f, col)
+		vals := cond.Values
+		if f.Lower {
+			vals = append([]string(nil), cond.Values...)
+			for i, v := range vals {
+				vals[i] = strings.ToLower(strings.TrimSpace(v))
+			}
+		}
+		b.WriteString(" AND ")
+		b.WriteString(expr)
+		if cond.Op == "eq" || cond.Op == "in" {
+			b.WriteString(" IN (")
+		} else {
+			b.WriteString(" NOT IN (")
+		}
+		b.WriteString(placeholders(len(vals)))
+		b.WriteByte(')')
+		if cond.Op == "ne" || cond.Op == "nin" {
+			b.WriteString(" AND ")
+			b.WriteString(expr)
+			b.WriteString(" != ''")
+		}
+		for _, v := range vals {
+			args = append(args, v)
+		}
+	}
+	return b.String(), args, false, nil
+}
+
+// stringType reports whether ClickHouse compares the type without toString.
+// t is the Field.Type. LowCardinality(String) counts as a string.
+func stringType(t string) bool {
+	return t == "String" || t == "LowCardinality(String)"
+}
+
+// eventsCidInSQL restricts a query to clicks that appear in events for the period.
+// eventsWhere is empty or a fragment from buildWhere on events that starts with " AND ".
+// The caller supplies ts >= ? AND ts < ? twice, then the where args, in that order.
+func eventsCidInSQL(eventsWhere string) string {
+	return ` AND cid IN (SELECT cid FROM events WHERE ts >= ? AND ts < ? AND cid != ''` + eventsWhere + `)`
+}
+
+// placeholders returns n question marks separated by commas.
+// n is at least 1; the caller has already rejected an empty list.
+func placeholders(n int) string {
+	var b strings.Builder
+	for i := 0; i < n; i++ {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('?')
+	}
+	return b.String()
+}

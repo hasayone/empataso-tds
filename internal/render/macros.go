@@ -34,8 +34,13 @@ type MacroDeps struct {
 	SubIDs    [15]string
 	Status    string // {status}
 	Payout    string // {payout}
+	Offer     string // {offer} — offer-step path for this click
 	DataDir   string // .dat directory for [RANDLINE]/[RANDDFL]
 	Rng       *rand.Rand
+	// Query reads one click URL parameter. name is the parameter.
+	// The string is its raw value and the bool is false when it is absent
+	// or empty. A nil Query leaves unknown {name} placeholders untouched.
+	Query func(name string) (string, bool)
 }
 
 // The RAND* macros are anchored: Expand matches them at the current position
@@ -159,7 +164,17 @@ func (d MacroDeps) scalars() []scalarMacro {
 }
 
 // curlyAt expands a Keitaro placeholder at the start of s.
-// Unknown names, including sub_id_16 and above, are left untouched.
+//
+// s is the template suffix starting at '{'. val is the replacement and n is
+// the number of bytes consumed, including both braces. n is 0 when the braces
+// are not a macro, and there is no error return. The closing brace must sit
+// at index 24 or earlier, the same window as before.
+//
+// subid, country, keyword, status, payout, offer and sub_id_1..sub_id_15 are
+// filled from MacroDeps and are never read from the click query. Any other name of
+// [A-Za-z0-9_-] is looked up in Query. A nil Query, a missing parameter, or a
+// name outside that set (a dot, sub_id_16, an HTML brace like {color}) is
+// left untouched.
 func (d MacroDeps) curlyAt(s string) (val string, n int) {
 	end := strings.IndexByte(s, '}')
 	if end <= 1 || end > 24 {
@@ -168,22 +183,49 @@ func (d MacroDeps) curlyAt(s string) (val string, n int) {
 	name := s[1:end]
 	switch name {
 	case "subid":
-		return d.CID, end + 1
+		return url.QueryEscape(d.CID), end + 1
 	case "country":
 		return d.Country, end + 1
 	case "keyword":
 		return url.QueryEscape(d.Key), end + 1
 	case "status":
-		return d.Status, end + 1
+		return url.QueryEscape(d.Status), end + 1
 	case "payout":
-		return d.Payout, end + 1
+		return url.QueryEscape(d.Payout), end + 1
+	case "offer":
+		return d.Offer, end + 1
 	default:
-		idx, ok := subIDIndex(name)
+		if idx, ok := subIDIndex(name); ok {
+			return url.QueryEscape(d.subID(idx)), end + 1
+		}
+		if d.Query == nil || !queryMacroName(name) {
+			return "", 0
+		}
+		v, ok := d.Query(name)
 		if !ok {
 			return "", 0
 		}
-		return d.subID(idx), end + 1
+		return url.QueryEscape(v), end + 1
 	}
+}
+
+// queryMacroName reports whether name is a click-query macro.
+//
+// name is the text between curly braces. The result is true only when name
+// has 1..24 characters and each one is an ASCII letter, digit, '_' or '-'.
+// Anything else is ordinary text. There is no error return.
+func queryMacroName(name string) bool {
+	if len(name) < 1 || len(name) > 24 {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // subIDIndex parses sub_id_1 .. sub_id_15 into a zero-based index.

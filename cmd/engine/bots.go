@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net"
 	"net/netip"
 	"os"
@@ -15,6 +16,44 @@ import (
 )
 
 var ptrResolver = &net.Resolver{}
+
+type botFileCache struct {
+	mu      sync.Mutex
+	mod     time.Time
+	known   bool
+	profile config.Bots
+}
+
+var botFiles botFileCache
+
+// botProfile reads the installation bot profile. A missing file uses the default.
+// The result is cached until the file's modification time changes.
+func (d *engineDeps) botProfile() config.Bots {
+	if d == nil || d.botPath == "" {
+		return config.DefaultBotProfile()
+	}
+	st, err := os.Stat(d.botPath)
+	botFiles.mu.Lock()
+	defer botFiles.mu.Unlock()
+	if err != nil {
+		return config.DefaultBotProfile()
+	}
+	if botFiles.known && botFiles.mod.Equal(st.ModTime()) {
+		return botFiles.profile
+	}
+	b, err := os.ReadFile(d.botPath)
+	if err != nil {
+		return config.DefaultBotProfile()
+	}
+	var profile config.Bots
+	if json.Unmarshal(b, &profile) != nil {
+		return config.DefaultBotProfile()
+	}
+	botFiles.profile = profile
+	botFiles.mod = st.ModTime()
+	botFiles.known = true
+	return profile
+}
 
 // detectBot — bot detection based on the toggles of the selected
 // stream. Returns the bot label or "" (not a bot).

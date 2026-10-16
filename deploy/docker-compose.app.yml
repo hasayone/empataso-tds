@@ -21,6 +21,10 @@ services:
       KUZTDS_DATA_DIR: /var/lib/kuztds/data
       KUZTDS_KEYS_DIR: /var/lib/kuztds/keys
       KUZTDS_GROUPS_FILE: /var/lib/kuztds/groups.json
+      KUZTDS_API_KEYS_FILE: /var/lib/kuztds/api_keys.json
+      KUZTDS_PAGES_DIR: /var/lib/kuztds/pages
+      KUZTDS_LANDINGS_DIR: /var/lib/kuztds/landings
+      KUZTDS_PHP_URL: http://php:80
       KUZTDS_CRON_FILE: /var/lib/kuztds/cron.json
       KUZTDS_GEO_DB: /var/lib/kuztds/geo/city.mmdb
       KUZTDS_ASN_DB: /var/lib/kuztds/geo/asn.mmdb
@@ -41,6 +45,16 @@ services:
       retries: 8
       start_period: 15s
 
+  php:
+    image: php:8.3-apache
+    container_name: kuztds-php
+    restart: unless-stopped
+    networks:
+      - tdsnet
+    volumes:
+      - kuztds_state:/var/lib/kuztds:ro
+    command: ["sh","-c","sed -ri 's#/var/www/html#/var/lib/kuztds/landings#g' /etc/apache2/sites-available/000-default.conf /etc/apache2/apache2.conf && sed -ri '/<Directory \\/var\\/www\\/>/,/<\\/Directory>/{s#/var/www/#/var/lib/kuztds/landings/#;s#Options Indexes FollowSymLinks#Options -Indexes +FollowSymLinks#}' /etc/apache2/apache2.conf && exec apache2-foreground"]
+
   admin:
     image: kuztds:local
     container_name: kuztds-admin
@@ -59,6 +73,9 @@ services:
       KUZTDS_DATA_DIR: /var/lib/kuztds/data
       KUZTDS_KEYS_DIR: /var/lib/kuztds/keys
       KUZTDS_GROUPS_FILE: /var/lib/kuztds/groups.json
+      KUZTDS_API_KEYS_FILE: /var/lib/kuztds/api_keys.json
+      KUZTDS_PAGES_DIR: /var/lib/kuztds/pages
+      KUZTDS_LANDINGS_DIR: /var/lib/kuztds/landings
       KUZTDS_CRON_FILE: /var/lib/kuztds/cron.json
       KUZTDS_GEO_DB: /var/lib/kuztds/geo/city.mmdb
       KUZTDS_ASN_DB: /var/lib/kuztds/geo/asn.mmdb
@@ -68,6 +85,8 @@ services:
       KUZTDS_CLICKHOUSE_DB: kuztds
       KUZTDS_CLICKHOUSE_USER: kuztds
       KUZTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      KEITARO_BASE_URL: ${KEITARO_BASE_URL:-}
+      KEITARO_API_KEY: ${KEITARO_API_KEY:-}
     volumes:
       - kuztds_state:/var/lib/kuztds
     networks:

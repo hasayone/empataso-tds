@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/kuztds/bridge/ktimport"
 )
 
 // FileGroups — a GroupsStore backed by a JSON groups configuration file.
@@ -102,6 +104,123 @@ func (l *FileLists) Write(name, content string) error {
 	return writeFileAtomic(p, []byte(content), 0o644)
 }
 
+// Delete removes one list file.
+// name is the file name, not a path. It returns nil when the file is already gone.
+// It returns an error when the name is invalid or the file cannot be removed.
+func (l *FileLists) Delete(name string) error {
+	p, err := l.safePath(name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(p); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+// pageNameRe matches a page file name. The name ends in .html and otherwise
+// contains only letters, digits, dot, underscore and hyphen.
+var pageNameRe = regexp.MustCompile(`^[a-zA-Z0-9._-]+\.html$`)
+
+// errBadPageName is returned when a page name is not one file in the pages directory.
+var errBadPageName = errors.New("invalid page name")
+
+// FilePages is a PagesStore backed by a directory of .html files.
+// dir is created on the first successful Write.
+type FilePages struct {
+	dir string
+}
+
+// NewFilePages creates a pages store in directory dir.
+// dir may be missing until the first Write. It does not return an error.
+func NewFilePages(dir string) *FilePages { return &FilePages{dir: dir} }
+
+// safePath returns the file path for name inside the pages directory.
+// name is a file name, not a path. The result is dir joined with name.
+// It returns errBadPageName when name contains ".." or fails pageNameRe.
+func (p *FilePages) safePath(name string) (string, error) {
+	if !pageNameRe.MatchString(name) || strings.Contains(name, "..") {
+		return "", errBadPageName
+	}
+	return filepath.Join(p.dir, name), nil
+}
+
+// Names lists HTML files in the pages directory.
+// It returns name and size for each regular file whose name is safe.
+// A missing directory is an empty slice and a nil error.
+// It returns an error when the directory cannot be read.
+func (p *FilePages) Names() ([]PageInfo, error) {
+	entries, err := os.ReadDir(p.dir)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return []PageInfo{}, nil
+		}
+		return nil, err
+	}
+	out := make([]PageInfo, 0, len(entries))
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !pageNameRe.MatchString(name) || strings.Contains(name, "..") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, PageInfo{Name: name, Size: info.Size()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// Read returns the body of one page file.
+// name is a file name, not a path. The result is the file contents.
+// A missing file wraps os.ErrNotExist. An invalid name is errBadPageName.
+// Any other read error is returned as-is.
+func (p *FilePages) Read(name string) (string, error) {
+	path, err := p.safePath(name)
+	if err != nil {
+		return "", err
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", fmt.Errorf("read page %s: %w", name, os.ErrNotExist)
+		}
+		return "", err
+	}
+	return string(b), nil
+}
+
+// Write replaces one page file and creates the directory on first use.
+// name is a file name. content is the HTML or text written as-is.
+// It returns nil after the file is renamed into place.
+// An invalid name is errBadPageName. A directory or disk failure is returned.
+func (p *FilePages) Write(name, content string) error {
+	path, err := p.safePath(name)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(p.dir, 0o755); err != nil {
+		return err
+	}
+	return writeFileAtomic(path, []byte(content), 0o644)
+}
+
+// Delete removes one page file.
+// name is a file name, not a path. It returns nil when the file is already gone.
+// It returns errBadPageName when the name is invalid, or a disk error when the file cannot be removed.
+func (p *FilePages) Delete(name string) error {
+	path, err := p.safePath(name)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
 // FileKeys reads collected keywords from keysDir/<group>/<date>[-se].dat.
 type FileKeys struct{ dir string }
 
@@ -123,4 +242,64 @@ func (k *FileKeys) Read(group, date string, se bool) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// ManifestStore loads and saves the Keitaro import manifest.
+// Load returns the last saved manifest. Save replaces the file.
+// A missing file is an empty manifest and a nil error.
+// A disk or JSON failure is an error.
+type ManifestStore interface {
+	Load() (ktimport.Manifest, error)
+	Save(ktimport.Manifest) error
+}
+
+// FileManifest is a ManifestStore backed by one JSON file.
+// path is the file. The parent directory must already exist.
+type FileManifest struct {
+	path string
+}
+
+// NewFileManifest returns a manifest store at path.
+// path is the JSON file, usually keitaro-import.json in the state directory.
+// It does not create the file and does not return an error.
+func NewFileManifest(path string) *FileManifest { return &FileManifest{path: path} }
+
+// Load reads the manifest.
+// It returns an empty manifest when the file is missing or blank.
+// It returns an error when the file cannot be read or is not a manifest object.
+func (f *FileManifest) Load() (ktimport.Manifest, error) {
+	if f == nil || f.path == "" {
+		return ktimport.Manifest{}, errors.New("manifest unavailable")
+	}
+	b, err := os.ReadFile(f.path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return ktimport.Manifest{}, nil
+		}
+		return ktimport.Manifest{}, err
+	}
+	if len(strings.TrimSpace(string(b))) == 0 {
+		return ktimport.Manifest{}, nil
+	}
+	var m ktimport.Manifest
+	if err := json.Unmarshal(b, &m); err != nil {
+		return ktimport.Manifest{}, err
+	}
+	return m, nil
+}
+
+// Save writes the manifest atomically.
+// m is the full manifest, including an empty one after a purge.
+// It returns nil after the file is renamed into place.
+// It returns an error when the value cannot be encoded or the disk write fails.
+func (f *FileManifest) Save(m ktimport.Manifest) error {
+	if f == nil || f.path == "" {
+		return errors.New("manifest unavailable")
+	}
+	b, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	b = append(b, '\n')
+	return writeFileAtomic(f.path, b, 0o644)
 }

@@ -8,11 +8,7 @@ package admin
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -26,6 +22,7 @@ import (
 	"time"
 
 	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/kuztds/internal/logbuf"
 	"github.com/egerkuzma/kuztds/internal/security"
 	"github.com/egerkuzma/kuztds/internal/store"
 )
@@ -33,15 +30,33 @@ import (
 // StatsProvider — source of statistics (implemented by store.CH).
 type StatsProvider interface {
 	Summary(ctx context.Context, from, to time.Time) (store.StatsSummary, error)
+	// SummaryFiltered returns period totals restricted to clicks matching conds.
+	SummaryFiltered(ctx context.Context, from, to time.Time, conds []store.Cond) (store.StatsSummary, error)
 	TimeSeries(ctx context.Context, from, to time.Time, stepSec int) ([]store.TSPoint, error)
+	// TimeSeriesFiltered returns chart buckets restricted to clicks matching conds.
+	TimeSeriesFiltered(ctx context.Context, from, to time.Time, stepSec int, conds []store.Cond) ([]store.TSPoint, error)
 	Breakdown(ctx context.Context, from, to time.Time, dim string, limit int) ([]store.KV, error)
+	// BreakdownFiltered returns the top values of dim under conds.
+	BreakdownFiltered(ctx context.Context, from, to time.Time, dim string, limit int, conds []store.Cond) ([]store.KV, error)
 	Performance(ctx context.Context, from, to time.Time) ([]store.PerfRow, error)
+	// PerformanceFiltered returns the performance table restricted to clicks matching conds.
+	PerformanceFiltered(ctx context.Context, from, to time.Time, conds []store.Cond) ([]store.PerfRow, error)
 	Logs(ctx context.Context, f store.LogFilter) ([]store.LogRow, int64, error)
 	Postbacks(ctx context.Context, from, to time.Time, group string, limit int) ([]store.PostbackRow, float64, error)
 	QueryPostbacks(ctx context.Context, q store.PostbackQuery) ([]store.PostbackRow, float64, error)
 	PostbackLog(ctx context.Context, from, to time.Time, limit int) ([]store.PostbackLogRow, error)
 	Slice(ctx context.Context, from, to time.Time) ([]store.SliceRow, error)
+	// Fields lists journal fields and ready waves without a query.
+	Fields() store.FieldsInfo
+	// Values lists the top values of field on table between from and to.
+	Values(ctx context.Context, table, field string, from, to time.Time, limit int) ([]store.KV, error)
+	// SliceFiltered returns the period report restricted by conds.
+	SliceFiltered(ctx context.Context, from, to time.Time, conds []store.Cond) ([]store.SliceRow, error)
 	DeleteGroupLogs(ctx context.Context, group string) error
+	ClickFacts(ctx context.Context, from, to time.Time) (store.Facts, error)
+	// ClickFactsFiltered returns catalog facts restricted to clicks matching conds.
+	ClickFactsFiltered(ctx context.Context, from, to time.Time, conds []store.Cond) (store.Facts, error)
+	ClickBuckets(ctx context.Context, groupID string, from, to time.Time, includeBots bool) ([]store.BucketCount, error)
 }
 
 // KeysReader reads the collected keywords.
@@ -60,6 +75,9 @@ type ListsStore interface {
 	Names() ([]string, error)
 	Read(name string) (string, error)
 	Write(name, content string) error
+	// Delete removes name from the list directory.
+	// A missing file is not an error. An invalid name or a disk failure is.
+	Delete(name string) error
 }
 
 // LoginLimiter limits the rate of login attempts per key (IP).
@@ -72,6 +90,20 @@ type LoginLimiter interface {
 	Allow(ctx context.Context, key string) (bool, error)
 }
 
+// ImportSink writes imported clicks and conversions and removes them for one host.
+// InsertEvents writes a click batch. An empty batch returns nil.
+// InsertConversions writes a conversion batch. An empty batch returns nil.
+// PurgeImported deletes events and conversions whose domain equals domain.
+// CountByDomain returns the events count and the conversions count.
+// A blank domain is an error from PurgeImported and CountByDomain.
+// Errors come from the warehouse.
+type ImportSink interface {
+	InsertEvents(ctx context.Context, rows []logbuf.Event) error
+	InsertConversions(ctx context.Context, rows []store.ConversionInsert) error
+	PurgeImported(ctx context.Context, domain string) error
+	CountByDomain(ctx context.Context, domain string) (int64, int64, error)
+}
+
 // Config — dependencies and settings of the admin server.
 type Config struct {
 	AdminUser    string
@@ -81,15 +113,29 @@ type Config struct {
 	Groups       GroupsStore
 	Offers       *JSONStore[config.Offer]
 	Landings     *JSONStore[config.Landing]
+	LandingFiles LandingFiles
 	Sources      *JSONStore[config.TrafficSource]
 	Networks     *JSONStore[config.AffiliateNetwork]
+	Domains      *JSONStore[config.Domain]
+	SeqOffers    *idSeq
+	SeqLandings  *idSeq
+	SeqSources   *idSeq
+	SeqNetworks  *idSeq
+	SeqDomains   *idSeq
+	SpendPath    string
+	BotPath      string
+	UIPath       string
 	Lists        ListsStore
+	Pages        PagesStore
+	Manifest     ManifestStore
 	Keys         KeysReader
 	Limiter      LoginLimiter
 	SessionTTL   time.Duration
 	CookieSecure bool
-	EngineURL    string // base URL of the engine for building group links
+	EngineURL    string // address the admin process uses to call the engine
+	PublicURL    string // address opened in the browser; empty uses EngineURL
 	PasswordFile string // file with the argon2id hash (overrides PasswordHash, written on change)
+	APIKeysFile  string // API key file; empty disables keys and rejects the Api-Key header
 	Log          slogLogger
 
 	// Tools and automation. All optional: what is not set is reported as
@@ -99,6 +145,12 @@ type Config struct {
 	GeoCityPath string  // whether the cron service has a target for each geo database
 	GeoASNPath  string
 	CronFile    string // cron service config
+
+	// KeitaroBase is the tracker origin. KeitaroKey is the Admin API key.
+	// Warehouse receives imported clicks and conversions. All three are optional.
+	KeitaroBase string
+	KeitaroKey  string
+	Warehouse   ImportSink
 }
 
 // slogLogger — minimal logger interface (to avoid pulling in a hard dependency).
@@ -139,6 +191,9 @@ type Server struct {
 	// the disk feels like taking.
 	pwWrite sync.Mutex
 
+	keys  *security.KeySet // nil when APIKeysFile is empty
+	keyMu sync.Mutex       // pairs Generate or Revoke with the following Save
+
 	// hashes bounds concurrent password verifications: argon2id is 64 MiB a
 	// call and runs before any credential is checked.
 	hashes *hashGate
@@ -146,6 +201,10 @@ type Server struct {
 	// loginFPKey keys the fingerprint of submitted login names in the log. It
 	// is generated once per process and never leaves it.
 	loginFPKey []byte
+
+	// ktJob is the background Keitaro import and the purge lock.
+	// New always sets it. Import and purge share its mutex.
+	ktJob *keitaroJob
 }
 
 const cookieName = "kuztds_admin"
@@ -167,7 +226,7 @@ func New(cfg Config) (*Server, error) {
 	// SHA-256, which is exactly what it exists to avoid, and nothing would look
 	// any different.
 	rand.Read(key)
-	s := &Server{cfg: cfg, hashes: newHashGate(0), loginFPKey: key}
+	s := &Server{cfg: cfg, hashes: newHashGate(0), loginFPKey: key, ktJob: newKeitaroJob()}
 	hash, err := initialHash(cfg)
 	if err != nil {
 		return nil, err
@@ -175,6 +234,7 @@ func New(cfg Config) (*Server, error) {
 	if err := s.publish(hash); err != nil {
 		return nil, err
 	}
+	s.loadAPIKeys()
 	return s, nil
 }
 
@@ -239,15 +299,18 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /api/login", s.handleLogin)
-	mux.Handle("POST /api/logout", s.auth(http.HandlerFunc(s.handleLogout)))
-	mux.Handle("GET /api/me", s.auth(http.HandlerFunc(s.handleMe)))
-	mux.Handle("POST /api/password", s.auth(http.HandlerFunc(s.handlePassword)))
+	mux.Handle("POST /api/logout", s.auth(cookieOnly(http.HandlerFunc(s.handleLogout))))
+	mux.Handle("GET /api/me", s.auth(cookieOnly(http.HandlerFunc(s.handleMe))))
+	mux.Handle("POST /api/password", s.auth(cookieOnly(http.HandlerFunc(s.handlePassword))))
+	registerAPIKeys(s, mux)
 
 	mux.Handle("GET /api/stats/summary", s.auth(http.HandlerFunc(s.handleSummary)))
 	mux.Handle("GET /api/stats/timeseries", s.auth(http.HandlerFunc(s.handleTimeSeries)))
 	mux.Handle("GET /api/stats/breakdown", s.auth(http.HandlerFunc(s.handleBreakdown)))
 	mux.Handle("GET /api/stats/performance", s.auth(http.HandlerFunc(s.handlePerformance)))
 	mux.Handle("GET /api/logs", s.auth(http.HandlerFunc(s.handleLogs)))
+	mux.Handle("GET /api/log-fields", s.auth(http.HandlerFunc(s.handleLogFields)))
+	mux.Handle("GET /api/log-values", s.auth(http.HandlerFunc(s.handleLogValues)))
 	mux.Handle("GET /api/logs/filters", s.auth(http.HandlerFunc(s.handleLogFilters)))
 	mux.Handle("GET /api/logs/export", s.auth(http.HandlerFunc(s.handleLogsExport)))
 	mux.Handle("DELETE /api/logs", s.auth(http.HandlerFunc(s.handleDeleteLogs)))
@@ -261,8 +324,20 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("PUT /api/groups", s.auth(http.HandlerFunc(s.handleGroupsSave)))
 	registerOffers(s, mux)
 	registerLandings(s, mux)
+	registerLandingFiles(s, mux)
 	registerSources(s, mux)
 	registerNetworks(s, mux)
+	registerDomains(s, mux)
+	mux.Handle("POST /api/domains/{id}/check", s.auth(http.HandlerFunc(s.handleDomainCheck)))
+	mux.Handle("GET /api/spend", s.auth(http.HandlerFunc(s.handleSpendList)))
+	mux.Handle("POST /api/spend", s.auth(http.HandlerFunc(s.handleSpendCreate)))
+	mux.Handle("DELETE /api/spend/{id}", s.auth(http.HandlerFunc(s.handleSpendDelete)))
+	mux.Handle("GET /api/stats/facts", s.auth(http.HandlerFunc(s.handleFacts)))
+	mux.Handle("GET /api/bot-protection", s.auth(http.HandlerFunc(s.handleBotGet)))
+	mux.Handle("PUT /api/bot-protection", s.auth(http.HandlerFunc(s.handleBotPut)))
+	mux.Handle("GET /api/ui", s.auth(http.HandlerFunc(s.handleUIGet)))
+	mux.Handle("PUT /api/ui", s.auth(http.HandlerFunc(s.handleUIPut)))
+	mux.HandleFunc("GET /api/brand", s.handleBrandGet)
 	mux.Handle("GET /api/campaigns/{id}/postbacks", s.auth(http.HandlerFunc(s.handleCampaignPostbacksGet)))
 	mux.Handle("PUT /api/campaigns/{id}/postbacks", s.auth(http.HandlerFunc(s.handleCampaignPostbacksPut)))
 
@@ -270,469 +345,27 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/lists/{name}", s.auth(http.HandlerFunc(s.handleListRead)))
 	mux.Handle("PUT /api/lists/{name}", s.auth(http.HandlerFunc(s.handleListWrite)))
 
+	mux.Handle("GET /api/pages", s.auth(http.HandlerFunc(s.handlePagesIndex)))
+	mux.Handle("GET /api/pages/{name}", s.auth(http.HandlerFunc(s.handlePageRead)))
+	mux.Handle("PUT /api/pages/{name}", s.auth(http.HandlerFunc(s.handlePageWrite)))
+	mux.Handle("DELETE /api/pages/{name}", s.auth(http.HandlerFunc(s.handlePageDelete)))
+
 	mux.Handle("GET /api/lookup", s.auth(http.HandlerFunc(s.handleLookup)))
 	mux.Handle("POST /api/simulate", s.auth(http.HandlerFunc(s.handleSimulate)))
 	mux.Handle("GET /api/cron", s.auth(http.HandlerFunc(s.handleCronGet)))
 	mux.Handle("PUT /api/cron", s.auth(http.HandlerFunc(s.handleCronSave)))
 	mux.Handle("POST /api/cron/run", s.auth(http.HandlerFunc(s.handleCronRun)))
 
+	mux.Handle("GET /api/keitaro/status", s.auth(http.HandlerFunc(s.handleKeitaroStatus)))
+	mux.Handle("POST /api/keitaro/check", s.auth(http.HandlerFunc(s.handleKeitaroCheck)))
+	mux.Handle("POST /api/keitaro/import", s.auth(http.HandlerFunc(s.handleKeitaroImport)))
+	mux.Handle("GET /api/keitaro/job", s.auth(http.HandlerFunc(s.handleKeitaroJob)))
+	mux.Handle("POST /api/keitaro/purge", s.auth(http.HandlerFunc(s.handleKeitaroPurge)))
+
 	// Embedded web interface (SPA).
+	mux.Handle("GET /assets/", serveAssets())
 	mux.HandleFunc("GET /{$}", serveUI)
 	return securityHeaders(mux)
-}
-
-// --- auth ---
-
-func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
-
-	// The limiter goes first, and its failure answers 500 before any password
-	// is looked at. That ordering is the whole point.
-	//
-	// A wrong password answers 401. A right password with the session store
-	// down answers 500, because issueSession cannot write the session. Two
-	// different answers to "was that the password" is an oracle: with the
-	// limiter previously swallowing the storage error into a fail-open true, an
-	// unlimited stream of guesses could be run against a dead Redis and be told
-	// which one was correct. Nobody could log in during that window — but the
-	// password was learned, and Redis comes back.
-	//
-	// Refusing before the comparison removes the answer instead of hiding it.
-	// It does not remove the window entirely: Redis can still die between this
-	// check and issueSession, with an argon2 verification in between. That
-	// residue is the width of one hash, and every probe of it costs the
-	// attacker a hash and a slot in the limiter. Closing it completely would
-	// take making both branches do the same work — writing and discarding a
-	// session on every failure — which puts a scanner's traffic into the same
-	// Redis the engine keeps its counters in. Not worth it. Do not read this as
-	// "the oracle is gone": it is narrowed to the gap between here and
-	// issueSession, and moving the limiter would widen it back.
-	if s.cfg.Limiter != nil {
-		allowed, err := s.cfg.Limiter.Allow(r.Context(), ip)
-		if err != nil {
-			s.logWarn("login limiter unavailable, refusing before the password check", "ip", ip, "err", err)
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
-		}
-		if !allowed {
-			writeErr(w, http.StatusTooManyRequests, "too many attempts")
-			return
-		}
-	}
-
-	var body struct{ Login, Password string }
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad request")
-		return
-	}
-
-	if !s.hashes.enter() {
-		if n := s.hashes.report(); n > 0 {
-			s.logWarn("login verifications refused: hashing slots exhausted", "since_last", n)
-		}
-		writeErr(w, http.StatusTooManyRequests, "too many attempts")
-		return
-	}
-	userOK := security.EqualTokens(body.Login, s.cfg.AdminUser)
-	// Both halves are evaluated. With "!userOK || !VerifyPassword(...)" Go
-	// short-circuits: a wrong user name returns in microseconds while the right
-	// one costs argon2's hundred milliseconds, and the administrator's login
-	// name reads off the clock. Constant-time EqualTokens right next to it buys
-	// nothing while the operator above it leaks the answer.
-	passOK := security.VerifyPassword(body.Password, s.currentHash())
-	s.hashes.leave()
-
-	if !userOK || !passOK {
-		// The submitted login is not logged. People type their password into
-		// the user name box, and this line goes to a collector that outlives
-		// the password. The fingerprint is keyed with a value generated at
-		// startup, so a scanner still reads as one repeated login and a spray
-		// as many different ones, while a dictionary run against the log
-		// finds nothing.
-		s.logWarn("admin login failed", "ip", ip, "login_fp", s.loginFP(body.Login))
-		writeErr(w, http.StatusUnauthorized, "invalid credentials")
-		return
-	}
-	csrf, err := s.issueSession(w, r)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"csrf": csrf})
-}
-
-// loginFP is a short keyed fingerprint of a submitted login name, for telling a
-// scanner (one value, many attempts) from a spray (many values) without putting
-// the value itself into a log.
-//
-// Keyed, not plain: eight bytes of bare SHA-256 are sixty-four bits, which is
-// plenty to confirm a guess, so a plain digest of a mistyped password is a
-// crackable artefact sitting in the log. The key is generated per process, so
-// the fingerprints are comparable within one run — the window anyone actually
-// looks at — and useless for linking activity across restarts or for testing a
-// dictionary against.
-func (s *Server) loginFP(login string) string {
-	m := hmac.New(sha256.New, s.loginFPKey)
-	m.Write([]byte(login))
-	return base64.RawURLEncoding.EncodeToString(m.Sum(nil)[:8])
-}
-
-// issueSession creates a fresh session bound to the current password, sets the
-// cookie and returns the new CSRF token.
-func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) (string, error) {
-	token, err1 := security.RandomToken()
-	csrf, err2 := security.RandomToken()
-	if err1 != nil {
-		return "", err1
-	}
-	if err2 != nil {
-		return "", err2
-	}
-	sess := security.Session{
-		User:    s.cfg.AdminUser,
-		CSRF:    csrf,
-		Created: time.Now(),
-		PwFP:    s.current().fp,
-	}
-	if err := s.cfg.Sessions.Create(r.Context(), token, sess, s.cfg.SessionTTL); err != nil {
-		return "", err
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name: cookieName, Value: token, Path: "/",
-		HttpOnly: true, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteStrictMode,
-		Expires: time.Now().Add(s.cfg.SessionTTL),
-	})
-	return csrf, nil
-}
-
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(cookieName); err == nil {
-		_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
-	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
-	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
-}
-
-func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	sess := sessionFrom(r.Context())
-	writeJSON(w, http.StatusOK, map[string]string{"user": sess.User, "csrf": sess.CSRF, "engine": s.cfg.EngineURL})
-}
-
-// handlePassword changes the administrator password (argon2id), saving the hash to a file.
-func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
-	var body struct{ Old, New string }
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad request")
-		return
-	}
-	if !security.VerifyPassword(body.Old, s.currentHash()) {
-		writeErr(w, http.StatusUnauthorized, "incorrect current password")
-		return
-	}
-	if len(body.New) < 6 {
-		writeErr(w, http.StatusBadRequest, "password too short (min. 6)")
-		return
-	}
-	hash, err := security.HashPassword(body.New)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	// One lock around the whole change. The write and the switch have to land
-	// in the same order for everyone: with two changes in flight, the disk
-	// keeps whichever renamed last while memory keeps whichever locked last,
-	// and the process then runs on a password the file does not hold. Nothing
-	// reveals that until the next restart.
-	s.pwWrite.Lock()
-	defer s.pwWrite.Unlock()
-
-	// Validate before the file, not after. A hash that cannot be decoded must
-	// never reach disk: the file outlives this process, and the next start
-	// would refuse to boot with no way left to log in and fix it.
-	if err := security.ValidateHash(hash); err != nil {
-		s.logWarn("refusing to store an unusable password hash", "err", err)
-		writeErr(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-	// Persist first, switch in memory second: a failed write must not leave the
-	// process running on a password that survives no restart.
-	if s.cfg.PasswordFile != "" {
-		if err := writeFileAtomic(s.cfg.PasswordFile, []byte(hash), 0o600); err != nil {
-			s.logWarn("password file write failed", "err", err)
-			writeErr(w, http.StatusInternalServerError, "failed to save (check KUZTDS_ADMIN_PASSWORD_FILE)")
-			return
-		}
-	}
-	if err := s.publish(hash); err != nil {
-		s.logWarn("password hash published after the write failed validation", "err", err)
-		writeErr(w, http.StatusInternalServerError, "internal error")
-		return
-	}
-
-	// Every session issued under the old password is now invalid, including
-	// this one — hand the caller a fresh cookie and CSRF token so the panel
-	// keeps working, and drop the old token from the store.
-	if c, err := r.Cookie(cookieName); err == nil {
-		_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
-	}
-	csrf, err := s.issueSession(w, r)
-	if err != nil {
-		s.logWarn("session reissue after password change failed", "err", err)
-		writeJSON(w, http.StatusOK, map[string]string{"status": "changed"})
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "changed", "csrf": csrf})
-}
-
-// --- stats ---
-
-func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
-		return
-	}
-	from, to := parseRange(r)
-	sum, err := s.cfg.Stats.Summary(r.Context(), from, to)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "stats error")
-		return
-	}
-	writeJSON(w, http.StatusOK, sum)
-}
-
-func (s *Server) handleTimeSeries(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
-		return
-	}
-	from, to := parseRange(r)
-	step := atoiDef(r.URL.Query().Get("step"), 3600)
-	pts, err := s.cfg.Stats.TimeSeries(r.Context(), from, to, step)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "stats error")
-		return
-	}
-	writeJSON(w, http.StatusOK, pts)
-}
-
-func (s *Server) handleBreakdown(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
-		return
-	}
-	from, to := parseRange(r)
-	dim := r.URL.Query().Get("dim")
-	limit := atoiDef(r.URL.Query().Get("limit"), 50)
-	kv, err := s.cfg.Stats.Breakdown(r.Context(), from, to, dim, limit)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, "bad dimension")
-		return
-	}
-	writeJSON(w, http.StatusOK, kv)
-}
-
-// handlePerformance — hits/unique/bots/conversions/profit per group and
-// stream over the period: the dashboard table and the numbers on the stream
-// rows of the groups editor.
-func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
-		return
-	}
-	from, to := parseRange(r)
-	rows, err := s.cfg.Stats.Performance(r.Context(), from, to)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "stats error")
-		return
-	}
-	if rows == nil {
-		rows = []store.PerfRow{}
-	}
-	writeJSON(w, http.StatusOK, rows)
-}
-
-func (s *Server) logFilter(r *http.Request) store.LogFilter {
-	q := r.URL.Query()
-	from, to := parseRange(r)
-	return store.LogFilter{
-		From: from, To: to,
-		Group: csvVals(q.Get("group")), Stream: csvVals(q.Get("stream")),
-		Country: csvVals(q.Get("country")), Device: csvVals(q.Get("device")),
-		OS: csvVals(q.Get("os")), Browser: csvVals(q.Get("browser")), Brand: csvVals(q.Get("brand")),
-		IP:         q.Get("ip"),
-		BotsOnly:   q.Get("bots") == "1",
-		HumansOnly: q.Get("humans") == "1",
-		Limit:      clampPage(atoiDef(q.Get("limit"), defaultPageRows)),
-		Offset:     max(atoiDef(q.Get("offset"), 0), 0),
-	}
-}
-
-const (
-	// defaultPageRows — one page of the log table.
-	defaultPageRows = 100
-	// maxPageRows bounds the interactive log endpoint. It is paginated, so a
-	// caller must not be able to turn one request into a full-table dump by
-	// asking for a huge limit; whole-period reads go through the CSV export.
-	maxPageRows = 1000
-	// exportRows — how many rows the CSV export pulls for the selected period.
-	// The store accepts this as-is (see store.maxLogRows).
-	exportRows = 50000
-)
-
-// clampPage bounds a page size requested by the client.
-func clampPage(n int) int {
-	if n <= 0 {
-		return defaultPageRows
-	}
-	if n > maxPageRows {
-		return maxPageRows
-	}
-	return n
-}
-
-// csvVals splits "a,b,c" into a slice of non-empty trimmed values.
-func csvVals(s string) []string {
-	if s == "" {
-		return nil
-	}
-	var out []string
-	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// handleLogFilters returns the available log filter values for each dimension
-// over the period (for the checkbox dropdowns in the UI).
-func (s *Server) handleLogFilters(w http.ResponseWriter, r *http.Request) {
-	out := map[string][]string{}
-	if s.cfg.Stats == nil {
-		writeJSON(w, http.StatusOK, out)
-		return
-	}
-	from, to := parseRange(r)
-	for _, dim := range []string{"group", "stream", "country", "device", "os", "browser", "brand"} {
-		kv, err := s.cfg.Stats.Breakdown(r.Context(), from, to, dim, 1000)
-		if err != nil {
-			continue
-		}
-		vals := []string{}
-		for _, x := range kv {
-			if x.Key != "" && x.Key != "-" {
-				vals = append(vals, x.Key)
-			}
-		}
-		out[dim] = vals
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
-		return
-	}
-	rows, total, err := s.cfg.Stats.Logs(r.Context(), s.logFilter(r))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "logs error")
-		return
-	}
-	if rows == nil {
-		rows = []store.LogRow{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"total": total, "rows": rows})
-}
-
-func (s *Server) handleLogsExport(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
-		return
-	}
-	f := s.logFilter(r)
-	f.Limit, f.Offset = exportRows, 0
-	rows, _, err := s.cfg.Stats.Logs(r.Context(), f)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "logs error")
-		return
-	}
-	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
-	w.Header().Set("Content-Disposition", "attachment; filename=logs.csv")
-	cw := csv.NewWriter(w)
-	_ = cw.Write([]string{"ts", "group", "stream", "country", "city", "device", "os", "browser", "brand", "bot", "uniq", "ip", "keyword", "out",
-		"region", "lang", "operator", "redirect", "referer", "useragent", "domain", "cid", "asn", "org", "timezone"})
-	for _, x := range rows {
-		rec := []string{x.TS.Format(time.RFC3339), x.Group, x.Stream, x.Country, x.City, x.Device,
-			x.OS, x.Browser, x.Brand, x.Bot, strconv.Itoa(int(x.Uniq)), x.IP, x.Keyword, x.Out,
-			x.Region, x.Lang, x.Operator, x.Redirect, x.Referer, x.UserAgent, x.Domain, x.CID,
-			strconv.FormatUint(uint64(x.ASN), 10), x.Org, x.Timezone}
-		for i := range rec {
-			rec[i] = csvSafe(rec[i])
-		}
-		_ = cw.Write(rec)
-	}
-	cw.Flush()
-}
-
-// csvSafe defuses spreadsheet formulas. Keyword, referer, User-Agent and the
-// rest are visitor-controlled text, and a cell that starts with = + - or @ is
-// executed by Excel and its relatives when the export is opened. A leading
-// apostrophe makes it a literal and is not shown in the cell.
-func csvSafe(v string) string {
-	if v == "" || v == "-" {
-		return v
-	}
-	switch v[0] {
-	case '=', '+', '-', '@', '\t', '\r':
-		return "'" + v
-	}
-	return v
-}
-
-func (s *Server) handleDeleteLogs(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
-		return
-	}
-	group := r.URL.Query().Get("group")
-	if group == "" {
-		writeErr(w, http.StatusBadRequest, "group required")
-		return
-	}
-	if err := s.cfg.Stats.DeleteGroupLogs(r.Context(), group); err != nil {
-		writeErr(w, http.StatusInternalServerError, "delete error")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-func (s *Server) handlePostbackLog(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeJSON(w, http.StatusOK, []store.PostbackLogRow{})
-		return
-	}
-	from, to := parseRange(r)
-	rows, err := s.cfg.Stats.PostbackLog(r.Context(), from, to, atoiDef(r.URL.Query().Get("limit"), 200))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "postback log error")
-		return
-	}
-	writeJSON(w, http.StatusOK, rows)
-}
-
-func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeJSON(w, http.StatusOK, []store.SliceRow{})
-		return
-	}
-	from, to := parseRange(r)
-	rows, err := s.cfg.Stats.Slice(r.Context(), from, to)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "report error")
-		return
-	}
-	writeJSON(w, http.StatusOK, rows)
 }
 
 func (s *Server) handleNotices(w http.ResponseWriter, r *http.Request) {
@@ -761,29 +394,6 @@ func (s *Server) handleNotices(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, lines)
 }
 
-func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
-		return
-	}
-	from, to := parseRange(r)
-	q := r.URL.Query()
-	rows, total, err := s.cfg.Stats.QueryPostbacks(r.Context(), store.PostbackQuery{
-		From: from, To: to, Group: q.Get("group"), Status: q.Get("status"),
-		Stream: q.Get("stream"), Offer: q.Get("offer"), Landing: q.Get("landing"),
-		Source: q.Get("source"), Network: q.Get("network"), CID: q.Get("cid"),
-		Limit: atoiDef(q.Get("limit"), 200),
-	})
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "postbacks error")
-		return
-	}
-	if rows == nil {
-		rows = []store.PostbackRow{}
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"total": total, "rows": rows})
-}
-
 func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Keys == nil {
 		writeErr(w, http.StatusServiceUnavailable, "keys unavailable")
@@ -798,103 +408,17 @@ func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"content": content})
 }
 
-// --- groups ---
-
-func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Groups == nil {
-		writeJSON(w, http.StatusOK, []config.Group{})
-		return
-	}
-	groups, err := s.cfg.Groups.List(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "groups error")
-		return
-	}
-	writeJSON(w, http.StatusOK, groups)
-}
-
-func (s *Server) handleGroupsSave(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Groups == nil {
-		writeErr(w, http.StatusServiceUnavailable, "groups store unavailable")
-		return
-	}
-	var groups []config.Group
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<20)).Decode(&groups); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad json")
-		return
-	}
-	seen := map[string]bool{}
-	for _, g := range groups {
-		if g.ID == "" {
-			writeErr(w, http.StatusBadRequest, "group id required")
-			return
-		}
-		if seen[g.ID] {
-			writeErr(w, http.StatusBadRequest, "duplicate group id: "+g.ID)
-			return
-		}
-		seen[g.ID] = true
-	}
-	if err := s.cfg.Groups.Save(r.Context(), groups); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
-}
-
-// --- lists (.dat editor) ---
-
-func (s *Server) handleListsIndex(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Lists == nil {
-		writeJSON(w, http.StatusOK, []string{})
-		return
-	}
-	names, err := s.cfg.Lists.Names()
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "lists error")
-		return
-	}
-	writeJSON(w, http.StatusOK, names)
-}
-
-func (s *Server) handleListRead(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Lists == nil {
-		writeErr(w, http.StatusServiceUnavailable, "lists unavailable")
-		return
-	}
-	content, err := s.cfg.Lists.Read(r.PathValue("name"))
-	if err != nil {
-		writeErr(w, http.StatusNotFound, "not found")
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"name": r.PathValue("name"), "content": content})
-}
-
-func (s *Server) handleListWrite(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Lists == nil {
-		writeErr(w, http.StatusServiceUnavailable, "lists unavailable")
-		return
-	}
-	var body struct{ Content string }
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20)).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad json")
-		return
-	}
-	if err := s.cfg.Lists.Write(r.PathValue("name"), body.Content); err != nil {
-		writeErr(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
-}
-
-// --- middleware ---
-
 type ctxKey int
 
 const sessionKey ctxKey = 0
 
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A present Api-Key is the only credential. A miss does not fall through to the cookie.
+		if r.Header.Get("Api-Key") != "" {
+			s.authAPIKey(w, r, next)
+			return
+		}
 		c, err := r.Cookie(cookieName)
 		if err != nil {
 			writeErr(w, http.StatusUnauthorized, "unauthorized")
@@ -938,11 +462,15 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
-// --- helpers ---
-
 func (s *Server) logWarn(msg string, args ...any) {
 	if s.cfg.Log != nil {
 		s.cfg.Log.Warn(msg, args...)
+	}
+}
+
+func (s *Server) logInfo(msg string, args ...any) {
+	if s.cfg.Log != nil {
+		s.cfg.Log.Info(msg, args...)
 	}
 }
 
@@ -955,23 +483,6 @@ func clientIP(r *http.Request) string {
 		return host
 	}
 	return r.RemoteAddr
-}
-
-// parseRange reads from/to (RFC3339) from the query; defaults to the last 24 hours.
-func parseRange(r *http.Request) (time.Time, time.Time) {
-	to := time.Now()
-	from := to.Add(-24 * time.Hour)
-	if v := r.URL.Query().Get("from"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			from = t
-		}
-	}
-	if v := r.URL.Query().Get("to"); v != "" {
-		if t, err := time.Parse(time.RFC3339, v); err == nil {
-			to = t
-		}
-	}
-	return from, to
 }
 
 func atoiDef(s string, def int) int {

@@ -1,0 +1,390 @@
+{
+  "campaigns": [
+    {
+      "id": 1,
+      "alias": "offer-es",
+      "name": "Offer ES",
+      "state": "active",
+      "type": "position",
+      "postbacks": []
+    },
+    {
+      "id": 2,
+      "alias": "split",
+      "name": "Split",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 3,
+      "alias": "weights",
+      "name": "Weights",
+      "state": "active",
+      "type": "weight"
+    },
+    {
+      "id": 4,
+      "alias": "",
+      "name": "No alias",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 5,
+      "alias": "shares",
+      "name": "Shares",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 6,
+      "alias": "macros",
+      "name": "Macros",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 7,
+      "alias": "local",
+      "name": "Local",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 8,
+      "alias": "linked",
+      "name": "Linked",
+      "state": "active",
+      "type": "weight",
+      "group_id": 10,
+      "domain_id": 3,
+      "traffic_source_id": 1,
+      "postbacks": [
+        {"url": "https://pb.example/hook", "method": "post", "statuses": ["sale", "lead"]}
+      ]
+    },
+    {
+      "id": 9,
+      "alias": "mystery",
+      "name": "Mystery",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 10,
+      "alias": "white",
+      "name": "White",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 11,
+      "alias": "netfilters",
+      "name": "Net filters",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 12,
+      "alias": "dupes",
+      "name": "Dupes",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 13,
+      "alias": "pages",
+      "name": "Pages",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 14,
+      "alias": "hop",
+      "name": "Hop",
+      "state": "active",
+      "type": "position"
+    },
+    {
+      "id": 15,
+      "alias": "gone",
+      "name": "Gone",
+      "state": "active",
+      "type": "position"
+    }
+  ],
+  "streams": {
+    "1": [
+      {
+        "id": 11,
+        "type": "regular",
+        "name": "es",
+        "position": 1,
+        "state": "active",
+        "schema": "offers",
+        "action_type": "http",
+        "filter_or": false,
+        "filters": [
+          {"name": "country", "mode": "accept", "payload": ["ES"]}
+        ],
+        "offers": [{"offer_id": 101, "share": 100, "state": "active"}]
+      }
+    ],
+    "2": [
+      {
+        "id": 21,
+        "type": "regular",
+        "name": "or",
+        "position": 1,
+        "state": "active",
+        "schema": "redirect",
+        "action_type": "http",
+        "action_payload": "https://or.example/go",
+        "filter_or": true,
+        "filters": [
+          {"name": "country", "mode": "accept", "payload": ["ES"]},
+          {"name": "city", "mode": "accept", "payload": ["Madrid"]}
+        ]
+      }
+    ],
+    "3": [
+      {
+        "id": 31,
+        "type": "regular",
+        "name": "w",
+        "position": 1,
+        "weight": 25,
+        "state": "active",
+        "schema": "redirect",
+        "action_type": "http",
+        "action_payload": "https://w.example/a",
+        "filters": []
+      }
+    ],
+    "5": [
+      {
+        "id": 51,
+        "type": "regular",
+        "name": "two",
+        "position": 1,
+        "state": "active",
+        "schema": "offers",
+        "action_type": "http",
+        "offers": [
+          {"offer_id": 501, "share": 70, "state": "active"},
+          {"offer_id": "502", "share": "30", "state": "active"}
+        ]
+      }
+    ],
+    "6": [
+      {
+        "id": 61,
+        "type": "regular",
+        "name": "macro",
+        "position": 1,
+        "state": "active",
+        "schema": "redirect",
+        "action_type": "http",
+        "action_payload": "https://m.example/go?x={bundle_id}"
+      }
+    ],
+    "7": [
+      {
+        "id": 71,
+        "type": "regular",
+        "name": "php",
+        "position": 1,
+        "state": "active",
+        "schema": "landings",
+        "action_type": "local",
+        "landings": [{"landing_id": 701, "share": 100, "state": "active"}]
+      }
+    ],
+    "8": [
+      {
+        "id": 81,
+        "type": "regular",
+        "name": "mix",
+        "position": 1,
+        "weight": 40,
+        "state": "active",
+        "schema": "offers",
+        "action_type": "http",
+        "filter_or": true,
+        "filters": [
+          {"name": "country", "mode": "accept", "payload": ["ES"]},
+          {"name": "weather", "mode": "accept", "payload": ["rain"]}
+        ],
+        "offers": [
+          {"offer_id": 101, "share": 60, "state": "active"},
+          {"offer_id": 501, "share": 40, "state": "active"}
+        ]
+      }
+    ],
+    "9": [
+      {
+        "id": 91,
+        "type": "regular",
+        "name": "u",
+        "position": 1,
+        "state": "active",
+        "schema": "redirect",
+        "action_type": "http",
+        "action_payload": "https://u.example/",
+        "filters": [
+          {"name": "spider", "mode": "accept", "payload": ["1"]}
+        ]
+      }
+    ],
+    "10": [
+      {
+        "id": 1010,
+        "type": "forced",
+        "name": "white",
+        "position": 1,
+        "state": "active",
+        "schema": "action",
+        "action_type": "status404",
+        "action_payload": "<html><body>white</body></html>"
+      }
+    ],
+    "11": [
+      {
+        "id": 111,
+        "type": "regular",
+        "name": "net",
+        "position": 1,
+        "state": "active",
+        "schema": "redirect",
+        "action_type": "http",
+        "action_payload": "https://nf.example/",
+        "filters": [
+          {
+            "name": "ip",
+            "mode": "accept",
+            "payload": ["99.236.16.124", "nope", "104.154.0.0/15", "999.1.1.1", "1.2.3.4-1.2.3.9", "1.2.3.4", "bad-ip", "also-bad", "99.236.16.124"]
+          },
+          {"name": "isp", "mode": "accept", "payload": ["Google LLC", "Google Fiber Inc.", "Google LLC"]},
+          {"name": "proxy", "mode": "reject", "payload": ["1"]}
+        ]
+      }
+    ],
+    "12": [
+      {
+        "id": 121,
+        "type": "regular",
+        "name": "same",
+        "position": 1,
+        "state": "active",
+        "schema": "offers",
+        "action_type": "http",
+        "offers": [
+          {"offer_id": 601, "share": 40, "state": "active"},
+          {"offer_id": 602, "share": 25, "state": "active"}
+        ]
+      }
+    ],
+    "13": [
+      {
+        "id": 131,
+        "type": "regular",
+        "name": "long",
+        "position": 1,
+        "state": "active",
+        "schema": "action",
+        "action_type": "show_html",
+        "action_payload": "<html><body>012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789012345678901234567890123456789</body></html>"
+      },
+      {
+        "id": 132,
+        "type": "regular",
+        "name": "short",
+        "position": 2,
+        "state": "active",
+        "schema": "action",
+        "action_type": "show_text",
+        "action_payload": "short"
+      }
+    ],
+    "14": [
+      {
+        "id": 141,
+        "type": "regular",
+        "name": "to-offer",
+        "position": 1,
+        "state": "active",
+        "schema": "action",
+        "action_type": "campaign",
+        "action_payload": "1",
+        "filters": [
+          {"name": "device_model", "mode": "accept", "payload": ["iPhone", "Pixel"]}
+        ]
+      }
+    ],
+    "15": [
+      {
+        "id": 151,
+        "type": "regular",
+        "name": "missing",
+        "position": 1,
+        "state": "active",
+        "schema": "action",
+        "action_type": "campaign",
+        "action_payload": "999",
+        "filters": [
+          {"name": "ipv4", "mode": "accept", "payload": ["1"]}
+        ]
+      }
+    ]
+  },
+  "offers": [
+    {
+      "id": 101,
+      "name": "Main",
+      "group_id": 20,
+      "affiliate_network_id": 2,
+      "action_type": "http",
+      "action_payload": "https://offer.example/p?subid={subid}&c={country}",
+      "country": ["ES", "it"],
+      "payout_type": "CPA",
+      "payout_value": "12.5",
+      "payout_currency": "usd",
+      "payout_auto": true,
+      "state": "active"
+    },
+    {"id": 501, "name": "A", "action_type": "http", "action_payload": "https://a.example/o"},
+    {"id": "502", "name": "B", "action_type": "http", "action_payload": "https://b.example/o"},
+    {"id": 503, "name": "Geo", "action_type": "http", "action_payload": "https://geo.example/o", "country": ["Russia", "South Africa", "Notaland"]},
+    {"id": 601, "name": "Same A", "action_type": "http", "action_payload": "https://dup.example/o"},
+    {"id": 602, "name": "Same B", "action_type": "http", "action_payload": " https://dup.example/o "},
+    {"id": 801, "name": "Territories", "action_type": "http", "action_payload": "https://t.example/o", "country": ["Polynesie Francaise", "Guyane", "Territory of the French Southern and Antarctic Lands"]}
+  ],
+  "landings": [
+    {"id": 701, "name": "Land", "landing_type": "local", "action_type": "local_file", "action_payload": ""}
+  ],
+  "traffic_sources": [
+    {
+      "id": 1,
+      "name": "facebook",
+      "state": "active",
+      "postback_url": "",
+      "parameters": {
+        "keyword": {"name": "keyword", "placeholder": "", "alias": "utm_term"},
+        "sub_id_1": {"name": "s1", "placeholder": "", "alias": "sub1"},
+        "cost": {"name": "cost", "placeholder": "", "alias": "cost"}
+      }
+    }
+  ],
+  "affiliate_networks": [
+    {"id": 2, "name": "net", "postback_url": "https://net.example/pb", "offer_param": "offer_id", "state": "active"},
+    {"id": 3, "name": "querynet", "postback_url": "https://q.example/pb", "offer_param": "sub1={subid}", "state": "active"}
+  ],
+  "domains": [
+    {"id": 3, "name": "track.example", "state": "active", "default_campaign_id": 1}
+  ],
+  "groups": [
+    {"id": 10, "name": "EU", "type": "campaigns"},
+    {"id": 20, "name": "Offers", "type": "offers"}
+  ],
+  "users": [{"id": 4, "name": "buyer"}]
+}

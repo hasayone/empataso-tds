@@ -37,14 +37,14 @@ func TestPickOutStaysInRange(t *testing.T) {
 	for _, val := range []string{"-1", "-5", "-999999", "999999", "abc", "3", "2"} {
 		req := httptest.NewRequest(http.MethodGet, "/g1", nil)
 		req.AddCookie(&http.Cookie{Name: "ztrot_g_s", Value: val})
-		got := pickOut(httptest.NewRecorder(), req, nil, req.Context(), "g", "s", raw, "rotator")
+		got := pickOut(httptest.NewRecorder(), req, nil, req.Context(), "g", "s", raw, "rotator", nil)
 		if got != "A" && got != "B" && got != "C" {
 			t.Errorf("cookie %q → %q, want one of A/B/C", val, got)
 		}
 	}
 	// no separator → the string is returned untouched
 	if got := pickOut(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil),
-		nil, t.Context(), "g", "s", "single", "rotator"); got != "single" {
+		nil, t.Context(), "g", "s", "single", "rotator", nil); got != "single" {
 		t.Errorf("without ||| the out is returned as is, got %q", got)
 	}
 }

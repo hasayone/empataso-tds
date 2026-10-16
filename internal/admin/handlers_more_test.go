@@ -17,7 +17,13 @@ import (
 
 type fakeLists struct{ data map[string]string }
 
-func (f *fakeLists) Names() ([]string, error) { return []string{"ip_test.dat"}, nil }
+func (f *fakeLists) Names() ([]string, error) {
+	names := make([]string, 0, len(f.data))
+	for name := range f.data {
+		names = append(names, name)
+	}
+	return names, nil
+}
 func (f *fakeLists) Read(name string) (string, error) {
 	v, ok := f.data[name]
 	if !ok {
@@ -30,6 +36,13 @@ func (f *fakeLists) Write(name, content string) error {
 		return errInvalidName
 	}
 	f.data[name] = content
+	return nil
+}
+func (f *fakeLists) Delete(name string) error {
+	if !strings.HasSuffix(name, ".dat") {
+		return errInvalidName
+	}
+	delete(f.data, name)
 	return nil
 }
 
@@ -255,6 +268,14 @@ func TestBreakdownAndTimeSeriesAndPostbacks(t *testing.T) {
 			t.Errorf("%s → 200, got %d", path, resp.StatusCode)
 		}
 	}
+	small, err := c.Get(srv.URL + "/api/stats/timeseries?step=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	small.Body.Close()
+	if small.StatusCode != http.StatusBadRequest {
+		t.Errorf("step 1 → 400, got %d", small.StatusCode)
+	}
 }
 
 func TestLogFiltersEndpoint(t *testing.T) {
@@ -317,6 +338,58 @@ func TestDeleteLogs(t *testing.T) {
 	}
 	if code := del("?group=g1"); code != http.StatusOK {
 		t.Errorf("delete group g1 → 200, got %d", code)
+	}
+}
+
+func putGroups(t *testing.T, c *http.Client, base, csrf, payload string) int {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPut, base+"/api/groups", strings.NewReader(payload))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-CSRF-Token", csrf)
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+func TestGroupsSaveTrimsFolder(t *testing.T) {
+	srv, fg, _ := fullServer(t, nil)
+	c, csrf := authedClient(t, srv.URL)
+	code := putGroups(t, c, srv.URL, csrf, `[{"id":"a","folder":"  Leads  ","streams":[]}]`)
+	if code != http.StatusOK {
+		t.Fatalf("trimmed folder → 200, got %d", code)
+	}
+	if len(fg.saved) != 1 || fg.saved[0].Folder != "Leads" {
+		t.Fatalf("saved folder = %#v", fg.saved)
+	}
+}
+
+func TestGroupsSaveRejectsLongFolder(t *testing.T) {
+	srv, fg, _ := fullServer(t, nil)
+	c, csrf := authedClient(t, srv.URL)
+	body := `[{"id":"a","folder":"` + strings.Repeat("д", 65) + `","streams":[]}]`
+	if code := putGroups(t, c, srv.URL, csrf, body); code != http.StatusBadRequest {
+		t.Fatalf("65-rune folder → 400, got %d", code)
+	}
+	if fg.saved != nil {
+		t.Fatalf("rejected folder was saved: %#v", fg.saved)
+	}
+}
+
+func TestGroupsSaveAccepts64RuneFolder(t *testing.T) {
+	srv, fg, _ := fullServer(t, nil)
+	c, csrf := authedClient(t, srv.URL)
+	folder := strings.Repeat("д", 64)
+	body := `[{"id":"a","folder":"` + folder + `","streams":[]}]`
+	if code := putGroups(t, c, srv.URL, csrf, body); code != http.StatusOK {
+		t.Fatalf("64-rune folder → 200, got %d", code)
+	}
+	if len(fg.saved) != 1 || fg.saved[0].Folder != folder {
+		t.Fatalf("saved = %#v", fg.saved)
 	}
 }
 

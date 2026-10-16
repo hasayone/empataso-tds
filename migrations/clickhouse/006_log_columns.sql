@@ -1,0 +1,32 @@
+ALTER TABLE kuztds.events
+	ADD COLUMN IF NOT EXISTS site String,
+	ADD COLUMN IF NOT EXISTS ad_campaign_id String,
+	ADD COLUMN IF NOT EXISTS creative_id String,
+	ADD COLUMN IF NOT EXISTS external_id String,
+	ADD COLUMN IF NOT EXISTS xrw LowCardinality(String);
+
+ALTER TABLE kuztds.conversions
+	ADD COLUMN IF NOT EXISTS region LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS lang LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS os LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS os_version LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS browser LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS browser_ver LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS brand LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS ip String,
+	ADD COLUMN IF NOT EXISTS keyword String,
+	ADD COLUMN IF NOT EXISTS se LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS referer String,
+	ADD COLUMN IF NOT EXISTS useragent String,
+	ADD COLUMN IF NOT EXISTS group_id LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS asn UInt32,
+	ADD COLUMN IF NOT EXISTS org LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS site String,
+	ADD COLUMN IF NOT EXISTS ad_campaign_id String,
+	ADD COLUMN IF NOT EXISTS creative_id String,
+	ADD COLUMN IF NOT EXISTS external_id String,
+	ADD COLUMN IF NOT EXISTS xrw LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS click_ts DateTime,
+	ADD COLUMN IF NOT EXISTS original_status String,
+	ADD COLUMN IF NOT EXISTS prev_status LowCardinality(String),
+	ADD COLUMN IF NOT EXISTS tid String;

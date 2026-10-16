@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -25,7 +27,7 @@ func (m *memGroups) Save(_ context.Context, g []config.Group) error {
 	return nil
 }
 
-func catalogServer(t *testing.T) (*httptest.Server, *memGroups) {
+func catalogServer(t *testing.T) (*httptest.Server, *memGroups, string) {
 	t.Helper()
 	hash, err := security.HashPassword("p@ss")
 	if err != nil {
@@ -49,7 +51,7 @@ func catalogServer(t *testing.T) (*httptest.Server, *memGroups) {
 	}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	return srv, groups
+	return srv, groups, dir
 }
 
 func csrfDo(t *testing.T, c *http.Client, method, url, csrf string, body any) *http.Response {
@@ -76,7 +78,7 @@ func csrfDo(t *testing.T, c *http.Client, method, url, csrf string, body any) *h
 }
 
 func TestOfferCRUDAndSimulate(t *testing.T) {
-	srv, _ := catalogServer(t)
+	srv, _, _ := catalogServer(t)
 	c := newClient(t)
 	code, csrf := login(t, c, srv.URL, "admin", "p@ss")
 	if code != 200 {
@@ -133,8 +135,78 @@ func TestOfferCRUDAndSimulate(t *testing.T) {
 	}
 }
 
+func TestOfferPayoutAndCountries(t *testing.T) {
+	srv, _, _ := catalogServer(t)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+	offer := config.Offer{
+		ID: "o-pay", Name: "Paid", URL: "https://offer.example/pay", Status: true,
+		Countries: []string{"ru", "us"}, PayoutModel: "cpa", Payout: 12.5,
+		PayoutCurrency: "USD", PayoutParam: true,
+	}
+	resp := csrfDo(t, c, http.MethodPost, srv.URL+"/api/offers", csrf, offer)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create %d", resp.StatusCode)
+	}
+	var created config.Offer
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if len(created.Countries) != 2 || created.Countries[0] != "ru" || created.PayoutModel != "cpa" ||
+		created.Payout != 12.5 || created.PayoutCurrency != "USD" || !created.PayoutParam {
+		t.Fatalf("created = %+v", created)
+	}
+	resp = csrfDo(t, c, http.MethodGet, srv.URL+"/api/offers/o-pay", csrf, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("get %d", resp.StatusCode)
+	}
+	var loaded config.Offer
+	if err := json.NewDecoder(resp.Body).Decode(&loaded); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if loaded.PayoutModel != "cpa" || len(loaded.Countries) != 2 {
+		t.Fatalf("loaded = %+v", loaded)
+	}
+
+	badModel := offer
+	badModel.ID = "o-bad-model"
+	badModel.PayoutModel = "revshare"
+	resp = csrfDo(t, c, http.MethodPost, srv.URL+"/api/offers", csrf, badModel)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad payout_model → %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	badCountry := offer
+	badCountry.ID = "o-bad-cc"
+	badCountry.Countries = []string{"rus"}
+	resp = csrfDo(t, c, http.MethodPost, srv.URL+"/api/offers", csrf, badCountry)
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad country → %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "offers.json")
+	if err := os.WriteFile(path, []byte(`[
+  {"id":"legacy","name":"Old","url":"https://offer.example/old","status":true}
+]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := NewJSONStore[config.Offer](path)
+	list, err := store.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != "legacy" || list[0].PayoutModel != "" || len(list[0].Countries) != 0 {
+		t.Fatalf("legacy list = %+v", list)
+	}
+}
+
 func TestCampaignPostbacksReplace(t *testing.T) {
-	srv, groups := catalogServer(t)
+	srv, groups, _ := catalogServer(t)
 	c := newClient(t)
 	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
 	body := []config.OutboundPostback{{URL: "https://pb.example/?cid={subid}&st={status}", Method: "GET", Statuses: []string{"sale"}}}
@@ -151,7 +223,7 @@ func TestCampaignPostbacksReplace(t *testing.T) {
 }
 
 func TestAffiliateNetworkCreate(t *testing.T) {
-	srv, _ := catalogServer(t)
+	srv, _, _ := catalogServer(t)
 	c := newClient(t)
 	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
 	body := config.AffiliateNetwork{
@@ -171,8 +243,78 @@ func TestAffiliateNetworkCreate(t *testing.T) {
 	resp.Body.Close()
 }
 
+func TestCatalogGroupTrimAndOmit(t *testing.T) {
+	srv, _, dir := catalogServer(t)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+	long65 := strings.Repeat("а", 65)
+	long64 := strings.Repeat("а", 64)
+	landing := config.Landing{ID: "ld1", Name: "Landing", URL: "https://land.example/x", Status: true, Group: long65}
+	resp := csrfDo(t, c, http.MethodPost, srv.URL+"/api/landings", csrf, landing)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("landing create %d", resp.StatusCode)
+	}
+	var created config.Landing
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if created.Group != long64 || created.Name != landing.Name || created.URL != landing.URL || created.ID != landing.ID {
+		t.Fatalf("landing = %+v", created)
+	}
+
+	netBody := config.AffiliateNetwork{ID: "net1", Name: "Net", Status: true, PostbackURL: "https://pb.example/"}
+	resp = csrfDo(t, c, http.MethodPost, srv.URL+"/api/affiliate-networks", csrf, netBody)
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("network create %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	netBody.Group = "  abc  "
+	resp = csrfDo(t, c, http.MethodPut, srv.URL+"/api/affiliate-networks/net1", csrf, netBody)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("network put %d", resp.StatusCode)
+	}
+	var net config.AffiliateNetwork
+	if err := json.NewDecoder(resp.Body).Decode(&net); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if net.Group != "abc" {
+		t.Fatalf("network group = %q", net.Group)
+	}
+
+	resp = csrfDo(t, c, http.MethodPost, srv.URL+"/api/traffic-sources", csrf, config.TrafficSource{
+		ID: "src1", Name: "Src", Group: "",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("source create %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	raw, err := os.ReadFile(filepath.Join(dir, "sources.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"group"`) {
+		t.Fatalf("sources file contains group: %s", raw)
+	}
+
+	resp = csrfDo(t, c, http.MethodPost, srv.URL+"/api/landings", csrf, config.Landing{
+		ID: "ld64", Name: "Full", URL: "https://land.example/y", Status: true, Group: long64,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("landing 64 %d", resp.StatusCode)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if created.Group != long64 {
+		t.Fatalf("landing 64 group len %d", len([]rune(created.Group)))
+	}
+}
+
 func TestTrafficSourceRejectsSubID16(t *testing.T) {
-	srv, _ := catalogServer(t)
+	srv, _, _ := catalogServer(t)
 	c := newClient(t)
 	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
 	resp := csrfDo(t, c, http.MethodPost, srv.URL+"/api/traffic-sources", csrf, config.TrafficSource{

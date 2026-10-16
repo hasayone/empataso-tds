@@ -17,17 +17,32 @@ import (
 
 type fakeStats struct{}
 
-func (fakeStats) Summary(context.Context, time.Time, time.Time) (store.StatsSummary, error) {
+func (f fakeStats) Summary(ctx context.Context, from, to time.Time) (store.StatsSummary, error) {
 	return store.StatsSummary{Total: 100, Unique: 70, Bots: 12}, nil
 }
-func (fakeStats) TimeSeries(context.Context, time.Time, time.Time, int) ([]store.TSPoint, error) {
+func (f fakeStats) SummaryFiltered(ctx context.Context, from, to time.Time, _ []store.Cond) (store.StatsSummary, error) {
+	return f.Summary(ctx, from, to)
+}
+func (f fakeStats) TimeSeries(ctx context.Context, from, to time.Time, step int) ([]store.TSPoint, error) {
 	return []store.TSPoint{{Total: 100, Unique: 70, Bots: 12}}, nil
+}
+func (f fakeStats) TimeSeriesFiltered(ctx context.Context, from, to time.Time, step int, _ []store.Cond) ([]store.TSPoint, error) {
+	return f.TimeSeries(ctx, from, to, step)
 }
 func (fakeStats) Breakdown(context.Context, time.Time, time.Time, string, int) ([]store.KV, error) {
 	return []store.KV{{Key: "ru", Count: 50}}, nil
 }
-func (fakeStats) Performance(context.Context, time.Time, time.Time) ([]store.PerfRow, error) {
+
+// BreakdownFiltered returns the same rows as Breakdown.
+// conds are ignored. It does not fail.
+func (f fakeStats) BreakdownFiltered(ctx context.Context, from, to time.Time, dim string, limit int, _ []store.Cond) ([]store.KV, error) {
+	return f.Breakdown(ctx, from, to, dim, limit)
+}
+func (f fakeStats) Performance(ctx context.Context, from, to time.Time) ([]store.PerfRow, error) {
 	return []store.PerfRow{{GroupID: "g1", Group: "demo", Stream: "s1", Hits: 80, Unique: 60, Bots: 5, Conv: 3, Profit: 4.5}}, nil
+}
+func (f fakeStats) PerformanceFiltered(ctx context.Context, from, to time.Time, _ []store.Cond) ([]store.PerfRow, error) {
+	return f.Performance(ctx, from, to)
 }
 func (fakeStats) Logs(context.Context, store.LogFilter) ([]store.LogRow, int64, error) {
 	return []store.LogRow{{IP: "1.2.3.4", Country: "ru"}}, 1, nil
@@ -45,6 +60,43 @@ func (fakeStats) Slice(context.Context, time.Time, time.Time) ([]store.SliceRow,
 	return []store.SliceRow{}, nil
 }
 func (fakeStats) DeleteGroupLogs(context.Context, string) error { return nil }
+func (f fakeStats) ClickFacts(ctx context.Context, from, to time.Time) (store.Facts, error) {
+	return store.Facts{Ready: true, Clicks: []store.ClickFact{}, Status: []store.StatusFact{}}, nil
+}
+func (f fakeStats) ClickFactsFiltered(ctx context.Context, from, to time.Time, _ []store.Cond) (store.Facts, error) {
+	return f.ClickFacts(ctx, from, to)
+}
+func (fakeStats) ClickBuckets(context.Context, string, time.Time, time.Time, bool) ([]store.BucketCount, error) {
+	return nil, nil
+}
+func (fakeStats) Fields() store.FieldsInfo {
+	return store.FieldsInfo{Fields: store.StaticFields(), Ready: map[string]map[string]bool{}}
+}
+func (fakeStats) Values(_ context.Context, table, field string, _, _ time.Time, _ int) ([]store.KV, error) {
+	if table != "events" && table != "conversions" {
+		return nil, store.ErrBadCond
+	}
+	for _, f := range store.StaticFields() {
+		if f.Name != field {
+			continue
+		}
+		on := f.Events
+		if table == "conversions" {
+			on = f.Conv
+		}
+		if !on {
+			return nil, store.ErrUnknownField
+		}
+		if !f.Dim {
+			return nil, store.ErrBadCond
+		}
+		return []store.KV{{Key: "PL", Count: 3}}, nil
+	}
+	return nil, store.ErrUnknownField
+}
+func (fakeStats) SliceFiltered(context.Context, time.Time, time.Time, []store.Cond) ([]store.SliceRow, error) {
+	return []store.SliceRow{}, nil
+}
 
 type fakeGroups struct{ saved []config.Group }
 
@@ -185,5 +237,16 @@ func TestCSRFRequiredOnMutation(t *testing.T) {
 	r3.Body.Close()
 	if r3.StatusCode != http.StatusUnauthorized {
 		t.Errorf("after logout /api/me must be 401, got %d", r3.StatusCode)
+	}
+}
+
+func TestLinkBasePrefersPublicURL(t *testing.T) {
+	s := &Server{cfg: Config{EngineURL: "http://engine:8080/", PublicURL: "http://127.0.0.1:8080/"}}
+	if got := s.linkBase(); got != "http://127.0.0.1:8080" {
+		t.Fatalf("public url: %s", got)
+	}
+	s.cfg.PublicURL = "  "
+	if got := s.linkBase(); got != "http://engine:8080" {
+		t.Fatalf("fallback: %s", got)
 	}
 }

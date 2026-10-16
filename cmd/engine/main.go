@@ -22,6 +22,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -108,7 +109,6 @@ func main() {
 	// Postback and keyword collection.
 	postbackKey := os.Getenv("KUZTDS_POSTBACK_KEY")
 	keysDir := getenv("KUZTDS_KEYS_DIR", "keys")
-	apiKey := os.Getenv("KUZTDS_API_KEY") // key for ?api= mode (clients)
 
 	// HTTP fetcher for CURL redirect and [REMOTE] (with in-memory cache).
 	fetcher := fetch.New(getenv("KUZTDS_CURL_UA", "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:71.0) Gecko/20100101 Firefox/71.0"), log)
@@ -153,7 +153,25 @@ func main() {
 	if groups != nil {
 		go newGroupsWatcher(groupsFile, groups, lists, seps, log, known).watch(ctx, reload)
 	}
+	// KUZTDS_API_KEY stays in the process environment. An empty key file means
+	// only that env key can open ?api=; both empty rejects ?api=, as an empty
+	// KUZTDS_API_KEY did. The env value is not written to the key file and
+	// is not logged.
+	apiEnv := os.Getenv("KUZTDS_API_KEY")
+	keysFile := os.Getenv("KUZTDS_API_KEYS_FILE")
+	keySet := loadAPIKeys(keysFile, log)
+	if keysFile != "" {
+		go keysWatcher(ctx, keysFile, keySet, reload, log)
+	}
 	offers, landings, sources, networks := openCatalogs(groupsFile, log)
+	botPath := os.Getenv("KUZTDS_BOT_FILE")
+	if botPath == "" && groupsFile != "" {
+		botPath = filepath.Join(filepath.Dir(groupsFile), "bot_protection.json")
+	}
+	pages := newPageCache(pagesDir(os.Getenv("KUZTDS_PAGES_DIR"), groupsFile), log)
+	lands := newLandingServer(landingsDir(os.Getenv("KUZTDS_LANDINGS_DIR"), groupsFile), os.Getenv("KUZTDS_PHP_URL"), func(id string) (config.Landing, bool) {
+		return landings.Get(id)
+	}, log)
 	go reloadCatalogs(ctx, reload, offers, landings, sources, networks)
 
 	// ClickHouse logs (phase 4): asynchronous batch writes. Optional.
@@ -184,14 +202,18 @@ func main() {
 		groups: groups, offers: offers, landings: landings, sources: sources, networks: networks,
 		outbound: make(chan outboundJob, 64),
 		logs:     logs, chConn: chConn, fetcher: fetcher,
-		dataDir: dataDir, keysDir: keysDir, postbackKey: postbackKey, apiKey: apiKey,
+		dataDir: dataDir, keysDir: keysDir, postbackKey: postbackKey, keys: apiKeys{env: apiEnv, set: keySet},
 		trashMode: trashMode, trashURL: trashURL, curlCacheMin: curlCacheMin,
+		botPath:   botPath,
+		pages:     pages,
+		landServe: lands,
 	}
 	go d.serveOutbound(ctx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/postback", d.postback)
 	mux.HandleFunc("/internal/notices", serveNotices(notices))
+	mux.HandleFunc("/l/", d.serveLandingAsset)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		// Body stays exactly "ok" for existing probes; the loss counter rides
 		// along in a header so it can be scraped without a metrics endpoint.
@@ -336,7 +358,10 @@ func extraParams(r *http.Request) []string {
 
 // pickOut selects an output variant from out, separated by |||, according to the
 // distribution type: rotator (cookie), evenly (Redis counter), random (default).
-func pickOut(w http.ResponseWriter, r *http.Request, counters *store.Counters, ctx context.Context, groupID, stream, raw, dist string) string {
+func pickOut(w http.ResponseWriter, r *http.Request, counters *store.Counters, ctx context.Context, groupID, stream, raw, dist string, shares []int) string {
+	if next, ok := router.ApplyOutShares(raw, shares, nil); ok {
+		return next
+	}
 	if !strings.Contains(raw, "|||") {
 		return raw
 	}
