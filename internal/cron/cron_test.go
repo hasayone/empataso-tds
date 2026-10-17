@@ -248,6 +248,27 @@ func TestIPListMergeKeepsWhatIsThere(t *testing.T) {
 	}
 }
 
+// Two sources that write one file report that file once, with the count
+// after the later write.
+func TestIPListsReportsEachFileOnce(t *testing.T) {
+	e := newEnv(t)
+	first := e.serve("/proxy-a.txt", "10.0.0.1\n10.0.0.2\n")
+	second := e.serve("/proxy-b.txt", "10.0.0.3\n10.0.0.4\n")
+	msg, err := e.r.runIPLists(context.Background(), IPLists{Sources: []IPSource{
+		{URL: first, Target: "ip_proxy", Mode: "replace"},
+		{URL: second, Target: "ip_proxy", Mode: "merge"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if msg != "ip_proxy: 4" || strings.Count(msg, "ip_proxy") != 1 {
+		t.Errorf("message = %q; want a single ip_proxy: 4", msg)
+	}
+	if got := e.list("ip_proxy"); got != "10.0.0.1\n10.0.0.2\n10.0.0.3\n10.0.0.4\n" {
+		t.Errorf("ip_proxy.dat = %q", got)
+	}
+}
+
 // A source that answers 200 with nothing usable must leave the list alone,
 // and one bad source must not stop the others.
 func TestIPListRefusesToEmptyAList(t *testing.T) {
@@ -765,6 +786,22 @@ func TestRunnerSchedulesAndPersists(t *testing.T) {
 	}
 }
 
+func TestJobStatusWithoutErrorField(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "status.json")
+	body := []byte(`{"jobs":{"disk":{"ok":false,"message":"partial"}}}`)
+	if err := os.WriteFile(p, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, err := ReadStatus(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	js := st.Jobs["disk"]
+	if js.OK || js.Message != "partial" || js.Error != "" {
+		t.Errorf("status without error = %+v", js)
+	}
+}
+
 func TestRunnerRunNowAndFailure(t *testing.T) {
 	e := newEnv(t)
 	e.saveConfig(Default()) // everything disabled
@@ -781,7 +818,7 @@ func TestRunnerRunNowAndFailure(t *testing.T) {
 	e.r.Tick(context.Background())
 	e.r.Wait()
 	st := e.status()
-	if vt := st.Jobs[JobVirusTotal]; vt.OK || !strings.Contains(vt.Message, "API key") {
+	if vt := st.Jobs[JobVirusTotal]; vt.OK || !strings.Contains(vt.Error, "API key") || strings.Contains(vt.Message, "API key") {
 		t.Errorf("a requested job runs even when disabled and reports its failure: %+v", vt)
 	}
 	if tt := st.Jobs[JobTelegramTest]; tt.OK || !tt.NextRun.IsZero() {

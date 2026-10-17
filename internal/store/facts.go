@@ -6,6 +6,10 @@ import (
 )
 
 // ClickFact is one click bucket for a period.
+// CostCents is the sum of click prices in CostCur for this bucket.
+// One combination of group, stream, offer and network can appear as several
+// rows when cost_cur differs. The caller sums Hits itself.
+// Without cost columns both cost fields stay zero and empty.
 type ClickFact struct {
 	OfferID   string `json:"offer_id"`
 	NetworkID string `json:"network_id"`
@@ -13,6 +17,8 @@ type ClickFact struct {
 	Stream    string `json:"stream"`
 	Hits      int64  `json:"hits"`
 	Uniq      int64  `json:"uniq"`
+	CostCents int64  `json:"cost_cents"`
+	CostCur   string `json:"cost_cur"`
 }
 
 // StatusFact is one conversion status for a period.
@@ -29,6 +35,8 @@ type StatusFact struct {
 // Facts is the click and conversion breakdown used by the catalog tables.
 // Ready is false when the offer and network columns are not on the tables.
 // Callers then show a dash instead of a zero for those columns.
+// One click key can appear as several Clicks rows when cost_cur differs.
+// The caller sums Hits itself.
 type Facts struct {
 	Ready  bool         `json:"ready"`
 	Clicks []ClickFact  `json:"clicks"`
@@ -96,14 +104,12 @@ func (c *CH) clickFactsBundle(ctx context.Context, from, to time.Time, where str
 	return out, nil
 }
 
+// clickFacts reads click counts for the half-open window.
+// where is empty or from buildWhere on events. When cost columns exist,
+// each currency is its own row and CostCents is the sum for that currency.
+// It returns an error when the query or a scan fails.
 func (c *CH) clickFacts(ctx context.Context, from, to time.Time, where string, wargs []any) ([]ClickFact, error) {
-	q := `SELECT group_id, stream_name, count(), countIf(uniq = 1)
-		FROM events WHERE ts >= ? AND ts < ?` + where + ` GROUP BY group_id, stream_name`
-	if c.clickCols {
-		q = `SELECT group_id, stream_name, offer_id, network_id, count(), countIf(uniq = 1)
-			FROM events WHERE ts >= ? AND ts < ?` + where + `
-			GROUP BY group_id, stream_name, offer_id, network_id`
-	}
+	q := clickFactsSQL(c.clickCols, c.costCols, where)
 	qargs := append([]any{from, to}, wargs...)
 	rows, err := c.conn.Query(ctx, q, qargs...)
 	if err != nil {
@@ -112,22 +118,66 @@ func (c *CH) clickFacts(ctx context.Context, from, to time.Time, where string, w
 	defer rows.Close()
 	var out []ClickFact
 	for rows.Next() {
-		var row ClickFact
-		var hits, uniq uint64
-		if c.clickCols {
-			if err := rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.NetworkID, &hits, &uniq); err != nil {
-				return nil, err
-			}
-		} else if err := rows.Scan(&row.GroupID, &row.Stream, &hits, &uniq); err != nil {
+		row, err := scanClickFact(rows, c.clickCols, c.costCols)
+		if err != nil {
 			return nil, err
 		}
-		row.Hits, row.Uniq = int64(hits), int64(uniq)
 		out = append(out, row)
 	}
 	if out == nil {
 		out = []ClickFact{}
 	}
 	return out, rows.Err()
+}
+
+// clickFactsSQL is the click breakdown for one window.
+// clickCols adds offer_id and network_id. costCols adds cost_cur and
+// sum(cost_cents) and groups by cost_cur, so one key can return several rows.
+// where is empty or an events filter that starts with " AND ", placed after
+// "ts < ?". Placeholders are from, to, then that filter. It does not fail.
+func clickFactsSQL(clickCols, costCols bool, where string) string {
+	cols := "group_id, stream_name"
+	group := "group_id, stream_name"
+	if clickCols {
+		cols += ", offer_id, network_id"
+		group += ", offer_id, network_id"
+	}
+	cols += ", count(), countIf(uniq = 1)"
+	if costCols {
+		cols += ", cost_cur, sum(cost_cents)"
+		group += ", cost_cur"
+	}
+	return "SELECT " + cols + " FROM events WHERE ts >= ? AND ts < ?" + where + " GROUP BY " + group
+}
+
+// factRow reads one result row. Scan matches driver.Rows.
+type factRow interface {
+	Scan(dest ...any) error
+}
+
+// scanClickFact reads one clickFacts row.
+// rows is the open result. clickCols and costCols select the column set
+// from clickFactsSQL. Hits and Uniq come from the counts. Without costCols
+// the cost fields stay zero and empty. A scan error is returned.
+func scanClickFact(rows factRow, clickCols, costCols bool) (ClickFact, error) {
+	var row ClickFact
+	var hits, uniq uint64
+	var err error
+	switch {
+	case clickCols && costCols:
+		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.NetworkID, &hits, &uniq, &row.CostCur, &row.CostCents)
+	case clickCols:
+		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.NetworkID, &hits, &uniq)
+	case costCols:
+		err = rows.Scan(&row.GroupID, &row.Stream, &hits, &uniq, &row.CostCur, &row.CostCents)
+	default:
+		err = rows.Scan(&row.GroupID, &row.Stream, &hits, &uniq)
+	}
+	if err != nil {
+		return ClickFact{}, err
+	}
+	row.Hits, row.Uniq = int64(hits), int64(uniq)
+	return row, nil
 }
 
 func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, wargs []any) ([]StatusFact, error) {
@@ -159,18 +209,29 @@ func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, 
 	return out, rows.Err()
 }
 
-func (c *CH) groupStatus(ctx context.Context, from, to time.Time, where string, wargs []any) ([]StatusFact, error) {
-	evArgs := append([]any{from, to}, wargs...)
-	rows, err := c.conn.Query(ctx, `SELECT e.group_id, c.status, count(), sum(c.profit)
+// groupStatusSQL joins conversions to one campaign id per click.
+// where is empty or an events filter that starts with " AND ".
+// The aggregate is aliased gid: group_id in where must stay the events column.
+// Placeholders are from, to, the where args, then from, to. It does not fail.
+func groupStatusSQL(where string) string {
+	return `SELECT e.gid, c.status, count(), sum(c.profit)
 		FROM conversions AS c FINAL
 		INNER JOIN (
-			SELECT cid, any(group_id) AS group_id
+			SELECT cid, any(group_id) AS gid
 			FROM events
-			WHERE ts >= ? AND ts < ? AND cid != ''`+where+`
+			WHERE ts >= ? AND ts < ? AND cid != ''` + where + `
 			GROUP BY cid
 		) AS e ON e.cid = c.cid
 		WHERE c.ts >= ? AND c.ts < ?
-		GROUP BY e.group_id, c.status`, append(evArgs, from, to)...)
+		GROUP BY e.gid, c.status`
+}
+
+// groupStatus reads conversion counts per campaign and status.
+// where is empty or from buildWhere on events. wargs are its placeholders.
+// It returns an error when the query or a scan fails.
+func (c *CH) groupStatus(ctx context.Context, from, to time.Time, where string, wargs []any) ([]StatusFact, error) {
+	evArgs := append([]any{from, to}, wargs...)
+	rows, err := c.conn.Query(ctx, groupStatusSQL(where), append(evArgs, from, to)...)
 	if err != nil {
 		return nil, err
 	}

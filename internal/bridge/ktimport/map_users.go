@@ -280,12 +280,12 @@ func (ctx *userMapCtx) grantLabels(ktRes string, groups []int, ref string) ([]Lo
 // userLang нормализует язык Keitaro для prefs.lang.
 //
 // Параметры: lang — preferences.language.
-// Результат: ru, en или пустая строка.
+// Результат: ru, en, uk или пустая строка.
 // Ошибки: нет.
 func userLang(lang string) string {
 	low := strings.ToLower(strings.TrimSpace(lang))
 	switch low {
-	case "ru", "en":
+	case "ru", "en", "uk":
 		return low
 	default:
 		return ""

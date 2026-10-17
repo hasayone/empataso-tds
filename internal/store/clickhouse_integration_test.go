@@ -29,6 +29,7 @@ func chFromEnv(t *testing.T) *CH {
 	if err != nil {
 		t.Skipf("ClickHouse unavailable (%s): %v — skipping integration tests", addr, err)
 	}
+	t.Cleanup(func() { ch.Close() })
 	return ch
 }
 
@@ -43,7 +44,6 @@ func envDef(k, def string) string {
 // reads, runs a postback, then cleans up after itself.
 func TestCHRoundTrip(t *testing.T) {
 	ch := chFromEnv(t)
-	defer ch.Close()
 	ctx := context.Background()
 
 	group := fmt.Sprintf("itest_%d", os.Getpid())
@@ -51,12 +51,7 @@ func TestCHRoundTrip(t *testing.T) {
 	from := now.Add(-time.Hour)
 	to := now.Add(time.Hour)
 
-	t.Cleanup(func() {
-		// clean up the test group's events and postbacks
-		_ = ch.conn.Exec(ctx, "ALTER TABLE events DELETE WHERE group_name = ?", group)
-		_ = ch.conn.Exec(ctx, "ALTER TABLE postbacks DELETE WHERE group_name = ?", group)
-		_ = ch.conn.Exec(ctx, "ALTER TABLE conversions DELETE WHERE group_name = ?", group)
-	})
+	t.Cleanup(func() { cleanupGroup(t, ch, group) })
 
 	events := []logbuf.Event{
 		{Ts: now, GroupID: group, GroupName: group, Stream: "s1", Out: "o1",
@@ -246,18 +241,13 @@ func TestCHRoundTrip(t *testing.T) {
 // conversions and checks the journal, value list and a field filter.
 func TestCHExtColumns(t *testing.T) {
 	ch := chFromEnv(t)
-	defer ch.Close()
 	ctx := context.Background()
 	group := fmt.Sprintf("itest_ext_%d", os.Getpid())
 	cid := fmt.Sprintf("ext_%d", os.Getpid())
 	now := time.Now().UTC().Truncate(time.Second)
 	from := now.Add(-time.Hour)
 	to := now.Add(time.Hour)
-	t.Cleanup(func() {
-		_ = ch.conn.Exec(ctx, "ALTER TABLE events DELETE WHERE group_name = ?", group)
-		_ = ch.conn.Exec(ctx, "ALTER TABLE postbacks DELETE WHERE group_name = ?", group)
-		_ = ch.conn.Exec(ctx, "ALTER TABLE conversions DELETE WHERE group_name = ?", group)
-	})
+	t.Cleanup(func() { cleanupGroup(t, ch, group) })
 	ev := logbuf.Event{
 		Ts: now, GroupID: group, GroupName: group, Stream: "s1", Country: "pl",
 		CID: cid, Site: "exland", XRW: "XMLHttpRequest", IP: "8.8.8.8",
@@ -327,6 +317,160 @@ func TestCHExtColumns(t *testing.T) {
 	})
 	if err != nil || len(got) != 1 || got[0].XRW != "XMLHttpRequest" || got[0].Site != "exland" {
 		t.Fatalf("Logs xrw: %v %+v", err, got)
+	}
+}
+
+// TestCHCost inserts one priced click and one without a price, then checks
+// facts, performance and the time series. Cleanup deletes the group's events.
+func TestCHCost(t *testing.T) {
+	ch := chFromEnv(t)
+	if !ch.costCols {
+		t.Fatal("cost columns are not ready")
+	}
+	ctx := context.Background()
+	group := fmt.Sprintf("itest_cost_%d", os.Getpid())
+	now := time.Now()
+	from := now.Add(-time.Hour)
+	to := now.Add(time.Hour)
+	t.Cleanup(func() { cleanupGroup(t, ch, group) })
+	events := []logbuf.Event{
+		{Ts: now, GroupID: group, GroupName: group, Stream: "s1", IP: "10.0.0.1", CID: group + "_a",
+			CostCents: 150, CostCur: "USD"},
+		{Ts: now, GroupID: group, GroupName: group, Stream: "s1", IP: "10.0.0.2", CID: group + "_b"},
+	}
+	if err := ch.InsertEvents(ctx, events); err != nil {
+		t.Fatalf("InsertEvents: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	facts, err := ch.ClickFacts(ctx, from, to)
+	if err != nil {
+		t.Fatalf("ClickFacts: %v", err)
+	}
+	var usd int64
+	var bare bool
+	for _, row := range facts.Clicks {
+		if row.GroupID != group {
+			continue
+		}
+		if row.CostCur == "USD" {
+			usd += row.CostCents
+		}
+		if row.CostCur == "" {
+			bare = true
+			if row.CostCents != 0 {
+				t.Fatalf("unpriced row cost_cents = %d", row.CostCents)
+			}
+		}
+	}
+	if usd != 150 || !bare {
+		t.Fatalf("facts usd=%d bare=%v rows=%+v", usd, bare, facts.Clicks)
+	}
+
+	perf, err := ch.Performance(ctx, from, to)
+	if err != nil {
+		t.Fatalf("Performance: %v", err)
+	}
+	var row PerfRow
+	var found bool
+	for _, p := range perf {
+		if p.GroupID == group && p.Stream == "s1" {
+			row = p
+			found = true
+		}
+	}
+	if !found || row.Cost["USD"] != 150 {
+		t.Fatalf("performance found=%v row=%+v", found, row)
+	}
+
+	pts, err := ch.TimeSeriesFiltered(ctx, from, to, 3600, []Cond{{
+		Field: "campaign_id", Op: "eq", Values: []string{group},
+	}})
+	if err != nil {
+		t.Fatalf("TimeSeries: %v", err)
+	}
+	var sum int64
+	for _, p := range pts {
+		sum += p.Cost["USD"]
+	}
+	if sum != 150 {
+		t.Fatalf("series USD = %d", sum)
+	}
+}
+
+// TestCHPerformanceByGroupID checks two campaigns that share a display name
+// keep their own conversion. Cleanup deletes the group's events and conversions.
+func TestCHPerformanceByGroupID(t *testing.T) {
+	ch := chFromEnv(t)
+	if !ch.extConv {
+		t.Fatal("conversions group_id is not ready")
+	}
+	ctx := context.Background()
+	name := fmt.Sprintf("itest_perf_%d", os.Getpid())
+	idA, idB := name+"_a", name+"_b"
+	now := time.Now()
+	from, to := now.Add(-time.Hour), now.Add(time.Hour)
+	t.Cleanup(func() { cleanupGroup(t, ch, name) })
+	events := []logbuf.Event{
+		{Ts: now, GroupID: idA, GroupName: name, Stream: "s1", IP: "10.1.0.1", CID: idA},
+		{Ts: now, GroupID: idB, GroupName: name, Stream: "s1", IP: "10.1.0.2", CID: idB},
+	}
+	if err := ch.InsertEvents(ctx, events); err != nil {
+		t.Fatalf("InsertEvents: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	if _, err := ch.RecordPostback(ctx, idA, 1, "lead"); err != nil {
+		t.Fatalf("conv a: %v", err)
+	}
+	if _, err := ch.RecordPostback(ctx, idB, 2, "sale"); err != nil {
+		t.Fatalf("conv b: %v", err)
+	}
+	time.Sleep(200 * time.Millisecond)
+	perf, err := ch.Performance(ctx, from, to)
+	if err != nil {
+		t.Fatalf("Performance: %v", err)
+	}
+	got := map[string]PerfRow{}
+	for _, p := range perf {
+		if p.GroupID == idA || p.GroupID == idB {
+			got[p.GroupID] = p
+		}
+	}
+	if a, b := got[idA], got[idB]; a.Conv != 1 || b.Conv != 1 || len(got) != 2 {
+		t.Fatalf("rows %+v", got)
+	}
+	facts, err := ch.ClickFactsFiltered(ctx, from, to, []Cond{{
+		Field: "campaign_id", Op: "eq", Values: []string{idA},
+	}})
+	if err != nil {
+		t.Fatalf("ClickFactsFiltered: %v", err)
+	}
+	if len(facts.Clicks) != 1 || facts.Clicks[0].GroupID != idA || facts.Clicks[0].Hits != 1 {
+		t.Fatalf("clicks %+v", facts.Clicks)
+	}
+	var saw bool
+	for _, st := range facts.Status {
+		if st.GroupID == idA && st.N == 1 {
+			saw = true
+		}
+	}
+	if !saw {
+		t.Fatalf("status %+v", facts.Status)
+	}
+}
+
+// cleanupGroup deletes one test group's rows from events, postbacks and conversions.
+// t receives a log line when a mutation is refused. ch is the open client.
+// name is the group_name the test inserted and contains no quotes.
+// It does not fail the test.
+func cleanupGroup(t *testing.T, ch *CH, name string) {
+	t.Helper()
+	ctx := context.Background()
+	for _, table := range []string{"events", "postbacks", "conversions"} {
+		q := fmt.Sprintf("ALTER TABLE %s DELETE WHERE group_name = '%s'", table, name)
+		if err := ch.conn.Exec(ctx, q); err != nil {
+			t.Logf("cleanup %s %s: %v", table, name, err)
+		}
 	}
 }
 

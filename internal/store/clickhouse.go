@@ -3,7 +3,6 @@ package store
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -106,7 +105,7 @@ func (c *CH) summary(ctx context.Context, from, to time.Time, where string, warg
 	qargs := append([]any{from, to}, wargs...)
 	row := c.conn.QueryRow(ctx,
 		`SELECT count() AS total,
-		        countIf(uniq = 1) AS uniq,
+		        countIf(uniq = 1) AS uniques,
 		        countIf(bot != '' AND bot != '-') AS bots
 		 FROM events
 		 WHERE ts >= ? AND ts < ?`+where,
@@ -120,23 +119,26 @@ func (c *CH) summary(ctx context.Context, from, to time.Time, where string, warg
 
 // TSPoint is one chart bucket.
 // Total, Unique and Bots come from clicks. Conv and Revenue are confirmed
-// lead and sale rows. Cost is not stored here.
+// lead and sale rows. Cost is click price in cents, keyed by currency code.
+// An empty Cost is omitted from JSON.
 type TSPoint struct {
-	TS      time.Time `json:"ts"`
-	Total   int64     `json:"total"`
-	Unique  int64     `json:"unique"`
-	Bots    int64     `json:"bots"`
-	Conv    int64     `json:"conv"`
-	Revenue float64   `json:"revenue"`
+	TS      time.Time        `json:"ts"`
+	Total   int64            `json:"total"`
+	Unique  int64            `json:"unique"`
+	Bots    int64            `json:"bots"`
+	Conv    int64            `json:"conv"`
+	Revenue float64          `json:"revenue"`
+	Cost    map[string]int64 `json:"cost,omitempty"`
 }
 
 // TimeSeries aggregates clicks and confirmed conversions for a period.
 // stepSec is the bucket length in seconds. A step below 3600 is raised, and
 // the step grows so the answer has at most 400 points.
-// It returns one point per bucket, including quiet buckets. An error from
-// either query is returned as-is.
+// It returns one point per bucket, including quiet buckets. When cost
+// columns exist, Cost carries click prices in cents by currency.
+// An error from a query is returned as-is.
 func (c *CH) TimeSeries(ctx context.Context, from, to time.Time, stepSec int) ([]TSPoint, error) {
-	return c.timeSeries(ctx, from, to, stepSec, "", nil)
+	return c.timeSeries(ctx, window{from: from, to: to}, stepSec)
 }
 
 // TimeSeriesFiltered returns TimeSeries when conds is empty. Otherwise it
@@ -153,20 +155,23 @@ func (c *CH) TimeSeriesFiltered(ctx context.Context, from, to time.Time, stepSec
 	if skip {
 		return []TSPoint{}, nil
 	}
-	return c.timeSeries(ctx, from, to, stepSec, where, args)
+	return c.timeSeries(ctx, window{from: from, to: to, where: where, args: args}, stepSec)
 }
 
 // timeSeries aggregates clicks and confirmed conversions per bucket.
-// where is empty or from buildWhere on events.
-func (c *CH) timeSeries(ctx context.Context, from, to time.Time, stepSec int, where string, wargs []any) ([]TSPoint, error) {
-	stepSec = capSeriesStep(from, to, stepSec)
+// w is the report window; its where is empty or from buildWhere on events.
+// stepSec is the bucket length in seconds. When cost columns exist, a third
+// query adds click prices in cents by currency. An error from any query is
+// returned as-is.
+func (c *CH) timeSeries(ctx context.Context, w window, stepSec int) ([]TSPoint, error) {
+	stepSec = capSeriesStep(w.from, w.to, stepSec)
 	hits := map[int64]seriesHit{}
-	evArgs := append([]any{stepSec, from, to}, wargs...)
+	evArgs := append([]any{stepSec, w.from, w.to}, w.args...)
 	rows, err := c.conn.Query(ctx,
 		`SELECT toStartOfInterval(ts, INTERVAL ? second) AS t,
-		        count() AS total, countIf(uniq=1) AS uniq,
+		        count() AS total, countIf(uniq=1) AS uniques,
 		        countIf(bot!='' AND bot!='-') AS bots
-		 FROM events WHERE ts >= ? AND ts < ?`+where+`
+		 FROM events WHERE ts >= ? AND ts < ?`+w.where+`
 		 GROUP BY t ORDER BY t`,
 		evArgs...)
 	if err != nil {
@@ -188,12 +193,12 @@ func (c *CH) timeSeries(ctx context.Context, from, to time.Time, stepSec int, wh
 	}
 	var convSQL string
 	var convArgs []any
-	if where == "" {
+	if w.where == "" {
 		convSQL = confirmedSeriesSQL
-		convArgs = []any{stepSec, from, to}
+		convArgs = []any{stepSec, w.from, w.to}
 	} else {
-		convSQL = confirmedSeriesFilteredSQL(where)
-		convArgs = append([]any{stepSec, from, to, from, to}, wargs...)
+		convSQL = confirmedSeriesFilteredSQL(w.where)
+		convArgs = append([]any{stepSec, w.from, w.to, w.from, w.to}, w.args...)
 	}
 	conv, err := c.conn.Query(ctx, convSQL, convArgs...)
 	if err != nil {
@@ -214,7 +219,12 @@ func (c *CH) timeSeries(ctx context.Context, from, to time.Time, stepSec int, wh
 	if err := conv.Err(); err != nil {
 		return nil, err
 	}
-	return fillSeries(from, to, stepSec, hits), nil
+	if c.costCols {
+		if err := c.addSeriesCost(ctx, w, stepSec, hits); err != nil {
+			return nil, err
+		}
+	}
+	return fillSeries(w.from, w.to, stepSec, hits), nil
 }
 
 // KV — a key/count pair for breakdowns.
@@ -248,16 +258,20 @@ type PerfRow struct {
 	// to Hits/Unique/Bots of the stream that sent them on, so a flow's
 	// numbers show everything that went through it.
 	Forwarded int64 `json:"forwarded"`
+	// Cost is click price in cents, keyed by currency code.
+	// Currencies share this row. An empty map is omitted from JSON.
+	Cost map[string]int64 `json:"cost,omitempty"`
 }
 
-// Performance aggregates events and postbacks per group and stream over a
-// period. Two GROUP BY queries merged in Go rather than one JOIN: postbacks
-// carry no group_id, and a JOIN across two MergeTree tables on free-text
-// names is slower on ClickHouse than two scans plus a map lookup. Rows are
-// ordered by hits, descending; a stream with conversions but no events in
-// the window still appears, with zero hits.
+// Performance aggregates events and conversions per group and stream over a
+// period. Two GROUP BY queries merged in Go rather than one JOIN: conversions
+// carry group_id once the ext wave is ready, postbacks do not, and a JOIN
+// across two MergeTree tables is slower than two scans plus a map lookup.
+// A conversion with group_id joins that campaign even after a rename. A row
+// with an empty group_id still joins by name. Rows are ordered by hits,
+// descending; a stream with conversions but no events still appears, with zero hits.
 func (c *CH) Performance(ctx context.Context, from, to time.Time) ([]PerfRow, error) {
-	return c.performance(ctx, from, to, "", nil)
+	return c.performance(ctx, window{from: from, to: to})
 }
 
 // PerformanceFiltered returns Performance when conds is empty. Otherwise it
@@ -274,90 +288,101 @@ func (c *CH) PerformanceFiltered(ctx context.Context, from, to time.Time, conds 
 	if skip {
 		return []PerfRow{}, nil
 	}
-	return c.performance(ctx, from, to, where, args)
+	return c.performance(ctx, window{from: from, to: to, where: where, args: args})
 }
 
 // performance merges event aggregates with postbacks and conversions.
-// where is empty or from buildWhere on events.
-func (c *CH) performance(ctx context.Context, from, to time.Time, where string, wargs []any) ([]PerfRow, error) {
-	evArgs := append([]any{from, to}, wargs...)
+// w is the report window; its where is empty or from buildWhere on events.
+// When cost columns exist, click prices are added on the same row, cents by currency.
+// An error from a query is returned as-is.
+func (c *CH) performance(ctx context.Context, w window) ([]PerfRow, error) {
+	evArgs := append([]any{w.from, w.to}, w.args...)
 	rows, err := c.conn.Query(ctx,
 		`SELECT group_id, group_name, stream_name,
-		        count() AS hits, countIf(uniq = 1) AS uniq,
+		        count() AS hits, countIf(uniq = 1) AS uniques,
 		        countIf(bot != '' AND bot != '-') AS bots
-		 FROM events WHERE ts >= ? AND ts < ?`+where+`
+		 FROM events WHERE ts >= ? AND ts < ?`+w.where+`
 		 GROUP BY group_id, group_name, stream_name
 		 ORDER BY hits DESC LIMIT 2000`, evArgs...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	type key struct{ group, stream string }
 	var out []PerfRow
-	index := map[key]int{}
+	var idx perfIndex
 	for rows.Next() {
 		var p PerfRow
 		var hits, uniq, bots uint64
 		if err := rows.Scan(&p.GroupID, &p.Group, &p.Stream, &hits, &uniq, &bots); err != nil {
 			return nil, err
 		}
-		p.Hits, p.Unique, p.Bots = int64(hits), int64(uniq), int64(bots)
-		index[key{p.Group, p.Stream}] = len(out)
-		out = append(out, p)
+		i := idx.at(&out, p.GroupID, p.Group, p.Stream)
+		out[i].Hits += int64(hits)
+		out[i].Unique += int64(uniq)
+		out[i].Bots += int64(bots)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	if c.netCols {
-		if err := c.addForwarded(ctx, from, to, where, wargs, &out); err != nil {
+	if c.costCols {
+		if err := c.addCost(ctx, w, &out, &idx); err != nil {
 			return nil, err
 		}
 	}
-	pbSQL, pbArgs := performanceConvSQL(from, to, where, wargs)
-	pbs, err := c.conn.Query(ctx, pbSQL, append([]any{from, to}, pbArgs...)...)
+	if c.netCols {
+		if err := c.addForwarded(ctx, w, &out, &idx); err != nil {
+			return nil, err
+		}
+	}
+	pbSQL, pbArgs := performanceConvSQL(w.from, w.to, w.where, w.args, c.extConv)
+	pbs, err := c.conn.Query(ctx, pbSQL, append([]any{w.from, w.to}, pbArgs...)...)
 	if err != nil {
 		return nil, err
 	}
 	defer pbs.Close()
 	for pbs.Next() {
-		var group, stream string
+		var groupID, group, stream string
 		var conv uint64
 		var profit float64
-		if err := pbs.Scan(&group, &stream, &conv, &profit); err != nil {
+		if err := pbs.Scan(&groupID, &group, &stream, &conv, &profit); err != nil {
 			return nil, err
 		}
-		i, ok := index[key{group, stream}]
-		if !ok {
-			i = len(out)
-			index[key{group, stream}] = i
-			out = append(out, PerfRow{Group: group, Stream: stream})
-		}
-		out[i].Conv, out[i].Profit = int64(conv), profit
+		i := idx.at(&out, groupID, group, stream)
+		out[i].Conv += int64(conv)
+		out[i].Profit += profit
 	}
 	return out, pbs.Err()
 }
 
 // performanceConvSQL is the conversion half of Performance.
 // from and to bound the outer WHERE. where is empty or from buildWhere on events.
+// haveGroupID is true when conversions carry group_id (the ext wave).
+// Postbacks have no such column, so that branch selects an empty group_id.
+// Without the column both branches select an empty group_id and the row shape stays one.
 // extraArgs follow the outer from and to: when where is set, subquery from, to
 // and wargs. It does not fail.
-func performanceConvSQL(from, to time.Time, where string, wargs []any) (sql string, extraArgs []any) {
-	if where == "" {
-		return `SELECT group_name, stream_name, count() AS conv, sum(profit) AS profit
-		 FROM (
-		   SELECT group_name, stream_name, profit, ts FROM postbacks
-		   UNION ALL
-		   SELECT group_name, stream_name, profit, ts FROM conversions
-		 ) WHERE ts >= ? AND ts < ?
-		 GROUP BY group_name, stream_name`, nil
+func performanceConvSQL(from, to time.Time, where string, wargs []any, haveGroupID bool) (sql string, extraArgs []any) {
+	convID := "'' AS group_id"
+	if haveGroupID {
+		convID = "group_id"
 	}
-	return `SELECT group_name, stream_name, count() AS conv, sum(profit) AS profit
+	tail := "profit, ts"
+	if where != "" {
+		tail = "profit, ts, cid"
+		extraArgs = append([]any{from, to}, wargs...)
+	}
+	sql = `SELECT group_id, group_name, stream_name, count() AS conv, sum(profit) AS profit
 		 FROM (
-		   SELECT group_name, stream_name, profit, ts, cid FROM postbacks
+		   SELECT '' AS group_id, group_name, stream_name, ` + tail + ` FROM postbacks
 		   UNION ALL
-		   SELECT group_name, stream_name, profit, ts, cid FROM conversions
-		 ) WHERE ts >= ? AND ts < ?` + eventsCidInSQL(where) + `
-		 GROUP BY group_name, stream_name`, append([]any{from, to}, wargs...)
+		   SELECT ` + convID + `, group_name, stream_name, ` + tail + ` FROM conversions
+		 ) WHERE ts >= ? AND ts < ?`
+	if where != "" {
+		sql += eventsCidInSQL(where)
+	}
+	sql += `
+		 GROUP BY group_id, group_name, stream_name`
+	return sql, extraArgs
 }
 
 // Breakdown returns the top values of dim over [from, to).
@@ -498,47 +523,4 @@ func scanKV(rows driver.Rows) ([]KV, error) {
 		out = append(out, kv)
 	}
 	return out, rows.Err()
-}
-
-// addForwarded adds the visits each linking stream sent on to another group.
-// where is empty or from buildWhere on events.
-func (c *CH) addForwarded(ctx context.Context, from, to time.Time, where string, wargs []any, out *[]PerfRow) error {
-	args := append([]any{from, to}, wargs...)
-	rows, err := c.conn.Query(ctx,
-		`SELECT via, count() AS hits, countIf(uniq = 1) AS uniq,
-		        countIf(bot != '' AND bot != '-') AS bots
-		 FROM events WHERE ts >= ? AND ts < ? AND via != ''`+where+`
-		 GROUP BY via`, args...)
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var via string
-		var hits, uniq, bots uint64
-		if err := rows.Scan(&via, &hits, &uniq, &bots); err != nil {
-			return err
-		}
-		gid, stream, ok := strings.Cut(via, "/")
-		if !ok {
-			continue
-		}
-		i := -1
-		for k := range *out {
-			if (*out)[k].GroupID == gid && (*out)[k].Stream == stream {
-				i = k
-				break
-			}
-		}
-		if i < 0 {
-			*out = append(*out, PerfRow{GroupID: gid, Stream: stream})
-			i = len(*out) - 1
-		}
-		p := &(*out)[i]
-		p.Hits += int64(hits)
-		p.Unique += int64(uniq)
-		p.Bots += int64(bots)
-		p.Forwarded += int64(hits)
-	}
-	return rows.Err()
 }

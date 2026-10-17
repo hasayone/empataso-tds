@@ -307,7 +307,7 @@ func loadBotProfile(path string) config.Bots {
 func (s *Server) handleFacts(w http.ResponseWriter, r *http.Request) {
 	from, to := parseRange(r)
 	if s.cfg.Stats == nil {
-		writeJSON(w, http.StatusOK, store.Facts{Clicks: []store.ClickFact{}, Status: []store.StatusFact{}})
+		s.writeStats(w, r, http.StatusOK, store.Facts{Clicks: []store.ClickFact{}, Status: []store.StatusFact{}})
 		return
 	}
 	conds, ok := s.condsFrom(w, r, "events")

@@ -39,6 +39,24 @@ func TestFillSeriesKeepsConversionGap(t *testing.T) {
 	}
 }
 
+func TestFillSeriesCopiesCost(t *testing.T) {
+	from := time.Date(2026, 10, 14, 10, 0, 0, 0, time.UTC)
+	to := from.Add(2 * time.Hour)
+	hits := map[int64]seriesHit{
+		from.Unix(): {total: 1, cost: map[string]int64{"USD": 150, "EUR": 20}},
+	}
+	pts := fillSeries(from, to, 3600, hits)
+	if len(pts) != 2 {
+		t.Fatalf("buckets = %d, want 2", len(pts))
+	}
+	if pts[0].Cost["USD"] != 150 || pts[0].Cost["EUR"] != 20 {
+		t.Fatalf("cost = %#v", pts[0].Cost)
+	}
+	if pts[1].Cost != nil {
+		t.Fatalf("quiet bucket cost = %#v", pts[1].Cost)
+	}
+}
+
 func TestCapSeriesStep(t *testing.T) {
 	from := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := from.Add(24 * time.Hour * 800)

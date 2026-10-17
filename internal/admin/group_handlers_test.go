@@ -135,6 +135,78 @@ func TestGroupPutUpsert(t *testing.T) {
 	}
 }
 
+func TestGroupPutAssignsNum(t *testing.T) {
+	srv := groupAPIServer(t)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+
+	put := func(id string, body config.Group) {
+		t.Helper()
+		resp := csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups/"+id, csrf, body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("put %s %d", id, resp.StatusCode)
+		}
+	}
+
+	put("a", config.Group{ID: "a", Name: "A"})
+	got := fetchGroups(t, c, srv.URL)
+	a, ok := groupByID(got, "a")
+	if !ok || a.Num != 1 {
+		t.Fatalf("a num: %+v ok=%v", a, ok)
+	}
+
+	put("b", config.Group{ID: "b", Name: "B"})
+	got = fetchGroups(t, c, srv.URL)
+	a, _ = groupByID(got, "a")
+	b, ok := groupByID(got, "b")
+	if a.Num != 1 || !ok || b.Num != 2 {
+		t.Fatalf("after b: a=%+v b=%+v ok=%v", a, b, ok)
+	}
+
+	put("c", config.Group{ID: "c", Name: "C", Num: 10})
+	got = fetchGroups(t, c, srv.URL)
+	gc, ok := groupByID(got, "c")
+	if !ok || gc.Num != 10 {
+		t.Fatalf("c num: %+v ok=%v", gc, ok)
+	}
+
+	put("d", config.Group{ID: "d", Name: "D"})
+	got = fetchGroups(t, c, srv.URL)
+	d, ok := groupByID(got, "d")
+	if !ok || d.Num != 11 {
+		t.Fatalf("d num: %+v ok=%v", d, ok)
+	}
+
+	put("a", config.Group{ID: "a", Name: "A2", Num: 1})
+	got = fetchGroups(t, c, srv.URL)
+	a, ok = groupByID(got, "a")
+	if !ok || a.Num != 1 || a.Name != "A2" {
+		t.Fatalf("a after rename: %+v ok=%v", a, ok)
+	}
+}
+
+func TestAssignGroupNums(t *testing.T) {
+	assignGroupNums(nil)
+
+	numbered := []config.Group{{ID: "a", Num: 2}, {ID: "b", Num: 2}, {ID: "c", Num: 5}}
+	assignGroupNums(numbered)
+	if numbered[0].Num != 2 || numbered[1].Num != 2 || numbered[2].Num != 5 {
+		t.Fatalf("numbered: %+v", numbered)
+	}
+
+	mixed := []config.Group{
+		{ID: "a"},
+		{ID: "b", Num: 4},
+		{ID: "c", Num: 4},
+		{ID: "d", Num: -1},
+	}
+	assignGroupNums(mixed)
+	if mixed[0].Num != 5 || mixed[1].Num != 4 || mixed[2].Num != 4 || mixed[3].Num != 6 {
+		t.Fatalf("mixed: %+v", mixed)
+	}
+}
+
 func TestGroupDelete(t *testing.T) {
 	srv := groupAPIServer(t)
 	c := newClient(t)

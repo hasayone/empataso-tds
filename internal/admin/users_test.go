@@ -158,6 +158,34 @@ func TestUsersPartialUpdateAdmin(t *testing.T) {
 	}
 }
 
+// TestUsersLangUK accepts Ukrainian and rejects a language outside the whitelist.
+// t is the test handle. It returns nothing. A non-200 for uk or a non-400 for an unknown code fails the test.
+func TestUsersLangUK(t *testing.T) {
+	_, c, csrf, base := usersHTTP(t)
+	code, raw := userJSON(t, c, http.MethodPost, base+"/api/users", csrf, `{"login":"ukrainian","password":"secret1","type":"USER","enabled":true}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create %d %s", code, raw)
+	}
+	var u security.User
+	if err := json.Unmarshal(raw, &u); err != nil {
+		t.Fatal(err)
+	}
+	code, raw = userJSON(t, c, http.MethodPut, base+"/api/users/"+u.ID, csrf, `{"prefs":{"lang":"uk"}}`)
+	if code != http.StatusOK {
+		t.Fatalf("uk lang %d %s", code, raw)
+	}
+	if err := json.Unmarshal(raw, &u); err != nil {
+		t.Fatal(err)
+	}
+	if u.Prefs.Lang != "uk" {
+		t.Fatalf("prefs.lang %q", u.Prefs.Lang)
+	}
+	code, _ = userJSON(t, c, http.MethodPut, base+"/api/users/"+u.ID, csrf, `{"prefs":{"lang":"de"}}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("bad lang want 400, got %d", code)
+	}
+}
+
 func TestUsersLastAdminGuards(t *testing.T) {
 	_, c, csrf, base := usersHTTP(t)
 

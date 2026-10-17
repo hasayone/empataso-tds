@@ -22,11 +22,22 @@ func confirmedSeriesFilteredSQL(eventsWhere string) string {
  GROUP BY t`
 }
 
+// costSeriesSQL is the click-price buckets for the dashboard chart.
+// where is empty or a buildWhere fragment that starts with " AND ".
+// Placeholders are step, from, to, then the where args. Clicks with no price
+// are excluded. It does not fail.
+func costSeriesSQL(where string) string {
+	return `SELECT toStartOfInterval(ts, INTERVAL ? second) AS t, cost_cur, sum(cost_cents)
+ FROM events WHERE ts >= ? AND ts < ?` + where + ` AND cost_cents > 0
+ GROUP BY t, cost_cur`
+}
+
 // seriesHit is one bucket before empty gaps are filled.
 type seriesHit struct {
 	total, unique, bots int64
 	conv                int64
 	revenue             float64
+	cost                map[string]int64
 }
 
 // capSeriesStep raises stepSec so [from, to) has at most 400 buckets.
@@ -70,7 +81,8 @@ func bucketStart(t time.Time, stepSec int) time.Time {
 
 // fillSeries builds one point per bucket from the first interval that overlaps from until to.
 // Missing buckets are zeros, so the chart axis does not skip a quiet hour.
-// A bucket that has conversions and no clicks is kept. It returns at most 400 points.
+// A bucket that has conversions and no clicks is kept. Cost is copied as stored.
+// It returns at most 400 points.
 func fillSeries(from, to time.Time, stepSec int, hits map[int64]seriesHit) []TSPoint {
 	if stepSec < 3600 {
 		stepSec = 3600
@@ -83,7 +95,7 @@ func fillSeries(from, to time.Time, stepSec int, hits map[int64]seriesHit) []TSP
 		h := hits[t.Unix()]
 		out = append(out, TSPoint{
 			TS: t, Total: h.total, Unique: h.unique, Bots: h.bots,
-			Conv: h.conv, Revenue: h.revenue,
+			Conv: h.conv, Revenue: h.revenue, Cost: h.cost,
 		})
 		if len(out) >= 400 {
 			break

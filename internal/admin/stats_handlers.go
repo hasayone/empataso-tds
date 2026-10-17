@@ -414,9 +414,10 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	s.writeStats(w, r, http.StatusOK, rows)
 }
 
-// handlePostbacks writes one page of the conversion journal and the profit sum.
+// handlePostbacks writes one page of the conversion journal, the profit sum and the match count.
 // r supplies the old parameters, repeated f= and offset. Offset below zero becomes zero.
-// A bad f= is 400. Missing stats is 503. A query failure is 500.
+// total is the profit. count is the number of matching rows. A bad f= is 400.
+// Missing stats is 503. A query failure is 500.
 func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Stats == nil {
 		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
@@ -428,7 +429,7 @@ func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
 	}
 	from, to := parseRange(r)
 	q := r.URL.Query()
-	rows, total, err := s.cfg.Stats.QueryPostbacks(r.Context(), store.PostbackQuery{
+	rows, tot, err := s.cfg.Stats.QueryPostbacks(r.Context(), store.PostbackQuery{
 		From: from, To: to, Group: q.Get("group"), Status: q.Get("status"),
 		Stream: q.Get("stream"), Offer: q.Get("offer"), Landing: q.Get("landing"),
 		Source: q.Get("source"), Network: q.Get("network"), CID: q.Get("cid"),
@@ -443,7 +444,7 @@ func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
 	if rows == nil {
 		rows = []store.PostbackRow{}
 	}
-	s.writeStatsExtra(w, r, http.StatusOK, map[string]any{"total": total, "rows": rows},
+	s.writeStatsExtra(w, r, http.StatusOK, map[string]any{"total": tot.Profit, "count": tot.Count, "rows": rows},
 		map[string][]string{"profit": {"total"}})
 }
 

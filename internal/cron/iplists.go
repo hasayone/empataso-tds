@@ -18,26 +18,49 @@ import (
 
 const maxListBytes = 32 << 20
 
+// runIPLists refreshes every source in cfg into the data directory.
+// ctx cancels the fetches. The string is one "name: count" per list file,
+// sorted by name and joined with ", ". count is how many entries the file
+// holds after the last source that wrote it; a later source replaces the
+// count from an earlier one. A source that fails is skipped, its error is
+// joined into the returned error, and later sources still run. No sources
+// returns "no sources configured" and a nil error.
 func (r *Runner) runIPLists(ctx context.Context, cfg IPLists) (string, error) {
 	if len(cfg.Sources) == 0 {
 		return "no sources configured", nil
 	}
-	var done []string
+	counts := map[string]int{}
 	var errs []error
 	for _, src := range cfg.Sources {
-		res, err := r.updateList(ctx, src)
+		got, err := r.updateList(ctx, src)
 		if err != nil {
 			errs = append(errs, err)
 			continue
 		}
-		done = append(done, res...)
+		for name, n := range got {
+			counts[name] = n
+		}
 	}
-	sort.Strings(done)
-	return strings.Join(done, ", "), errors.Join(errs...)
+	names := make([]string, 0, len(counts))
+	for name := range counts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, len(names))
+	for i, name := range names {
+		parts[i] = fmt.Sprintf("%s: %d", name, counts[name])
+	}
+	return strings.Join(parts, ", "), errors.Join(errs...)
 }
 
-// updateList fetches one source and writes the list(s) it describes.
-func (r *Runner) updateList(ctx context.Context, src IPSource) ([]string, error) {
+// updateList fetches src and writes the lists that response describes.
+// ctx cancels the fetch. The map is the list name to the number of entries
+// in the file after this write; merge mode counts lines already stored as
+// well. A read, parse or write failure is returned as an error. An empty
+// address set leaves that file unchanged and is also an error, as is a
+// sectioned body with no named sections. Names written before the failure
+// stay in the map.
+func (r *Runner) updateList(ctx context.Context, src IPSource) (map[string]int, error) {
 	body, err := r.get(ctx, src.URL, nil, "", "", maxListBytes)
 	if err != nil {
 		return nil, err
@@ -64,7 +87,7 @@ func (r *Runner) updateList(ctx context.Context, src IPSource) ([]string, error)
 		lists = splitSections(string(raw))
 	}
 
-	var out []string
+	out := map[string]int{}
 	for name, lines := range lists {
 		n := countEntries(lines)
 		// An upstream that answers 200 with an error page or an empty file
@@ -80,7 +103,7 @@ func (r *Runner) updateList(ctx context.Context, src IPSource) ([]string, error)
 		if err := atomicfile.Write(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644); err != nil {
 			return out, err
 		}
-		out = append(out, fmt.Sprintf("%s: %d", name, n))
+		out[name] = n
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("%s: no \"# name\" sections found", hostOf(src.URL))

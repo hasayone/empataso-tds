@@ -32,11 +32,15 @@ func StatusPath(config string) string { return config + ".status.json" }
 // TriggerPath is the "run now" queue: one job name per line.
 func TriggerPath(config string) string { return config + ".run" }
 
-// JobStatus is what one job last did.
+// JobStatus is the last run of one job.
+// Message is the result that job reported and may be empty. Error is the
+// failure text when the run did not succeed. A status file with no error
+// field reads back with Error empty.
 type JobStatus struct {
 	LastRun    time.Time `json:"last_run"`
 	OK         bool      `json:"ok"`
 	Message    string    `json:"message"`
+	Error      string    `json:"error,omitempty"`
 	DurationMS int64     `json:"duration_ms"`
 	NextRun    time.Time `json:"next_run"`
 	Running    bool      `json:"running"`
@@ -276,10 +280,7 @@ func (r *Runner) start(ctx context.Context, cfg Config, job string) {
 		}
 		js := JobStatus{LastRun: began, OK: err == nil, Message: msg, DurationMS: took.Milliseconds()}
 		if err != nil {
-			js.Message = err.Error()
-			if msg != "" {
-				js.Message = msg + " — " + err.Error()
-			}
+			js.Error = err.Error()
 		}
 		// The interval counts from the end of a run. Counted from its start, a
 		// job that takes longer than its interval — a VirusTotal pass over many

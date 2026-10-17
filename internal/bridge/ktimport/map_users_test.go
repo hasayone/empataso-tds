@@ -6,6 +6,14 @@ import (
 	"testing"
 )
 
+// TestUserLang checks the Keitaro language whitelist keeps uk.
+// t is the test handle. It returns nothing. A dropped uk or a kept unknown code fails the test.
+func TestUserLang(t *testing.T) {
+	if userLang("UK") != "uk" || userLang(" en ") != "en" || userLang("de") != "" {
+		t.Fatal(userLang("UK"), userLang("de"))
+	}
+}
+
 func TestMapUsersFixture(t *testing.T) {
 	snap := Snapshot{
 		Campaigns: []Campaign{{ID: 7, Alias: "promo", Name: "Spring"}},

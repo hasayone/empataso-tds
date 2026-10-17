@@ -364,9 +364,13 @@ type cronState struct {
 	Status    cron.Status `json:"status"`
 	Jobs      []string    `json:"jobs"`
 	GeoPaths  struct {
-		City bool `json:"city"`
-		ASN  bool `json:"asn"`
+		City     bool `json:"city"`
+		ASN      bool `json:"asn"`
+		CityFile bool `json:"city_file"` // city database file exists and is not empty
+		ASNFile  bool `json:"asn_file"`  // asn database file exists and is not empty
 	} `json:"geo_paths"`
+	TelegramConfigured bool   `json:"telegram_configured"`    // stored token and chat id are both set
+	ConfigError        string `json:"config_error,omitempty"` // Validate failure; never includes a secret
 }
 
 // cronAliveWindow — the service ticks every few seconds; a heartbeat older
@@ -374,24 +378,70 @@ type cronState struct {
 const cronAliveWindow = 30 * time.Second
 
 func (s *Server) handleCronGet(w http.ResponseWriter, r *http.Request) {
-	st := cronState{Jobs: cron.Jobs, Config: cron.Default().Redacted(), Status: cron.Status{Jobs: map[string]cron.JobStatus{}}}
-	st.GeoPaths.City, st.GeoPaths.ASN = s.cfg.GeoCityPath != "", s.cfg.GeoASNPath != ""
-	if s.cfg.CronFile == "" {
-		writeJSON(w, http.StatusOK, st)
-		return
+	cfg := cron.Default()
+	st := cronState{Jobs: cron.Jobs, Config: cfg.Redacted(), Status: cron.Status{Jobs: map[string]cron.JobStatus{}}}
+	if s.cfg.CronFile != "" {
+		st.Available = true
+		loaded, err := cron.Load(s.cfg.CronFile)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "cron config unreadable")
+			return
+		}
+		cfg = loaded
+		st.Config = cfg.Redacted()
+		if status, err := cron.ReadStatus(cron.StatusPath(s.cfg.CronFile)); err == nil {
+			st.Status = status
+			st.Alive = time.Since(status.Heartbeat) < cronAliveWindow
+		}
 	}
-	st.Available = true
-	cfg, err := cron.Load(s.cfg.CronFile)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "cron config unreadable")
-		return
-	}
-	st.Config = cfg.Redacted()
-	if status, err := cron.ReadStatus(cron.StatusPath(s.cfg.CronFile)); err == nil {
-		st.Status = status
-		st.Alive = time.Since(status.Heartbeat) < cronAliveWindow
-	}
+	s.fillCronPanel(&st, cfg)
 	writeJSON(w, http.StatusOK, st)
+}
+
+// fillCronPanel sets Telegram, config validity and geo file flags on st.
+// cfg is the stored cron config before secrets are masked; st.Config is left
+// unchanged. ConfigError is empty when cfg.Validate returns nil. A validator
+// message that contains a bot token, a VirusTotal key or a geo password is
+// replaced with "config is invalid".
+func (s *Server) fillCronPanel(st *cronState, cfg cron.Config) {
+	st.TelegramConfigured = cfg.Telegram.Configured()
+	st.ConfigError = configErrorText(cfg)
+	st.GeoPaths.City = s.cfg.GeoCityPath != ""
+	st.GeoPaths.ASN = s.cfg.GeoASNPath != ""
+	st.GeoPaths.CityFile = nonEmptyFile(s.cfg.GeoCityPath)
+	st.GeoPaths.ASNFile = nonEmptyFile(s.cfg.GeoASNPath)
+}
+
+// configErrorText returns the text of cfg.Validate, or "" when cfg is usable.
+// It returns "config is invalid" when that text contains a secret field value,
+// so the panel does not echo a token or a key.
+func configErrorText(cfg cron.Config) string {
+	err := cfg.Validate()
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	secrets := []string{cfg.Telegram.Token, cfg.VirusTotal.APIKey}
+	for _, src := range cfg.GeoDB.Sources {
+		secrets = append(secrets, src.Password)
+	}
+	for _, secret := range secrets {
+		if secret != "" && strings.Contains(msg, secret) {
+			return "config is invalid"
+		}
+	}
+	return msg
+}
+
+// nonEmptyFile reports whether path is an existing file whose size is greater
+// than zero. A missing path, a directory, an empty file and any Stat error
+// return false.
+func nonEmptyFile(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return false
+	}
+	return fi.Size() > 0
 }
 
 func (s *Server) handleCronSave(w http.ResponseWriter, r *http.Request) {

@@ -71,7 +71,7 @@ func (r *recStats) Logs(ctx context.Context, f store.LogFilter) ([]store.LogRow,
 	return r.fakeStats.Logs(ctx, f)
 }
 
-func (r *recStats) QueryPostbacks(ctx context.Context, q store.PostbackQuery) ([]store.PostbackRow, float64, error) {
+func (r *recStats) QueryPostbacks(ctx context.Context, q store.PostbackQuery) ([]store.PostbackRow, store.PostbackTotals, error) {
 	r.remember(q.Conds)
 	return r.fakeStats.QueryPostbacks(ctx, q)
 }
@@ -218,6 +218,29 @@ func TestStatsScopeConds(t *testing.T) {
 	}
 }
 
+func TestStatsStripCostKeys(t *testing.T) {
+	keys := statsStripKeys(viewer{hidden: map[string]bool{"cost": true}}, nil)
+	for _, k := range []string{"cost_cur", "cost", "cost_cents"} {
+		if !keys[k] {
+			t.Fatalf("hidden cost missing %s in %#v", k, keys)
+		}
+	}
+	raw := []any{
+		map[string]any{
+			"hits": float64(2),
+			"cost": map[string]any{"USD": float64(150)},
+		},
+	}
+	got := stripKeys(raw, keys).([]any)
+	row := got[0].(map[string]any)
+	if _, ok := row["cost"]; ok {
+		t.Fatalf("nested cost kept: %#v", row)
+	}
+	if row["hits"] != float64(2) {
+		t.Fatalf("hits %#v", row)
+	}
+}
+
 func TestHiddenFilterProfit(t *testing.T) {
 	st := &recStats{}
 	_, srv := scopeServer(t, st, "")
@@ -273,6 +296,9 @@ func TestHiddenMoneyInJSON(t *testing.T) {
 	resp.Body.Close()
 	if strings.Contains(string(body), `"profit"`) || strings.Contains(string(body), `"total"`) {
 		t.Fatalf("postbacks money keys: %s", body)
+	}
+	if !strings.Contains(string(body), `"count"`) {
+		t.Fatalf("postbacks missing count: %s", body)
 	}
 
 	resp, _ = sel.Get(srv.URL + "/api/logs")

@@ -271,7 +271,7 @@ func mergePrefs(cur security.Prefs, patch security.Prefs) security.Prefs {
 // validatePrefs checks language and timezone fields for a user record.
 func validatePrefs(p security.Prefs) error {
 	switch p.Lang {
-	case "", "ru", "en":
+	case "", "ru", "en", "uk":
 	default:
 		return errors.New("invalid language")
 	}

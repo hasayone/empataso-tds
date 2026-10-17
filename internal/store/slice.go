@@ -131,6 +131,7 @@ func (c *CH) SliceFiltered(ctx context.Context, from, to time.Time, conds []Cond
 // c selects the click and ext waves of conversionFrom, so the outer WHERE
 // sees every conversions column, including ones the postbacks table lacks.
 // cvSQL is the extra AND fragment from buildWhere, or empty.
+// The payout sum is named profit_sum so a profit filter stays the column.
 // The string is a full SELECT. It does not fail.
 func sliceConvSQL(c *CH, cvSQL string) string {
 	offer, source, extra := "''", "''", ""
@@ -141,7 +142,7 @@ func sliceConvSQL(c *CH, cvSQL string) string {
 			offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
 		}
 	}
-	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, count() AS conv, sum(profit) AS profit
+	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, count() AS conv, sum(profit) AS profit_sum
 		FROM (
 		%s
 		) WHERE ts >= ? AND ts < ?%s

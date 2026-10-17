@@ -137,7 +137,7 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
-// commitGroups merges full into stored, checks links and streams, and saves.
+// commitGroups merges full into stored, assigns missing campaign numbers, checks links and streams, and saves.
 // w receives writeErr when a check or Save fails. r carries the request context.
 // v is the caller. stored is the list read under groupsMu. full is the complete candidate
 // list, never a single row: a non-admin merge of one row would drop their other campaigns.
@@ -160,6 +160,7 @@ func (s *Server) commitGroups(w http.ResponseWriter, r *http.Request, v viewer, 
 		writeErr(w, http.StatusBadRequest, msg)
 		return false
 	}
+	assignGroupNums(groups)
 	offers, err := s.offerList(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "read error")
@@ -275,4 +276,28 @@ func prepareGroups(groups []config.Group) string {
 		}
 	}
 	return ""
+}
+
+// assignGroupNums gives the next campaign number to every row whose Num is not positive.
+// groups is updated in place. A nil slice is unchanged.
+// The start is the largest Num greater than zero, or zero when none exist.
+// Each Num less than or equal to zero, in slice order, becomes that start plus one, then plus two, and so on.
+// A Num greater than zero is left as stored, including duplicates.
+// It does not return an error.
+func assignGroupNums(groups []config.Group) {
+	if groups == nil {
+		return
+	}
+	maxNum := 0
+	for i := range groups {
+		if groups[i].Num > maxNum {
+			maxNum = groups[i].Num
+		}
+	}
+	for i := range groups {
+		if groups[i].Num <= 0 {
+			maxNum++
+			groups[i].Num = maxNum
+		}
+	}
 }

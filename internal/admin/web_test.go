@@ -3,6 +3,7 @@ package admin
 import (
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -349,8 +350,8 @@ func TestCampaignMoneyAndROIDisplay(t *testing.T) {
 	}
 	must(t, cm, "moneyMap(by,4)", "campaignMoney uses moneyMap with 4 digits")
 	must(t, mt, ".toFixed(d)+' '+suf", "moneyText formats amount and currency suffix")
-	must(t, cr, "return '0.00%'", "metricROI zero percent placeholder")
-	must(t, cr, "'100%'", "metricROI 100% without spend")
+	must(t, cr, "return NA", "metricROI without a base is NA")
+	mustNot(t, cr, "'100%'", "metricROI is not 100% without spend")
 	mustNot(t, mt, "return '—'", "moneyText must not return em dash")
 	mustNot(t, cr, "return '—'", "metricROI must not return em dash")
 	mustNot(t, ratio, "'—'", "cellRatio must not return em dash")
@@ -463,6 +464,63 @@ func TestSpendShareByOverlap(t *testing.T) {
 	must(t, fold, "*share", "foldCost multiplies cents by the share")
 	must(t, camp, "*share", "campaign cost multiplies cents by the share")
 	must(t, period, "*share", "period spend multiplies cents by the share")
+}
+
+// TestClickCostInSpend — click prices join manual spend, and the new labels exist in every language.
+func TestClickCostInSpend(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, "function clickCostBy(", "click prices fold into spend")
+	period := spaFunctionLine(html, "periodSpendBy")
+	camp := spaFunctionLine(html, "campaignCostOnly")
+	fold := spaFunctionLine(html, "foldCost")
+	chart := spaFunctionLine(html, "annotateChart")
+	if period == "" || camp == "" || fold == "" || chart == "" {
+		t.Fatal("periodSpendBy, campaignCostOnly, foldCost or annotateChart not found")
+	}
+	must(t, period, "clickCostBy(", "period spend includes click prices")
+	must(t, camp, "clickCostBy(", "campaign cost includes click prices")
+	must(t, fold, "clickCostBy(", "folded cost includes click prices")
+	must(t, chart, "p.cost", "chart buckets add point cost")
+	must(t, html, "'money.nocost':'No cost recorded: set the price parameter on the campaign or add a cost entry'", "english no-cost hint")
+	must(t, html, "'money.nocost':'Расход не записан: задайте параметр цены в кампании или внесите расход'", "russian no-cost hint")
+	must(t, html, "'money.nocost':'Витрату не записано: задайте параметр ціни в кампанії або внесіть витрату'", "ukrainian no-cost hint")
+	must(t, html, "'money.nocur':'no currency'", "english no-currency label")
+	must(t, html, "'money.nocur':'без валюты'", "russian no-currency label")
+	must(t, html, "'money.nocur':'без валюти'", "ukrainian no-currency label")
+	must(t, html, "'col.rej.hint':'Postbacks with status rejected'", "english rejected hint")
+	must(t, html, "'col.rej.hint':'Постбеки со статусом rejected'", "russian rejected hint")
+	must(t, html, "'col.rej.hint':'Постбеки зі статусом rejected'", "ukrainian rejected hint")
+}
+
+// TestCatalogNames — breakdowns, the report and conversions show catalog names, and an open campaign refetches its rows.
+func TestCatalogNames(t *testing.T) {
+	html := string(indexHTML)
+	bd := spaFunctionLine(html, "loadBreakdown")
+	rep := spaFunctionLine(html, "paintReport")
+	conv := spaFunctionLine(html, "conversions")
+	pb := spaFunctionLine(html, "loadPostbacks")
+	one := spaFunctionLine(html, "loadPerfFor")
+	page := spaFunctionLine(html, "flowPage")
+	if bd == "" || rep == "" || conv == "" || pb == "" || one == "" || page == "" {
+		t.Fatal("loadBreakdown, paintReport, conversions, loadPostbacks, loadPerfFor or flowPage missing")
+	}
+	must(t, bd, "idLabel(", "breakdown names catalog ids")
+	must(t, bd, "ensureCatalogs(", "breakdown loads catalogs")
+	must(t, bd, "countryLabel(", "breakdown names a country")
+	cell := spaFunctionLine(html, "reportCellText")
+	must(t, cell, "idLabel('offer_id'", "report offer name")
+	must(t, cell, "idLabel('source_id'", "report source name")
+	must(t, rep, "reportCellText(", "report table and export share the cell text")
+	must(t, rep, "loadCols('report')", "report export uses the visible columns")
+	mustNot(t, rep, "r.group,r.stream,r.country", "report export does not dump raw ids")
+	must(t, conv, "f:'campaign_id'", "conversion filter uses campaign id")
+	mustNot(t, conv, "f:'campaign',", "conversion filter is not the campaign name")
+	must(t, conv, "nameOf(GROUPS, PB.campaignId)", "conversion title is the campaign name")
+	must(t, pb, "r.count", "conversion counter uses the filtered count")
+	must(t, pb, "typeof r.total==='number'", "missing profit total is not drawn as zero")
+	must(t, one, "campaign_id", "open campaign refetches its performance")
+	must(t, page, "loadPerfFor(", "flow page loads that campaign before drawing")
+	must(t, html, "#/flows/", "campaign address stays a slug path")
 }
 
 // TestNavExportAndCampaignTable — icon nav, HTML export, period label, campaign table.
@@ -1181,4 +1239,131 @@ func TestStreamProxyAndOrConditions(t *testing.T) {
 	mustNot(t, body, `['unique','yabrowser','has_referer','bot']`, "tri keys are not a fixed list")
 	must(t, html, `'ch_proxy'`, "proxy bot check")
 	must(t, html, `'ch_non_mobile'`, "non-mobile bot check")
+}
+
+// dictBetween returns the SPA source from start up to end.
+// html is the embedded page. start and end are unique markers; end is excluded.
+// A missing marker fails the test.
+func dictBetween(t *testing.T, html, start, end string) string {
+	t.Helper()
+	i := strings.Index(html, start)
+	if i < 0 {
+		t.Fatalf("missing %s", start)
+	}
+	rest := html[i+len(start):]
+	j := strings.Index(rest, end)
+	if j < 0 {
+		t.Fatalf("missing end after %s", start)
+	}
+	return rest[:j]
+}
+
+// dictDupes fails when one object repeats a quoted key.
+// body is the object source. name is the dictionary in the failure.
+func dictDupes(t *testing.T, body, name string) {
+	t.Helper()
+	re := regexp.MustCompile(`'((?:[^'\\]|\\.)*)'\s*:`)
+	seen := map[string]int{}
+	for _, m := range re.FindAllStringSubmatch(body, -1) {
+		seen[m[1]]++
+	}
+	for k, n := range seen {
+		if n > 1 {
+			t.Errorf("duplicate key %q (%d) in %s", k, n, name)
+		}
+	}
+}
+
+// TestTerms checks campaign wording, breakdown captions and unique dictionary keys.
+func TestTerms(t *testing.T) {
+	html := string(indexHTML)
+	dicts := dictBetween(t, html, "const PHRASE_EXTRA={", "const TYPES=")
+	mustNot(t, dicts, "Ветк", "russian branch word")
+	mustNot(t, dicts, "Гілк", "ukrainian branch word")
+	mustNot(t, dicts, "'№'", "number sign used as an id heading")
+	must(t, html, "'Flow':'Campaign'", "english flow key reads campaign")
+	must(t, html, "domain:'Domains',org:'Providers'", "breakdown captions")
+	mustNot(t, html, "domain:'Sources'", "domain breakdown is not sources")
+	mustNot(t, html, "org:'Networks'", "provider breakdown is not networks")
+	i18n := dictBetween(t, html, "const I18N={", "const PHRASE={")
+	phrase := dictBetween(t, html, "const PHRASE={", "const TYPES=")
+	extra := dictBetween(t, html, "const PHRASE_EXTRA={", "function tr(")
+	dictDupes(t, dictBetween(t, i18n, "en:{", "\n},\nru:{"), "I18N.en")
+	dictDupes(t, dictBetween(t, i18n, "\nru:{", "\n},\nuk:{"), "I18N.ru")
+	dictDupes(t, dictBetween(t, i18n, "\nuk:{", "\n};"), "I18N.uk")
+	dictDupes(t, dictBetween(t, phrase, "\nru:{", "\n},\nuk:{"), "PHRASE.ru")
+	dictDupes(t, dictBetween(t, phrase, "\nuk:{", "\n};"), "PHRASE.uk")
+	dictDupes(t, dictBetween(t, extra, "\nru:{", "\n},\nuk:{"), "PHRASE_EXTRA.ru")
+	dictDupes(t, dictBetween(t, extra, "\nuk:{", "\n};"), "PHRASE_EXTRA.uk")
+	sameDictKeys(t, dictKeys(dictBetween(t, i18n, "en:{", "\n},\nru:{")), dictKeys(dictBetween(t, i18n, "\nru:{", "\n},\nuk:{")), "I18N.en", "I18N.ru")
+	sameDictKeys(t, dictKeys(dictBetween(t, i18n, "en:{", "\n},\nru:{")), dictKeys(dictBetween(t, i18n, "\nuk:{", "\n};")), "I18N.en", "I18N.uk")
+	sameDictKeys(t, dictKeys(dictBetween(t, phrase, "\nru:{", "\n},\nuk:{")), dictKeys(dictBetween(t, phrase, "\nuk:{", "\n};")), "PHRASE.ru", "PHRASE.uk")
+}
+
+// dictKeys collects quoted keys from one dictionary object.
+// body is the object source without the surrounding name. It returns the key set.
+func dictKeys(body string) map[string]struct{} {
+	re := regexp.MustCompile(`'((?:[^'\\]|\\.)*)'\s*:`)
+	out := map[string]struct{}{}
+	for _, m := range re.FindAllStringSubmatch(body, -1) {
+		out[m[1]] = struct{}{}
+	}
+	return out
+}
+
+// sameDictKeys fails when two dictionaries do not list the same keys.
+// a and b are key sets. an and bn name them in the failure. It returns nothing.
+func sameDictKeys(t *testing.T, a, b map[string]struct{}, an, bn string) {
+	t.Helper()
+	for k := range a {
+		if _, ok := b[k]; !ok {
+			t.Errorf("key %q in %s missing from %s", k, an, bn)
+		}
+	}
+	for k := range b {
+		if _, ok := a[k]; !ok {
+			t.Errorf("key %q in %s missing from %s", k, bn, an)
+		}
+	}
+}
+
+// TestSPALiterals checks that known visible sentences go through tr.
+// t is the test handle. It returns nothing. A leftover placeholder fails the test.
+// TestFlowFooter checks the campaign canvas strip labels revenue and reads cost.
+// t is the test handle. It returns nothing and fails when the footer markup regresses.
+func TestFlowFooter(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `tr('col.revenue')`, "campaign footer labels revenue")
+	must(t, html, `campaignCostOnly`, "campaign footer reads click and manual cost")
+	mustNot(t, html, `${periodMoney(p.profit)}</b>${tr('profit')}`, "footer no longer calls revenue profit")
+}
+
+func TestSPALiterals(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `function serviceBadge(`, "service badge helper")
+	must(t, html, `CRONST.telegram_configured`, "telegram readiness from the panel")
+	must(t, html, `value="uk"`, "ukrainian language option")
+	must(t, html, `j.error`, "job error is read")
+	for _, lit := range []string{
+		`placeholder="Choose a flow and a day"`,
+		`Nothing collected for this flow on this day`,
+		`Turn collection on in a flow's settings`,
+		`>No lists in the data directory<`,
+		`placeholder="IP address, v4 or v6"`,
+		`>service running<`,
+		`>service not running<`,
+		`Has not run yet`,
+		`>Runs every<`,
+		`>Enter an IP address to test<`,
+		`>No conversions in this period<`,
+		`>Conversions are not available — is ClickHouse connected?<`,
+		`>Where alerts go. Create a bot`,
+		`>Not in any .dat list<`,
+		`Look up</button>`,
+		`placeholder='Empty list'`,
+		`CRON.telegram.token&&CRON.telegram.chat_id`,
+		`buck||'USD'`,
+	} {
+		mustNot(t, html, lit, lit)
+	}
 }

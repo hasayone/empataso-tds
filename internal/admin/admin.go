@@ -43,7 +43,7 @@ type StatsProvider interface {
 	PerformanceFiltered(ctx context.Context, from, to time.Time, conds []store.Cond) ([]store.PerfRow, error)
 	Logs(ctx context.Context, f store.LogFilter) ([]store.LogRow, int64, error)
 	Postbacks(ctx context.Context, from, to time.Time, group string, limit int) ([]store.PostbackRow, float64, error)
-	QueryPostbacks(ctx context.Context, q store.PostbackQuery) ([]store.PostbackRow, float64, error)
+	QueryPostbacks(ctx context.Context, q store.PostbackQuery) ([]store.PostbackRow, store.PostbackTotals, error)
 	PostbackLog(ctx context.Context, from, to time.Time, limit int) ([]store.PostbackLogRow, error)
 	Slice(ctx context.Context, from, to time.Time) ([]store.SliceRow, error)
 	// Fields lists journal fields and ready waves without a query.

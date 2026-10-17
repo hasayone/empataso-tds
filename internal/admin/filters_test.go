@@ -66,9 +66,9 @@ func (f *filterStats) Logs(_ context.Context, lf store.LogFilter) ([]store.LogRo
 	return []store.LogRow{{IP: "1.2.3.4"}}, 1, nil
 }
 
-func (f *filterStats) QueryPostbacks(_ context.Context, q store.PostbackQuery) ([]store.PostbackRow, float64, error) {
+func (f *filterStats) QueryPostbacks(_ context.Context, q store.PostbackQuery) ([]store.PostbackRow, store.PostbackTotals, error) {
 	f.pb = q
-	return []store.PostbackRow{{Profit: 1}}, 1, nil
+	return []store.PostbackRow{{Profit: 1}}, store.PostbackTotals{Profit: 1, Count: 1}, nil
 }
 
 func (f *filterStats) Slice(_ context.Context, _, _ time.Time) ([]store.SliceRow, error) {

@@ -44,7 +44,7 @@
 }
 ```
 
-`prefs.lang` — `ru`, `en` или пусто. `prefs.tz` — имя пояса IANA или пусто. `access_source` — `manual` или `keitaro` (источник прав при импорте). `keitaro_id` связывает запись с пользователем Keitaro. Поле `source` есть только в ответах `GET /api/users`: `env` для администратора окружения, `file` для записей файла; в `users.json` не хранится.
+`prefs.lang` — `ru`, `en`, `uk` или пусто. При входе, если в браузере язык ещё не выбран, интерфейс берёт это значение. Числа и даты в интерфейсе форматируются локалью языка: `ru-RU`, `uk-UA`, `en-US`. CSV пишет числа без группировки. `prefs.tz` — имя пояса IANA или пусто. `access_source` — `manual` или `keitaro` (источник прав при импорте). `keitaro_id` связывает запись с пользователем Keitaro. Поле `source` есть только в ответах `GET /api/users`: `env` для администратора окружения, `file` для записей файла; в `users.json` не хранится.
 
 ## Разделы панели
 
@@ -102,7 +102,7 @@
 
 В `access.hidden` допустимы только `profit` и `cost`.
 
-При `profit` из JSON статистики убираются ключи `profit`, `revenue`, `payout`. При `cost` — `cost_cents`, `cost`, `currency`, `spend`. Фильтр журнала или статистики по полям `profit`, `cost_cents`, `cost_cur` даёт `400 bad filter: hidden field …`.
+При `profit` из JSON статистики убираются ключи `profit`, `revenue`, `payout`. При `cost` — `cost_cents`, `cost`, `cost_cur`, `currency`, `spend`. Фильтр журнала или статистики по полям `profit`, `cost_cents`, `cost_cur` даёт `400 bad filter: hidden field …`.
 
 Все методы `/api/spend` при скрытом `cost` отвечают `403 forbidden` до чтения файла расхода.
 

@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -293,6 +294,141 @@ func TestCronEndpoints(t *testing.T) {
 	call(t, c, "GET", base+"/api/cron", csrf, nil, &st)
 	if !st.Alive || st.Status.Jobs["disk"].Message != "fine" {
 		t.Errorf("with a heartbeat: alive=%v status=%+v", st.Alive, st.Status.Jobs)
+	}
+}
+
+// cronPanelServer is an admin whose cron file and geo paths are under the test's control.
+func cronPanelServer(t *testing.T, cityPath, asnPath string) (base string, c *http.Client, csrf, cronFile string) {
+	t.Helper()
+	cronFile = filepath.Join(t.TempDir(), "cron.json")
+	hash, err := security.HashPassword("p@ss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{
+		AdminUser: "admin", PasswordHash: hash, Sessions: security.NewMemoryStore(),
+		Limiter: allowAll{}, SessionTTL: time.Hour,
+		GeoCityPath: cityPath, GeoASNPath: asnPath, CronFile: cronFile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c = &http.Client{Jar: jar}
+	_, csrf = login(t, c, srv.URL, "admin", "p@ss")
+	if csrf == "" {
+		t.Fatal("login failed")
+	}
+	return srv.URL, c, csrf, cronFile
+}
+
+// getCron reads GET /api/cron and returns the decoded state plus the raw body.
+func getCron(t *testing.T, c *http.Client, base string) (cronState, string) {
+	t.Helper()
+	resp, err := c.Get(base + "/api/cron")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/cron → %d %s", resp.StatusCode, b)
+	}
+	var st cronState
+	if err := json.Unmarshal(b, &st); err != nil {
+		t.Fatal(err)
+	}
+	return st, string(b)
+}
+
+func TestCronGetPanelFields(t *testing.T) {
+	dir := t.TempDir()
+	city := filepath.Join(dir, "city.mmdb")
+	asn := filepath.Join(dir, "asn.mmdb")
+	if err := os.WriteFile(city, []byte("city-db"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(asn, []byte("asn-db"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base, c, csrf, cronFile := cronPanelServer(t, city, asn)
+
+	st, _ := getCron(t, c, base)
+	if st.TelegramConfigured || st.ConfigError != "" || !st.GeoPaths.City || !st.GeoPaths.CityFile || !st.GeoPaths.ASN || !st.GeoPaths.ASNFile {
+		t.Fatalf("fresh panel = %+v geo=%+v", st, st.GeoPaths)
+	}
+
+	const token = "123456:PANEL-TOKEN"
+	cfg := st.Config
+	cfg.Telegram = cron.Telegram{Token: token, ChatID: "99"}
+	if code := call(t, c, "PUT", base+"/api/cron", csrf, cfg, nil); code != 200 {
+		t.Fatalf("save → %d", code)
+	}
+	st, raw := getCron(t, c, base)
+	if !st.TelegramConfigured || st.Config.Telegram.Token != cron.SecretMask || st.Config.Telegram.ChatID != "99" {
+		t.Errorf("with a bot: configured=%v token=%q chat=%q", st.TelegramConfigured, st.Config.Telegram.Token, st.Config.Telegram.ChatID)
+	}
+	if strings.Contains(raw, token) {
+		t.Fatalf("GET /api/cron leaks the bot token: %s", raw)
+	}
+
+	hb, err := json.Marshal(cron.Status{Heartbeat: time.Now(), Jobs: map[string]cron.JobStatus{
+		"disk": {OK: false, Message: "partial", Error: "disk full"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cron.StatusPath(cronFile), hb, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st, raw = getCron(t, c, base)
+	disk := st.Status.Jobs["disk"]
+	if disk.Error != "disk full" || disk.Message != "partial" || !strings.Contains(raw, `"error":"disk full"`) {
+		t.Errorf("job error: %+v body has error field: %v", disk, strings.Contains(raw, `"error":"disk full"`))
+	}
+}
+
+func TestCronGetMissingGeoAndBadConfig(t *testing.T) {
+	dir := t.TempDir()
+	emptyASN := filepath.Join(dir, "empty-asn.mmdb")
+	if err := os.WriteFile(emptyASN, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "no-such-city.mmdb")
+	base, c, _, cronFile := cronPanelServer(t, missing, emptyASN)
+
+	st, _ := getCron(t, c, base)
+	if st.TelegramConfigured || !st.GeoPaths.City || st.GeoPaths.CityFile || !st.GeoPaths.ASN || st.GeoPaths.ASNFile || st.ConfigError != "" {
+		t.Fatalf("missing geo file: configured=%v geo=%+v err=%q", st.TelegramConfigured, st.GeoPaths, st.ConfigError)
+	}
+
+	if err := os.WriteFile(cronFile, []byte(`{"disk":{"min_free_percent":250}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = getCron(t, c, base)
+	if st.ConfigError != "disk: min free percent must be 0..99" {
+		t.Errorf("config_error = %q", st.ConfigError)
+	}
+
+	const token = "bot-token-value"
+	rawCfg := `{"telegram":{"token":"` + token + `","chat_id":"42"},"ip_lists":{"sources":[{"url":"` + token + `","target":"ip_google"}]}}`
+	if err := os.WriteFile(cronFile, []byte(rawCfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st, raw := getCron(t, c, base)
+	if st.ConfigError != "config is invalid" || !st.TelegramConfigured || st.Config.Telegram.Token != cron.SecretMask {
+		t.Errorf("secret in validator text: configured=%v token=%q err=%q", st.TelegramConfigured, st.Config.Telegram.Token, st.ConfigError)
+	}
+	if !strings.Contains(raw, `"config_error":"config is invalid"`) || strings.Contains(st.ConfigError, token) {
+		t.Errorf("config_error = %q", st.ConfigError)
 	}
 }
 

@@ -250,39 +250,50 @@ type PostbackQuery struct {
 	Conds                                                       []Cond
 }
 
-// Postbacks returns conversions over a period (optional group filter) and the total profit.
-// It is QueryPostbacks with only the period, the group and the limit set.
-func (c *CH) Postbacks(ctx context.Context, from, to time.Time, group string, limit int) ([]PostbackRow, float64, error) {
-	return c.QueryPostbacks(ctx, PostbackQuery{From: from, To: to, Group: group, Limit: limit})
+// PostbackTotals is the size of one conversion-journal match.
+// Profit is the sum of payouts. Count is the number of rows, not the page.
+type PostbackTotals struct {
+	Profit float64
+	Count  int64
 }
 
-// QueryPostbacks returns conversions matching q and the total profit.
+// Postbacks returns conversions over a period (optional group filter) and the total profit.
+// It is QueryPostbacks with only the period, the group and the limit set.
+// The profit is PostbackTotals.Profit. Count is not returned.
+func (c *CH) Postbacks(ctx context.Context, from, to time.Time, group string, limit int) ([]PostbackRow, float64, error) {
+	rows, tot, err := c.QueryPostbacks(ctx, PostbackQuery{From: from, To: to, Group: group, Limit: limit})
+	return rows, tot.Profit, err
+}
+
+// QueryPostbacks returns conversions matching q and the totals.
 // ctx bounds the queries. A filter on offer, landing, source or network
 // yields no rows when those columns are not on the table yet.
 // Conds that name a wave that is not ready do the same, without a query.
 // ErrUnknownField and ErrBadCond come from Conds. Offset below zero becomes
-// zero. The profit is the sum over the whole match, not the page.
-// A query error is returned as-is.
-func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow, float64, error) {
+// zero. Profit is the sum over the whole match, not the page. Count is the
+// number of matching rows. A query error is returned as-is.
+func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow, PostbackTotals, error) {
 	if !c.clickCols && (q.Offer != "" || q.Landing != "" || q.Source != "" || q.Network != "") {
-		return []PostbackRow{}, 0, nil
+		return []PostbackRow{}, PostbackTotals{}, nil
 	}
 	q.Status = strings.ToLower(strings.TrimSpace(q.Status))
 	where, args := postbackWhere(q, c.clickCols)
 	extra, extraArgs, skip, err := buildWhere(c, "conversions", q.Conds)
 	if err != nil {
-		return nil, 0, err
+		return nil, PostbackTotals{}, err
 	}
 	if skip {
-		return []PostbackRow{}, 0, nil
+		return []PostbackRow{}, PostbackTotals{}, nil
 	}
 	where += extra
 	args = append(args, extraArgs...)
 	from := conversionFrom(c.clickCols, c.extConv)
-	var total float64
-	if err := c.conn.QueryRow(ctx, "SELECT sum(profit) FROM ("+from+") WHERE "+where, args...).Scan(&total); err != nil {
-		return nil, 0, err
+	var tot PostbackTotals
+	var n uint64
+	if err := c.conn.QueryRow(ctx, "SELECT sum(profit), count() FROM ("+from+") WHERE "+where, args...).Scan(&tot.Profit, &n); err != nil {
+		return nil, PostbackTotals{}, err
 	}
+	tot.Count = int64(n)
 	limit := q.Limit
 	if limit <= 0 || limit > 1000 {
 		limit = 200
@@ -304,7 +315,7 @@ func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow
 		"SELECT "+sel+" FROM ("+from+") WHERE "+where+" ORDER BY ts DESC LIMIT ? OFFSET ?",
 		append(args, limit, off)...)
 	if err != nil {
-		return nil, 0, err
+		return nil, PostbackTotals{}, err
 	}
 	defer rows.Close()
 	var out []PostbackRow
@@ -322,7 +333,7 @@ func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow
 			dest = append(dest, postbackExtDest(&p, extCols)...)
 		}
 		if err := rows.Scan(dest...); err != nil {
-			return nil, 0, err
+			return nil, PostbackTotals{}, err
 		}
 		if p.ClickTS.Unix() <= 0 {
 			p.ClickTS = time.Time{}
@@ -333,16 +344,16 @@ func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow
 		out = append(out, p)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, 0, err
+		return nil, PostbackTotals{}, err
 	}
 	if cids := cidsNeedingClickFill(out); len(cids) > 0 {
 		fills, err := c.clickFillByCIDs(ctx, cids)
 		if err != nil {
-			return nil, 0, err
+			return nil, PostbackTotals{}, err
 		}
 		fillFromClicks(out, fills)
 	}
-	return out, total, nil
+	return out, tot, nil
 }
 
 // clickFillByCIDs loads the newest event per cid for backfilling conversions.

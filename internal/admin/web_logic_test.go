@@ -182,7 +182,7 @@ eq(axisScale(0,0,true), {lo:0,hi:1,step:1,ticks:[0,1]}, 'empty int scale');
 eq(axisScale(0,2.5,false).ticks, [0,0.5,1,1.5,2,2.5], 'money 0..2.5');
 eq(axisScale(0,5600,true).ticks, [0,1000,2000,3000,4000,5000,6000], 'clicks 0..5600');
 eq(tickEvery(48,1000,44,[1,2,3,4,6,12,24]), 3, 'hour ticks wide'); eq(tickEvery(48,300,36,[1,2,3,4,6,12,24]), 6, 'hour ticks narrow'); eq(tickEvery(365,600,44,[1,2,7,14,30]), 30, 'daily ticks'); eq(tickEvery(400,100,44,[1,2,7]), 176, 'tail step');
-eq(roiPct(100,0), 100, 'roi no cost'); eq(roiPct(150,100), 50, 'roi 50'); eq(roiPct(0,0), 0, 'roi nothing');
+eq(roiPct(100,0), 0, 'roi no cost'); eq(roiPct(150,100), 50, 'roi 50'); eq(roiPct(0,0), 0, 'roi nothing');
 eq(ratioPct(1,0), null, 'ratio zero divisor'); eq(ratioPct(1,4), 25, 'ratio 25');
 eq(overlapShare(0,100,0,100), 1, 'overlap full'); eq(overlapShare(0,100,50,200), 0.5, 'overlap half'); eq(overlapShare(0,100,200,300), 0, 'overlap none'); eq(overlapShare(10,10,0,100), 1, 'zero length inside'); eq(overlapShare(10,10,100,200), 0, 'zero length outside');
 eq(tickDecimals(2.5), 1, 'decimals 2.5'); eq(tickDecimals(5), 0, 'decimals 5'); eq(tickDecimals(0.25), 2, 'decimals 0.25');
@@ -252,12 +252,25 @@ eq(userIsEnv({source:'env'}), true, 'userIsEnv env');
 eq(userIsEnv({source:'file'}), false, 'userIsEnv file');
 eq(userIsEnv(null), false, 'userIsEnv null');
 
+eq(serviceBadge('geo_db', {config_error:'bad db'}), {key:'cron.cfgerr', title:'bad db'}, 'config error wins');
+eq(serviceBadge('telegram_test', {telegram_configured:false}), {key:'cron.notset', title:''}, 'telegram off');
+eq(serviceBadge('telegram_test', {telegram_configured:true}), {key:'cron.first', title:''}, 'telegram waits');
+eq(serviceBadge('geo_db', {geo_paths:{city_file:true, asn_file:true}}), {key:'cron.notset', title:''}, 'geo without sources');
+eq(serviceBadge('geo_db', {config:{geo_db:{sources:[{kind:'city'}]}}, geo_paths:{city_file:true, asn_file:false}, status:{jobs:{geo_db:{last_run:'2020-01-02T00:00:00Z', next_run:'2020-01-03T00:00:00Z', ok:true}}}}).key, 'cron.next', 'city source keeps the next run');
+eq(serviceBadge('geo_db', {config:{geo_db:{sources:[{kind:'city'}]}}, geo_paths:{city_file:false, asn_file:''}}), {key:'cron.notset', title:'cron.nofile'}, 'sources but no files');
+eq(serviceBadge('geo_db', {config:{geo_db:{sources:[{kind:'city'}]}}, geo_paths:{city_file:true, asn_file:false}}), {key:'cron.first', title:''}, 'city source waits for its file');
+eq(serviceBadge('ip_lists', {status:{jobs:{}}}), {key:'cron.first', title:''}, 'no last run');
+eq(serviceBadge('ip_lists', {status:{jobs:{ip_lists:{last_run:'2020-01-02T00:00:00Z', next_run:'2020-01-03T00:00:00Z', ok:true, message:'ip_google: 120'}}}}), {key:'cron.next', title:'2020-01-03T00:00:00Z'}, 'next run');
+eq(serviceBadge('disk', {status:{jobs:{disk:{last_run:'2020-01-02T00:00:00Z', ok:false, error:'full'}}}}).key, 'failed', 'ran without next');
+eq(serviceBadge('disk', {config_error:'x', telegram_configured:false, status:{jobs:{disk:{last_run:'2020-01-02T00:00:00Z', next_run:'2020-01-03T00:00:00Z'}}}}).key, 'cron.cfgerr', 'config before next');
+eq(serviceBadge('conversions', {status:{jobs:{conversions:{last_run:'0001-01-01T00:00:00Z'}}}}).key, 'cron.first', 'zero time is the first run');
+
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `
 
 // TestMoneyDisplay runs the SPA currency helpers under node and checks the
-// labels: a zero key is not a second currency, revenue without spend is 100%,
-// and two nonzero currencies stay a code list. It skips when node is absent.
+// labels: a zero key is not a second currency, revenue without spend is an
+// em dash, and two nonzero currencies stay a code list. It skips when node is absent.
 // The uitest tag keeps this off the default go test, which does not need node.
 func TestMoneyDisplay(t *testing.T) {
 	node, err := exec.LookPath("node")
@@ -266,7 +279,7 @@ func TestMoneyDisplay(t *testing.T) {
 	}
 	html := string(indexHTML)
 	var b strings.Builder
-	for _, name := range []string{"moneyText", "bareMoney", "cellRatio", "moneyMap", "costCode", "costCodesList", "roiPct", "metricROI", "cpcCell", "moneyOf", "profitOf"} {
+	for _, name := range []string{"moneyText", "bareMoney", "cellRatio", "moneyMap", "costCode", "costCodesList", "roiPct", "metricROI", "cpcCell", "moneyOf", "profitOf", "clickCostBy", "addBy", "pct", "periodSpendBy", "campaignCostOnly", "spendShare", "overlapShare", "rangeBounds"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -294,15 +307,37 @@ eq(costCode({EUR:0, GBP:100}).code, 'GBP', 'zero key is not a second currency');
 eq(costCode({EUR:0, GBP:100}).multi, false, 'one nonzero amount');
 eq(costCode({EUR:0}).code, 'EUR', 'a lone zero key keeps EUR');
 eq(costCode({}).code, '', 'no keys');
-eq(metricROI(12.34, {}, true), '100%', 'revenue and no spend');
+const NA='—';
+var FACTS={ready:true,clicks:[{group_id:'g1',offer_id:'o1',network_id:'n1',stream:'s',hits:2,uniq:1,cost_cents:150,cost_cur:'USD'},{group_id:'g2',offer_id:'o1',network_id:'n1',stream:'s',hits:1,uniq:1,cost_cents:0,cost_cur:''}],status:[]};
+var SPEND=[];
+rangeBounds=function(){return {from:new Date('2020-01-01T00:00:00Z'),to:new Date('2030-01-01T00:00:00Z')}};
+eq(metricROI(12.34, {}, true), '—', 'revenue and no spend');
 eq(metricROI(12.34, {EUR:100, USD:100}, true), 'EUR · USD', 'two currencies list codes');
 eq(moneyOf(12.34, {EUR:100, USD:100}, true, 2), '12.34', 'multi revenue has no currency mark');
 eq(profitOf(12.34, {EUR:100, USD:100}, true), '12.34 · 1.0000 EUR · 1.0000 $', 'multi profit lists spend');
 eq(moneyOf(12.34, {EUR:0, GBP:100}, true, 2), '12.34 GBP', 'revenue keeps the nonzero currency');
 eq(moneyMap({EUR:0, GBP:100}, 4), '0.0000 EUR · 1.0000 GBP', 'zero keys stay in the spend list');
 eq(moneyOf(0, {EUR:100}, false, 2), '0.00 EUR', 'unready facts keep EUR');
-eq(cpcCell({hits:0, costBy:{EUR:100}}), '0.0000 EUR', 'zero clicks keep EUR');
-eq(moneyText(1, '', 2), '1.00 $', 'no currency at all is dollars');
+eq(cpcCell({hits:0, costBy:{EUR:100}}), '—', 'zero clicks are not a price');
+eq(moneyText(1, '', 2), '1.00', 'no currency at all is the number');
 eq(moneyText(1, 'USD', 2), '1.00 $', 'USD is dollars');
+eq(clickCostBy(), {USD:150}, 'click prices sum by currency');
+eq(clickCostBy(function(r){return r.group_id==='g2'}), {}, 'zero cents add no key');
+eq(moneyMap({'':300}, 4), '3.0000', 'empty currency is a bare number');
+eq(costCode({'':300}).code, '', 'empty bucket is one currency');
+eq(costCode({'':300}).multi, false, 'empty bucket is not multi');
+eq(metricROI(6, {'':300}, true), '100.00%', 'roi of one empty bucket');
+eq(campaignCostOnly('g1'), {USD:150}, 'campaign click price');
+eq(periodSpendBy(), {USD:150}, 'period click price');
+const keptClicks=FACTS.clicks;
+FACTS.clicks=[{group_id:'g3',hits:1,cost_cents:300,cost_cur:''}];
+eq(clickCostBy(), {'':300}, 'empty currency is a bucket');
+FACTS.clicks=keptClicks;
+SPEND=[{group_id:'g1',currency:'USD',cents:100,from:'2020-01-01',to:'2020-02-01'}];
+spendShare=function(){return 1};
+eq(campaignCostOnly('g1'), {USD:250}, 'manual window plus click price');
+eq(pct(1,0), '—', 'pct zero base');
+eq(cellRatio(0,0), '—', 'cellRatio zero base');
+eq(roiPct(100,0), 0, 'roi no cost');
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `

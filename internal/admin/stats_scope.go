@@ -19,7 +19,7 @@ var moneyFields = map[string][]string{
 // moneyKeys maps a hidden metric id to JSON keys stripped from stats responses.
 var moneyKeys = map[string][]string{
 	"profit": {"profit", "revenue", "payout"},
-	"cost":   {"cost_cents", "cost", "currency", "spend"},
+	"cost":   {"cost_cents", "cost", "cost_cur", "currency", "spend"},
 }
 
 // hides reports whether metric is hidden for this viewer. Administrators see all metrics.
