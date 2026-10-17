@@ -1,7 +1,6 @@
 package admin
 
 import (
-	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
@@ -62,8 +61,37 @@ func TestUsersCRUD(t *testing.T) {
 		t.Fatalf("list %d", code)
 	}
 	var list []security.User
-	if err := json.Unmarshal(raw, &list); err != nil || len(list) < 1 {
+	if err := json.Unmarshal(raw, &list); err != nil || len(list) < 2 {
 		t.Fatalf("list %v", list)
+	}
+	if list[0].Source != security.SourceEnv || list[0].ID != "" || list[0].Type != security.UserAdmin || !list[0].Enabled || list[0].Login != "admin" {
+		t.Fatalf("env row %+v", list[0])
+	}
+	var rows []map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &rows); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rows[0]["hash"]; ok {
+		t.Error("env row JSON must not include hash")
+	}
+	var fileRow *security.User
+	for i := range list {
+		if list[i].Login == "bob" {
+			fileRow = &list[i]
+			break
+		}
+	}
+	if fileRow == nil || fileRow.Source != security.SourceFile {
+		t.Fatalf("file user source %+v", fileRow)
+	}
+
+	code, _ = userJSON(t, c, http.MethodPut, base+"/api/users/", csrf, `{"enabled":false}`)
+	if code != http.StatusNotFound && code != http.StatusMethodNotAllowed {
+		t.Fatalf("PUT env user want 404 or 405, got %d", code)
+	}
+	code, _ = userJSON(t, c, http.MethodDelete, base+"/api/users/", csrf, "")
+	if code != http.StatusNotFound && code != http.StatusMethodNotAllowed {
+		t.Fatalf("DELETE env user want 404 or 405, got %d", code)
 	}
 
 	code, raw = userJSON(t, c, http.MethodPut, base+"/api/users/"+created.ID, csrf, `{"login":"bobby","type":"USER","enabled":true,"prefs":{"lang":"en","tz":"UTC"}}`)
@@ -247,8 +275,12 @@ func TestUsersDisabled(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatal(code)
 	}
-	if !bytes.Equal(bytes.TrimSpace(raw), []byte("[]")) {
-		t.Fatalf("want [], got %s", raw)
+	var list []security.User
+	if err := json.Unmarshal(raw, &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].Source != security.SourceEnv || list[0].Login != "admin" {
+		t.Fatalf("want single env row, got %v", list)
 	}
 	code, _ = userJSON(t, c, http.MethodPost, srv.URL+"/api/users", csrf, `{"login":"x","password":"secret1"}`)
 	if code != http.StatusServiceUnavailable {

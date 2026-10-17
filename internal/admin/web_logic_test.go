@@ -248,6 +248,10 @@ eq(hidProfit.has('cr'), false, 'hiddenCols profit not cr');
 eq(homePage({access:{sections:['flows']}, pages:['flows']}), 'flows', 'homePage flows');
 eq(homePage({access:{sections:[]}, pages:[]}), 'settings', 'homePage no dashboard');
 
+eq(userIsEnv({source:'env'}), true, 'userIsEnv env');
+eq(userIsEnv({source:'file'}), false, 'userIsEnv file');
+eq(userIsEnv(null), false, 'userIsEnv null');
+
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `
 

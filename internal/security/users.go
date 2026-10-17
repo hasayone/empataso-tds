@@ -30,6 +30,11 @@ const (
 	// ModeCreated grants access to objects the user created.
 	ModeCreated Mode = "created"
 
+	// SourceEnv marks the environment administrator in API list responses.
+	SourceEnv = "env"
+	// SourceFile marks a users.json record in API list responses.
+	SourceFile = "file"
+
 	maxLoginRunes = 64
 )
 
@@ -76,6 +81,8 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 	KeitaroID    int       `json:"keitaro_id,omitempty"`
 	AccessSource string    `json:"access_source,omitempty"`
+	// Source is set only in API responses ("env" for the environment admin, "file" for users.json); it is not stored in users.json.
+	Source string `json:"source,omitempty"`
 }
 
 // Public returns a copy of u with Hash cleared, safe for API responses.

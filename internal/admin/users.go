@@ -25,16 +25,35 @@ func registerUsers(s *Server, mux *http.ServeMux) {
 	s.handle(mux, "PUT /api/users/{id}/access", cookieOnly(http.HandlerFunc(s.handleUsersAccess)))
 }
 
-// handleUsersList writes every user with Hash cleared.
+// envAdminRow returns the virtual list entry for the environment administrator (AdminUser).
+func (s *Server) envAdminRow() security.User {
+	return security.User{
+		Login:   s.cfg.AdminUser,
+		Type:    security.UserAdmin,
+		Enabled: true,
+		Source:  security.SourceEnv,
+	}
+}
+
+// handleUsersList returns users visible in the panel API.
 //
-// When users storage is disabled the body is an empty array. Success is 200.
-// There is no error status from List.
+// The first row is always the environment administrator (AdminUser from config, not
+// stored in users.json) with Source env and no id or hash. When users.json storage
+// is enabled, file-backed rows follow with Hash cleared and Source file. When storage
+// is disabled, the body is a one-element array containing only the environment row.
+// Success is always 200; List does not produce error responses.
 func (s *Server) handleUsersList(w http.ResponseWriter, _ *http.Request) {
+	out := []security.User{s.envAdminRow()}
 	if !s.usersEnabled() {
-		writeJSON(w, http.StatusOK, []security.User{})
+		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.users.List())
+	stored := s.users.List()
+	for i := range stored {
+		stored[i].Source = security.SourceFile
+		out = append(out, stored[i])
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleUsersCreate adds one users.json record and returns the public row.

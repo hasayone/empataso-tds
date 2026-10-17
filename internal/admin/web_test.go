@@ -697,6 +697,9 @@ func TestSPAUsersPage(t *testing.T) {
 	must(t, html, "hiddenCols(", "hiddenCols helper")
 	must(t, html, "pageAllowed(", "pageAllowed helper")
 	must(t, html, "canEdit(", "canEdit helper")
+	must(t, html, "userIsEnv(", "userIsEnv helper")
+	must(t, html, "'users.src.env'", "users.src.env i18n")
+	must(t, html, "'prof.account'", "prof.account i18n")
 	for _, anchor := range []string{
 		`'menu.users':'Users'`,
 		`'menu.users':'Пользователи'`,
