@@ -20,7 +20,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
 		return
 	}
-	conds, ok := condsFrom(w, r, "events")
+	conds, ok := s.condsFrom(w, r, "events")
 	if !ok {
 		return
 	}
@@ -36,7 +36,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "stats error")
 		return
 	}
-	writeJSON(w, http.StatusOK, sum)
+	s.writeStats(w, r, http.StatusOK, sum)
 }
 
 // handleTimeSeries writes hit counts bucketed by step.
@@ -47,7 +47,7 @@ func (s *Server) handleTimeSeries(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
 		return
 	}
-	conds, ok := condsFrom(w, r, "events")
+	conds, ok := s.condsFrom(w, r, "events")
 	if !ok {
 		return
 	}
@@ -72,7 +72,7 @@ func (s *Server) handleTimeSeries(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "stats error")
 		return
 	}
-	writeJSON(w, http.StatusOK, pts)
+	s.writeStats(w, r, http.StatusOK, pts)
 }
 
 // handleBreakdown writes the top values of one dimension.
@@ -86,7 +86,7 @@ func (s *Server) handleBreakdown(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
 		return
 	}
-	conds, ok := condsFrom(w, r, "events")
+	conds, ok := s.condsFrom(w, r, "events")
 	if !ok {
 		return
 	}
@@ -112,7 +112,7 @@ func (s *Server) handleBreakdown(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "stats error")
 		return
 	}
-	writeJSON(w, http.StatusOK, kv)
+	s.writeStats(w, r, http.StatusOK, kv)
 }
 
 // handlePerformance writes hits, uniques, bots, conversions and profit per group and stream.
@@ -123,7 +123,7 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
 		return
 	}
-	conds, ok := condsFrom(w, r, "events")
+	conds, ok := s.condsFrom(w, r, "events")
 	if !ok {
 		return
 	}
@@ -142,17 +142,16 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 	if rows == nil {
 		rows = []store.PerfRow{}
 	}
-	writeJSON(w, http.StatusOK, rows)
+	s.writeStats(w, r, http.StatusOK, rows)
 }
 
 // logFilter reads the click-journal query.
-// r supplies the period, the old categorical parameters and repeated f=.
-// The filter is ready for Logs. A bad f= returns an error and does not include a partial filter.
-func (s *Server) logFilter(r *http.Request) (store.LogFilter, error) {
+// w and r supply the period, legacy parameters and f=. A bad filter writes 400 to w.
+func (s *Server) logFilter(w http.ResponseWriter, r *http.Request) (store.LogFilter, bool) {
 	q := r.URL.Query()
-	conds, err := queryConds(q, "events")
-	if err != nil {
-		return store.LogFilter{}, err
+	conds, ok := s.condsFrom(w, r, "events")
+	if !ok {
+		return store.LogFilter{}, false
 	}
 	from, to := parseRange(r)
 	return store.LogFilter{
@@ -166,7 +165,7 @@ func (s *Server) logFilter(r *http.Request) (store.LogFilter, error) {
 		Limit:      clampPage(atoiDef(q.Get("limit"), defaultPageRows)),
 		Offset:     max(atoiDef(q.Get("offset"), 0), 0),
 		Conds:      conds,
-	}, nil
+	}, true
 }
 
 const (
@@ -218,9 +217,19 @@ func (s *Server) handleLogFilters(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
+	conds, ok := s.condsFrom(w, r, "events")
+	if !ok {
+		return
+	}
 	from, to := parseRange(r)
 	for _, dim := range []string{"group", "stream", "country", "device", "os", "browser", "brand"} {
-		kv, err := s.cfg.Stats.Breakdown(r.Context(), from, to, dim, 1000)
+		var kv []store.KV
+		var err error
+		if len(conds) > 0 {
+			kv, err = s.cfg.Stats.BreakdownFiltered(r.Context(), from, to, dim, 1000, conds)
+		} else {
+			kv, err = s.cfg.Stats.Breakdown(r.Context(), from, to, dim, 1000)
+		}
 		if err != nil {
 			continue
 		}
@@ -243,9 +252,8 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
 		return
 	}
-	f, err := s.logFilter(r)
-	if err != nil {
-		writeBadFilter(w, err)
+	f, ok := s.logFilter(w, r)
+	if !ok {
 		return
 	}
 	rows, total, err := s.cfg.Stats.Logs(r.Context(), f)
@@ -256,7 +264,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	if rows == nil {
 		rows = []store.LogRow{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"total": total, "rows": rows})
+	s.writeStats(w, r, http.StatusOK, map[string]any{"total": total, "rows": rows})
 }
 
 // handleLogsExport writes the click journal for the period as CSV.
@@ -267,9 +275,8 @@ func (s *Server) handleLogsExport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
 		return
 	}
-	f, err := s.logFilter(r)
-	if err != nil {
-		writeBadFilter(w, err)
+	f, ok := s.logFilter(w, r)
+	if !ok {
 		return
 	}
 	f.Limit, f.Offset = exportRows, 0
@@ -388,14 +395,14 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, []store.SliceRow{})
 		return
 	}
-	conds, ok := condsFrom(w, r, "events")
+	conds, ok := s.condsFrom(w, r, "events")
 	if !ok {
 		return
 	}
 	from, to := parseRange(r)
 	var rows []store.SliceRow
 	var err error
-	if _, has := r.URL.Query()["f"]; has {
+	if len(conds) > 0 {
 		rows, err = s.cfg.Stats.SliceFiltered(r.Context(), from, to, conds)
 	} else {
 		rows, err = s.cfg.Stats.Slice(r.Context(), from, to)
@@ -404,7 +411,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "report error")
 		return
 	}
-	writeJSON(w, http.StatusOK, rows)
+	s.writeStats(w, r, http.StatusOK, rows)
 }
 
 // handlePostbacks writes one page of the conversion journal and the profit sum.
@@ -415,7 +422,7 @@ func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
 		return
 	}
-	conds, ok := condsFrom(w, r, "conversions")
+	conds, ok := s.condsFrom(w, r, "conversions")
 	if !ok {
 		return
 	}
@@ -436,7 +443,8 @@ func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
 	if rows == nil {
 		rows = []store.PostbackRow{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"total": total, "rows": rows})
+	s.writeStatsExtra(w, r, http.StatusOK, map[string]any{"total": total, "rows": rows},
+		map[string][]string{"profit": {"total"}})
 }
 
 // parseRange reads from/to (RFC3339) from the query; defaults to the last 24 hours.

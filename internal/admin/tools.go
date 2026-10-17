@@ -241,7 +241,7 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 		roll := *req.Roll
 		deps.Roll = func(n int) int { return roll }
 	}
-	cats := s.simCatalogs(r.Context(), req)
+	cats := s.simCatalogs(r.Context(), req, s.viewerFrom(r.Context()))
 
 	var path []simStep
 	for hop := 0; ; hop++ {
@@ -294,19 +294,27 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 }
 
 // simCatalogs builds the offer and landing maps for one simulation.
-// An omitted list is read from the store. A list in the request replaces it,
-// so an unsaved edit can be tried on its own.
-func (s *Server) simCatalogs(ctx context.Context, req simRequest) router.Catalogs {
+// An omitted list is read from the store and filtered by v. A list in the
+// request replaces it unchanged, so an unsaved edit can be tried on its own.
+func (s *Server) simCatalogs(ctx context.Context, req simRequest, v viewer) router.Catalogs {
 	offers := req.Offers
 	if offers == nil && s.cfg.Offers != nil {
 		if list, err := s.cfg.Offers.List(ctx); err == nil {
-			offers = list
+			offers = visibleCatalog(v, &catalogHooks[config.Offer]{
+				res:   resOffers,
+				label: func(o config.Offer) string { return o.Group },
+				owner: func(o config.Offer) string { return o.CreatedBy },
+			}, func(o config.Offer) string { return o.ID }, list)
 		}
 	}
 	landings := req.Landings
 	if landings == nil && s.cfg.Landings != nil {
 		if list, err := s.cfg.Landings.List(ctx); err == nil {
-			landings = list
+			landings = visibleCatalog(v, &catalogHooks[config.Landing]{
+				res:   resLandings,
+				label: func(l config.Landing) string { return l.Group },
+				owner: func(l config.Landing) string { return l.CreatedBy },
+			}, func(l config.Landing) string { return l.ID }, list)
 		}
 	}
 	cat := router.Catalogs{

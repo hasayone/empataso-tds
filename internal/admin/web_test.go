@@ -209,7 +209,7 @@ func TestDashboardUIFiltersBrand(t *testing.T) {
 	set := spaFunctionLine(html, "settings")
 	must(t, set, `id="company-card"`, "company settings card")
 	must(t, html, "defaultCompany", "default company helper")
-	must(t, html, "let BRAND={name:'CustomTDS'", "BRAND defaults to CustomTDS")
+	must(t, html, `let BRAND={name:''`, "BRAND defaults to an empty name")
 }
 
 // TestDashboardPerfControls — performance table defaults, pure helpers, export scope, KPI tiles, and fold nav.
@@ -549,10 +549,11 @@ func TestFlowsHeaderExportMenu(t *testing.T) {
 		t.Errorf("export must follow the pager: page=%d export=%d", page, exp)
 	}
 	cards := spaFunctionLine(html, "paintFlowCards")
-	must(t, cards, `class="sm" id="bulk-on"`, "bulk enable is small")
-	must(t, cards, `class="sm" id="bulk-off"`, "bulk disable is small")
-	must(t, cards, `class="sm" id="bulk-dup"`, "bulk duplicate is small")
-	must(t, cards, `class="sm danger" id="bulk-del"`, "bulk delete is small")
+	must(t, cards, `id="bulk-on"`, "bulk enable")
+	must(t, cards, `id="bulk-off"`, "bulk disable")
+	must(t, cards, `id="bulk-del"`, "bulk delete")
+	mustNot(t, cards, `class="sm" id="bulk-`, "small class on a bulk action")
+	mustNot(t, cards, `class="sm danger" id="bulk-del"`, "small danger class on bulk delete")
 	must(t, html, `.ftable td.fname{font-size:11px}`, "name cell is 11px")
 	cell := spaFunctionLine(html, "flowMetricCell")
 	must(t, cell, `class="ell fname"`, "name cell class")
@@ -686,6 +687,44 @@ func TestKeitaroPage(t *testing.T) {
 	}
 }
 
+// TestSPAUsersPage checks the users tab, access helpers, Keitaro users import,
+// and that menu.users appears in all three interface dictionaries.
+func TestSPAUsersPage(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `data-ptab="users"`, "profile users tab")
+	must(t, html, `id="kt-users"`, "keitaro users checkbox")
+	must(t, html, "/api/users", "users API")
+	must(t, html, "hiddenCols(", "hiddenCols helper")
+	must(t, html, "pageAllowed(", "pageAllowed helper")
+	must(t, html, "canEdit(", "canEdit helper")
+	for _, anchor := range []string{
+		`'menu.users':'Users'`,
+		`'menu.users':'Пользователи'`,
+		`'menu.users':'Користувачі'`,
+	} {
+		i := strings.Index(html, anchor)
+		if i < 0 {
+			t.Errorf("dictionary anchor missing: %s", anchor)
+			continue
+		}
+		lineEnd := strings.Index(html[i:], "\n")
+		if lineEnd < 0 {
+			t.Errorf("dictionary line has no newline: %s", anchor)
+			continue
+		}
+		line := html[i : i+lineEnd]
+		if !strings.Contains(line, `'users.new'`) {
+			t.Errorf("dictionary missing users.new next to %s", anchor)
+		}
+		if !strings.Contains(line, `'acc.title'`) {
+			t.Errorf("dictionary missing acc.title next to %s", anchor)
+		}
+		if !strings.Contains(line, `'kt.c.users'`) {
+			t.Errorf("dictionary missing kt.c.users next to %s", anchor)
+		}
+	}
+}
+
 // TestStreamPageEditor — a stream output of @page:<name>.html opens that file
 // in a modal. The field on the stream stays the reference.
 func TestStreamPageEditor(t *testing.T) {
@@ -720,8 +759,8 @@ func TestLandingTextAndDeleteConfirm(t *testing.T) {
 
 // TestSPASettingsPickers — country and timezone search boxes and the settings
 // postback card are gone. The lead URL in the postback popup has no payout,
-// the timezone letter buffer resets after 3 seconds, and theme hover does
-// not call toggleTheme.
+// the timezone letter buffer resets after 3 seconds, and the theme-pick
+// handler sets data-theme without calling toggleTheme.
 func TestSPASettingsPickers(t *testing.T) {
 	html := string(indexHTML)
 	mustNot(t, html, `id="cfind"`, "country search field")
@@ -765,16 +804,16 @@ func TestSPASettingsPickers(t *testing.T) {
 		t.Fatal("bindTzPick missing")
 	}
 	must(t, tz, "setTimeout(()=>{buf=''; if(open) paint()}, 3000)", "timezone buffer resets after 3 seconds")
-	hoverAt := strings.Index(html, "onmouseenter")
-	if hoverAt < 0 {
-		t.Fatal("onmouseenter missing")
+	pickAt := strings.Index(html, `data-theme-pick]').forEach`)
+	if pickAt < 0 {
+		t.Fatal("theme pick handler missing")
 	}
-	frag := html[hoverAt:]
-	if len(frag) > 220 {
-		frag = frag[:220]
+	frag := html[pickAt:]
+	if len(frag) > 300 {
+		frag = frag[:300]
 	}
-	must(t, frag, "setAttribute('data-theme'", "hover sets data-theme")
-	mustNot(t, frag, "toggleTheme", "theme hover must not call toggleTheme")
+	must(t, frag, "setAttribute('data-theme'", "theme pick sets data-theme")
+	mustNot(t, frag, "toggleTheme", "theme pick must not call toggleTheme")
 }
 
 // TestNavIconTooltips checks nav tooltips only while icon mode hides labels.
@@ -999,4 +1038,127 @@ func TestSPAProfileAndReportFilters(t *testing.T) {
 			t.Errorf("menu label missing: %s", anchor)
 		}
 	}
+}
+
+// TestAppearanceAccents checks accent tokens, the swatch picker and row hover.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestAppearanceAccents(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `:root[data-accent="blue"]`, "blue accent tokens")
+	must(t, html, `:root[data-accent="green"]`, "green accent tokens")
+	must(t, html, `:root[data-accent="graphite"]`, "graphite accent tokens")
+	must(t, html, `localStorage.getItem('kuztds-accent')`, "remembered accent")
+	must(t, html, `data-accent-pick`, "accent swatch")
+	must(t, html, `function applyAccent(`, "applyAccent")
+	must(t, html, `rgb(var(--acc-l))`, "light accent from the RGB triple")
+	must(t, html, `tbody tr:hover td{background:var(--accent-soft)}`, "row hover uses the accent")
+	mustNot(t, html, `tbody tr:hover td{background:var(--surface-2)}`, "surface row hover")
+}
+
+// TestNavMoreMenu checks the overflow menu for hidden nav items.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestNavMoreMenu(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `function navHidden(`, "navHidden")
+	must(t, html, `navmore-btn`, "more button")
+	must(t, html, `'nav.more':'Прочее'`, "ru nav.more")
+	must(t, html, `id="navmore"`, "more slot outside the scrolling nav")
+	must(t, html, `#navmore:empty{display:none}`, "empty more slot hidden")
+	chrome := spaFunctionLine(html, "paintChrome")
+	if chrome == "" {
+		t.Fatal("paintChrome missing")
+	}
+	must(t, chrome, `cap:tr('nav.more')`, "burger more section")
+}
+
+// TestTimezoneKyiv checks the Kiev alias and the canonical timezone name.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestTimezoneKyiv(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `'Europe/Kiev':'Europe/Kyiv'`, "Kiev alias")
+	must(t, html, `function tzCanon(`, "tzCanon")
+}
+
+// TestFilePickAndCrop checks logo crop, file drop and the header logo box.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestFilePickAndCrop(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `function cropImage(`, "cropImage")
+	must(t, html, `function bindFilePick(`, "bindFilePick")
+	must(t, html, `upload:'<path`, "upload icon")
+	must(t, html, `.logo{height:26px;width:auto`, "logo keeps its ratio")
+	mustNot(t, html, `.logo{width:26px;height:26px`, "square logo rule")
+}
+
+// TestButtonSizes checks icon and tag button sizes.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestButtonSizes(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `button.icon.sm{height:26px;width:26px`, "small icon button")
+	must(t, html, `button.tagbtn{`, "tag button")
+	mustNot(t, html, `button.sm,.btn.sm{`, "shared small text button rule")
+	mustNot(t, html, `id="go" style="width:100%;height:36px"`, "sign-in button height")
+	mustNot(t, html, `href="#/flows" style="height:34px"`, "back link height")
+	must(t, html, `href="#/flows" style="height:32px"`, "back link height")
+}
+
+// TestDomainsCatalogAndPager checks domain columns, the pager and the row menu.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestDomainsCatalogAndPager(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `if(kind==='domains') return [['id','flows.col.num',1],['host','dom.host',1]`, "domains column set")
+	must(t, html, `const DOM_LOCKED=new Set(['id','host'])`, "locked domain columns")
+	must(t, html, `domains:'kuztds-dom-cols'`, "domains column storage key")
+	must(t, html, `data-col-gear="domains"`, "domains column gear")
+	must(t, html, `const DOM_PAGE_KEY='kuztds-domains-page'`, "domains page storage key")
+	must(t, html, `function domainStatusText(`, "domainStatusText")
+	must(t, html, `function domainCell(`, "domainCell")
+	must(t, html, `function paintDomPage(`, "paintDomPage")
+	must(t, html, `'dom.why.dns':'DNS-запись не найдена'`, "ru dns miss")
+	must(t, html, `'dom.status':'Статус'`, "ru domain status")
+	must(t, html, `'dom.campaigns':'Кампании'`, "ru domain campaigns")
+	src := spaFunctionLine(html, "domains")
+	if src == "" {
+		src = html
+	}
+	must(t, src, `c.id==='host'?'<th class="acts"></th>':''`, "actions header after host")
+	must(t, src, `data-more="${esc(d.id)}"`, "domain row more menu")
+	mustNot(t, html, `data-dcheck=`, "inline domain check")
+	mustNot(t, html, `data-ddel=`, "inline domain delete")
+}
+
+// TestApiKeysMenu checks rotate, edit, remove and the key table.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestApiKeysMenu(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `/rotate'`, "rotate path")
+	must(t, html, `'?hard=1'`, "hard delete query")
+	must(t, html, `function rotateKey(`, "rotateKey")
+	must(t, html, `function editKey(`, "editKey")
+	must(t, html, `function removeKey(`, "removeKey")
+	must(t, html, `function readKeyForm(`, "readKeyForm")
+	must(t, html, `data-kcopy=`, "copy key button")
+	must(t, html, `<span class="dot ${dead?'bad':'on'}"></span>`, "key status dot")
+	must(t, html, `'key.scope.engine':'Движок'`, "ru engine scope")
+	must(t, html, `'key.key':'API ключ'`, "ru API key column")
+	must(t, html, `'key.table.hint':`, "key table hint")
+	must(t, html, `'key.status':`, "key status label")
+	must(t, html, `'key.prefix':`, "key prefix label")
+	mustNot(t, html, `'key.scope.engine':'Движок ?api='`, "engine scope query hint")
+	mustNot(t, html, `data-revoke=`, "inline revoke button")
+}
+
+// TestProfileTabsSections checks profile tabs, settings sections and the TDS title.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestProfileTabsSections(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `class="vseg" role="tablist"`, "profile tab list")
+	must(t, html, `role="tab" data-ptab="profile"`, "profile tab")
+	must(t, html, `<section class="setsec">`, "settings section")
+	must(t, html, `'set.sec.access':'Компания и доступ'`, "ru access section")
+	must(t, html, `.setsec h2{`, "section heading style")
+	must(t, html, `<title>TDS</title>`, "document title")
+	must(t, html, `document.title=name||'TDS'`, "title falls back to TDS")
+	must(t, html, `a.hidden=!name&&!logo`, "brand hidden without name and logo")
+	mustNot(t, html, `CustomTDS`, "CustomTDS branding")
 }

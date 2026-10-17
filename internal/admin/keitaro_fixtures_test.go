@@ -122,6 +122,7 @@ func newKeitaroServers(t *testing.T, base, key string, groups *memGroups, wh Imp
 		Manifest:    NewFileManifest(filepath.Join(dir, "keitaro-import.json")),
 		KeitaroBase: base,
 		KeitaroKey:  key,
+		UsersFile:   filepath.Join(dir, "users.json"),
 		Warehouse:   wh,
 		Log:         log,
 	})
@@ -254,6 +255,11 @@ func keitaroFake(t *testing.T, mode string) *httptest.Server {
 			return
 		}
 		switch r.URL.Path {
+		case "/admin_api/v1/users":
+			_, _ = w.Write([]byte(`[
+				{"id":10,"login":"buyer","type":"USER","access_data":{"resources":["campaigns","offers"],"campaigns_access_type":"to_groups_and_selected","campaigns_selected_entities":[7],"offers_access_type":"read_only"},"preferences":{"language":"en","timezone":"UTC"}},
+				{"id":1,"login":"admin","type":"USER","access_data":{"resources":["offers"]}}
+			]`))
 		case "/admin_api/v1/campaigns":
 			_, _ = w.Write([]byte(`[{"id":7,"alias":"promo","name":"Spring","state":"active"}]`))
 		case "/admin_api/v1/campaigns/7/streams":

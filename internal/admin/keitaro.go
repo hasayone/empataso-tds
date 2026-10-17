@@ -25,6 +25,7 @@ type keitaroImportReq struct {
 	Landings    bool   `json:"landings"`
 	Sources     bool   `json:"sources"`
 	Campaigns   bool   `json:"campaigns"`
+	Users       bool   `json:"users"`
 	Conversions bool   `json:"conversions"`
 	Clicks      bool   `json:"clicks"`
 	From        string `json:"from"`
@@ -69,7 +70,7 @@ func (req keitaroImportReq) needsTracker() bool {
 // catalog reports whether a snapshot must be fetched.
 // It returns true when any of the six catalog or campaign flags is set.
 func (req keitaroImportReq) catalog() bool {
-	return req.Domains || req.Networks || req.Offers || req.Landings || req.Sources || req.Campaigns
+	return req.Domains || req.Networks || req.Offers || req.Landings || req.Sources || req.Campaigns || req.Users
 }
 
 // selection is the mapper switch for this request.
@@ -82,6 +83,7 @@ func (req keitaroImportReq) selection() ktimport.Selection {
 		Landings:  req.Landings,
 		Sources:   req.Sources,
 		Campaigns: req.Campaigns,
+		Users:     req.Users,
 	}
 }
 
@@ -115,7 +117,8 @@ func (s *Server) keitaroStoreMissing(req keitaroImportReq) string {
 		(req.Domains && s.cfg.Domains == nil) ||
 		(req.Landings && s.cfg.Landings == nil) ||
 		(req.Offers && s.cfg.Offers == nil) ||
-		(req.Campaigns && s.cfg.Groups == nil)
+		(req.Campaigns && s.cfg.Groups == nil) ||
+		(req.Users && !s.usersEnabled())
 	if missing {
 		return "store unavailable"
 	}
@@ -147,56 +150,84 @@ func sanitize(err error, key string) string {
 	return msg
 }
 
+// catalogMerge holds parameters for mergeCatalog.
+//
+// store is the catalog JSON file. idOf reads the record id. valid returns a client
+// message or an empty string when the row is acceptable. imported is true for ids
+// already recorded in the manifest. owner is the importing session UID for CreatedBy;
+// empty when the environment administrator runs the import.
+type catalogMerge[T any] struct {
+	store    *JSONStore[T]
+	idOf     func(T) string
+	valid    func(T) string
+	imported func(string) bool
+	owner    string
+}
+
 // importCatalogs writes the selected catalogs in a fixed order.
-// prev is the manifest loaded before this run. counts receives one entry per selected kind.
-// losses collects validator rejections and id conflicts. After each catalog the matching
-// sequence moves past the imported numeric ids. A nil sequence is left alone.
-// It returns an error when a store cannot be read or saved.
-func (s *Server) importCatalogs(ctx context.Context, req keitaroImportReq, res ktimport.Result, prev ktimport.Manifest, counts map[string]int, losses *[]ktimport.Loss) error {
+// st holds the mapper result, prior manifest, owner UID, counts, and losses for this run.
+// After each catalog the matching sequence moves past the imported numeric ids. A nil
+// sequence is left alone. It returns an error when a store cannot be read or saved.
+func (s *Server) importCatalogs(ctx context.Context, req keitaroImportReq, st *importState) error {
 	if req.Networks {
-		n, extra, err := mergeCatalog(ctx, s.cfg.Networks, res.Networks, func(v config.AffiliateNetwork) string { return v.ID }, validNetwork, prev.Imported(ktimport.KindNetworks))
-		*losses = append(*losses, extra...)
+		n, extra, err := mergeCatalog(ctx, st.res.Networks, catalogMerge[config.AffiliateNetwork]{
+			store: s.cfg.Networks, idOf: func(v config.AffiliateNetwork) string { return v.ID },
+			valid: validNetwork, imported: st.prev.Imported(ktimport.KindNetworks), owner: st.owner,
+		})
+		st.losses = append(st.losses, extra...)
 		if err != nil {
 			return err
 		}
-		s.cfg.SeqNetworks.noteAll(res.Manifest.Networks)
-		counts["networks"] = n
+		s.cfg.SeqNetworks.noteAll(st.res.Manifest.Networks)
+		st.counts["networks"] = n
 	}
 	if req.Sources {
-		n, extra, err := mergeCatalog(ctx, s.cfg.Sources, res.Sources, func(v config.TrafficSource) string { return v.ID }, validSource, prev.Imported(ktimport.KindSources))
-		*losses = append(*losses, extra...)
+		n, extra, err := mergeCatalog(ctx, st.res.Sources, catalogMerge[config.TrafficSource]{
+			store: s.cfg.Sources, idOf: func(v config.TrafficSource) string { return v.ID },
+			valid: validSource, imported: st.prev.Imported(ktimport.KindSources), owner: st.owner,
+		})
+		st.losses = append(st.losses, extra...)
 		if err != nil {
 			return err
 		}
-		s.cfg.SeqSources.noteAll(res.Manifest.Sources)
-		counts["sources"] = n
+		s.cfg.SeqSources.noteAll(st.res.Manifest.Sources)
+		st.counts["sources"] = n
 	}
 	if req.Domains {
-		n, extra, err := mergeCatalog(ctx, s.cfg.Domains, res.Domains, func(v config.Domain) string { return v.ID }, validDomain, prev.Imported(ktimport.KindDomains))
-		*losses = append(*losses, extra...)
+		n, extra, err := mergeCatalog(ctx, st.res.Domains, catalogMerge[config.Domain]{
+			store: s.cfg.Domains, idOf: func(v config.Domain) string { return v.ID },
+			valid: validDomain, imported: st.prev.Imported(ktimport.KindDomains), owner: st.owner,
+		})
+		st.losses = append(st.losses, extra...)
 		if err != nil {
 			return err
 		}
-		s.cfg.SeqDomains.noteAll(res.Manifest.Domains)
-		counts["domains"] = n
+		s.cfg.SeqDomains.noteAll(st.res.Manifest.Domains)
+		st.counts["domains"] = n
 	}
 	if req.Landings {
-		n, extra, err := mergeCatalog(ctx, s.cfg.Landings, res.Landings, func(v config.Landing) string { return v.ID }, validLanding, prev.Imported(ktimport.KindLandings))
-		*losses = append(*losses, extra...)
+		n, extra, err := mergeCatalog(ctx, st.res.Landings, catalogMerge[config.Landing]{
+			store: s.cfg.Landings, idOf: func(v config.Landing) string { return v.ID },
+			valid: validLanding, imported: st.prev.Imported(ktimport.KindLandings), owner: st.owner,
+		})
+		st.losses = append(st.losses, extra...)
 		if err != nil {
 			return err
 		}
-		s.cfg.SeqLandings.noteAll(res.Manifest.Landings)
-		counts["landings"] = n
+		s.cfg.SeqLandings.noteAll(st.res.Manifest.Landings)
+		st.counts["landings"] = n
 	}
 	if req.Offers {
-		n, extra, err := mergeCatalog(ctx, s.cfg.Offers, res.Offers, func(v config.Offer) string { return v.ID }, validOffer, prev.Imported(ktimport.KindOffers))
-		*losses = append(*losses, extra...)
+		n, extra, err := mergeCatalog(ctx, st.res.Offers, catalogMerge[config.Offer]{
+			store: s.cfg.Offers, idOf: func(v config.Offer) string { return v.ID },
+			valid: validOffer, imported: st.prev.Imported(ktimport.KindOffers), owner: st.owner,
+		})
+		st.losses = append(st.losses, extra...)
 		if err != nil {
 			return err
 		}
-		s.cfg.SeqOffers.noteAll(res.Manifest.Offers)
-		counts["offers"] = n
+		s.cfg.SeqOffers.noteAll(st.res.Manifest.Offers)
+		st.counts["offers"] = n
 	}
 	return nil
 }
@@ -216,60 +247,112 @@ func preserveCatalogGroups[T any](existing, kept []T, idOf func(T) string) []T {
 	for i, row := range kept {
 		id := idOf(row)
 		if old, ok := byID[id]; ok {
-			row = keepGroup(old, row)
+			row = keepLocalFields(old, row)
 		}
 		out[i] = row
 	}
 	return out
 }
 
-// keepGroup returns next with Group taken from old when next.Group is empty.
-// It supports catalog record types that carry a group label on the record.
-func keepGroup[T any](old, next T) T {
+// createdByOf returns CreatedBy from a catalog row, or an empty string for unknown types.
+func createdByOf[T any](item T) string {
+	switch n := any(item).(type) {
+	case config.Offer:
+		return n.CreatedBy
+	case config.Landing:
+		return n.CreatedBy
+	case config.AffiliateNetwork:
+		return n.CreatedBy
+	case config.TrafficSource:
+		return n.CreatedBy
+	case config.Domain:
+		return n.CreatedBy
+	default:
+		return ""
+	}
+}
+
+// keepLocalFields returns next with Group taken from old when empty on next, then restores
+// CreatedBy from old when next left it empty. It supports catalog types with group and owner.
+func keepLocalFields[T any](old, next T) T {
 	switch o := any(old).(type) {
 	case config.Offer:
 		n := any(next).(config.Offer)
 		if n.Group == "" {
 			n.Group = o.Group
 		}
-		return any(n).(T)
+		return withOwner(any(n).(T), createdByOf(old))
 	case config.Landing:
 		n := any(next).(config.Landing)
 		if n.Group == "" {
 			n.Group = o.Group
 		}
-		return any(n).(T)
+		return withOwner(any(n).(T), createdByOf(old))
 	case config.AffiliateNetwork:
 		n := any(next).(config.AffiliateNetwork)
 		if n.Group == "" {
 			n.Group = o.Group
 		}
-		return any(n).(T)
+		return withOwner(any(n).(T), createdByOf(old))
 	case config.TrafficSource:
 		n := any(next).(config.TrafficSource)
 		if n.Group == "" {
 			n.Group = o.Group
 		}
-		return any(n).(T)
+		return withOwner(any(n).(T), createdByOf(old))
 	case config.Domain:
 		n := any(next).(config.Domain)
 		if n.Group == "" {
 			n.Group = o.Group
 		}
+		return withOwner(any(n).(T), createdByOf(old))
+	default:
+		return withOwner(next, createdByOf(old))
+	}
+}
+
+// withOwner sets CreatedBy when uid is non-empty and the row field is still empty.
+func withOwner[T any](item T, uid string) T {
+	if uid == "" {
+		return item
+	}
+	switch n := any(item).(type) {
+	case config.Offer:
+		if n.CreatedBy == "" {
+			n.CreatedBy = uid
+		}
+		return any(n).(T)
+	case config.Landing:
+		if n.CreatedBy == "" {
+			n.CreatedBy = uid
+		}
+		return any(n).(T)
+	case config.AffiliateNetwork:
+		if n.CreatedBy == "" {
+			n.CreatedBy = uid
+		}
+		return any(n).(T)
+	case config.TrafficSource:
+		if n.CreatedBy == "" {
+			n.CreatedBy = uid
+		}
+		return any(n).(T)
+	case config.Domain:
+		if n.CreatedBy == "" {
+			n.CreatedBy = uid
+		}
 		return any(n).(T)
 	default:
-		return next
+		return item
 	}
 }
 
 // mergeCatalog validates incoming rows, merges them by id and saves the list.
-// store is the catalog file. incoming is the mapper output. idOf reads the id.
-// valid returns a client message, or an empty string when the row is acceptable.
-// imported is true for ids already recorded in the manifest. A nil func replaces nothing.
-// The count is how many incoming rows passed validation.
-// Losses are the rejected rows and the id conflicts. An error means the file could not be read or saved.
-func mergeCatalog[B any, T any](ctx context.Context, store *JSONStore[T], incoming []B, idOf func(T) string, valid func(T) string, imported func(string) bool) (int, []ktimport.Loss, error) {
-	existing, err := store.List(ctx)
+// incoming is the mapper output. cm carries the store, validators, manifest filter and owner.
+// The count is how many incoming rows passed validation. Losses are rejections and id conflicts.
+// An error means the file could not be read or saved.
+func mergeCatalog[B any, T any](ctx context.Context, incoming []B, cm catalogMerge[T]) (int, []ktimport.Loss, error) {
+	existing, err := cm.store.List(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -280,16 +363,19 @@ func mergeCatalog[B any, T any](ctx context.Context, store *JSONStore[T], incomi
 		if err != nil {
 			return 0, losses, err
 		}
-		if msg := valid(item); msg != "" {
-			losses = append(losses, ktimport.Loss{Kind: "skipped", Ref: idOf(item), Detail: msg})
+		if msg := cm.valid(item); msg != "" {
+			losses = append(losses, ktimport.Loss{Kind: "skipped", Ref: cm.idOf(item), Detail: msg})
 			continue
 		}
 		kept = append(kept, item)
 	}
-	kept = preserveCatalogGroups(existing, kept, idOf)
-	merged, extra := ktimport.MergeByIDReport(existing, kept, idOf, imported)
+	kept = preserveCatalogGroups(existing, kept, cm.idOf)
+	for i := range kept {
+		kept[i] = withOwner(kept[i], cm.owner)
+	}
+	merged, extra := ktimport.MergeByIDReport(existing, kept, cm.idOf, cm.imported)
 	losses = append(losses, extra...)
-	if err := store.Save(ctx, merged); err != nil {
+	if err := cm.store.Save(ctx, merged); err != nil {
 		return 0, losses, err
 	}
 	return len(kept), losses, nil
@@ -297,11 +383,12 @@ func mergeCatalog[B any, T any](ctx context.Context, store *JSONStore[T], incomi
 
 // mergeImportedGroups applies the bridge merge and keeps local group fields.
 // existing is the file. incoming is the mapper output. prev is the manifest from before this run.
+// owner is the importing session UID for CreatedBy on new groups, or empty for root.
 // A group is replaced only when prev already lists its id. Otherwise the stored group is kept.
 // A replaced import keeps its stored number when the incoming row has none.
 // A new import keeps the number from the merge. Missing numbers are filled for ids in this import.
 // Losses are the bridge merge report. An error means a JSON conversion failed.
-func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, prev ktimport.Manifest) ([]config.Group, []ktimport.Loss, error) {
+func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, prev ktimport.Manifest, owner string) ([]config.Group, []ktimport.Loss, error) {
 	bridgeExisting, err := convert[[]ktimport.Group](existing)
 	if err != nil {
 		return nil, nil, err
@@ -325,6 +412,9 @@ func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, pre
 			if err != nil {
 				return nil, nil, err
 			}
+			if owner != "" && cg.CreatedBy == "" {
+				cg.CreatedBy = owner
+			}
 			out = append(out, cg)
 			continue
 		}
@@ -335,6 +425,9 @@ func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, pre
 			}
 			if cg.Num <= 0 {
 				cg.Num = old.Num
+			}
+			if cg.CreatedBy == "" {
+				cg.CreatedBy = old.CreatedBy
 			}
 			out = append(out, cg)
 			continue
@@ -447,7 +540,7 @@ func maskSecret(s, key string) string {
 // URLs and the key are not logged. It does not return an error.
 func (s *Server) logKeitaro(msg string, counts map[string]int, elapsed time.Duration) {
 	args := make([]any, 0, len(counts)*2+2)
-	for _, name := range []string{"lists", "pages", "groups", "offers", "landings", "landing_files", "networks", "sources", "domains", "conversions", "clicks"} {
+	for _, name := range []string{"lists", "pages", "groups", "users", "offers", "landings", "landing_files", "networks", "sources", "domains", "conversions", "clicks"} {
 		n, ok := counts[name]
 		if !ok {
 			continue

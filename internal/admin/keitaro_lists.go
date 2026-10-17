@@ -67,13 +67,13 @@ func stripMissingIPLists(groups []ktimport.Group) ([]ktimport.Group, []ktimport.
 // A failing one is skipped. Groups that were not in the manifest stay in the file.
 // It returns how many incoming groups were saved and the skip report.
 // An error means the file could not be read, converted or saved.
-func (s *Server) importGroups(ctx context.Context, incoming []ktimport.Group, prev ktimport.Manifest) (int, []ktimport.Loss, error) {
+func (s *Server) importGroups(ctx context.Context, incoming []ktimport.Group, prev ktimport.Manifest, owner string) (int, []ktimport.Loss, error) {
 	existing, err := s.cfg.Groups.List(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
 	incoming, losses := keepFirstGroups(incoming)
-	merged, extra, err := mergeImportedGroups(existing, incoming, prev)
+	merged, extra, err := mergeImportedGroups(existing, incoming, prev, owner)
 	if err != nil {
 		return 0, append(losses, extra...), err
 	}

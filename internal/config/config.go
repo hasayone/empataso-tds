@@ -79,6 +79,10 @@ type Group struct {
 	SourceID string `json:"source_id,omitempty"`
 	// Folder is the operator's grouping label for the campaign list and its filter. The engine ignores it.
 	Folder string `json:"folder,omitempty"`
+	// CreatedBy is the users.json id of the panel user who created this record.
+	// Empty means the environment administrator or a record older than this field.
+	// The engine does not read it.
+	CreatedBy string `json:"created_by,omitempty"`
 	// CostParam and CurrencyParam are the query names for a click price.
 	// CostToken and CurrencyToken are written into the campaign link as the
 	// values the traffic source replaces, for example {price}.

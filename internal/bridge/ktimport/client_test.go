@@ -95,6 +95,12 @@ func TestAllowLog(t *testing.T) {
 	if err := Allow(http.MethodGet, "/admin_api/v1/groups/1"); err == nil {
 		t.Fatal("group id allowed")
 	}
+	if err := Allow(http.MethodGet, "/admin_api/v1/users"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Allow(http.MethodGet, "/admin_api/v1/users/1"); err == nil {
+		t.Fatal("user id allowed")
+	}
 	c := &Client{Base: "https://tracker.example", Key: "secret", HTTP: &http.Client{Transport: denyTrip{}}}
 	if _, err := c.postLog(context.Background(), "/admin_api/v1/campaigns", map[string]int{}); err == nil || !strings.Contains(err.Error(), "allowlist") {
 		t.Fatal(err)
@@ -218,7 +224,7 @@ func TestFetchSnapshotOptional(t *testing.T) {
 			_, _ = io.WriteString(w, `[{"id":1,"alias":"a","name":"A"}]`)
 		case "/admin_api/v1/campaigns/1/streams":
 			_, _ = io.WriteString(w, `[]`)
-		case "/admin_api/v1/offers", "/admin_api/v1/landing_pages", "/admin_api/v1/groups",
+		case "/admin_api/v1/offers", "/admin_api/v1/landing_pages", "/admin_api/v1/groups", "/admin_api/v1/users",
 			"/admin_api/v1/stream_schemas", "/admin_api/v1/stream_types", "/admin_api/v1/stream_filters", "/admin_api/v1/streams_actions":
 			_, _ = io.WriteString(w, `[]`)
 		case "/admin_api/v1/affiliate_networks":

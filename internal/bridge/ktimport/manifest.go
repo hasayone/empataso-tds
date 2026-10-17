@@ -16,6 +16,7 @@ type Manifest struct {
 	Domains  []string `json:"domains,omitempty"`
 	Lists    []string `json:"lists,omitempty"`
 	Pages    []string `json:"pages,omitempty"`
+	Users    []string `json:"users,omitempty"`
 }
 
 const (
@@ -27,6 +28,7 @@ const (
 	KindDomains  = "domains"
 	KindLists    = "lists"
 	KindPages    = "pages"
+	KindUsers    = "users"
 )
 
 // Add дописывает id в список вида, без повторов и без пустых строк.
@@ -90,7 +92,7 @@ func (m Manifest) Empty() bool {
 	return m.Host == "" &&
 		len(m.Groups) == 0 && len(m.Offers) == 0 && len(m.Landings) == 0 &&
 		len(m.Networks) == 0 && len(m.Sources) == 0 && len(m.Domains) == 0 &&
-		len(m.Lists) == 0 && len(m.Pages) == 0
+		len(m.Lists) == 0 && len(m.Pages) == 0 && len(m.Users) == 0
 }
 
 // Merge объединяет два манифеста.
@@ -106,7 +108,7 @@ func (m Manifest) Merge(other Manifest) Manifest {
 	}
 	for _, kind := range []string{
 		KindGroups, KindOffers, KindLandings, KindNetworks,
-		KindSources, KindDomains, KindLists, KindPages,
+		KindSources, KindDomains, KindLists, KindPages, KindUsers,
 	} {
 		out.Add(kind, m.list(kind)...)
 		out.Add(kind, other.list(kind)...)
@@ -140,6 +142,8 @@ func (m *Manifest) slice(kind string) *[]string {
 		return &m.Lists
 	case KindPages:
 		return &m.Pages
+	case KindUsers:
+		return &m.Users
 	default:
 		return nil
 	}
@@ -187,6 +191,9 @@ func attachManifest(res Result) Result {
 	}
 	for _, name := range sortedKeys(res.Pages) {
 		m.Add(KindPages, name)
+	}
+	for _, u := range res.Users {
+		m.Add(KindUsers, u.ID)
 	}
 	res.Manifest = m
 	return res

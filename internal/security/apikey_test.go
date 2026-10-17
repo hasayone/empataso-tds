@@ -321,6 +321,187 @@ func TestValidScopes(t *testing.T) {
 	}
 }
 
+// TestRotateAPIKey checks that rotation replaces the secret and keeps the
+// identity, and that a revoked or unknown id is refused.
+func TestRotateAPIKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys.json")
+	s := NewKeySet()
+	raw, key, err := s.Generate("night", []string{ScopeAdmin, ScopeEngine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, got, err := s.Rotate(key.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next == "" || next == raw {
+		t.Fatal("rotated secret should be a new raw key")
+	}
+	if !strings.HasPrefix(next, "kz_") || len(next) != 43 {
+		t.Fatalf("raw key length %d", len(next))
+	}
+	if got.Prefix == key.Prefix || got.Prefix != next[3:11] {
+		t.Fatalf("prefix = %q", got.Prefix)
+	}
+	if got.ID != key.ID || got.Name != key.Name || !got.CreatedAt.Equal(key.CreatedAt) {
+		t.Fatal("rotation changed id, name, or created time")
+	}
+	if !slices.Equal(got.Scopes, key.Scopes) {
+		t.Fatalf("scopes = %v", got.Scopes)
+	}
+	sum := sha256.Sum256([]byte(next))
+	if got.Hash != hex.EncodeToString(sum[:]) {
+		t.Fatal("rotated hash is not sha256 of the new raw key")
+	}
+	if _, ok := s.Verify(raw, ScopeAdmin); ok {
+		t.Fatal("old secret should not verify")
+	}
+	if _, ok := s.Verify(next, ScopeAdmin); !ok || !got.HasScope(ScopeEngine) {
+		t.Fatal("new secret should verify and keep its scopes")
+	}
+	if _, ok := s.Verify(next, ScopeEngine); !ok {
+		t.Fatal("new secret should verify the engine scope")
+	}
+	list := s.List()
+	if len(list) != 1 || list[0].ID != key.ID || list[0].Prefix != got.Prefix || list[0].Hash != "" {
+		t.Fatalf("list after rotate: %+v", list)
+	}
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(body, []byte(raw)) || bytes.Contains(body, []byte(next)) {
+		t.Fatal("key file contains a raw secret")
+	}
+	loaded, err := LoadKeySet(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := loaded.Verify(next, ScopeAdmin); !ok {
+		t.Fatal("loaded key should verify with the new secret")
+	}
+	if _, ok := loaded.Verify(raw, ScopeAdmin); ok {
+		t.Fatal("loaded key should reject the old secret")
+	}
+	if !s.Revoke(key.ID) {
+		t.Fatal("revoke should succeed")
+	}
+	if _, _, err := s.Rotate(key.ID); !errors.Is(err, ErrAPIKeyRevoked) {
+		t.Fatalf("rotate revoked err = %v", err)
+	}
+	if _, _, err := s.Rotate("missing"); !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Fatalf("rotate missing err = %v", err)
+	}
+}
+
+// TestUpdateAPIKey checks a name and scope change, validation errors, and
+// that the same secret verifies only the new scope.
+func TestUpdateAPIKey(t *testing.T) {
+	s := NewKeySet()
+	raw, key, err := s.Generate("old", []string{ScopeAdmin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Update(key.ID, "  renamed  ", []string{" engine ", ScopeEngine})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Name != "renamed" || !slices.Equal(got.Scopes, []string{ScopeEngine}) {
+		t.Fatalf("updated = %+v", got)
+	}
+	if got.ID != key.ID || got.Prefix != key.Prefix || got.Hash != key.Hash || !got.CreatedAt.Equal(key.CreatedAt) {
+		t.Fatal("update changed id, prefix, hash, or created time")
+	}
+	if _, ok := s.Verify(raw, ScopeEngine); !ok {
+		t.Fatal("updated key should verify the new scope")
+	}
+	if _, ok := s.Verify(raw, ScopeAdmin); ok {
+		t.Fatal("updated key should drop the old scope")
+	}
+	list := s.List()
+	if len(list) != 1 || list[0].Name != "renamed" || !slices.Equal(list[0].Scopes, []string{ScopeEngine}) {
+		t.Fatalf("list after update: %+v", list)
+	}
+	cases := []struct {
+		name   string
+		scopes []string
+		want   error
+	}{
+		{name: " ", scopes: []string{ScopeAdmin}, want: ErrAPIKeyName},
+		{name: strings.Repeat("я", 65), scopes: []string{ScopeAdmin}, want: ErrAPIKeyNameLen},
+		{name: "ok", scopes: nil, want: ErrAPIKeyScope},
+		{name: "ok", scopes: []string{"billing"}, want: ErrAPIKeyScope},
+	}
+	for _, tc := range cases {
+		if _, err := s.Update(key.ID, tc.name, tc.scopes); !errors.Is(err, tc.want) {
+			t.Errorf("Update(%q, %v) err = %v, want %v", tc.name, tc.scopes, err, tc.want)
+		}
+	}
+	if _, ok := s.Verify(raw, ScopeEngine); !ok {
+		t.Fatal("rejected update changed the key")
+	}
+	if _, err := s.Update("missing", "n", []string{ScopeAdmin}); !errors.Is(err, ErrAPIKeyNotFound) {
+		t.Fatalf("update missing err = %v", err)
+	}
+	if !s.Revoke(key.ID) {
+		t.Fatal("revoke should succeed")
+	}
+	if _, err := s.Update(key.ID, "n", []string{ScopeAdmin}); !errors.Is(err, ErrAPIKeyRevoked) {
+		t.Fatalf("update revoked err = %v", err)
+	}
+}
+
+// TestRemoveAPIKey checks that a live key is kept and a revoked key is dropped
+// from the set and from the file.
+func TestRemoveAPIKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys.json")
+	s := NewKeySet()
+	raw, key, err := s.Generate("n", []string{ScopeAdmin})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Remove(key.ID); !errors.Is(err, ErrAPIKeyActive) {
+		t.Fatalf("remove active err = %v", err)
+	}
+	if _, ok := s.Verify(raw, ScopeAdmin); !ok {
+		t.Fatal("refused remove dropped the key")
+	}
+	if !s.Revoke(key.ID) {
+		t.Fatal("revoke should succeed")
+	}
+	if err := s.Remove(key.ID); err != nil {
+		t.Fatal(err)
+	}
+	if list := s.List(); len(list) != 0 {
+		t.Fatalf("list after remove: %+v", list)
+	}
+	if _, ok := s.Verify(raw, ScopeAdmin); ok {
+		t.Fatal("removed key should not verify")
+	}
+	if err := s.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var recs []APIKey
+	if err := json.Unmarshal(body, &recs); err != nil {
+		t.Fatal(err)
+	}
+	for _, rec := range recs {
+		if rec.ID == key.ID {
+			t.Fatal("key file still contains the removed id")
+		}
+	}
+	if bytes.Contains(body, []byte(raw)) {
+		t.Fatal("key file contains the raw secret")
+	}
+}
+
 // corruptKey flips the last character so the secret no longer matches.
 func corruptKey(raw string) string {
 	b := []byte(raw)

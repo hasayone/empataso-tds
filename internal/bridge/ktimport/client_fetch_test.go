@@ -35,6 +35,30 @@ func TestGetAcceptsNineMegabytes(t *testing.T) {
 	}
 }
 
+func TestFetchSnapshotUsersDenied(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/admin_api/v1/users" {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+		switch r.URL.Path {
+		case "/admin_api/v1/campaigns":
+			_, _ = io.WriteString(w, `[]`)
+		default:
+			_, _ = io.WriteString(w, `[]`)
+		}
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL, Key: "k-test", HTTP: srv.Client()}
+	snap, err := c.FetchSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap.UsersDenied || len(snap.Users) != 0 {
+		t.Fatalf("snap users %+v denied=%v", snap.Users, snap.UsersDenied)
+	}
+}
+
 func TestFetchSnapshotGroups(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {

@@ -27,6 +27,10 @@ type Offer struct {
 	NetworkID string `json:"network_id,omitempty"`
 	// Group is a label stored on this offer. The set of groups is these labels.
 	Group string `json:"group,omitempty"`
+	// CreatedBy is the users.json id of the panel user who created this record.
+	// Empty means the environment administrator or a record older than this field.
+	// The engine does not read it.
+	CreatedBy string `json:"created_by,omitempty"`
 	// Countries lists ISO 3166-1 alpha-2 codes in lowercase, for example ru.
 	Countries []string `json:"countries,omitempty"`
 	// PayoutModel is the partner payout type: cpa or cpc.
@@ -42,6 +46,8 @@ type Offer struct {
 // Domain is a host parked on this tracker.
 // Role is admin, links or both. Primary marks the default base for campaign links.
 // OK is set only after a check received this tracker's own answer on that host.
+// Reason is the code of the last failed check (dns, private, connect, foreign).
+// It is empty when OK is true.
 type Domain struct {
 	ID      string `json:"id"`
 	Host    string `json:"host"`
@@ -49,7 +55,12 @@ type Domain struct {
 	Role    string `json:"role"`
 	Primary bool   `json:"primary,omitempty"`
 	OK      bool   `json:"ok,omitempty"`
+	Reason  string `json:"reason,omitempty"`
 	Checked string `json:"checked,omitempty"`
+	// CreatedBy is the users.json id of the panel user who created this record.
+	// Empty means the environment administrator or a record older than this field.
+	// The engine does not read it.
+	CreatedBy string `json:"created_by,omitempty"`
 }
 
 // AffiliateNetwork is a partner that sends the inbound postback.
@@ -65,6 +76,10 @@ type AffiliateNetwork struct {
 	OfferQuery  string `json:"offer_query,omitempty"`
 	// Group is a label stored on this record. The set of groups is these labels.
 	Group string `json:"group,omitempty"`
+	// CreatedBy is the users.json id of the panel user who created this record.
+	// Empty means the environment administrator or a record older than this field.
+	// The engine does not read it.
+	CreatedBy string `json:"created_by,omitempty"`
 }
 
 // Landing is a page shown before an offer.
@@ -82,6 +97,10 @@ type Landing struct {
 	Entry string `json:"entry,omitempty"`
 	// Group is a label stored on this record. The set of groups is these labels.
 	Group string `json:"group,omitempty"`
+	// CreatedBy is the users.json id of the panel user who created this record.
+	// Empty means the environment administrator or a record older than this field.
+	// The engine does not read it.
+	CreatedBy string `json:"created_by,omitempty"`
 }
 
 // TrafficSource names the query keys a partner uses for keyword and sub_id_1..15.
@@ -91,6 +110,10 @@ type TrafficSource struct {
 	Parameters map[string]string `json:"parameters,omitempty"`
 	// Group is a label stored on this record. The set of groups is these labels.
 	Group string `json:"group,omitempty"`
+	// CreatedBy is the users.json id of the panel user who created this record.
+	// Empty means the environment administrator or a record older than this field.
+	// The engine does not read it.
+	CreatedBy string `json:"created_by,omitempty"`
 }
 
 // OutboundPostback is a server-to-server template fired after an inbound conversion.

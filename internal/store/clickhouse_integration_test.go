@@ -315,10 +315,10 @@ func TestCHExtColumns(t *testing.T) {
 	if sale == nil || sale.PrevStatus != "approved" {
 		t.Fatalf("sale prev: %+v", sale)
 	}
-	if _, err := ch.Values(ctx, "events", "country", from, to, 50); err != nil {
+	if _, err := ch.Values(ctx, ValuesQuery{Table: "events", Field: "country", From: from, To: to, Limit: 50}); err != nil {
 		t.Fatalf("Values country: %v", err)
 	}
-	if _, err := ch.Values(ctx, "events", "ip", from, to, 50); !errors.Is(err, ErrBadCond) {
+	if _, err := ch.Values(ctx, ValuesQuery{Table: "events", Field: "ip", From: from, To: to, Limit: 50}); !errors.Is(err, ErrBadCond) {
 		t.Fatalf("Values ip: %v", err)
 	}
 	got, _, err := ch.Logs(ctx, LogFilter{

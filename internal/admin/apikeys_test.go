@@ -321,6 +321,113 @@ func TestAPIKeysDisabled(t *testing.T) {
 	}
 }
 
+// TestAPIKeyRotateUpdateHardDelete checks rotate, a scope change, and hard delete.
+func TestAPIKeyRotateUpdateHardDelete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys.json")
+	srv := startKeyServer(t, path, nil)
+	c := newClient(t)
+	code, csrf := login(t, c, srv.URL, "admin", "p@ss")
+	if code != http.StatusOK || csrf == "" {
+		t.Fatalf("login status %d", code)
+	}
+
+	createdBody, _ := json.Marshal(map[string]any{
+		"name": "panel", "scopes": []string{security.ScopeAdmin},
+	})
+	code, respBody := doReq(t, c, http.MethodPost, srv.URL+"/api/api-keys", csrf, "", string(createdBody))
+	if code != http.StatusCreated {
+		t.Fatalf("create status %d", code)
+	}
+	var created struct {
+		Key  string          `json:"key"`
+		Item security.APIKey `json:"item"`
+	}
+	if err := json.Unmarshal(respBody, &created); err != nil {
+		t.Fatal(err)
+	}
+
+	code, rotBody := doReq(t, c, http.MethodPost, srv.URL+"/api/api-keys/"+created.Item.ID+"/rotate", csrf, "", "")
+	if code != http.StatusOK {
+		t.Fatalf("rotate status %d body %s", code, rotBody)
+	}
+	var rotated struct {
+		Key  string          `json:"key"`
+		Item security.APIKey `json:"item"`
+	}
+	if err := json.Unmarshal(rotBody, &rotated); err != nil {
+		t.Fatal(err)
+	}
+	if rotated.Key == "" || rotated.Key == created.Key || !strings.HasPrefix(rotated.Key, "kz_") || len(rotated.Key) != 43 {
+		t.Fatal("rotate response key shape")
+	}
+	if rotated.Item.ID != created.Item.ID || rotated.Item.Prefix == created.Item.Prefix || rotated.Item.Prefix != rotated.Key[3:11] {
+		t.Fatal("rotate response item")
+	}
+	if bytes.Contains(rotBody, []byte(`"hash"`)) {
+		t.Fatal("rotate response contains a hash field")
+	}
+
+	code, _ = doReq(t, nil, http.MethodGet, srv.URL+"/api/offers", "", created.Key, "")
+	if code != http.StatusUnauthorized {
+		t.Fatalf("old key status %d", code)
+	}
+	code, _ = doReq(t, nil, http.MethodGet, srv.URL+"/api/offers", "", rotated.Key, "")
+	if code != http.StatusOK {
+		t.Fatalf("new key status %d", code)
+	}
+
+	code, denied := doReq(t, nil, http.MethodPost, srv.URL+"/api/api-keys/"+created.Item.ID+"/rotate", "", rotated.Key, "")
+	if code != http.StatusForbidden || errText(t, denied) != "cookie session required" {
+		t.Fatalf("rotate via api key status %d", code)
+	}
+	putBody, _ := json.Marshal(map[string]any{
+		"name": "n2", "scopes": []string{security.ScopeEngine},
+	})
+	code, denied = doReq(t, nil, http.MethodPut, srv.URL+"/api/api-keys/"+created.Item.ID, "", rotated.Key, string(putBody))
+	if code != http.StatusForbidden || errText(t, denied) != "cookie session required" {
+		t.Fatalf("update via api key status %d", code)
+	}
+
+	code, updBody := doReq(t, c, http.MethodPut, srv.URL+"/api/api-keys/"+created.Item.ID, csrf, "", string(putBody))
+	if code != http.StatusOK {
+		t.Fatalf("update status %d body %s", code, updBody)
+	}
+	var updated security.APIKey
+	if err := json.Unmarshal(updBody, &updated); err != nil {
+		t.Fatal(err)
+	}
+	if updated.Name != "n2" || !updated.HasScope(security.ScopeEngine) || updated.HasScope(security.ScopeAdmin) {
+		t.Fatalf("updated item: %+v", updated)
+	}
+	code, _ = doReq(t, nil, http.MethodGet, srv.URL+"/api/offers", "", rotated.Key, "")
+	if code != http.StatusUnauthorized {
+		t.Fatalf("engine key status %d", code)
+	}
+
+	idURL := srv.URL + "/api/api-keys/" + created.Item.ID
+	code, _ = doReq(t, c, http.MethodDelete, idURL+"?hard=1", csrf, "", "")
+	if code != http.StatusConflict {
+		t.Fatalf("hard delete active status %d", code)
+	}
+	code, _ = doReq(t, c, http.MethodDelete, idURL, csrf, "", "")
+	if code != http.StatusNoContent {
+		t.Fatalf("revoke status %d", code)
+	}
+	code, _ = doReq(t, c, http.MethodPost, idURL+"/rotate", csrf, "", "")
+	if code != http.StatusConflict {
+		t.Fatalf("rotate revoked status %d", code)
+	}
+	code, _ = doReq(t, c, http.MethodDelete, idURL+"?hard=1", csrf, "", "")
+	if code != http.StatusNoContent {
+		t.Fatalf("hard delete status %d", code)
+	}
+	code, listBody := doReq(t, c, http.MethodGet, srv.URL+"/api/api-keys", "", "", "")
+	if code != http.StatusOK || strings.TrimSpace(string(listBody)) != "[]" {
+		t.Fatalf("list after hard delete status %d body %s", code, strings.TrimSpace(string(listBody)))
+	}
+	assertFileHides(t, path, created.Key, rotated.Key)
+}
+
 // assertFileHides fails when path contains any raw secret.
 func assertFileHides(t *testing.T, path string, raws ...string) {
 	t.Helper()

@@ -19,6 +19,16 @@ func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "groups error")
 		return
 	}
+	v := s.viewerFrom(r.Context())
+	if !v.admin {
+		filtered := make([]config.Group, 0, len(groups))
+		for _, g := range groups {
+			if v.canSee(resCampaigns, campaignRef(g)) {
+				filtered = append(filtered, g)
+			}
+		}
+		groups = filtered
+	}
 	writeJSON(w, http.StatusOK, groups)
 }
 
@@ -35,10 +45,30 @@ func (s *Server) handleGroupsSave(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "groups store unavailable")
 		return
 	}
-	var groups []config.Group
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxGroupsBody)).Decode(&groups); err != nil {
+	var body []config.Group
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxGroupsBody)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad json")
 		return
+	}
+	v := s.viewerFrom(r.Context())
+	s.groupsMu.Lock()
+	defer s.groupsMu.Unlock()
+	stored, err := s.cfg.Groups.List(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "groups error")
+		return
+	}
+	groups, code, msg := mergeGroups(v, stored, body)
+	if code != 0 {
+		writeErr(w, code, msg)
+		return
+	}
+	if !v.admin {
+		cat := s.loadLinkCatalog(r.Context(), groups)
+		if msg := validateUserGroupLinks(v, stored, groups, cat); msg != "" {
+			writeErr(w, http.StatusBadRequest, msg)
+			return
+		}
 	}
 	if msg := prepareGroups(groups); msg != "" {
 		writeErr(w, http.StatusBadRequest, msg)

@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 const landingTextLimit = 2 << 20
@@ -311,11 +313,56 @@ func (s *Server) removeLandingFiles(id string) {
 // registerLandingFiles mounts the landing file routes behind auth.
 // A nil store answers 503. Paths that escape the landing directory are 400.
 func registerLandingFiles(s *Server, mux *http.ServeMux) {
-	mux.Handle("GET /api/landings/{id}/files", s.auth(http.HandlerFunc(s.handleLandingFiles)))
-	mux.Handle("POST /api/landings/{id}/archive", s.auth(http.HandlerFunc(s.handleLandingArchive)))
-	mux.Handle("GET /api/landings/{id}/files/{path...}", s.auth(http.HandlerFunc(s.handleLandingFileGet)))
-	mux.Handle("PUT /api/landings/{id}/files/{path...}", s.auth(http.HandlerFunc(s.handleLandingFilePut)))
-	mux.Handle("DELETE /api/landings/{id}/files/{path...}", s.auth(http.HandlerFunc(s.handleLandingFileDelete)))
+	s.handle(mux, "GET /api/landings/{id}/files", s.landingAllowed(false, s.handleLandingFiles))
+	s.handle(mux, "POST /api/landings/{id}/archive", s.landingAllowed(true, s.handleLandingArchive))
+	s.handle(mux, "GET /api/landings/{id}/files/{path...}", s.landingAllowed(false, s.handleLandingFileGet))
+	s.handle(mux, "PUT /api/landings/{id}/files/{path...}", s.landingAllowed(true, s.handleLandingFilePut))
+	s.handle(mux, "DELETE /api/landings/{id}/files/{path...}", s.landingAllowed(true, s.handleLandingFileDelete))
+}
+
+// landingAllowed checks landing catalog grants before file handlers run.
+// write selects POST archive, PUT and DELETE. A missing landings store yields 404.
+func (s *Server) landingAllowed(write bool, next http.HandlerFunc) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		v := s.viewerFrom(r.Context())
+		if v.admin {
+			next(w, r)
+			return
+		}
+		if s.cfg.Landings == nil {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		id := r.PathValue("id")
+		list, err := s.cfg.Landings.List(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "read error")
+			return
+		}
+		var found config.Landing
+		ok := false
+		for _, l := range list {
+			if l.ID == id {
+				found = l
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		lref := ref{id: found.ID, label: found.Group, owner: found.CreatedBy}
+		if !v.canSee(resLandings, lref) {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+		if write && !v.canWrite(resLandings, lref) {
+			writeErr(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		next(w, r)
+	})
 }
 
 // landingFilesStore returns the file store or writes 503.

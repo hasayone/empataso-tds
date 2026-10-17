@@ -80,7 +80,7 @@ func TestImportGroupsDropsInvalidOnly(t *testing.T) {
 		{ID: "long", Name: "kt: Long", Folder: strings.Repeat("я", 65)},
 		{ID: "", Name: "kt: empty"},
 		{ID: "local", Name: "kt: Hijack"},
-	}, ktimport.Manifest{})
+	}, ktimport.Manifest{}, "")
 	if err != nil || n != 1 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}

@@ -28,6 +28,11 @@ type spendBody struct {
 }
 
 func (s *Server) handleSpendList(w http.ResponseWriter, r *http.Request) {
+	v := s.viewerFrom(r.Context())
+	if v.hides("cost") {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	if s.cfg.SpendPath == "" {
 		writeJSON(w, http.StatusOK, []config.SpendEntry{})
 		return
@@ -37,10 +42,20 @@ func (s *Server) handleSpendList(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "read error")
 		return
 	}
+	list, err = s.filterSpendList(r.Context(), v, list)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "groups error")
+		return
+	}
 	writeJSON(w, http.StatusOK, list)
 }
 
 func (s *Server) handleSpendCreate(w http.ResponseWriter, r *http.Request) {
+	v := s.viewerFrom(r.Context())
+	if v.hides("cost") {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	if s.cfg.SpendPath == "" {
 		writeErr(w, http.StatusServiceUnavailable, "store unavailable")
 		return
@@ -54,6 +69,17 @@ func (s *Server) handleSpendCreate(w http.ResponseWriter, r *http.Request) {
 	if msg != "" {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
+	}
+	if !v.admin {
+		ok, err := s.spendVisible(r.Context(), v, entry.GroupID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "groups error")
+			return
+		}
+		if !ok {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
 	}
 	var weights []config.SpendWeight
 	if s.cfg.Stats != nil {
@@ -101,6 +127,11 @@ func (s *Server) handleSpendCreate(w http.ResponseWriter, r *http.Request) {
 // handleSpendDelete removes one saved cost by id.
 // Other entries and their buckets are left as stored.
 func (s *Server) handleSpendDelete(w http.ResponseWriter, r *http.Request) {
+	v := s.viewerFrom(r.Context())
+	if v.hides("cost") {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	if s.cfg.SpendPath == "" {
 		writeErr(w, http.StatusServiceUnavailable, "store unavailable")
 		return
@@ -117,6 +148,17 @@ func (s *Server) handleSpendDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "read error")
 		return
 	}
+	if !v.admin {
+		okDel, err := s.spendDeleteAllowed(r.Context(), v, list, id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "groups error")
+			return
+		}
+		if !okDel {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+	}
 	next, ok := dropSpend(list, id)
 	if !ok {
 		writeErr(w, http.StatusNotFound, "not found")
@@ -127,6 +169,22 @@ func (s *Server) handleSpendDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// spendDeleteAllowed reports whether v may delete the spend row id in list.
+// ok is false when id is missing or the campaign is not visible. List errors propagate.
+func (s *Server) spendDeleteAllowed(ctx context.Context, v viewer, list []config.SpendEntry, id string) (bool, error) {
+	for _, e := range list {
+		if e.ID != id {
+			continue
+		}
+		ok, err := s.spendVisible(ctx, v, e.GroupID)
+		if err != nil {
+			return false, err
+		}
+		return ok, nil
+	}
+	return false, nil
 }
 
 // dropSpend returns the list without the entry id.

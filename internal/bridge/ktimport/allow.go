@@ -88,7 +88,7 @@ func match(parts []string) bool {
 		return true
 	case listOrOne(rest, "affiliate_networks"), listOrOne(rest, "traffic_sources"), listOrOne(rest, "domains"):
 		return true
-	case eq(rest, "groups"):
+	case eq(rest, "groups"), eq(rest, "users"):
 		return true
 	case eq(rest, "stream_schemas"), eq(rest, "stream_types"), eq(rest, "stream_filters"), eq(rest, "streams_actions"):
 		return true

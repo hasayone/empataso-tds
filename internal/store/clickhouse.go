@@ -421,38 +421,61 @@ func breakdownSQL(col, where string) string {
 		 WHERE ts >= ? AND ts < ?` + where + ` GROUP BY k ORDER BY n DESC LIMIT ?`
 }
 
-// Values returns the top values of field on table over [from, to).
-// ctx bounds the query and carries max_execution_time=10. table is events
-// or conversions. field must have Dim. limit <= 0 or above 500 becomes 500.
+// ValuesQuery selects top dimension values on one journal table over a time range.
+type ValuesQuery struct {
+	Table string
+	Field string
+	From  time.Time
+	To    time.Time
+	Limit int
+	Conds []Cond
+}
+
+// Values returns the top values of q.Field on q.Table over [q.From, q.To).
+// ctx bounds the query and carries max_execution_time=10. q.Table is events
+// or conversions. q.Field must have Dim. q.Conds restrict rows; a wave that is
+// not ready yields an empty list. q.Limit <= 0 or above 500 becomes 500.
 // The rows are ordered by count, descending.
 // ErrBadCond means the table is unknown or the field is not a dimension.
 // ErrUnknownField and ErrFieldNotReady come from dimColumn.
 // A query error is returned as-is.
-func (c *CH) Values(ctx context.Context, table, field string, from, to time.Time, limit int) ([]KV, error) {
-	if table != "events" && table != "conversions" {
+func (c *CH) Values(ctx context.Context, q ValuesQuery) ([]KV, error) {
+	if q.Table != "events" && q.Table != "conversions" {
 		return nil, ErrBadCond
 	}
-	f, ok := fieldByName(field)
+	f, ok := fieldByName(q.Field)
 	if !ok {
 		return nil, ErrUnknownField
 	}
 	if !f.Dim {
 		return nil, ErrBadCond
 	}
-	col, err := dimColumn(c, table, field)
+	col, err := dimColumn(c, q.Table, q.Field)
 	if err != nil {
 		return nil, err
 	}
+	where, args, skip, err := buildWhere(c, q.Table, q.Conds)
+	if err != nil {
+		return nil, err
+	}
+	if skip {
+		return []KV{}, nil
+	}
+	limit := q.Limit
 	if limit <= 0 || limit > 500 {
 		limit = 500
 	}
 	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
 		"max_execution_time": 10,
 	}))
+	qargs := make([]any, 0, 2+len(args)+1)
+	qargs = append(qargs, q.From, q.To)
+	qargs = append(qargs, args...)
+	qargs = append(qargs, limit)
 	rows, err := c.conn.Query(ctx,
-		`SELECT `+col+` AS k, count() AS n FROM `+table+`
-		 WHERE ts >= ? AND ts < ? GROUP BY k ORDER BY count() DESC LIMIT ?`,
-		from, to, limit)
+		`SELECT `+col+` AS k, count() AS n FROM `+q.Table+`
+		 WHERE ts >= ? AND ts < ?`+where+` GROUP BY k ORDER BY count() DESC LIMIT ?`,
+		qargs...)
 	if err != nil {
 		return nil, err
 	}

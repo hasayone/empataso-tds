@@ -11,7 +11,8 @@ import (
 	"unicode/utf8"
 )
 
-const defaultCompanyName = "CustomTDS"
+// defaultCompanyName — пустое название компании по умолчанию, шапка без бренда.
+const defaultCompanyName = ""
 
 var uiMu sync.Mutex
 

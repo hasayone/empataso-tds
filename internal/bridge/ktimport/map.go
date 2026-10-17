@@ -38,7 +38,6 @@ func Map(src Snapshot, sel Selection) Result {
 	var losses []Loss
 	lists := listBag{}
 	pages := pageBag{}
-	losses = append(losses, skippedNamed("user", src.Users)...)
 	if sel.Networks {
 		nets, extra := mapNetworks(src.AffiliateNetworks)
 		res.Networks = nets
@@ -67,6 +66,9 @@ func Map(src Snapshot, sel Selection) Result {
 	if sel.Campaigns {
 		ctx := &mapCtx{offers: offers, landings: landings, groups: groups, lists: &lists, pages: &pages}
 		res.Groups, losses = ctx.mapCampaigns(src, losses)
+	}
+	if sel.Users {
+		losses = append(losses, mapUsers(src, sel, &res)...)
 	}
 	if len(lists) > 0 {
 		res.Lists = map[string]string(lists)
@@ -114,6 +116,9 @@ func fillResult(res Result, losses []Loss) Result {
 	if res.Domains == nil {
 		res.Domains = []CatDomain{}
 	}
+	if res.Users == nil {
+		res.Users = []CatUser{}
+	}
 	if res.Losses == nil {
 		res.Losses = []Loss{}
 	}
@@ -136,23 +141,6 @@ func numID(n int) string {
 // Ошибки: нет.
 func entityRef(kind string, n int) string {
 	return fmt.Sprintf("%s %d", kind, n)
-}
-
-// skippedNamed перечисляет сущности, которым в kuztds нет поля.
-//
-// Параметры: kind — вид сущности; rows — список имён.
-// Результат: строки отчёта kind=skipped.
-// Ошибки: нет.
-func skippedNamed(kind string, rows []Named) []Loss {
-	out := make([]Loss, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, Loss{
-			Kind:   "skipped",
-			Ref:    entityRef(kind, int(row.ID)),
-			Detail: row.Name + " некуда положить",
-		})
-	}
-	return out
 }
 
 // indexGroups группирует имена Keitaro по числовому id.

@@ -5,14 +5,21 @@ import (
 	"strings"
 )
 
+// ScopeNone is a campaign_id value that matches no real id. An empty visibility
+// scope uses it so queries return nothing instead of everything.
+const ScopeNone = "\x00"
+
 // Cond is one filter on a journal column.
 // Field is the API name. Op is eq, ne, in or nin.
 // Values are the accepted (eq/in) or rejected (ne/nin) values; an empty
 // value is allowed, an empty list is not.
+// Scope marks a server-side access restriction: it is not counted toward
+// maxConds, Values is not capped by maxCondVal, and parseConds never sets it.
 type Cond struct {
 	Field  string
 	Op     string
 	Values []string
+	Scope  bool
 }
 
 // ErrUnknownField means the name is not a field, or the field has no column
@@ -41,16 +48,14 @@ func ValidateConds(table string, conds []Cond) error {
 	if table != "events" && table != "conversions" {
 		return ErrBadCond
 	}
-	if len(conds) > maxConds {
-		return ErrBadCond
-	}
+	nRegular := 0
 	for _, cond := range conds {
 		switch cond.Op {
 		case "eq", "ne", "in", "nin":
 		default:
 			return ErrBadCond
 		}
-		if len(cond.Values) == 0 || len(cond.Values) > maxCondVal {
+		if len(cond.Values) == 0 {
 			return ErrBadCond
 		}
 		f, ok := fieldByName(cond.Field)
@@ -60,6 +65,16 @@ func ValidateConds(table string, conds []Cond) error {
 		if col, _ := f.tableCol(table); col == "" {
 			return ErrUnknownField
 		}
+		if cond.Scope {
+			continue
+		}
+		nRegular++
+		if len(cond.Values) > maxCondVal {
+			return ErrBadCond
+		}
+	}
+	if nRegular > maxConds {
+		return ErrBadCond
 	}
 	return nil
 }

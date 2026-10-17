@@ -24,7 +24,7 @@ func (f fakeStats) SummaryFiltered(ctx context.Context, from, to time.Time, _ []
 	return f.Summary(ctx, from, to)
 }
 func (f fakeStats) TimeSeries(ctx context.Context, from, to time.Time, step int) ([]store.TSPoint, error) {
-	return []store.TSPoint{{Total: 100, Unique: 70, Bots: 12}}, nil
+	return []store.TSPoint{{Total: 100, Unique: 70, Bots: 12, Revenue: 9.5}}, nil
 }
 func (f fakeStats) TimeSeriesFiltered(ctx context.Context, from, to time.Time, step int, _ []store.Cond) ([]store.TSPoint, error) {
 	return f.TimeSeries(ctx, from, to, step)
@@ -72,16 +72,16 @@ func (fakeStats) ClickBuckets(context.Context, string, time.Time, time.Time, boo
 func (fakeStats) Fields() store.FieldsInfo {
 	return store.FieldsInfo{Fields: store.StaticFields(), Ready: map[string]map[string]bool{}}
 }
-func (fakeStats) Values(_ context.Context, table, field string, _, _ time.Time, _ int) ([]store.KV, error) {
-	if table != "events" && table != "conversions" {
+func (fakeStats) Values(_ context.Context, q store.ValuesQuery) ([]store.KV, error) {
+	if q.Table != "events" && q.Table != "conversions" {
 		return nil, store.ErrBadCond
 	}
 	for _, f := range store.StaticFields() {
-		if f.Name != field {
+		if f.Name != q.Field {
 			continue
 		}
 		on := f.Events
-		if table == "conversions" {
+		if q.Table == "conversions" {
 			on = f.Conv
 		}
 		if !on {

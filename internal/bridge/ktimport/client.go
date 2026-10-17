@@ -116,6 +116,11 @@ func (c *Client) FetchSnapshot(ctx context.Context) (Snapshot, error) {
 		}
 		snap.Groups = append(snap.Groups, part...)
 	}
+	ok, err := c.getOptionalArrayOK(ctx, "/admin_api/v1/users", &snap.Users)
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snap.UsersDenied = !ok
 	return snap, nil
 }
 
@@ -284,17 +289,33 @@ func (c *Client) getArray(ctx context.Context, path string, dest any) error {
 // Результат: при 200 dest заполнен. При любом другом статусе dest не меняется.
 // Ошибки: путь вне allowlist, сеть или 200 с телом не массивом.
 func (c *Client) getOptionalArray(ctx context.Context, path string, dest any) error {
-	code, body, err := c.request(ctx, http.MethodGet, path, nil, Allow)
+	ok, err := c.getOptionalArrayOK(ctx, path, dest)
 	if err != nil {
 		return err
 	}
-	if code != http.StatusOK {
+	if !ok {
 		return nil
 	}
-	if err := json.Unmarshal(body, dest); err != nil {
-		return fmt.Errorf("keitaro: %s не массив", strings.TrimPrefix(path, "/admin_api/v1/"))
-	}
 	return nil
+}
+
+// getOptionalArrayOK читает справочник и сообщает, был ли ответ 200.
+//
+// Параметры: ctx — отмена; path — путь; dest — указатель на срез.
+// Результат: ok true при 200 и успешном разборе массива; dest заполнен только тогда.
+// Ошибки: путь вне allowlist, сеть или 200 с телом не массивом.
+func (c *Client) getOptionalArrayOK(ctx context.Context, path string, dest any) (ok bool, err error) {
+	code, body, err := c.request(ctx, http.MethodGet, path, nil, Allow)
+	if err != nil {
+		return false, err
+	}
+	if code != http.StatusOK {
+		return false, nil
+	}
+	if err := json.Unmarshal(body, dest); err != nil {
+		return false, fmt.Errorf("keitaro: %s не массив", strings.TrimPrefix(path, "/admin_api/v1/"))
+	}
+	return true, nil
 }
 
 // logColumns добавляет sub_id_1..sub_id_12 к списку колонок журнала.

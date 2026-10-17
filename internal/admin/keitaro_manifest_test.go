@@ -20,13 +20,17 @@ func TestImportCatalogNotesSeq(t *testing.T) {
 		Offers: []ktimport.CatOffer{{ID: "796", Name: "A", URL: "https://a.example/x", Status: true}},
 	}
 	res.Manifest.Add(ktimport.KindOffers, "796")
-	counts := map[string]int{}
-	var losses []ktimport.Loss
-	if err := s.importCatalogs(context.Background(), keitaroImportReq{Offers: true}, res, ktimport.Manifest{}, counts, &losses); err != nil {
+	st := &importState{
+		counts: map[string]int{},
+		losses: []ktimport.Loss{},
+		prev:   ktimport.Manifest{},
+		res:    res,
+	}
+	if err := s.importCatalogs(context.Background(), keitaroImportReq{Offers: true}, st); err != nil {
 		t.Fatal(err)
 	}
-	if counts["offers"] != 1 {
-		t.Fatalf("counts %+v", counts)
+	if st.counts["offers"] != 1 {
+		t.Fatalf("counts %+v", st.counts)
 	}
 	s.cfg.SeqOffers.mu.Lock()
 	n, err := s.cfg.SeqOffers.take(1)
@@ -49,7 +53,9 @@ func TestMergeCatalogKeepsManualGroup(t *testing.T) {
 	prev := ktimport.Manifest{}
 	prev.Add(ktimport.KindNetworks, "3")
 	incoming := []ktimport.CatNetwork{{ID: "3", Name: "Remote", Status: true, PostbackURL: "https://pb.example/"}}
-	if _, _, err := mergeCatalog(ctx, netStore, incoming, netID, validNetwork, prev.Imported(ktimport.KindNetworks)); err != nil {
+	if _, _, err := mergeCatalog(ctx, incoming, catalogMerge[config.AffiliateNetwork]{
+		store: netStore, idOf: netID, valid: validNetwork, imported: prev.Imported(ktimport.KindNetworks),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := netStore.List(ctx)
@@ -68,7 +74,9 @@ func TestMergeCatalogKeepsManualGroup(t *testing.T) {
 	withGroup := []ktimport.CatOffer{{
 		ID: "9", Name: "Remote", URL: "https://offer.example/a", Status: true, Group: "tracker",
 	}}
-	if _, _, err := mergeCatalog(ctx, offerStore, withGroup, offerID, validOffer, prev.Imported(ktimport.KindOffers)); err != nil {
+	if _, _, err := mergeCatalog(ctx, withGroup, catalogMerge[config.Offer]{
+		store: offerStore, idOf: offerID, valid: validOffer, imported: prev.Imported(ktimport.KindOffers),
+	}); err != nil {
 		t.Fatal(err)
 	}
 	offers, err := offerStore.List(ctx)
@@ -88,7 +96,9 @@ func TestLocalOfferConflictThenReimport(t *testing.T) {
 		ID: "796", Name: "Remote", URL: "https://offer.example/a", Status: true,
 	}}
 	idOf := func(v config.Offer) string { return v.ID }
-	_, losses, err := mergeCatalog(ctx, store, incoming, idOf, validOffer, (ktimport.Manifest{}).Imported(ktimport.KindOffers))
+	_, losses, err := mergeCatalog(ctx, incoming, catalogMerge[config.Offer]{
+		store: store, idOf: idOf, valid: validOffer, imported: (ktimport.Manifest{}).Imported(ktimport.KindOffers),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +111,9 @@ func TestLocalOfferConflictThenReimport(t *testing.T) {
 	}
 	prev := ktimport.Manifest{}
 	prev.Add(ktimport.KindOffers, "796")
-	_, losses, err = mergeCatalog(ctx, store, incoming, idOf, validOffer, prev.Imported(ktimport.KindOffers))
+	_, losses, err = mergeCatalog(ctx, incoming, catalogMerge[config.Offer]{
+		store: store, idOf: idOf, valid: validOffer, imported: prev.Imported(ktimport.KindOffers),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

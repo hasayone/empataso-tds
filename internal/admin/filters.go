@@ -72,18 +72,6 @@ func queryConds(q url.Values, table string) ([]store.Cond, error) {
 	return conds, nil
 }
 
-// condsFrom reads f= for table and writes 400 when the filter is bad.
-// w receives the error body. r is the request. table is events or conversions.
-// The bool is false after the 400 has been written.
-func condsFrom(w http.ResponseWriter, r *http.Request, table string) ([]store.Cond, bool) {
-	conds, err := queryConds(r.URL.Query(), table)
-	if err != nil {
-		writeBadFilter(w, err)
-		return nil, false
-	}
-	return conds, true
-}
-
 // writeBadFilter writes 400 with a bad filter prefix.
 // w is the response. err is the parse or validation error. It does not return an error.
 func writeBadFilter(w http.ResponseWriter, err error) {
@@ -117,9 +105,20 @@ func (s *Server) handleLogValues(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad filter: table")
 		return
 	}
+	field := q.Get("field")
+	if hiddenFilterField(s.viewerFrom(r.Context()), field) {
+		writeErr(w, http.StatusBadRequest, "bad filter: hidden field "+field)
+		return
+	}
+	conds, ok := s.condsFrom(w, r, table)
+	if !ok {
+		return
+	}
 	from, to := parseRange(r)
 	limit := clampValueLimit(atoiDef(q.Get("limit"), maxValueLimit))
-	rows, err := s.cfg.Stats.Values(r.Context(), table, q.Get("field"), from, to, limit)
+	rows, err := s.cfg.Stats.Values(r.Context(), store.ValuesQuery{
+		Table: table, Field: field, From: from, To: to, Limit: limit, Conds: conds,
+	})
 	if err != nil {
 		if errors.Is(err, store.ErrFieldNotReady) {
 			writeJSON(w, http.StatusOK, []store.KV{})

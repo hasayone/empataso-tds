@@ -48,8 +48,8 @@ type StatsProvider interface {
 	Slice(ctx context.Context, from, to time.Time) ([]store.SliceRow, error)
 	// Fields lists journal fields and ready waves without a query.
 	Fields() store.FieldsInfo
-	// Values lists the top values of field on table between from and to.
-	Values(ctx context.Context, table, field string, from, to time.Time, limit int) ([]store.KV, error)
+	// Values lists the top values of q.Field on q.Table between q.From and q.To under q.Conds.
+	Values(ctx context.Context, q store.ValuesQuery) ([]store.KV, error)
 	// SliceFiltered returns the period report restricted by conds.
 	SliceFiltered(ctx context.Context, from, to time.Time, conds []store.Cond) ([]store.SliceRow, error)
 	DeleteGroupLogs(ctx context.Context, group string) error
@@ -133,10 +133,19 @@ type Config struct {
 	SessionTTL   time.Duration
 	CookieSecure bool
 	EngineURL    string // address the admin process uses to call the engine
+	// LookupIP resolves a host for a domain check.
+	// host is the name without a port. Nil uses net.DefaultResolver.LookupIPAddr.
+	// It returns the addresses or the resolver error.
+	LookupIP func(ctx context.Context, host string) ([]net.IPAddr, error)
+	// CheckClient performs the HTTPS probe of a domain check.
+	// Nil uses the default client, which refuses a non-public address at connect time.
+	CheckClient  *http.Client
 	PublicURL    string // address opened in the browser; empty uses EngineURL
 	PasswordFile string // file with the argon2id hash (overrides PasswordHash, written on change)
-	APIKeysFile  string // API key file; empty disables keys and rejects the Api-Key header
-	Log          slogLogger
+	// UsersFile is users.json; empty leaves only the environment administrator.
+	UsersFile   string
+	APIKeysFile string // API key file; empty disables keys and rejects the Api-Key header
+	Log         slogLogger
 
 	// Tools and automation. All optional: what is not set is reported as
 	// unavailable by the corresponding endpoint.
@@ -194,6 +203,15 @@ type Server struct {
 	keys  *security.KeySet // nil when APIKeysFile is empty
 	keyMu sync.Mutex       // pairs Generate or Revoke with the following Save
 
+	users  *security.UserSet // nil when UsersFile is empty
+	userMu sync.Mutex        // pairs user changes with Save
+
+	// domainMu serializes List, modify and Save of domains.json during a domain check.
+	domainMu sync.Mutex
+
+	// groupsMu serializes List, modify and Save of groups.json in the admin API.
+	groupsMu sync.Mutex
+
 	// hashes bounds concurrent password verifications: argon2id is 64 MiB a
 	// call and runs before any credential is checked.
 	hashes *hashGate
@@ -205,6 +223,10 @@ type Server struct {
 	// ktJob is the background Keitaro import and the purge lock.
 	// New always sets it. Import and purge share its mutex.
 	ktJob *keitaroJob
+
+	// routes lists mux patterns registered via handle during Handler().
+	// Handler runs once at startup; no mutex is required.
+	routes []string
 }
 
 const cookieName = "kuztds_admin"
@@ -233,6 +255,13 @@ func New(cfg Config) (*Server, error) {
 	}
 	if err := s.publish(hash); err != nil {
 		return nil, err
+	}
+	if cfg.UsersFile != "" {
+		us, err := security.LoadUserSet(cfg.UsersFile)
+		if err != nil {
+			return nil, fmt.Errorf("admin: users file %s: %w", cfg.UsersFile, err)
+		}
+		s.users = us
 	}
 	s.loadAPIKeys()
 	return s, nil
@@ -296,71 +325,73 @@ func (s *Server) currentHash() string { return s.current().hash }
 
 // Handler returns an http.Handler with all routes and middleware.
 func (s *Server) Handler() http.Handler {
+	s.routes = nil
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("POST /api/login", s.handleLogin)
-	mux.Handle("POST /api/logout", s.auth(cookieOnly(http.HandlerFunc(s.handleLogout))))
-	mux.Handle("GET /api/me", s.auth(cookieOnly(http.HandlerFunc(s.handleMe))))
-	mux.Handle("POST /api/password", s.auth(cookieOnly(http.HandlerFunc(s.handlePassword))))
+	s.handle(mux, "POST /api/logout", cookieOnly(http.HandlerFunc(s.handleLogout)))
+	s.handle(mux, "GET /api/me", cookieOnly(http.HandlerFunc(s.handleMe)))
+	s.handle(mux, "POST /api/password", cookieOnly(http.HandlerFunc(s.handlePassword)))
 	registerAPIKeys(s, mux)
+	registerUsers(s, mux)
 
-	mux.Handle("GET /api/stats/summary", s.auth(http.HandlerFunc(s.handleSummary)))
-	mux.Handle("GET /api/stats/timeseries", s.auth(http.HandlerFunc(s.handleTimeSeries)))
-	mux.Handle("GET /api/stats/breakdown", s.auth(http.HandlerFunc(s.handleBreakdown)))
-	mux.Handle("GET /api/stats/performance", s.auth(http.HandlerFunc(s.handlePerformance)))
-	mux.Handle("GET /api/logs", s.auth(http.HandlerFunc(s.handleLogs)))
-	mux.Handle("GET /api/log-fields", s.auth(http.HandlerFunc(s.handleLogFields)))
-	mux.Handle("GET /api/log-values", s.auth(http.HandlerFunc(s.handleLogValues)))
-	mux.Handle("GET /api/logs/filters", s.auth(http.HandlerFunc(s.handleLogFilters)))
-	mux.Handle("GET /api/logs/export", s.auth(http.HandlerFunc(s.handleLogsExport)))
-	mux.Handle("DELETE /api/logs", s.auth(http.HandlerFunc(s.handleDeleteLogs)))
-	mux.Handle("GET /api/postbacks", s.auth(http.HandlerFunc(s.handlePostbacks)))
-	mux.Handle("GET /api/postback-log", s.auth(http.HandlerFunc(s.handlePostbackLog)))
-	mux.Handle("GET /api/notices", s.auth(http.HandlerFunc(s.handleNotices)))
-	mux.Handle("GET /api/report", s.auth(http.HandlerFunc(s.handleReport)))
-	mux.Handle("GET /api/keys", s.auth(http.HandlerFunc(s.handleKeys)))
+	s.handle(mux, "GET /api/stats/summary", http.HandlerFunc(s.handleSummary))
+	s.handle(mux, "GET /api/stats/timeseries", http.HandlerFunc(s.handleTimeSeries))
+	s.handle(mux, "GET /api/stats/breakdown", http.HandlerFunc(s.handleBreakdown))
+	s.handle(mux, "GET /api/stats/performance", http.HandlerFunc(s.handlePerformance))
+	s.handle(mux, "GET /api/logs", http.HandlerFunc(s.handleLogs))
+	s.handle(mux, "GET /api/log-fields", http.HandlerFunc(s.handleLogFields))
+	s.handle(mux, "GET /api/log-values", http.HandlerFunc(s.handleLogValues))
+	s.handle(mux, "GET /api/logs/filters", http.HandlerFunc(s.handleLogFilters))
+	s.handle(mux, "GET /api/logs/export", http.HandlerFunc(s.handleLogsExport))
+	s.handle(mux, "DELETE /api/logs", http.HandlerFunc(s.handleDeleteLogs))
+	s.handle(mux, "GET /api/postbacks", http.HandlerFunc(s.handlePostbacks))
+	s.handle(mux, "GET /api/postback-log", http.HandlerFunc(s.handlePostbackLog))
+	s.handle(mux, "GET /api/notices", http.HandlerFunc(s.handleNotices))
+	s.handle(mux, "GET /api/report", http.HandlerFunc(s.handleReport))
+	s.handle(mux, "GET /api/keys", http.HandlerFunc(s.handleKeys))
 
-	mux.Handle("GET /api/groups", s.auth(http.HandlerFunc(s.handleGroupsGet)))
-	mux.Handle("PUT /api/groups", s.auth(http.HandlerFunc(s.handleGroupsSave)))
+	s.handle(mux, "GET /api/groups", http.HandlerFunc(s.handleGroupsGet))
+	s.handle(mux, "PUT /api/groups", http.HandlerFunc(s.handleGroupsSave))
 	registerOffers(s, mux)
 	registerLandings(s, mux)
 	registerLandingFiles(s, mux)
 	registerSources(s, mux)
 	registerNetworks(s, mux)
 	registerDomains(s, mux)
-	mux.Handle("POST /api/domains/{id}/check", s.auth(http.HandlerFunc(s.handleDomainCheck)))
-	mux.Handle("GET /api/spend", s.auth(http.HandlerFunc(s.handleSpendList)))
-	mux.Handle("POST /api/spend", s.auth(http.HandlerFunc(s.handleSpendCreate)))
-	mux.Handle("DELETE /api/spend/{id}", s.auth(http.HandlerFunc(s.handleSpendDelete)))
-	mux.Handle("GET /api/stats/facts", s.auth(http.HandlerFunc(s.handleFacts)))
-	mux.Handle("GET /api/bot-protection", s.auth(http.HandlerFunc(s.handleBotGet)))
-	mux.Handle("PUT /api/bot-protection", s.auth(http.HandlerFunc(s.handleBotPut)))
-	mux.Handle("GET /api/ui", s.auth(http.HandlerFunc(s.handleUIGet)))
-	mux.Handle("PUT /api/ui", s.auth(http.HandlerFunc(s.handleUIPut)))
+	s.handle(mux, "POST /api/domains/{id}/check", http.HandlerFunc(s.handleDomainCheck))
+	s.handle(mux, "GET /api/spend", http.HandlerFunc(s.handleSpendList))
+	s.handle(mux, "POST /api/spend", http.HandlerFunc(s.handleSpendCreate))
+	s.handle(mux, "DELETE /api/spend/{id}", http.HandlerFunc(s.handleSpendDelete))
+	s.handle(mux, "GET /api/stats/facts", http.HandlerFunc(s.handleFacts))
+	s.handle(mux, "GET /api/bot-protection", http.HandlerFunc(s.handleBotGet))
+	s.handle(mux, "PUT /api/bot-protection", http.HandlerFunc(s.handleBotPut))
+	s.handle(mux, "GET /api/ui", http.HandlerFunc(s.handleUIGet))
+	s.handle(mux, "PUT /api/ui", http.HandlerFunc(s.handleUIPut))
 	mux.HandleFunc("GET /api/brand", s.handleBrandGet)
-	mux.Handle("GET /api/campaigns/{id}/postbacks", s.auth(http.HandlerFunc(s.handleCampaignPostbacksGet)))
-	mux.Handle("PUT /api/campaigns/{id}/postbacks", s.auth(http.HandlerFunc(s.handleCampaignPostbacksPut)))
+	s.handle(mux, "GET /api/campaigns/{id}/postbacks", http.HandlerFunc(s.handleCampaignPostbacksGet))
+	s.handle(mux, "PUT /api/campaigns/{id}/postbacks", http.HandlerFunc(s.handleCampaignPostbacksPut))
 
-	mux.Handle("GET /api/lists", s.auth(http.HandlerFunc(s.handleListsIndex)))
-	mux.Handle("GET /api/lists/{name}", s.auth(http.HandlerFunc(s.handleListRead)))
-	mux.Handle("PUT /api/lists/{name}", s.auth(http.HandlerFunc(s.handleListWrite)))
+	s.handle(mux, "GET /api/lists", http.HandlerFunc(s.handleListsIndex))
+	s.handle(mux, "GET /api/lists/{name}", http.HandlerFunc(s.handleListRead))
+	s.handle(mux, "PUT /api/lists/{name}", http.HandlerFunc(s.handleListWrite))
 
-	mux.Handle("GET /api/pages", s.auth(http.HandlerFunc(s.handlePagesIndex)))
-	mux.Handle("GET /api/pages/{name}", s.auth(http.HandlerFunc(s.handlePageRead)))
-	mux.Handle("PUT /api/pages/{name}", s.auth(http.HandlerFunc(s.handlePageWrite)))
-	mux.Handle("DELETE /api/pages/{name}", s.auth(http.HandlerFunc(s.handlePageDelete)))
+	s.handle(mux, "GET /api/pages", http.HandlerFunc(s.handlePagesIndex))
+	s.handle(mux, "GET /api/pages/{name}", http.HandlerFunc(s.handlePageRead))
+	s.handle(mux, "PUT /api/pages/{name}", http.HandlerFunc(s.handlePageWrite))
+	s.handle(mux, "DELETE /api/pages/{name}", http.HandlerFunc(s.handlePageDelete))
 
-	mux.Handle("GET /api/lookup", s.auth(http.HandlerFunc(s.handleLookup)))
-	mux.Handle("POST /api/simulate", s.auth(http.HandlerFunc(s.handleSimulate)))
-	mux.Handle("GET /api/cron", s.auth(http.HandlerFunc(s.handleCronGet)))
-	mux.Handle("PUT /api/cron", s.auth(http.HandlerFunc(s.handleCronSave)))
-	mux.Handle("POST /api/cron/run", s.auth(http.HandlerFunc(s.handleCronRun)))
+	s.handle(mux, "GET /api/lookup", http.HandlerFunc(s.handleLookup))
+	s.handle(mux, "POST /api/simulate", http.HandlerFunc(s.handleSimulate))
+	s.handle(mux, "GET /api/cron", http.HandlerFunc(s.handleCronGet))
+	s.handle(mux, "PUT /api/cron", http.HandlerFunc(s.handleCronSave))
+	s.handle(mux, "POST /api/cron/run", http.HandlerFunc(s.handleCronRun))
 
-	mux.Handle("GET /api/keitaro/status", s.auth(http.HandlerFunc(s.handleKeitaroStatus)))
-	mux.Handle("POST /api/keitaro/check", s.auth(http.HandlerFunc(s.handleKeitaroCheck)))
-	mux.Handle("POST /api/keitaro/import", s.auth(http.HandlerFunc(s.handleKeitaroImport)))
-	mux.Handle("GET /api/keitaro/job", s.auth(http.HandlerFunc(s.handleKeitaroJob)))
-	mux.Handle("POST /api/keitaro/purge", s.auth(http.HandlerFunc(s.handleKeitaroPurge)))
+	s.handle(mux, "GET /api/keitaro/status", http.HandlerFunc(s.handleKeitaroStatus))
+	s.handle(mux, "POST /api/keitaro/check", http.HandlerFunc(s.handleKeitaroCheck))
+	s.handle(mux, "POST /api/keitaro/import", http.HandlerFunc(s.handleKeitaroImport))
+	s.handle(mux, "GET /api/keitaro/job", http.HandlerFunc(s.handleKeitaroJob))
+	s.handle(mux, "POST /api/keitaro/purge", http.HandlerFunc(s.handleKeitaroPurge))
 
 	// Embedded web interface (SPA).
 	mux.Handle("GET /assets/", serveAssets())
@@ -400,7 +431,20 @@ func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	q := r.URL.Query()
-	content, err := s.cfg.Keys.Read(q.Get("group"), q.Get("date"), q.Get("se") == "1")
+	v := s.viewerFrom(r.Context())
+	groupID := q.Get("group")
+	if !v.admin && groupID != "" {
+		ref, ok, err := s.campaignRefByID(r.Context(), groupID)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "groups error")
+			return
+		}
+		if !ok || !v.canSee(resCampaigns, ref) {
+			writeErr(w, http.StatusNotFound, "not found")
+			return
+		}
+	}
+	content, err := s.cfg.Keys.Read(groupID, q.Get("date"), q.Get("se") == "1")
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]string{"content": ""})
 		return
@@ -429,9 +473,16 @@ func (s *Server) auth(next http.Handler) http.Handler {
 			writeErr(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		// A session issued under a previous password is dead: changing the
-		// password must kick out everyone who holds an older cookie.
-		if !security.EqualTokens(sess.PwFP, s.current().fp) {
+		// Legacy cookies without UID remain environment-administrator sessions.
+		if sess.UID != "" {
+			u, ok := s.userByID(sess.UID)
+			if !ok || !u.Enabled || u.Hash == "" || !security.EqualTokens(sess.PwFP, u.Fingerprint()) {
+				_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
+				writeErr(w, http.StatusUnauthorized, "unauthorized")
+				return
+			}
+		} else if !security.EqualTokens(sess.PwFP, s.current().fp) {
+			// A session issued under a previous root password is dead.
 			_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
 			writeErr(w, http.StatusUnauthorized, "unauthorized")
 			return

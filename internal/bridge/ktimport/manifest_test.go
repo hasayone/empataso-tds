@@ -100,4 +100,14 @@ func TestManifestAddMerge(t *testing.T) {
 	if (Manifest{Host: "only"}).Empty() {
 		t.Fatal("host-only manifest is empty")
 	}
+	var m2 Manifest
+	m2.Add(KindUsers, "42", "42")
+	if !m2.Has(KindUsers, "42") {
+		t.Fatal("users manifest")
+	}
+	res := Result{Users: []CatUser{{ID: "7", Login: "u"}}}
+	res = attachManifest(res)
+	if !res.Manifest.Has(KindUsers, "7") {
+		t.Fatalf("%+v", res.Manifest)
+	}
 }

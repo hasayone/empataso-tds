@@ -47,6 +47,12 @@ var (
 	ErrAPIKeyNameLen = errors.New("security: api key name is longer than 64 characters")
 	// ErrAPIKeyScope is returned when scopes are empty or name an unknown scope.
 	ErrAPIKeyScope = errors.New("security: api key scopes must be admin, engine, or both")
+	// ErrAPIKeyNotFound is returned when no stored key has the given id.
+	ErrAPIKeyNotFound = errors.New("api key not found")
+	// ErrAPIKeyRevoked is returned when the key exists but is not active.
+	ErrAPIKeyRevoked = errors.New("api key revoked")
+	// ErrAPIKeyActive is returned when Remove is asked to drop a key that is still active.
+	ErrAPIKeyActive = errors.New("api key is active")
 	// errAPIKeyGenerate is returned when every attempt collided with an existing
 	// id or hash. It is not a validation error.
 	errAPIKeyGenerate = errors.New("security: failed to generate a unique api key")
@@ -143,8 +149,8 @@ func ValidScopes(scopes []string) ([]string, error) {
 //
 // mu guards keys and byHash. byHash indexes the stored records by Hash so
 // Verify does not scan. The raw secret is never put in the set. Readers take
-// the read lock; Generate, Revoke, Save's snapshot and Reload take the write
-// lock.
+// the read lock; Generate, Rotate, Update, Remove, Revoke, Save's snapshot
+// and Reload take the write lock.
 type KeySet struct {
 	mu     sync.RWMutex
 	keys   []*APIKey
@@ -264,6 +270,101 @@ func (s *KeySet) Verify(raw, scope string) (APIKey, bool) {
 	return k.clone(), true
 }
 
+// Rotate replaces the secret of the active key id and returns the new raw secret once.
+//
+// id selects the record. raw is "kz_" plus 40 hex characters and is not stored.
+// key is a copy of the updated record, including Hash. ID, Name, Scopes and
+// CreatedAt stay as they were. ErrAPIKeyNotFound means no record has id.
+// ErrAPIKeyRevoked means the record exists but is not active. A random-source
+// error or errAPIKeyGenerate is returned when a unique hash cannot be made;
+// the set is unchanged then.
+func (s *KeySet) Rotate(id string) (raw string, key APIKey, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := s.findID(id)
+	if k == nil {
+		return "", APIKey{}, ErrAPIKeyNotFound
+	}
+	if !k.Active() {
+		return "", APIKey{}, ErrAPIKeyRevoked
+	}
+	for range apiKeyGenAttempts {
+		var prefix, hash string
+		raw, prefix, hash, err = freshSecret()
+		if err != nil {
+			return "", APIKey{}, err
+		}
+		if other, exists := s.byHash[hash]; exists && other != k {
+			continue
+		}
+		if s.byHash[k.Hash] == k {
+			delete(s.byHash, k.Hash)
+		}
+		k.Prefix = prefix
+		k.Hash = hash
+		s.byHash[hash] = k
+		return raw, k.clone(), nil
+	}
+	return "", APIKey{}, errAPIKeyGenerate
+}
+
+// Update changes the name and scopes of the active key id.
+//
+// name is trimmed and must be non-empty and at most 64 Unicode characters.
+// scopes must be a non-empty subset of ScopeAdmin and ScopeEngine; duplicates
+// are removed. The returned key is a copy of the updated record, including
+// Hash. ID, Prefix, Hash, CreatedAt and RevokedAt stay as they were.
+// ErrAPIKeyName, ErrAPIKeyNameLen and ErrAPIKeyScope match Generate and leave
+// the set unchanged. ErrAPIKeyNotFound means no record has id. ErrAPIKeyRevoked
+// means the record exists but is not active.
+func (s *KeySet) Update(id, name string, scopes []string) (APIKey, error) {
+	name, scopes, err := normalizeKeyRequest(name, scopes)
+	if err != nil {
+		return APIKey{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := s.findID(id)
+	if k == nil {
+		return APIKey{}, ErrAPIKeyNotFound
+	}
+	if !k.Active() {
+		return APIKey{}, ErrAPIKeyRevoked
+	}
+	k.Name = name
+	k.Scopes = append([]string{}, scopes...)
+	return k.clone(), nil
+}
+
+// Remove drops a revoked key with id from the set.
+//
+// id selects the record. ErrAPIKeyNotFound means no record has id.
+// ErrAPIKeyActive means the record is still active and must be revoked first.
+// On success the record is gone from keys and byHash. There is no other error.
+func (s *KeySet) Remove(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	k := s.findID(id)
+	if k == nil {
+		return ErrAPIKeyNotFound
+	}
+	if k.Active() {
+		return ErrAPIKeyActive
+	}
+	if s.byHash[k.Hash] == k {
+		delete(s.byHash, k.Hash)
+	}
+	kept := make([]*APIKey, 0, len(s.keys))
+	for _, item := range s.keys {
+		if item == k {
+			continue
+		}
+		kept = append(kept, item)
+	}
+	s.keys = kept
+	return nil
+}
+
 // Revoke marks every stored key with id as revoked at the current time.
 //
 // It returns false when id is empty, when no record has that id, or when
@@ -331,13 +432,28 @@ func normalizeKeyRequest(name string, scopes []string) (string, []string, error)
 	return name, norm, nil
 }
 
+// freshSecret builds one raw key and the prefix and hash stored beside it.
+//
+// raw is "kz_" plus 40 hex characters from crypto/rand. prefix is the first
+// 8 hex characters of the secret body. hash is hex(sha256(raw)). An error
+// means crypto/rand failed. Nothing is stored.
+func freshSecret() (raw, prefix, hash string, err error) {
+	body, err := randomHex(apiKeyBodyBytes)
+	if err != nil {
+		return "", "", "", err
+	}
+	raw = apiKeyPrefix + body
+	sum := sha256.Sum256([]byte(raw))
+	return raw, body[:apiKeyPrefixLen], hex.EncodeToString(sum[:]), nil
+}
+
 // newAPIKey builds a record and the raw secret. The record is not stored yet.
 //
-// name and scopes are already normalized. raw is "kz_" plus 40 hex characters.
-// The returned record holds only the hash and an 8-character prefix. An error
-// means crypto/rand failed; nothing is stored.
+// name and scopes are already normalized. raw, prefix and hash come from
+// freshSecret. The returned record holds only the hash and an 8-character
+// prefix. An error means crypto/rand failed; nothing is stored.
 func newAPIKey(name string, scopes []string) (string, *APIKey, error) {
-	body, err := randomHex(apiKeyBodyBytes)
+	raw, prefix, hash, err := freshSecret()
 	if err != nil {
 		return "", nil, err
 	}
@@ -345,13 +461,11 @@ func newAPIKey(name string, scopes []string) (string, *APIKey, error) {
 	if err != nil {
 		return "", nil, err
 	}
-	raw := apiKeyPrefix + body
-	sum := sha256.Sum256([]byte(raw))
 	rec := &APIKey{
 		ID:        id,
 		Name:      name,
-		Prefix:    body[:apiKeyPrefixLen],
-		Hash:      hex.EncodeToString(sum[:]),
+		Prefix:    prefix,
+		Hash:      hash,
 		Scopes:    append([]string{}, scopes...),
 		CreatedAt: time.Now().UTC(),
 	}
@@ -386,18 +500,25 @@ func (s *KeySet) storeNew(rec *APIKey) bool {
 	return true
 }
 
-// hasID reports whether id is already stored. The caller holds s.mu.
-// An empty id matches nothing. There is no error.
-func (s *KeySet) hasID(id string) bool {
+// findID returns the stored record with id. The caller holds s.mu.
+//
+// An empty id and an unknown id return nil. There is no error.
+func (s *KeySet) findID(id string) *APIKey {
 	if id == "" {
-		return false
+		return nil
 	}
 	for _, k := range s.keys {
 		if k != nil && k.ID == id {
-			return true
+			return k
 		}
 	}
-	return false
+	return nil
+}
+
+// hasID reports whether id is already stored. The caller holds s.mu.
+// An empty id matches nothing. There is no error.
+func (s *KeySet) hasID(id string) bool {
+	return s.findID(id) != nil
 }
 
 // snapshot copies the stored records. The caller holds s.mu.

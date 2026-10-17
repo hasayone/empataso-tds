@@ -97,6 +97,33 @@ func TestBuildWhereErrorsAndSkip(t *testing.T) {
 	}
 }
 
+func TestValidateCondsScope(t *testing.T) {
+	many := make([]string, 250)
+	for i := range many {
+		many[i] = "x"
+	}
+	scope := []Cond{{Field: "campaign_id", Op: "in", Values: many, Scope: true}}
+	if err := ValidateConds("events", scope); err != nil {
+		t.Fatalf("scope 250 values: %v", err)
+	}
+	regular := []Cond{{Field: "country", Op: "in", Values: many}}
+	if err := ValidateConds("events", regular); !errors.Is(err, ErrBadCond) {
+		t.Fatalf("regular 250 values want ErrBadCond, got %v", err)
+	}
+	twenty := make([]Cond, 20)
+	for i := range twenty {
+		twenty[i] = Cond{Field: "country", Op: "eq", Values: []string{"PL"}}
+	}
+	withScope := append(append([]Cond(nil), twenty...), scope[0])
+	if err := ValidateConds("events", withScope); err != nil {
+		t.Fatalf("20 regular + scope: %v", err)
+	}
+	badScope := []Cond{{Field: "campaign_id", Op: "like", Values: []string{"x"}, Scope: true}}
+	if err := ValidateConds("events", badScope); !errors.Is(err, ErrBadCond) {
+		t.Fatalf("scope bad op want ErrBadCond, got %v", err)
+	}
+}
+
 func TestEventsCidInSQL(t *testing.T) {
 	c := &CH{readyFlags: map[string]map[wave]bool{"events": {waveBase: true}}}
 	where, args, skip, err := buildWhere(c, "events", []Cond{{Field: "device", Op: "eq", Values: []string{"mobile"}}})

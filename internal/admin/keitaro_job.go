@@ -229,9 +229,10 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), keitaroJobTimeout)
+	owner := sessionFrom(r.Context()).UID
 	go func() {
 		defer cancel()
-		s.runKeitaroImport(ctx, req)
+		s.runKeitaroImport(ctx, req, owner)
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
 }
@@ -246,12 +247,14 @@ func (s *Server) handleKeitaroJob(w http.ResponseWriter, r *http.Request) {
 // importState holds one Keitaro import while stages run.
 // counts and losses are what finish stores. prev is the manifest loaded
 // before catalogs. res is the mapper output; list and page stages update it.
+// owner is the importing session UID for CreatedBy on new catalog rows.
 // fail is empty until a stage stops the run, and then it is safe to show.
 type importState struct {
 	counts map[string]int
 	losses []ktimport.Loss
 	prev   ktimport.Manifest
 	res    ktimport.Result
+	owner  string
 	fail   string
 }
 
@@ -285,9 +288,9 @@ func (s *Server) runStage(st *importState, name, key string, step func() (int, [
 // On failure the stage is failed and the error is safe to show. Counts and losses
 // collected before the failure stay in the state. It does not return an error.
 // It logs one line with the counts and the duration. The key and URLs are not logged.
-func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq) {
+func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, owner string) {
 	started := time.Now()
-	st := &importState{counts: map[string]int{}, losses: []ktimport.Loss{}}
+	st := &importState{counts: map[string]int{}, losses: []ktimport.Loss{}, owner: owner}
 	defer func() {
 		s.logKeitaro("keitaro import", st.counts, time.Since(started))
 		s.ktJob.finish(st.fail, st.counts, st.losses, s.cfg.KeitaroKey)
@@ -308,18 +311,20 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq) {
 			st.fail = sanitize(err, s.cfg.KeitaroKey)
 			return
 		}
-		st.res = ktimport.Map(snap, req.selection())
-		st.losses = append(st.losses, st.res.Losses...)
-		if req.Campaigns {
-			aliases = campaignAliases(snap)
-		}
 		st.prev, err = s.loadManifest()
 		if err != nil {
 			st.fail = "save error"
 			return
 		}
+		sel := req.selection()
+		sel.Known = st.prev.Has
+		st.res = ktimport.Map(snap, sel)
+		st.losses = append(st.losses, st.res.Losses...)
+		if req.Campaigns {
+			aliases = campaignAliases(snap)
+		}
 		s.ktJob.setStage("catalogs")
-		if err := s.importCatalogs(ctx, req, st.res, st.prev, st.counts, &st.losses); err != nil {
+		if err := s.importCatalogs(ctx, req, st); err != nil {
 			st.fail = "save error"
 			return
 		}
@@ -339,9 +344,16 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq) {
 			}) && s.runStage(st, "pages", "pages", func() (int, []ktimport.Loss, error) {
 				return s.importPages(&st.res)
 			}) && s.runStage(st, "groups", "groups", func() (int, []ktimport.Loss, error) {
-				return s.importGroups(ctx, st.res.Groups, st.prev)
+				return s.importGroups(ctx, st.res.Groups, st.prev, owner)
 			})
 			if !ok {
+				return
+			}
+		}
+		if req.Users {
+			if !s.runStage(st, "users", "users", func() (int, []ktimport.Loss, error) {
+				return s.importUsers(st.res.Users)
+			}) {
 				return
 			}
 		}

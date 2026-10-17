@@ -13,7 +13,8 @@ type Snapshot struct {
 	AffiliateNetworks []KNetwork           `json:"affiliate_networks"`
 	Domains           []KDomain            `json:"domains"`
 	Groups            []KGroup             `json:"groups"`
-	Users             []Named              `json:"users"`
+	Users             []KUser              `json:"users"`
+	UsersDenied       bool                 `json:"-"`
 }
 
 // Campaign — кампания Keitaro, которая становится группой.
@@ -141,10 +142,39 @@ type KGroup struct {
 	Type string  `json:"type"`
 }
 
-// Named — сущность без каталога kuztds, сейчас это пользователь.
-type Named struct {
-	ID   FlexInt `json:"id"`
-	Name string  `json:"name"`
+// KUser — пользователь Keitaro из GET /admin_api/v1/users.
+type KUser struct {
+	ID          FlexInt         `json:"id"`
+	Login       string          `json:"login"`
+	Name        string          `json:"name"`
+	Type        string          `json:"type"`
+	AccessData  json.RawMessage `json:"access_data"`
+	Preferences KUserPrefs      `json:"preferences"`
+}
+
+// KUserPrefs — язык и часовой пояс пользователя Keitaro.
+type KUserPrefs struct {
+	Language string `json:"language"`
+	Timezone string `json:"timezone"`
+}
+
+// CatUser — пользователь kuztds после маппинга прав Keitaro.
+type CatUser struct {
+	ID       string              `json:"id"`
+	Login    string              `json:"login"`
+	Type     string              `json:"type"`
+	Sections []string            `json:"sections,omitempty"`
+	Grants   map[string]CatGrant `json:"grants,omitempty"`
+	Hidden   []string            `json:"hidden,omitempty"`
+	Lang     string              `json:"lang,omitempty"`
+	TZ       string              `json:"tz,omitempty"`
+}
+
+// CatGrant — режим доступа к ресурсу каталога или кампаний.
+type CatGrant struct {
+	Mode   string   `json:"mode"`
+	IDs    []string `json:"ids,omitempty"`
+	Labels []string `json:"labels,omitempty"`
 }
 
 // Group — группа kuztds, которую принимает PUT /api/groups.
@@ -321,6 +351,7 @@ type Result struct {
 	Domains  []CatDomain       `json:"domains"`
 	Lists    map[string]string `json:"lists,omitempty"`
 	Pages    map[string]string `json:"pages,omitempty"`
+	Users    []CatUser         `json:"users,omitempty"`
 	Manifest Manifest          `json:"manifest"`
 	Losses   []Loss            `json:"losses"`
 }
@@ -334,6 +365,9 @@ type Selection struct {
 	Landings  bool
 	Sources   bool
 	Campaigns bool
+	Users     bool
+	// Known сообщает, что id каталога уже переносился раньше (из prev-манифеста).
+	Known func(kind, id string) bool
 }
 
 // MaxBody — предел тела PUT /api/groups в kuztds.

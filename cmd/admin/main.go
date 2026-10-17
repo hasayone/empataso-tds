@@ -92,6 +92,8 @@ func main() {
 		landingsDir := getenv("KUZTDS_LANDINGS_DIR", filepath.Join(dir, "landings"))
 		cfg.LandingFiles = admin.NewFileLandings(landingsDir)
 		log.Info("landings dir", "path", landingsDir)
+		cfg.UsersFile = getenv("KUZTDS_USERS_FILE", filepath.Join(dir, "users.json"))
+		log.Info("users file", "path", cfg.UsersFile)
 	}
 
 	// .dat lists (IP, WAP operators, signatures) — editor.

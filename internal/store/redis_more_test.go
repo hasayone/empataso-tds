@@ -97,3 +97,24 @@ func TestRedisSessions(t *testing.T) {
 		t.Error("after the TTL the session must disappear")
 	}
 }
+
+func TestRedisSessionsLegacyJSONWithoutUID(t *testing.T) {
+	mr, err := miniredis.Run()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mr.Close()
+	rdb := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	const raw = `{"User":"admin","CSRF":"c","Created":"2026-01-01T00:00:00Z","PwFP":"fp"}`
+	if err := rdb.Set(context.Background(), "sess:tok", raw, time.Hour).Err(); err != nil {
+		t.Fatal(err)
+	}
+	ss := NewRedisSessions(rdb)
+	got, ok, err := ss.Get(context.Background(), "tok")
+	if err != nil || !ok {
+		t.Fatalf("Get: ok=%v err=%v", ok, err)
+	}
+	if got.User != "admin" || got.CSRF != "c" || got.PwFP != "fp" || got.UID != "" {
+		t.Fatalf("legacy session: %+v", got)
+	}
+}

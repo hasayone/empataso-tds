@@ -156,7 +156,13 @@ func registerOffers(s *Server, mux *http.ServeMux) {
 		func(o config.Offer) string { return o.ID },
 		func(o *config.Offer, id string) { o.ID = id },
 		validOffer,
-		&catalogHooks[config.Offer]{seq: s.cfg.SeqOffers, floor: s.offerFloor, prep: prepOffer},
+		&catalogHooks[config.Offer]{
+			seq: s.cfg.SeqOffers, floor: s.offerFloor, prep: prepOffer,
+			res:      resOffers,
+			label:    func(o config.Offer) string { return o.Group },
+			owner:    func(o config.Offer) string { return o.CreatedBy },
+			setOwner: func(o *config.Offer, uid string) { o.CreatedBy = uid },
+		},
 	)
 }
 
@@ -233,7 +239,13 @@ func registerNetworks(s *Server, mux *http.ServeMux) {
 		func(o config.AffiliateNetwork) string { return o.ID },
 		func(o *config.AffiliateNetwork, id string) { o.ID = id },
 		validNetwork,
-		&catalogHooks[config.AffiliateNetwork]{seq: s.cfg.SeqNetworks, floor: s.networkFloor, prep: prepNetwork},
+		&catalogHooks[config.AffiliateNetwork]{
+			seq: s.cfg.SeqNetworks, floor: s.networkFloor, prep: prepNetwork,
+			res:      resNetworks,
+			label:    func(n config.AffiliateNetwork) string { return n.Group },
+			owner:    func(n config.AffiliateNetwork) string { return n.CreatedBy },
+			setOwner: func(n *config.AffiliateNetwork, uid string) { n.CreatedBy = uid },
+		},
 	)
 }
 
@@ -280,10 +292,11 @@ func registerLandings(s *Server, mux *http.ServeMux) {
 		func(o *config.Landing, id string) { o.ID = id },
 		validLanding,
 		&catalogHooks[config.Landing]{
-			seq:      s.cfg.SeqLandings,
-			floor:    s.landingFloor,
-			prep:     prepLanding,
-			onDelete: s.removeLandingFiles,
+			seq: s.cfg.SeqLandings, floor: s.landingFloor, prep: prepLanding, onDelete: s.removeLandingFiles,
+			res:      resLandings,
+			label:    func(l config.Landing) string { return l.Group },
+			owner:    func(l config.Landing) string { return l.CreatedBy },
+			setOwner: func(l *config.Landing, uid string) { l.CreatedBy = uid },
 		},
 	)
 }
@@ -293,7 +306,13 @@ func registerSources(s *Server, mux *http.ServeMux) {
 		func(o config.TrafficSource) string { return o.ID },
 		func(o *config.TrafficSource, id string) { o.ID = id },
 		validSource,
-		&catalogHooks[config.TrafficSource]{seq: s.cfg.SeqSources, floor: s.sourceFloor, prep: prepSource},
+		&catalogHooks[config.TrafficSource]{
+			seq: s.cfg.SeqSources, floor: s.sourceFloor, prep: prepSource,
+			res:      resSources,
+			label:    func(src config.TrafficSource) string { return src.Group },
+			owner:    func(src config.TrafficSource) string { return src.CreatedBy },
+			setOwner: func(src *config.TrafficSource, uid string) { src.CreatedBy = uid },
+		},
 	)
 }
 
@@ -302,7 +321,14 @@ func registerDomains(s *Server, mux *http.ServeMux) {
 		func(o config.Domain) string { return o.ID },
 		func(o *config.Domain, id string) { o.ID = id },
 		validDomain,
-		&catalogHooks[config.Domain]{seq: s.cfg.SeqDomains, floor: s.domainFloor, prep: prepDomain, tidy: tidyDomains},
+		&catalogHooks[config.Domain]{
+			seq: s.cfg.SeqDomains, floor: s.domainFloor, prep: prepDomain, tidy: tidyDomains, view: s.domainRows,
+			res:       resDomains,
+			label:     func(d config.Domain) string { return d.Group },
+			owner:     func(d config.Domain) string { return d.CreatedBy },
+			setOwner:  func(d *config.Domain, uid string) { d.CreatedBy = uid },
+			userLimit: limitDomainUser,
+		},
 	)
 }
 
@@ -330,6 +356,27 @@ func prepDomain(d *config.Domain) {
 	d.Group = trimGroupLabel(d.Group)
 }
 
+const domainUserLimitMsg = "primary and admin role are set by an administrator"
+
+// limitDomainUser rejects domain fields a panel user may not set.
+// item is the request body; old is nil on POST and the stored row on PUT.
+// It returns a 403 message, or an empty string when the fields are allowed.
+// prepDomain runs after this hook on POST, so empty Role becomes links here first.
+func limitDomainUser(item *config.Domain, old *config.Domain) string {
+	if old == nil {
+		if item.Role == "" {
+			item.Role = "links"
+		}
+		if item.Primary || item.Role == "admin" || item.Role == "both" {
+			return domainUserLimitMsg
+		}
+		return ""
+	}
+	item.Primary = old.Primary
+	item.Role = old.Role
+	return ""
+}
+
 func tidyDomains(list []config.Domain, id string) []config.Domain {
 	primary := false
 	for _, d := range list {
@@ -348,15 +395,106 @@ func tidyDomains(list []config.Domain, id string) []config.Domain {
 	return list
 }
 
+// domainRow is one parked domain and the number of campaigns that use it.
+type domainRow struct {
+	config.Domain
+	Campaigns int `json:"campaigns"`
+}
+
+// domainRows attaches a campaign count to each domain for GET /api/domains.
+// list is the stored domains. A nil Groups store counts every domain as zero.
+// It returns a non-nil slice, empty when list is empty, so the JSON body is an array.
+// An error comes from Groups.List.
+func (s *Server) domainRows(ctx context.Context, list []config.Domain) (any, error) {
+	counts := map[string]int{}
+	if s.cfg.Groups != nil {
+		groups, err := s.cfg.Groups.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		for _, g := range groups {
+			if g.DomainID != "" {
+				counts[g.DomainID]++
+			}
+		}
+	}
+	rows := make([]domainRow, 0, len(list))
+	for _, d := range list {
+		rows = append(rows, domainRow{Domain: d, Campaigns: counts[d.ID]})
+	}
+	return rows, nil
+}
+
 // catalogHooks assigns a number and tidies the list around one catalog.
 // A nil hooks value keeps the old rule: an empty id is rejected by valid.
 // onDelete runs after the record is removed and the file is saved.
+// view, when set, shapes the GET list response.
 type catalogHooks[T any] struct {
 	seq      *idSeq
 	floor    func() (int, error)
 	prep     func(*T)
 	tidy     func([]T, string) []T
 	onDelete func(id string)
+	// view converts the list for the GET response. Nil returns the list as stored.
+	view func(ctx context.Context, list []T) (any, error)
+	res  string
+	// label and owner feed grant checks. setOwner writes CreatedBy on create.
+	label     func(T) string
+	owner     func(T) string
+	setOwner  func(*T, string)
+	userLimit func(*T, *T) string
+}
+
+// crudCatalog holds shared state for one JSON catalog's HTTP handlers.
+type crudCatalog[T any] struct {
+	s     *Server
+	store *JSONStore[T]
+	idOf  func(T) string
+	setID func(*T, string)
+	valid func(T) string
+	hooks *catalogHooks[T]
+}
+
+// catalogItemRef builds a grant ref for item using hooks label and owner funcs.
+func catalogItemRef[T any](idOf func(T) string, hooks *catalogHooks[T], item T) ref {
+	r := ref{id: idOf(item)}
+	if hooks != nil {
+		if hooks.label != nil {
+			r.label = hooks.label(item)
+		}
+		if hooks.owner != nil {
+			r.owner = hooks.owner(item)
+		}
+	}
+	return r
+}
+
+// visibleCatalog returns list entries the viewer may read for hooks.res.
+func visibleCatalog[T any](v viewer, hooks *catalogHooks[T], idOf func(T) string, list []T) []T {
+	if v.admin || hooks == nil || hooks.res == "" {
+		return list
+	}
+	out := make([]T, 0, len(list))
+	for _, item := range list {
+		if v.canSee(hooks.res, catalogItemRef(idOf, hooks, item)) {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+// applyCatalogCreatedBy sets CreatedBy on item from old unless an admin sent a non-empty value.
+func applyCatalogCreatedBy[T any](v viewer, hooks *catalogHooks[T], item *T, old T) {
+	if hooks == nil || hooks.setOwner == nil || hooks.owner == nil {
+		return
+	}
+	if v.admin {
+		if hooks.owner(*item) == "" {
+			hooks.setOwner(item, hooks.owner(old))
+		}
+		return
+	}
+	hooks.setOwner(item, hooks.owner(old))
 }
 
 // registerCRUD mounts list, create, read, replace and delete for one catalog.
@@ -364,8 +502,9 @@ type catalogHooks[T any] struct {
 // When hooks carries a counter, an empty id is filled under that counter's lock
 // before validation. An explicit id is left as sent and the counter moves past it.
 func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSONStore[T], idOf func(T) string, setID func(*T, string), valid func(T) string, hooks *catalogHooks[T]) {
-	h := func(next http.HandlerFunc) http.Handler {
-		return s.auth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	c := crudCatalog[T]{s: s, store: store, idOf: idOf, setID: setID, valid: valid, hooks: hooks}
+	wrap := func(pattern string, next http.HandlerFunc) {
+		s.handle(mux, pattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if store == nil {
 				writeErr(w, http.StatusServiceUnavailable, "store unavailable")
 				return
@@ -373,149 +512,228 @@ func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSON
 			next(w, r)
 		}))
 	}
-	mux.Handle("GET "+base, h(func(w http.ResponseWriter, r *http.Request) {
-		list, err := store.List(r.Context())
+	wrap("GET "+base, c.crudList)
+	wrap("POST "+base, c.crudCreate)
+	wrap("GET "+base+"/{id}", c.crudGet)
+	wrap("PUT "+base+"/{id}", c.crudPut)
+	wrap("DELETE "+base+"/{id}", c.crudDelete)
+}
+
+// crudList handles GET list with grant filtering and optional view shaping.
+func (c crudCatalog[T]) crudList(w http.ResponseWriter, r *http.Request) {
+	list, err := c.store.List(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "read error")
+		return
+	}
+	v := c.s.viewerFrom(r.Context())
+	list = visibleCatalog(v, c.hooks, c.idOf, list)
+	if list == nil {
+		list = []T{}
+	}
+	if c.hooks != nil && c.hooks.view != nil {
+		out, err := c.hooks.view(r.Context(), list)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "read error")
 			return
 		}
-		writeJSON(w, http.StatusOK, list)
-	}))
-	mux.Handle("POST "+base, h(func(w http.ResponseWriter, r *http.Request) {
-		var item T
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&item); err != nil {
-			writeErr(w, http.StatusBadRequest, "bad json")
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+// crudCreate handles POST with create grants, userLimit and owner assignment.
+func (c crudCatalog[T]) crudCreate(w http.ResponseWriter, r *http.Request) {
+	var item T
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&item); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	v := c.s.viewerFrom(r.Context())
+	if c.hooks != nil && c.hooks.res != "" && !v.canCreate(c.hooks.res) {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if !v.admin && c.hooks != nil && c.hooks.userLimit != nil {
+		if msg := c.hooks.userLimit(&item, nil); msg != "" {
+			writeErr(w, http.StatusForbidden, msg)
 			return
 		}
-		if hooks != nil && hooks.seq != nil {
-			hooks.seq.mu.Lock()
-			defer hooks.seq.mu.Unlock()
-		}
-		if hooks != nil && hooks.prep != nil {
-			hooks.prep(&item)
-		}
-		if idOf(item) == "" && hooks != nil && hooks.seq != nil {
-			floor := 1
-			if hooks.floor != nil {
-				n, err := hooks.floor()
-				if err != nil {
-					writeErr(w, http.StatusInternalServerError, "read error")
-					return
-				}
-				floor = n
-			}
-			n, err := hooks.seq.take(floor)
+	}
+	if c.hooks != nil && c.hooks.seq != nil {
+		c.hooks.seq.mu.Lock()
+		defer c.hooks.seq.mu.Unlock()
+	}
+	if c.hooks != nil && c.hooks.prep != nil {
+		c.hooks.prep(&item)
+	}
+	if c.idOf(item) == "" && c.hooks != nil && c.hooks.seq != nil {
+		floor := 1
+		if c.hooks.floor != nil {
+			n, err := c.hooks.floor()
 			if err != nil {
-				writeErr(w, http.StatusInternalServerError, "save error")
+				writeErr(w, http.StatusInternalServerError, "read error")
 				return
 			}
-			setID(&item, strconv.Itoa(n))
-		} else if hooks != nil && hooks.seq != nil {
-			hooks.seq.note(idOf(item))
+			floor = n
 		}
-		if msg := valid(item); msg != "" {
-			writeErr(w, http.StatusBadRequest, msg)
-			return
-		}
-		list, err := store.List(r.Context())
+		n, err := c.hooks.seq.take(floor)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "read error")
-			return
-		}
-		for _, cur := range list {
-			if idOf(cur) == idOf(item) {
-				writeErr(w, http.StatusConflict, "already exists")
-				return
-			}
-		}
-		list = append(list, item)
-		if hooks != nil && hooks.tidy != nil {
-			list = hooks.tidy(list, idOf(item))
-		}
-		if err := store.Save(r.Context(), list); err != nil {
 			writeErr(w, http.StatusInternalServerError, "save error")
 			return
 		}
-		writeJSON(w, http.StatusCreated, item)
-	}))
-	mux.Handle("GET "+base+"/{id}", h(func(w http.ResponseWriter, r *http.Request) {
-		item, _, ok, code, msg := findCatalog(r, store, idOf)
-		if !ok {
-			writeErr(w, code, msg)
+		c.setID(&item, strconv.Itoa(n))
+	} else if c.hooks != nil && c.hooks.seq != nil {
+		c.hooks.seq.note(c.idOf(item))
+	}
+	if msg := c.valid(item); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	if c.hooks != nil && c.hooks.setOwner != nil {
+		c.hooks.setOwner(&item, v.uid)
+	}
+	list, err := c.store.List(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "read error")
+		return
+	}
+	for _, cur := range list {
+		if c.idOf(cur) == c.idOf(item) {
+			writeErr(w, http.StatusConflict, "already exists")
 			return
 		}
-		writeJSON(w, http.StatusOK, item)
-	}))
-	mux.Handle("PUT "+base+"/{id}", h(func(w http.ResponseWriter, r *http.Request) {
-		var item T
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&item); err != nil {
-			writeErr(w, http.StatusBadRequest, "bad json")
+	}
+	list = append(list, item)
+	if c.hooks != nil && c.hooks.tidy != nil {
+		list = c.hooks.tidy(list, c.idOf(item))
+	}
+	if err := c.store.Save(r.Context(), list); err != nil {
+		writeErr(w, http.StatusInternalServerError, "save error")
+		return
+	}
+	writeJSON(w, http.StatusCreated, item)
+}
+
+// crudGet handles GET by id and hides invisible rows as 404.
+func (c crudCatalog[T]) crudGet(w http.ResponseWriter, r *http.Request) {
+	item, _, ok, code, msg := findCatalog(r, c.store, c.idOf)
+	if !ok {
+		writeErr(w, code, msg)
+		return
+	}
+	v := c.s.viewerFrom(r.Context())
+	if c.hooks != nil && c.hooks.res != "" && !v.canSee(c.hooks.res, catalogItemRef(c.idOf, c.hooks, item)) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+// crudPut handles PUT with write grants, userLimit and CreatedBy preservation.
+func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
+	var item T
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&item); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	pathID := r.PathValue("id")
+	c.setID(&item, pathID)
+	list, err := c.store.List(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "read error")
+		return
+	}
+	idx := -1
+	var old T
+	for i := range list {
+		if c.idOf(list[i]) == pathID {
+			idx = i
+			old = list[i]
+			break
+		}
+	}
+	if idx < 0 {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	v := c.s.viewerFrom(r.Context())
+	itemRef := catalogItemRef(c.idOf, c.hooks, old)
+	if c.hooks != nil && c.hooks.res != "" && !v.canSee(c.hooks.res, itemRef) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if c.hooks != nil && c.hooks.res != "" && !v.canWrite(c.hooks.res, itemRef) {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if !v.admin && c.hooks != nil && c.hooks.userLimit != nil {
+		if msg := c.hooks.userLimit(&item, &old); msg != "" {
+			writeErr(w, http.StatusForbidden, msg)
 			return
 		}
-		setID(&item, r.PathValue("id"))
-		if hooks != nil && hooks.prep != nil {
-			hooks.prep(&item)
-			setID(&item, r.PathValue("id"))
+	}
+	applyCatalogCreatedBy(v, c.hooks, &item, old)
+	if c.hooks != nil && c.hooks.prep != nil {
+		c.hooks.prep(&item)
+		c.setID(&item, pathID)
+	}
+	if msg := c.valid(item); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	list[idx] = item
+	if c.hooks != nil && c.hooks.tidy != nil {
+		list = c.hooks.tidy(list, c.idOf(item))
+	}
+	if err := c.store.Save(r.Context(), list); err != nil {
+		writeErr(w, http.StatusInternalServerError, "save error")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+// crudDelete handles DELETE with see/write grant checks.
+func (c crudCatalog[T]) crudDelete(w http.ResponseWriter, r *http.Request) {
+	list, err := c.store.List(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "read error")
+		return
+	}
+	id := r.PathValue("id")
+	idx := -1
+	var old T
+	for i := range list {
+		if c.idOf(list[i]) == id {
+			idx = i
+			old = list[i]
+			break
 		}
-		if msg := valid(item); msg != "" {
-			writeErr(w, http.StatusBadRequest, msg)
-			return
-		}
-		list, err := store.List(r.Context())
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "read error")
-			return
-		}
-		idx := -1
-		for i := range list {
-			if idOf(list[i]) == idOf(item) {
-				idx = i
-				break
-			}
-		}
-		if idx < 0 {
-			writeErr(w, http.StatusNotFound, "not found")
-			return
-		}
-		list[idx] = item
-		if hooks != nil && hooks.tidy != nil {
-			list = hooks.tidy(list, idOf(item))
-		}
-		if err := store.Save(r.Context(), list); err != nil {
-			writeErr(w, http.StatusInternalServerError, "save error")
-			return
-		}
-		writeJSON(w, http.StatusOK, item)
-	}))
-	mux.Handle("DELETE "+base+"/{id}", h(func(w http.ResponseWriter, r *http.Request) {
-		list, err := store.List(r.Context())
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "read error")
-			return
-		}
-		id := r.PathValue("id")
-		next := list[:0]
-		found := false
-		for _, cur := range list {
-			if idOf(cur) == id {
-				found = true
-				continue
-			}
-			next = append(next, cur)
-		}
-		if !found {
-			writeErr(w, http.StatusNotFound, "not found")
-			return
-		}
-		if err := store.Save(r.Context(), next); err != nil {
-			writeErr(w, http.StatusInternalServerError, "save error")
-			return
-		}
-		if hooks != nil && hooks.onDelete != nil {
-			hooks.onDelete(id)
-		}
-		writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-	}))
+	}
+	if idx < 0 {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	v := c.s.viewerFrom(r.Context())
+	itemRef := catalogItemRef(c.idOf, c.hooks, old)
+	if c.hooks != nil && c.hooks.res != "" && !v.canSee(c.hooks.res, itemRef) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if c.hooks != nil && c.hooks.res != "" && !v.canWrite(c.hooks.res, itemRef) {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	next := append(list[:idx], list[idx+1:]...)
+	if err := c.store.Save(r.Context(), next); err != nil {
+		writeErr(w, http.StatusInternalServerError, "save error")
+		return
+	}
+	if c.hooks != nil && c.hooks.onDelete != nil {
+		c.hooks.onDelete(id)
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
 func findCatalog[T any](r *http.Request, store *JSONStore[T], idOf func(T) string) (T, []T, bool, int, string) {
@@ -544,8 +762,13 @@ func (s *Server) handleCampaignPostbacksGet(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	id := r.PathValue("id")
+	v := s.viewerFrom(r.Context())
 	for _, g := range groups {
 		if g.ID == id {
+			if !v.canSee(resCampaigns, campaignRef(g)) {
+				writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
 			if g.Postbacks == nil {
 				g.Postbacks = []config.OutboundPostback{}
 			}
@@ -576,6 +799,9 @@ func (s *Server) handleCampaignPostbacksPut(w http.ResponseWriter, r *http.Reque
 			return
 		}
 	}
+	v := s.viewerFrom(r.Context())
+	s.groupsMu.Lock()
+	defer s.groupsMu.Unlock()
 	groups, err := s.cfg.Groups.List(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "groups error")
@@ -585,6 +811,15 @@ func (s *Server) handleCampaignPostbacksPut(w http.ResponseWriter, r *http.Reque
 	found := false
 	for i := range groups {
 		if groups[i].ID == id {
+			ref := campaignRef(groups[i])
+			if !v.canSee(resCampaigns, ref) {
+				writeErr(w, http.StatusNotFound, "not found")
+				return
+			}
+			if !v.canWrite(resCampaigns, ref) {
+				writeErr(w, http.StatusForbidden, "forbidden")
+				return
+			}
 			groups[i].Postbacks = list
 			found = true
 			break

@@ -177,7 +177,7 @@ func TestMapFixture(t *testing.T) {
 	}
 
 	text := lossesText(res.Losses)
-	for _, want := range []string{"параметр cost", "buyer", "фильтр weather", "фильтр spider", "нет переносимых фильтров", "Notaland", "фильтр proxy не переносится: в kuztds нет детектора прокси", "фильтр ip отбросил негодные записи: nope, 999.1.1.1, bad-ip", "офферы с одинаковым URL объединены: 601, 602"} {
+	for _, want := range []string{"параметр cost", "фильтр weather", "фильтр spider", "нет переносимых фильтров", "Notaland", "фильтр proxy не переносится: в kuztds нет детектора прокси", "фильтр ip отбросил негодные записи: nope, 999.1.1.1, bad-ip", "офферы с одинаковым URL объединены: 601, 602"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("report missing %s\n%s", want, text)
 		}

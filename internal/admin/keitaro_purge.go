@@ -3,8 +3,10 @@ package admin
 import (
 	"context"
 	"net/http"
+	"strconv"
 
 	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/kuztds/internal/security"
 	"github.com/kuztds/bridge/ktimport"
 )
 
@@ -20,6 +22,7 @@ type keitaroRemoved struct {
 	Domains     int   `json:"domains"`
 	Lists       int   `json:"lists"`
 	Pages       int   `json:"pages"`
+	Users       int   `json:"users"`
 	Events      int64 `json:"events"`
 	Conversions int64 `json:"conversions"`
 }
@@ -46,38 +49,8 @@ func (s *Server) handleKeitaroPurge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	var removed keitaroRemoved
-	n, err := s.purgeGroups(ctx, manifest.Imported(ktimport.KindGroups))
+	removed, err := s.purgeStores(ctx, manifest)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	removed.Groups = n
-	if removed.Networks, err = purgeCatalog(ctx, s.cfg.Networks, func(v config.AffiliateNetwork) string { return v.ID }, manifest.Imported(ktimport.KindNetworks)); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	if removed.Sources, err = purgeCatalog(ctx, s.cfg.Sources, func(v config.TrafficSource) string { return v.ID }, manifest.Imported(ktimport.KindSources)); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	if removed.Domains, err = purgeCatalog(ctx, s.cfg.Domains, func(v config.Domain) string { return v.ID }, manifest.Imported(ktimport.KindDomains)); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	if removed.Landings, err = purgeCatalog(ctx, s.cfg.Landings, func(v config.Landing) string { return v.ID }, manifest.Imported(ktimport.KindLandings)); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	if removed.Offers, err = purgeCatalog(ctx, s.cfg.Offers, func(v config.Offer) string { return v.ID }, manifest.Imported(ktimport.KindOffers)); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	if removed.Lists, err = s.purgeImportedLists(manifest.Imported(ktimport.KindLists)); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	if removed.Pages, err = s.purgeImportedPages(manifest.Imported(ktimport.KindPages)); err != nil {
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
 	}
@@ -114,6 +87,85 @@ func (s *Server) handleKeitaroPurge(w http.ResponseWriter, r *http.Request) {
 	}
 	s.logPurge(removed)
 	writeJSON(w, http.StatusOK, map[string]any{"removed": removed})
+}
+
+// purgeStores removes catalog rows and list, page, and user records named in manifest.
+// ctx bounds store I/O. manifest supplies imported id sets per kind.
+// It returns per-kind removal counts. An error means a store could not be read or saved.
+func (s *Server) purgeStores(ctx context.Context, manifest ktimport.Manifest) (keitaroRemoved, error) {
+	var removed keitaroRemoved
+	var err error
+	if removed.Groups, err = s.purgeGroups(ctx, manifest.Imported(ktimport.KindGroups)); err != nil {
+		return removed, err
+	}
+	if removed.Networks, err = purgeCatalog(ctx, s.cfg.Networks, func(v config.AffiliateNetwork) string { return v.ID }, manifest.Imported(ktimport.KindNetworks)); err != nil {
+		return removed, err
+	}
+	if removed.Sources, err = purgeCatalog(ctx, s.cfg.Sources, func(v config.TrafficSource) string { return v.ID }, manifest.Imported(ktimport.KindSources)); err != nil {
+		return removed, err
+	}
+	if removed.Domains, err = purgeCatalog(ctx, s.cfg.Domains, func(v config.Domain) string { return v.ID }, manifest.Imported(ktimport.KindDomains)); err != nil {
+		return removed, err
+	}
+	if removed.Landings, err = purgeCatalog(ctx, s.cfg.Landings, func(v config.Landing) string { return v.ID }, manifest.Imported(ktimport.KindLandings)); err != nil {
+		return removed, err
+	}
+	if removed.Offers, err = purgeCatalog(ctx, s.cfg.Offers, func(v config.Offer) string { return v.ID }, manifest.Imported(ktimport.KindOffers)); err != nil {
+		return removed, err
+	}
+	if removed.Lists, err = s.purgeImportedLists(manifest.Imported(ktimport.KindLists)); err != nil {
+		return removed, err
+	}
+	if removed.Pages, err = s.purgeImportedPages(manifest.Imported(ktimport.KindPages)); err != nil {
+		return removed, err
+	}
+	if removed.Users, err = s.purgeUsers(manifest.Imported(ktimport.KindUsers)); err != nil {
+		return removed, err
+	}
+	return removed, nil
+}
+
+// purgeUsers removes or detaches Keitaro-imported panel users listed in the manifest.
+//
+// imported is true for keitaro_id strings from the manifest. Disabled users without a
+// hash are removed; active accounts keep login but lose keitaro_id.
+// It returns how many users were removed. An error means users.json could not be saved.
+func (s *Server) purgeUsers(imported func(string) bool) (int, error) {
+	if !s.usersEnabled() || imported == nil {
+		return 0, nil
+	}
+	s.userMu.Lock()
+	defer s.userMu.Unlock()
+	removed := 0
+	changed := false
+	for _, pub := range s.users.List() {
+		if pub.KeitaroID <= 0 || !imported(strconv.Itoa(pub.KeitaroID)) {
+			continue
+		}
+		u, ok := s.users.Get(pub.ID)
+		if !ok {
+			continue
+		}
+		if !u.Enabled && u.Hash == "" {
+			if err := s.users.Remove(pub.ID); err != nil {
+				return removed, err
+			}
+			removed++
+			changed = true
+			continue
+		}
+		if err := s.users.Update(pub.ID, func(rec *security.User) error {
+			rec.KeitaroID = 0
+			return nil
+		}); err != nil {
+			return removed, err
+		}
+		changed = true
+	}
+	if !changed {
+		return removed, nil
+	}
+	return removed, s.persistUsers()
 }
 
 // purgeGroups drops groups whose id is in the manifest.
@@ -255,6 +307,7 @@ func (s *Server) logPurge(removed keitaroRemoved) {
 		"domains", removed.Domains,
 		"lists", removed.Lists,
 		"pages", removed.Pages,
+		"users", removed.Users,
 		"events", removed.Events,
 		"conversions", removed.Conversions,
 	)

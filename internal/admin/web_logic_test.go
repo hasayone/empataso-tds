@@ -224,6 +224,30 @@ eq(deduped.length, 2, 'dedupeConds length');
 eq(deduped[0].v[0], '1', 'dedupeConds first campaign value');
 eq(deduped[1].f, 'device', 'dedupeConds second field');
 
+eq(accessPages(null), [], 'accessPages null');
+eq(accessPages({pages:'x'}), [], 'accessPages not array');
+eq(accessPages({pages:['flows']}), ['flows'], 'accessPages list');
+eq(pageAllowed(null, 'settings'), true, 'settings always');
+eq(pageAllowed({access:{sections:[]}, pages:[]}, 'users'), false, 'users without pages');
+eq(pageAllowed({access:{sections:['users']}, pages:['users']}, 'users'), true, 'users in pages');
+eq(sectionAllowed({access:{}, pages:['settings']}, 'settings'), true, 'sectionAllowed settings');
+eq(sectionAllowed({access:{}, pages:[]}, 'bot_protection'), false, 'sectionAllowed missing');
+eq(canEdit(null, 'offers', {id:'1'}), true, 'canEdit admin');
+const readMe={access:{grants:{offers:{mode:'read'}}}};
+eq(canEdit(readMe, 'offers', {id:'1'}), false, 'canEdit read');
+const selMe={access:{grants:{offers:{mode:'selected',ids:['o1'],labels:['grp']}}}};
+eq(canEdit(selMe, 'offers', {id:'o1'}), true, 'canEdit selected id');
+eq(canEdit(selMe, 'offers', {id:'x',group:'grp'}), true, 'canEdit selected label');
+const crtMe={uid:'u1',access:{grants:{offers:{mode:'created',ids:[],labels:[]}}}};
+eq(canEdit(crtMe, 'offers', {id:'n',created_by:'u1'}), true, 'canEdit created uid');
+eq(canCreate(readMe, 'offers'), false, 'canCreate read');
+eq(canCreate({access:{grants:{offers:{mode:'full'}}}}, 'offers'), true, 'canCreate full');
+const hidProfit=hiddenCols({access:{hidden:['profit']}});
+eq(hidProfit.has('roi'), true, 'hiddenCols profit has roi');
+eq(hidProfit.has('cr'), false, 'hiddenCols profit not cr');
+eq(homePage({access:{sections:['flows']}, pages:['flows']}), 'flows', 'homePage flows');
+eq(homePage({access:{sections:[]}, pages:[]}), 'settings', 'homePage no dashboard');
+
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `
 

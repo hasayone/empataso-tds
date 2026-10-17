@@ -15,7 +15,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"math/rand"
 	"net/http"
@@ -214,17 +213,7 @@ func main() {
 	mux.HandleFunc("/postback", d.postback)
 	mux.HandleFunc("/internal/notices", serveNotices(notices))
 	mux.HandleFunc("/l/", d.serveLandingAsset)
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		// Body stays exactly "ok" for existing probes; the loss counter rides
-		// along in a header so it can be scraped without a metrics endpoint.
-		if logs != nil {
-			l := logs.Losses()
-			w.Header().Set("X-Events-Lost", strconv.FormatInt(l.Total(), 10))
-			w.Header().Set("X-Events-Lost-Detail", fmt.Sprintf("full=%d queue=%d insert=%d late=%d", l.Full, l.Queue, l.Insert, l.Late))
-		}
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	mux.HandleFunc("/healthz", healthzHandler(logs))
 	mux.HandleFunc("/", d.root)
 
 	srv := &http.Server{

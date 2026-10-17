@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -62,13 +63,15 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusTooManyRequests, "too many attempts")
 		return
 	}
-	userOK := security.EqualTokens(body.Login, s.cfg.AdminUser)
+	hash, uid, userOK := s.credentialFor(body.Login)
 	// Both halves are evaluated. With "!userOK || !VerifyPassword(...)" Go
 	// short-circuits: a wrong user name returns in microseconds while the right
 	// one costs argon2's hundred milliseconds, and the administrator's login
 	// name reads off the clock. Constant-time EqualTokens right next to it buys
-	// nothing while the operator above it leaks the answer.
-	passOK := security.VerifyPassword(body.Password, s.currentHash())
+	// nothing while the operator above it leaks the answer. credentialFor always
+	// supplies a hash to verify (DummyHash when the user is unknown) so argon2
+	// still runs and timing stays comparable.
+	passOK := security.VerifyPassword(body.Password, hash)
 	s.hashes.leave()
 
 	if !userOK || !passOK {
@@ -82,7 +85,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusUnauthorized, "invalid credentials")
 		return
 	}
-	csrf, err := s.issueSession(w, r)
+	csrf, err := s.issueSession(w, r, uid)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
@@ -107,8 +110,9 @@ func (s *Server) loginFP(login string) string {
 }
 
 // issueSession creates a fresh session bound to the current password, sets the
-// cookie and returns the new CSRF token.
-func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) (string, error) {
+// cookie and returns the new CSRF token. uid empty selects the environment
+// administrator; otherwise the session is tied to that users.json record.
+func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, uid string) (string, error) {
 	token, err1 := security.RandomToken()
 	csrf, err2 := security.RandomToken()
 	if err1 != nil {
@@ -118,10 +122,20 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request) (string, e
 		return "", err2
 	}
 	sess := security.Session{
-		User:    s.cfg.AdminUser,
 		CSRF:    csrf,
 		Created: time.Now(),
-		PwFP:    s.current().fp,
+	}
+	if uid == "" {
+		sess.User = s.cfg.AdminUser
+		sess.PwFP = s.current().fp
+	} else {
+		u, ok := s.userByID(uid)
+		if !ok {
+			return "", fmt.Errorf("admin: user %q not found", uid)
+		}
+		sess.User = u.Login
+		sess.UID = u.ID
+		sess.PwFP = u.Fingerprint()
 	}
 	if err := s.cfg.Sessions.Create(r.Context(), token, sess, s.cfg.SessionTTL); err != nil {
 		return "", err
@@ -142,9 +156,42 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 
+// meResponse is the JSON body of GET /api/me for the SPA.
+type meResponse struct {
+	User   string            `json:"user"`
+	UID    string            `json:"uid,omitempty"`
+	Type   security.UserType `json:"type"`
+	CSRF   string            `json:"csrf"`
+	Engine string            `json:"engine"`
+	Prefs  security.Prefs    `json:"prefs"`
+	Pages  []string          `json:"pages"`
+	Access *security.Access  `json:"access,omitempty"`
+}
+
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
-	writeJSON(w, http.StatusOK, map[string]string{"user": sess.User, "csrf": sess.CSRF, "engine": s.linkBase()})
+	out := meResponse{
+		User:   sess.User,
+		CSRF:   sess.CSRF,
+		Engine: s.linkBase(),
+		Type:   security.UserAdmin,
+	}
+	if sess.UID != "" {
+		u, ok := s.userByID(sess.UID)
+		if ok {
+			out.UID = u.ID
+			out.Type = u.Type
+			out.Prefs = u.Prefs
+			out.Pages = userPages(u)
+			if u.Type != security.UserAdmin {
+				acc := u.Access
+				out.Access = &acc
+			}
+		}
+	} else {
+		out.Pages = rootPages()
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // linkBase is the engine address shown in campaign links and postbacks.
@@ -157,22 +204,69 @@ func (s *Server) linkBase() string {
 	return strings.TrimRight(strings.TrimSpace(s.cfg.EngineURL), "/")
 }
 
-// handlePassword changes the administrator password (argon2id), saving the hash to a file.
+// handlePassword changes the password for the current session (argon2id).
+// Root sessions update the administrator hash and optional password file;
+// users.json sessions update only that user's record.
 func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 	var body struct{ Old, New string }
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	if !security.VerifyPassword(body.Old, s.currentHash()) {
+	sess := sessionFrom(r.Context())
+	if sess.UID != "" {
+		s.handleUserPasswordChange(w, r, sess, body.Old, body.New)
+		return
+	}
+	s.handleRootPasswordChange(w, r, body.Old, body.New)
+}
+
+// handleUserPasswordChange verifies the old password against users.json, stores
+// newPw, revokes the current cookie, and issues a fresh session. Errors are
+// written to w as HTTP 4xx/5xx; success returns 200 with status and csrf.
+func (s *Server) handleUserPasswordChange(w http.ResponseWriter, r *http.Request, sess security.Session, oldPw, newPw string) {
+	u, ok := s.userByID(sess.UID)
+	if !ok {
+		writeErr(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if !security.VerifyPassword(oldPw, u.Hash) {
 		writeErr(w, http.StatusUnauthorized, "incorrect current password")
 		return
 	}
-	if len(body.New) < 6 {
+	if len(newPw) < 6 {
 		writeErr(w, http.StatusBadRequest, "password too short (min. 6)")
 		return
 	}
-	hash, err := security.HashPassword(body.New)
+	if err := s.setUserPassword(u.ID, newPw); err != nil {
+		writeErr(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+	if c, err := r.Cookie(cookieName); err == nil {
+		_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
+	}
+	csrf, err := s.issueSession(w, r, u.ID)
+	if err != nil {
+		s.logWarn("session reissue after user password change failed", "err", err)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "changed"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "changed", "csrf": csrf})
+}
+
+// handleRootPasswordChange verifies the old administrator password, writes the
+// new hash to the password file when configured, publishes it in memory, and
+// reissues the session cookie. Errors are written to w; success returns 200.
+func (s *Server) handleRootPasswordChange(w http.ResponseWriter, r *http.Request, oldPw, newPw string) {
+	if !security.VerifyPassword(oldPw, s.currentHash()) {
+		writeErr(w, http.StatusUnauthorized, "incorrect current password")
+		return
+	}
+	if len(newPw) < 6 {
+		writeErr(w, http.StatusBadRequest, "password too short (min. 6)")
+		return
+	}
+	hash, err := security.HashPassword(newPw)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
@@ -214,7 +308,7 @@ func (s *Server) handlePassword(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(cookieName); err == nil {
 		_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
 	}
-	csrf, err := s.issueSession(w, r)
+	csrf, err := s.issueSession(w, r, "")
 	if err != nil {
 		s.logWarn("session reissue after password change failed", "err", err)
 		writeJSON(w, http.StatusOK, map[string]string{"status": "changed"})

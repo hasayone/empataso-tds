@@ -82,9 +82,9 @@ func (f *filterStats) SliceFiltered(_ context.Context, _, _ time.Time, conds []s
 	return []store.SliceRow{}, nil
 }
 
-func (f *filterStats) Values(ctx context.Context, table, field string, from, to time.Time, limit int) ([]store.KV, error) {
-	f.valLimit = limit
-	return f.fakeStats.Values(ctx, table, field, from, to, limit)
+func (f *filterStats) Values(ctx context.Context, q store.ValuesQuery) ([]store.KV, error) {
+	f.valLimit = q.Limit
+	return f.fakeStats.Values(ctx, q)
 }
 
 func (f *filterStats) Breakdown(ctx context.Context, from, to time.Time, dim string, limit int) ([]store.KV, error) {
@@ -240,11 +240,11 @@ func TestLogFilterPassesConds(t *testing.T) {
 // dashFilterStats records filtered vs plain calls on dashboard stats endpoints.
 type dashFilterStats struct {
 	fakeStats
-	sumN, sumFN       int
-	tsN, tsFN         int
-	perfN, perfFN     int
-	factsN, factsFN   int
-	lastConds         []store.Cond
+	sumN, sumFN     int
+	tsN, tsFN       int
+	perfN, perfFN   int
+	factsN, factsFN int
+	lastConds       []store.Cond
 }
 
 func (d *dashFilterStats) Summary(ctx context.Context, from, to time.Time) (store.StatsSummary, error) {
@@ -308,7 +308,7 @@ func TestDashboardStatsFilter(t *testing.T) {
 	filter := "f=device:eq:mobile"
 
 	paths := []struct {
-		path string
+		path  string
 		check func(t *testing.T)
 	}{
 		{"/api/stats/summary?" + filter, func(t *testing.T) {
