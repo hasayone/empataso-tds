@@ -164,6 +164,7 @@ func main() {
 		go keysWatcher(ctx, keysFile, keySet, reload, log)
 	}
 	offers, landings, sources, networks := openCatalogs(groupsFile, log)
+	s2s := openS2S(groupsFile, log)
 	botPath := os.Getenv("KUZTDS_BOT_FILE")
 	if botPath == "" && groupsFile != "" {
 		botPath = filepath.Join(filepath.Dir(groupsFile), "bot_protection.json")
@@ -172,7 +173,7 @@ func main() {
 	lands := newLandingServer(landingsDir(os.Getenv("KUZTDS_LANDINGS_DIR"), groupsFile), os.Getenv("KUZTDS_PHP_URL"), func(id string) (config.Landing, bool) {
 		return landings.Get(id)
 	}, log)
-	go reloadCatalogs(ctx, reload, offers, landings, sources, networks)
+	go reloadCatalogs(ctx, reload, offers, landings, sources, networks, s2s)
 
 	// ClickHouse logs (phase 4): asynchronous batch writes. Optional.
 	var logs *logbuf.Buffer
@@ -199,7 +200,7 @@ func main() {
 
 	d := &engineDeps{
 		log: log, lists: lists, sigs: sigs, seps: seps, geores: geores, counters: counters,
-		groups: groups, offers: offers, landings: landings, sources: sources, networks: networks,
+		groups: groups, offers: offers, landings: landings, sources: sources, networks: networks, s2s: s2s,
 		outbound: make(chan outboundJob, 64),
 		logs:     logs, chConn: chConn, fetcher: fetcher,
 		dataDir: dataDir, keysDir: keysDir, postbackKey: postbackKey, keys: apiKeys{env: apiEnv, set: keySet},

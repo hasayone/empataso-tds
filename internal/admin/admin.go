@@ -112,6 +112,7 @@ type Config struct {
 	Stats        StatsProvider
 	Groups       GroupsStore
 	Offers       *JSONStore[config.Offer]
+	S2S          *JSONStore[config.OutboundPostback]
 	Landings     *JSONStore[config.Landing]
 	LandingFiles LandingFiles
 	Sources      *JSONStore[config.TrafficSource]
@@ -373,6 +374,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/brand", s.handleBrandGet)
 	s.handle(mux, "GET /api/campaigns/{id}/postbacks", http.HandlerFunc(s.handleCampaignPostbacksGet))
 	s.handle(mux, "PUT /api/campaigns/{id}/postbacks", http.HandlerFunc(s.handleCampaignPostbacksPut))
+	s.handle(mux, "GET /api/s2s", http.HandlerFunc(s.handleS2SGet))
+	s.handle(mux, "PUT /api/s2s", http.HandlerFunc(s.handleS2SPut))
 
 	s.handle(mux, "GET /api/lists", http.HandlerFunc(s.handleListsIndex))
 	s.handle(mux, "GET /api/lists/{name}", http.HandlerFunc(s.handleListRead))

@@ -3,15 +3,18 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/kuztds/internal/security"
 	"github.com/kuztds/bridge/ktimport"
 )
 
@@ -351,4 +354,114 @@ func keitaroFilterFake(t *testing.T) *httptest.Server {
 	}))
 	t.Cleanup(srv.Close)
 	return srv
+}
+
+// globalImportGroups builds three campaigns, two of them sharing one postback.
+// The OutboundPostback is the shared template, including its original status case.
+// The third campaign carries a different URL. There is no error.
+func globalImportGroups() ([]ktimport.Group, config.OutboundPostback) {
+	shared := config.OutboundPostback{
+		URL: "https://pb.example/hook?cid={subid}", Method: "post", Statuses: []string{"Sale", "Lead"},
+	}
+	pb := ktimport.Postback{URL: shared.URL, Method: shared.Method, Statuses: []string{"Sale", "Lead"}}
+	other := ktimport.Postback{URL: "https://other.example/pb", Method: "GET", Statuses: []string{"rejected"}}
+	groups := []ktimport.Group{
+		{ID: "a", Name: "A", Postbacks: []ktimport.Postback{pb}},
+		{ID: "b", Name: "B", Postbacks: []ktimport.Postback{pb}},
+		{ID: "c", Name: "C", Postbacks: []ktimport.Postback{other}},
+	}
+	return groups, shared
+}
+
+// importS2SServer builds an admin server whose groups and optional s2s catalog are files in a temp directory.
+// t reports setup failures. withS2S adds s2s.json when true.
+// It returns the server and the directory. It does not return an error.
+func importS2SServer(t *testing.T, withS2S bool) (*Server, string) {
+	t.Helper()
+	hash, err := security.HashPassword("p@ss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	cfg := Config{
+		AdminUser: "admin", PasswordHash: hash,
+		Sessions: security.NewMemoryStore(), Stats: fakeStats{},
+		Groups:       NewFileGroups(filepath.Join(dir, "groups.json")),
+		Limiter:      allowAll{},
+		SessionTTL:   time.Hour,
+		CookieSecure: false,
+	}
+	if withS2S {
+		cfg.S2S = NewJSONStore[config.OutboundPostback](filepath.Join(dir, "s2s.json"))
+	}
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, dir
+}
+
+// readSavedGroups reads groups.json written by importGroups.
+// t reports a missing or invalid file. path is the groups file.
+// It returns the decoded campaigns. It does not return an error.
+func readSavedGroups(t *testing.T, path string) []config.Group {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var groups []config.Group
+	if err := json.Unmarshal(b, &groups); err != nil {
+		t.Fatal(err)
+	}
+	return groups
+}
+
+func TestImportGroupsExtractsGlobalS2S(t *testing.T) {
+	incoming, shared := globalImportGroups()
+	id := config.PostbackID(shared.Signature())
+	s, dir := importS2SServer(t, true)
+	n, _, err := s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "")
+	if err != nil || n != 3 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	catRaw, err := os.ReadFile(filepath.Join(dir, "s2s.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var cat []config.OutboundPostback
+	if err := json.Unmarshal(catRaw, &cat); err != nil {
+		t.Fatal(err)
+	}
+	if len(cat) != 1 || cat[0].ID != id {
+		t.Fatalf("catalog %+v, want %s", cat, id)
+	}
+	groups := readSavedGroups(t, filepath.Join(dir, "groups.json"))
+	for _, gid := range []string{"a", "b"} {
+		g, ok := savedGroup(groups, gid)
+		if !ok || len(g.Postbacks) != 0 || len(g.PostbackIDs) != 1 || g.PostbackIDs[0] != id {
+			t.Fatalf("%s %+v", gid, g)
+		}
+	}
+	c, ok := savedGroup(groups, "c")
+	if !ok || len(c.PostbackIDs) != 0 || len(c.Postbacks) != 1 || c.Postbacks[0].URL != "https://other.example/pb" {
+		t.Fatalf("c %+v", c)
+	}
+
+	incoming, _ = globalImportGroups()
+	s, dir = importS2SServer(t, false)
+	n, _, err = s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "")
+	if err != nil || n != 3 {
+		t.Fatalf("nil store n=%d err=%v", n, err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "s2s.json")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("s2s.json err=%v", err)
+	}
+	groups = readSavedGroups(t, filepath.Join(dir, "groups.json"))
+	for _, gid := range []string{"a", "b", "c"} {
+		g, ok := savedGroup(groups, gid)
+		if !ok || len(g.Postbacks) != 1 || len(g.PostbackIDs) != 0 {
+			t.Fatalf("inline %s %+v", gid, g)
+		}
+	}
 }

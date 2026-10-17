@@ -57,6 +57,8 @@ func (d *engineDeps) sourceOf(grp *config.Group) (*config.TrafficSource, bool) {
 }
 
 // fireOutbound queues the campaign templates that match status.
+// Local postbacks and ids from the s2s catalog are both included.
+// A missing catalog id counts as a match that was not queued.
 // A full queue drops the job so the inbound pixel is never blocked.
 // It reports false only when a matching template existed and none was queued.
 func (d *engineDeps) fireOutbound(groupID, cid string, profit float64, status string, q url.Values) bool {
@@ -67,10 +69,11 @@ func (d *engineDeps) fireOutbound(groupID, cid string, profit float64, status st
 	if !ok {
 		return true
 	}
+	list, missing := d.templatesFor(*grp)
 	_, subs := config.ApplySource(q, nil)
 	payout := strconv.FormatFloat(profit, 'f', -1, 64)
-	matched, queued := 0, 0
-	for _, pb := range grp.Postbacks {
+	matched, queued := missing, 0
+	for _, pb := range list {
 		if !pb.MatchesStatus(status) {
 			continue
 		}
@@ -102,6 +105,47 @@ func (d *engineDeps) fireOutbound(groupID, cid string, profit float64, status st
 	return queued > 0
 }
 
+// templatesFor collects the outbound templates of grp.
+// grp is the campaign. Local Postbacks come first. Each PostbackIDs entry is
+// then read from d.s2s when that book is non-nil. A nil d or a nil book skips
+// catalog ids. Templates that share Signature are kept once; the earlier copy wins.
+// missing is how many catalog ids were absent from a non-nil book.
+// There is no error. Each missing id is logged when d.log is set.
+func (d *engineDeps) templatesFor(grp config.Group) ([]config.OutboundPostback, int) {
+	out := make([]config.OutboundPostback, 0, len(grp.Postbacks)+len(grp.PostbackIDs))
+	seen := make(map[string]struct{}, len(grp.Postbacks)+len(grp.PostbackIDs))
+	add := func(p config.OutboundPostback) {
+		sig := p.Signature()
+		if _, ok := seen[sig]; ok {
+			return
+		}
+		seen[sig] = struct{}{}
+		out = append(out, p)
+	}
+	for _, p := range grp.Postbacks {
+		add(p)
+	}
+	if d == nil || d.s2s == nil {
+		return out, 0
+	}
+	missing := 0
+	for _, id := range grp.PostbackIDs {
+		if id == "" {
+			continue
+		}
+		pb, ok := d.s2s.Get(id)
+		if !ok {
+			missing++
+			if d.log != nil {
+				d.log.Warn("s2s template missing", "id", id, "group", grp.ID)
+			}
+			continue
+		}
+		add(pb)
+	}
+	return out, missing
+}
+
 // serveOutbound sends queued postbacks until ctx is cancelled.
 // It is the only sender; cron does not run a second one.
 func (d *engineDeps) serveOutbound(ctx context.Context) {
@@ -130,24 +174,34 @@ func (d *engineDeps) serveOutbound(ctx context.Context) {
 // openCatalogs loads offers, landings and traffic sources from the groups directory.
 // Explicit KUZTDS_*_FILE paths override that default. Missing files stay empty.
 func openCatalogs(groupsFile string, log *slog.Logger) (*config.Book[config.Offer], *config.Book[config.Landing], *config.Book[config.TrafficSource], *config.Book[config.AffiliateNetwork]) {
-	dir := ""
-	if groupsFile != "" {
-		dir = filepath.Dir(groupsFile)
-	}
-	path := func(env, name string) string {
-		if v := os.Getenv(env); v != "" {
-			return v
-		}
-		if dir == "" {
-			return ""
-		}
-		return filepath.Join(dir, name)
-	}
-	offers := mustBook(path("KUZTDS_OFFERS_FILE", "offers.json"), func(o config.Offer) string { return o.ID }, log)
-	landings := mustBook(path("KUZTDS_LANDINGS_FILE", "landings.json"), func(o config.Landing) string { return o.ID }, log)
-	sources := mustBook(path("KUZTDS_SOURCES_FILE", "sources.json"), func(o config.TrafficSource) string { return o.ID }, log)
-	networks := mustBook(path("KUZTDS_NETWORKS_FILE", "networks.json"), func(o config.AffiliateNetwork) string { return o.ID }, log)
+	offers := mustBook(catalogPath(groupsFile, "KUZTDS_OFFERS_FILE", "offers.json"), func(o config.Offer) string { return o.ID }, log)
+	landings := mustBook(catalogPath(groupsFile, "KUZTDS_LANDINGS_FILE", "landings.json"), func(o config.Landing) string { return o.ID }, log)
+	sources := mustBook(catalogPath(groupsFile, "KUZTDS_SOURCES_FILE", "sources.json"), func(o config.TrafficSource) string { return o.ID }, log)
+	networks := mustBook(catalogPath(groupsFile, "KUZTDS_NETWORKS_FILE", "networks.json"), func(o config.AffiliateNetwork) string { return o.ID }, log)
 	return offers, landings, sources, networks
+}
+
+// catalogPath returns a catalog file path beside the groups file.
+// groupsFile is the groups.json path. env is the override variable; a non-empty value wins.
+// name is the sibling file name used when env is empty.
+// It returns an empty string when both env and groupsFile are empty.
+// There is no error.
+func catalogPath(groupsFile, env, name string) string {
+	if v := os.Getenv(env); v != "" {
+		return v
+	}
+	if groupsFile == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(groupsFile), name)
+}
+
+// openS2S loads the shared postback catalog beside the groups file.
+// groupsFile is the groups.json path. log receives a warning when the file cannot be parsed.
+// KUZTDS_S2S_FILE overrides the path. A missing file is an empty book.
+// The return is never nil. A parse error yields an empty book after the warning.
+func openS2S(groupsFile string, log *slog.Logger) *config.Book[config.OutboundPostback] {
+	return mustBook(catalogPath(groupsFile, "KUZTDS_S2S_FILE", "s2s.json"), func(p config.OutboundPostback) string { return p.ID }, log)
 }
 
 func mustBook[T any](path string, idOf func(T) string, log *slog.Logger) *config.Book[T] {

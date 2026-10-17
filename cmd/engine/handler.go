@@ -38,6 +38,7 @@ type engineDeps struct {
 	landings     *config.Book[config.Landing]
 	sources      *config.Book[config.TrafficSource]
 	networks     *config.Book[config.AffiliateNetwork]
+	s2s          *config.Book[config.OutboundPostback]
 	outbound     chan outboundJob
 	sentMu       sync.Mutex
 	sent         map[string]struct{}

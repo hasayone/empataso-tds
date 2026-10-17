@@ -179,24 +179,29 @@ type CatGrant struct {
 
 // Group — группа kuztds, которую принимает PUT /api/groups.
 // Num — номер в списке кампаний. Маппер пишет id кампании Keitaro. Ноль значит, что слияние ещё не выдало номер.
+// PostbackIDs — id общих шаблонов каталога s2s. Тот же шаблон в Postbacks не дублируется.
 type Group struct {
-	ID        string     `json:"id"`
-	Aliases   []string   `json:"aliases,omitempty"`
-	Name      string     `json:"name"`
-	Status    bool       `json:"status"`
-	Redirect  string     `json:"redirect"`
-	Out       string     `json:"out"`
-	Folder    string     `json:"folder,omitempty"`
-	DomainID  string     `json:"domain_id,omitempty"`
-	SourceID  string     `json:"source_id,omitempty"`
-	Weight    bool       `json:"weight,omitempty"`
-	Num       int        `json:"num,omitempty"`
-	Postbacks []Postback `json:"postbacks,omitempty"`
-	Streams   []Stream   `json:"streams"`
+	ID          string     `json:"id"`
+	Aliases     []string   `json:"aliases,omitempty"`
+	Name        string     `json:"name"`
+	Status      bool       `json:"status"`
+	Redirect    string     `json:"redirect"`
+	Out         string     `json:"out"`
+	Folder      string     `json:"folder,omitempty"`
+	DomainID    string     `json:"domain_id,omitempty"`
+	SourceID    string     `json:"source_id,omitempty"`
+	Weight      bool       `json:"weight,omitempty"`
+	Num         int        `json:"num,omitempty"`
+	Postbacks   []Postback `json:"postbacks,omitempty"`
+	PostbackIDs []string   `json:"postback_ids,omitempty"`
+	Streams     []Stream   `json:"streams"`
 }
 
 // Postback — исходящий шаблон конверсии кампании.
+// ID и Name заполнены у записи общего каталога. У шаблона внутри кампании они пустые.
 type Postback struct {
+	ID       string   `json:"id,omitempty"`
+	Name     string   `json:"name,omitempty"`
 	URL      string   `json:"url"`
 	Method   string   `json:"method"`
 	Statuses []string `json:"statuses,omitempty"`

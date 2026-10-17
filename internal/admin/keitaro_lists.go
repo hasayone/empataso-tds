@@ -63,7 +63,9 @@ func stripMissingIPLists(groups []ktimport.Group) ([]ktimport.Group, []ktimport.
 
 // importGroups merges campaigns and saves the groups that pass the checks.
 // incoming is the mapper output. prev is the manifest from before this run.
-// The first copy of a repeated id is kept. Each imported group is checked on its own.
+// The first copy of a repeated id is kept. The most common postback is lifted
+// into the s2s catalog before groups are saved, when that store is set.
+// Each imported group is checked on its own.
 // A failing one is skipped. Groups that were not in the manifest stay in the file.
 // It returns how many incoming groups were saved and the skip report.
 // An error means the file could not be read, converted or saved.
@@ -73,6 +75,10 @@ func (s *Server) importGroups(ctx context.Context, incoming []ktimport.Group, pr
 		return 0, nil, err
 	}
 	incoming, losses := keepFirstGroups(incoming)
+	incoming, err = s.extractGlobalS2S(ctx, incoming)
+	if err != nil {
+		return 0, losses, err
+	}
 	merged, extra, err := mergeImportedGroups(existing, incoming, prev, owner)
 	if err != nil {
 		return 0, append(losses, extra...), err
@@ -112,6 +118,54 @@ func keepFirstGroups(incoming []ktimport.Group) ([]ktimport.Group, []ktimport.Lo
 		out = append(out, g)
 	}
 	return out, losses
+}
+
+// extractGlobalS2S moves the most common postback into the s2s catalog.
+// ctx is the request context. incoming is the deduped mapper output.
+// A nil S2S store returns incoming unchanged. No chosen template does the same.
+// A catalog id that is not already stored is appended and saved before the caller writes groups.
+// It returns groups whose matching inline copies are removed and whose PostbackIDs hold the catalog id.
+// An error means the catalog could not be read, converted or saved. Groups are not written here.
+func (s *Server) extractGlobalS2S(ctx context.Context, incoming []ktimport.Group) ([]ktimport.Group, error) {
+	if s.cfg.S2S == nil {
+		return incoming, nil
+	}
+	stored, err := s.cfg.S2S.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	existing, err := convert[[]ktimport.Postback](stored)
+	if err != nil {
+		return nil, err
+	}
+	pb, groups := ktimport.ExtractGlobalPostback(incoming, existing)
+	if pb == nil {
+		return incoming, nil
+	}
+	if s2sHasID(stored, pb.ID) {
+		return groups, nil
+	}
+	row, err := convert[config.OutboundPostback](*pb)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.cfg.S2S.Save(ctx, append(stored, row)); err != nil {
+		return nil, err
+	}
+	return groups, nil
+}
+
+// s2sHasID reports whether list already contains id.
+// list is the current catalog. id is the template id to find.
+// It returns true when a row has that id. An empty id matches only an empty row id.
+// It does not return an error.
+func s2sHasID(list []config.OutboundPostback, id string) bool {
+	for _, p := range list {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 // selectImportedGroups applies the save checks to imported groups only.

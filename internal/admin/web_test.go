@@ -75,7 +75,7 @@ func TestSPAStructure(t *testing.T) {
 	must(t, html, `FLOW_VIEW='table'`, "flows table by default")
 	must(t, html, `kuztds-flows-view`, "remembered flows layout")
 	must(t, html, `data-flow-view="grid"`, "cards layout switch")
-	must(t, html, `class="canvas"`, "flow canvas")
+	must(t, html, `id="canvas"`, "flow canvas")
 	must(t, html, `id="wires"`, "wires layer")
 	must(t, html, `data-grip`, "drag handle")
 	must(t, html, `data-toggle`, "per-stream switch")
@@ -99,6 +99,12 @@ func TestSPAStructure(t *testing.T) {
 	must(t, html, `data-addvar=`, "add-a-variant button")
 	must(t, html, `data-addrw=`, "add-a-replacement button")
 	must(t, html, `data-rxon=`, "switch to a regular expression")
+	must(t, html, `f_iplist_t`, "ip list chips")
+	must(t, html, `data-iptext`, "ip list text switch")
+	must(t, html, `f_iplist_text`, "ip list textarea")
+	must(t, html, `function ipEntries`, "ip entry splitter")
+	must(t, html, `flushIPDraft`, "ip list flush before campaigns")
+	mustNot(t, html, `id="f_iplist_file"`, "ip list file field removed")
 	must(t, html, `// ---- pure: begin ----`, "start of the helpers block run by web_logic_test.go")
 	must(t, html, `// ---- pure: end ----`, "end of the helpers block run by web_logic_test.go")
 	mustNot(t, html, `(<code>|||</code>)`, "asking people to type ||| between variants")
@@ -350,7 +356,8 @@ func TestCampaignMoneyAndROIDisplay(t *testing.T) {
 	}
 	must(t, cm, "moneyMap(by,4)", "campaignMoney uses moneyMap with 4 digits")
 	must(t, mt, ".toFixed(d)+' '+suf", "moneyText formats amount and currency suffix")
-	must(t, cr, "return NA", "metricROI without a base is NA")
+	must(t, cr, "return '0.00%'", "metricROI without a base is 0.00%")
+	mustNot(t, cr, "return NA", "metricROI does not return NA")
 	mustNot(t, cr, "'100%'", "metricROI is not 100% without spend")
 	mustNot(t, mt, "return '—'", "moneyText must not return em dash")
 	mustNot(t, cr, "return '—'", "metricROI must not return em dash")
@@ -627,10 +634,10 @@ func TestFlowsHeaderExportMenu(t *testing.T) {
 func TestSpaPureAndConvMarkers(t *testing.T) {
 	html := string(indexHTML)
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
-	must(t, pure, "function leadingMark(", "leadingMark in pure block")
+	must(t, pure, "function nameSortKey(", "nameSortKey in pure block")
 	must(t, pure, "function capFirst(", "capFirst in pure block")
 	rows := spaFunctionLine(html, "campaignRows")
-	must(t, rows, "leadingMark(campaignLabel", "name sort uses leadingMark")
+	must(t, rows, "nameSortKey(campaignLabel", "name sort uses nameSortKey")
 	must(t, spaFunctionLine(html, "when"), "year:'numeric'", "when includes year")
 	conv := spaFunctionLine(html, "convCell")
 	must(t, conv, "tr('conv.lead')", "lead pill label")
@@ -638,9 +645,8 @@ func TestSpaPureAndConvMarkers(t *testing.T) {
 	must(t, html, "'zm|", "zambia in country pack")
 	must(t, html, "'ci|", "ivory coast in country pack")
 	must(t, html, "'ph|", "philippines in country pack")
-	must(t, html, "zm:'", "zambia flag spec")
-	must(t, html, "ci:'", "ivory coast flag spec")
-	must(t, html, "ph:'", "philippines flag spec")
+	must(t, html, "/assets/flags/", "country flags are embedded svg files")
+	mustNot(t, html, "FLAG_SPEC", "inline flag spec is gone")
 	must(t, spaFunctionLine(html, "syncSaveBar"), "capFirst(tr('flows'))", "save bar capitalizes flows")
 }
 
@@ -703,7 +709,7 @@ func TestKeitaroPage(t *testing.T) {
 	if typesAt < 0 {
 		t.Fatal("TYPES missing")
 	}
-	typesEnd := strings.Index(html[typesAt:], "\nconst QUICK=")
+	typesEnd := strings.Index(html[typesAt:], "\nconst typeLabel=")
 	if typesEnd < 0 {
 		t.Fatal("TYPES block has no end")
 	}
@@ -743,6 +749,32 @@ func TestKeitaroPage(t *testing.T) {
 			t.Errorf("dictionary missing kt.c.pages next to %s", anchor)
 		}
 	}
+}
+
+// TestStreamThen checks the Then mode tabs, share rows and shared S2S templates.
+func TestStreamThen(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `.share-row`, "share row grid")
+	must(t, html, `max="100"`, "share percent ceiling")
+	must(t, html, `class="icon ghost" data-delshare`, "remove button on a share row")
+	for _, key := range []string{"then.mode.offers", "then.mode.url", "then.mode.action"} {
+		must(t, html, key, "then mode label")
+	}
+	must(t, html, `/api/s2s`, "shared postback catalog")
+	must(t, spaFunctionLine(html, "collectFlow"), `postback_ids`, "campaign stores chosen templates")
+	mustNot(t, html, `/api/campaigns/`, "campaign postback route is not used by the SPA")
+	must(t, html, `class="types"`, "then modes keep the type tabs")
+	must(t, html, `data-then=`, "then mode switch")
+}
+
+// TestSPAFlowCompact checks compact flow canvas toggle, i18n, breakdown label tooltips.
+func TestSPAFlowCompact(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, "FLOW_COMPACT_KEY", "flow compact localStorage key")
+	must(t, html, "canvas-toggle", "compact canvas toggle button")
+	must(t, html, "'flow.compact'", "flow.compact i18n")
+	must(t, html, "flowCompactClass(", "flowCompactClass helper")
+	must(t, html, `class="k" title="${esc(label)}"`, "breakdown title shows label")
 }
 
 // TestSPAUsersPage checks the users tab, access helpers, Keitaro users import,

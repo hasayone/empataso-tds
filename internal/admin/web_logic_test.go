@@ -143,11 +143,12 @@ eq(macroHTML('go [KEY] &amp; [PAR-1] [RANDNUM-1-9] [()COUNTRY()]'),
   'go <span class="mac">[KEY]</span> &amp; <span class="mac">[PAR-1]</span> <span class="mac">[RANDNUM-1-9]</span> <span class="mac">[()COUNTRY()]</span>', 'macros');
 eq(macroHTML('[&quot;a&quot;] [lower] [1]'), '[&quot;a&quot;] [lower] [1]', 'not macros');
 
-eq(leadingMark('❌ SpinDog'), true, 'emoji before name');
-eq(leadingMark('🟢 Bingo'), true, 'circle emoji before name');
-eq(leadingMark('711 Casino'), false, 'digit first');
-eq(leadingMark('alloffers'), false, 'letter first');
-eq(leadingMark(''), false, 'empty string');
+eq(nameSortKey('⚡️ 711 Casino'), '711 Casino', 'emoji before a name');
+eq(nameSortKey('❌ SpinDog - Play'), 'SpinDog - Play', 'cross before a name');
+eq(nameSortKey('All Offers'), 'All Offers', 'plain english name');
+eq(nameSortKey('Ловушка'), 'Ловушка', 'cyrillic name');
+eq(nameSortKey(''), '', 'empty string');
+eq(nameSortKey('⚡️'), '⚡️', 'a lone mark stays itself');
 eq(capFirst('flows'), 'Flows', 'capFirst word');
 eq(capFirst('automation'), 'Automation', 'capFirst automation');
 eq(capFirst(''), '', 'capFirst empty');
@@ -251,6 +252,8 @@ eq(homePage({access:{sections:[]}, pages:[]}), 'settings', 'homePage no dashboar
 eq(userIsEnv({source:'env'}), true, 'userIsEnv env');
 eq(userIsEnv({source:'file'}), false, 'userIsEnv file');
 eq(userIsEnv(null), false, 'userIsEnv null');
+eq(flowCompactClass(true),'compact','flowCompactClass on');
+eq(flowCompactClass(false),'','flowCompactClass off');
 
 eq(serviceBadge('geo_db', {config_error:'bad db'}), {key:'cron.cfgerr', title:'bad db'}, 'config error wins');
 eq(serviceBadge('telegram_test', {telegram_configured:false}), {key:'cron.notset', title:''}, 'telegram off');
@@ -265,12 +268,55 @@ eq(serviceBadge('disk', {status:{jobs:{disk:{last_run:'2020-01-02T00:00:00Z', ok
 eq(serviceBadge('disk', {config_error:'x', telegram_configured:false, status:{jobs:{disk:{last_run:'2020-01-02T00:00:00Z', next_run:'2020-01-03T00:00:00Z'}}}}).key, 'cron.cfgerr', 'config before next');
 eq(serviceBadge('conversions', {status:{jobs:{conversions:{last_run:'0001-01-01T00:00:00Z'}}}}).key, 'cron.first', 'zero time is the first run');
 
+eq(balanceShares([60,50], 0), [60,40], 'edited share keeps 60');
+eq(balanceShares([100,50,0], 0), [100,0,0], '100 clears the other shares');
+const held=balanceShares([70,30,30], 0);
+eq(held[0], 70, 'edited row stays 70');
+eq(held.reduce((a,v)=>a+v,0), 100, 'shares after 70 still sum to 100');
+eq(balanceShares([60], -1), [100], 'one row left after delete is 100');
+eq(balanceShares([], -1), [], 'no rows');
+const rem=balanceShares([33,33,33], -1);
+eq(rem.reduce((a,v)=>a+v,0), 100, 'remainder still sums to 100');
+eq(thenMode({redirect:'group', offers:[{id:'a'}]}), 'action', 'group stays an action');
+eq(thenMode({redirect:'landing'}), 'offers', 'landing is the offers mode');
+eq(thenMode({redirect:'http_redirect'}), 'url', 'bare redirect is a url');
+eq(thenMode({redirect:'http_redirect', offers:[]}), 'url', 'empty offers stay a url');
+eq(thenMode({redirect:'http_redirect', offers:[{id:'a'}]}), 'offers', 'redirect with offers is offers');
+const left={redirect:'http_redirect', out:'https://x', out_shares:[50], offers:[]};
+switchThenMode(left, 'offers');
+eq(left.out, '', 'leaving a url clears it');
+const moved={redirect:'http_redirect', offers:[{id:'a',share:100}], landings:[{id:'b'}], out:'z'};
+switchThenMode(moved, 'action');
+eq(moved.redirect, 'group', 'offers become the group action');
+eq(moved.offers, [], 'action drops offers');
+
+const simA={id:'A',redirect:'group',out:'B'};
+const simB={id:'B',redirect:'group',out:'C'};
+const simC={id:'C',redirect:'group',out:'A'};
+const simZ={id:'Z'};
+const simCyc=simGroups([simA,simB,simC,simZ],'A');
+eq(simCyc.map(g=>g.id).sort(), ['A','B','C'], 'simGroups cycle is A B C');
+eq(simCyc.length<=3, true, 'simGroups cycle stays within three');
+eq(simGroups([{id:'solo'},simZ],'solo').map(g=>g.id), ['solo'], 'simGroups campaign without links');
+eq(simGroups([simA],'missing'), [], 'simGroups unknown id');
+eq(simGroups([{id:'A',redirect:'group',out:'promo'},{id:'B',aliases:['promo']}],'A').map(g=>g.id), ['A','B'], 'simGroups finds the alias');
+const simChain=['c0','c1','c2','c3','c4','c5'].map((id,i,a)=>({id,redirect:'group',out:a[i+1]||''}));
+eq(simGroups(simChain,'c0').map(g=>g.id), ['c0','c1','c2','c3'], 'simGroups depth is four from the root');
+
+eq(ipEntries('1.2.3.4\n5.6.7.8'), ['1.2.3.4','5.6.7.8'], 'two lines');
+eq(ipEntries('1.2.3.4 5.6.7.8 10.0.0.1'), ['1.2.3.4','5.6.7.8','10.0.0.1'], 'spaces of the old field');
+eq(ipEntries('1.2.3.4\n1.2.3.4\n1.2.3.4'), ['1.2.3.4'], 'repeat dropped, first stays');
+eq(ipEntries('AbC\nabc'), ['AbC'], 'repeat ignores letter case');
+eq(ipEntries('1.2.3.4-1.2.3.9'), ['1.2.3.4-1.2.3.9'], 'a range is one entry');
+eq(ipEntries('10.0.0.0/8'), ['10.0.0.0/8'], 'a prefix is one entry');
+eq(ipEntries('1.2.3.4\n\n  \n5.6.7.8\n'), ['1.2.3.4','5.6.7.8'], 'empty lines dropped');
+
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `
 
 // TestMoneyDisplay runs the SPA currency helpers under node and checks the
-// labels: a zero key is not a second currency, revenue without spend is an
-// em dash, and two nonzero currencies stay a code list. It skips when node is absent.
+// labels: a zero key is not a second currency, ROI without spend is 0.00%,
+// and two nonzero currencies stay a code list. It skips when node is absent.
 // The uitest tag keeps this off the default go test, which does not need node.
 func TestMoneyDisplay(t *testing.T) {
 	node, err := exec.LookPath("node")
@@ -311,7 +357,7 @@ const NA='—';
 var FACTS={ready:true,clicks:[{group_id:'g1',offer_id:'o1',network_id:'n1',stream:'s',hits:2,uniq:1,cost_cents:150,cost_cur:'USD'},{group_id:'g2',offer_id:'o1',network_id:'n1',stream:'s',hits:1,uniq:1,cost_cents:0,cost_cur:''}],status:[]};
 var SPEND=[];
 rangeBounds=function(){return {from:new Date('2020-01-01T00:00:00Z'),to:new Date('2030-01-01T00:00:00Z')}};
-eq(metricROI(12.34, {}, true), '—', 'revenue and no spend');
+eq(metricROI(12.34, {}, true), '0.00%', 'revenue and no spend');
 eq(metricROI(12.34, {EUR:100, USD:100}, true), 'EUR · USD', 'two currencies list codes');
 eq(moneyOf(12.34, {EUR:100, USD:100}, true, 2), '12.34', 'multi revenue has no currency mark');
 eq(profitOf(12.34, {EUR:100, USD:100}, true), '12.34 · 1.0000 EUR · 1.0000 $', 'multi profit lists spend');

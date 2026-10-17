@@ -1,8 +1,11 @@
 package config
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"math"
 	"net/url"
+	"sort"
 	"strconv"
 	"strings"
 )
@@ -117,7 +120,10 @@ type TrafficSource struct {
 }
 
 // OutboundPostback is a server-to-server template fired after an inbound conversion.
+// ID and Name are empty on campaign templates saved before the shared catalog.
 type OutboundPostback struct {
+	ID       string   `json:"id,omitempty"`
+	Name     string   `json:"name,omitempty"`
 	URL      string   `json:"url"`
 	Method   string   `json:"method"`
 	Statuses []string `json:"statuses,omitempty"`
@@ -135,6 +141,37 @@ func (p OutboundPostback) MatchesStatus(status string) bool {
 		}
 	}
 	return false
+}
+
+// Signature returns the canonical text of a template.
+// p is the receiver. Method case, status case and the order of statuses do not change the result.
+// An empty method is GET. The URL and each status are trimmed. Statuses are lowercased. Blank statuses are dropped.
+// The return is method, URL and the sorted statuses, separated by newlines; statuses are comma-separated.
+// There is no error.
+func (p OutboundPostback) Signature() string {
+	method := strings.ToUpper(strings.TrimSpace(p.Method))
+	if method == "" {
+		method = "GET"
+	}
+	stats := make([]string, 0, len(p.Statuses))
+	for _, s := range p.Statuses {
+		s = strings.ToLower(strings.TrimSpace(s))
+		if s == "" {
+			continue
+		}
+		stats = append(stats, s)
+	}
+	sort.Strings(stats)
+	return method + "\n" + strings.TrimSpace(p.URL) + "\n" + strings.Join(stats, ",")
+}
+
+// PostbackID returns the catalog id for a template signature.
+// sig is the text from OutboundPostback.Signature. Any other string is hashed as given.
+// The return is "pb-" plus the first 10 hex characters of SHA-1(sig).
+// There is no error.
+func PostbackID(sig string) string {
+	sum := sha1.Sum([]byte(sig))
+	return "pb-" + hex.EncodeToString(sum[:])[:10]
 }
 
 // ApplySource reads keyword and sub_id_1..15 from the query.

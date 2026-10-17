@@ -73,6 +73,7 @@ func main() {
 		log.Info("groups file", "path", f)
 		dir := filepath.Dir(f)
 		cfg.Offers = admin.NewJSONStore[config.Offer](getenv("KUZTDS_OFFERS_FILE", filepath.Join(dir, "offers.json")))
+		cfg.S2S = admin.NewJSONStore[config.OutboundPostback](getenv("KUZTDS_S2S_FILE", filepath.Join(dir, "s2s.json")))
 		cfg.Landings = admin.NewJSONStore[config.Landing](getenv("KUZTDS_LANDINGS_FILE", filepath.Join(dir, "landings.json")))
 		cfg.Sources = admin.NewJSONStore[config.TrafficSource](getenv("KUZTDS_SOURCES_FILE", filepath.Join(dir, "sources.json")))
 		cfg.Networks = admin.NewJSONStore[config.AffiliateNetwork](getenv("KUZTDS_NETWORKS_FILE", filepath.Join(dir, "networks.json")))

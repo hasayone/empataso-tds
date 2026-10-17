@@ -93,6 +93,8 @@ type Group struct {
 	CurrencyToken string `json:"currency_token,omitempty"`
 	// Postbacks are outbound URLs fired after an inbound conversion.
 	Postbacks []OutboundPostback `json:"postbacks,omitempty"`
+	// id шаблонов из общего каталога s2s.json.
+	PostbackIDs []string `json:"postback_ids,omitempty"`
 
 	Streams []Stream `json:"streams"`
 }
