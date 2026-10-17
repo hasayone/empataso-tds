@@ -6,38 +6,11 @@ import (
 	"strings"
 )
 
-// proxySkip — текст пропуска фильтра proxy. Детектора в kuztds нет, поток из-за этого не выключается.
-const proxySkip = "фильтр proxy не переносится: в kuztds нет детектора прокси"
-
-// ipVersionSkip сообщает, что фильтр версии IP пропущен и поток из-за него не выключается.
-//
-// Параметры: name — имя фильтра, уже в нижнем регистре.
-// Результат: текст строки отчёта.
-// Ошибки: нет.
-func ipVersionSkip(name string) string {
-	return "фильтр " + name + " не переносится: в kuztds нет фильтра версии IP"
-}
-
-// ipVersionFilter отличает фильтр версии IP от фильтра адреса.
-//
-// Параметры: name — имя фильтра в нижнем регистре.
-// Результат: true для ipv4, ipv6, ipv_4, ipv_6 и ip_version.
-// Ошибки: нет.
-func ipVersionFilter(name string) bool {
-	switch name {
-	case "ipv4", "ipv6", "ipv_4", "ipv_6", "ip_version":
-		return true
-	default:
-		return false
-	}
-}
-
 // mapFilters переводит фильтры потока в правила kuztds.
 //
 // Параметры: filters — фильтры Keitaro; lists — файлы списков IP, которые собрал этот прогон.
 // Результат: правила, true если поток можно оставить включённым, причина выключения и строки отчёта.
 // Ошибки: нет. Неизвестное имя пропускается. Поток выключается только когда ни один фильтр не перенёсся.
-// Фильтры proxy и версии IP пропускаются и в этот подсчёт не входят.
 func mapFilters(filters []KFilter, lists *listBag) (Rules, bool, string, []Loss) {
 	var rules Rules
 	var losses []Loss
@@ -45,14 +18,6 @@ func mapFilters(filters []KFilter, lists *listBag) (Rules, bool, string, []Loss)
 	for _, f := range filters {
 		name := strings.ToLower(strings.TrimSpace(f.Name))
 		if name == "" {
-			continue
-		}
-		if name == "proxy" {
-			losses = append(losses, Loss{Kind: "skipped", Detail: proxySkip})
-			continue
-		}
-		if ipVersionFilter(name) {
-			losses = append(losses, Loss{Kind: "skipped", Detail: ipVersionSkip(name)})
 			continue
 		}
 		named++
@@ -115,7 +80,11 @@ func oneFilter(f KFilter, lists *listBag) (Rules, bool, bool, string) {
 	case "device_model":
 		return listRule(name, f, func(v ListFilter) Rules { return Rules{Brand: v} })
 	case "ipv4", "ipv6", "ipv_4", "ipv_6", "ip_version":
-		return Rules{}, false, false, ipVersionSkip(name)
+		part, ok := ipvFilter(f)
+		if !ok {
+			return Rules{}, false, false, "фильтр " + name + " не разобран"
+		}
+		return part, true, false, ""
 	case "day_of_week", "weekday", "schedule", "timetable":
 		return scheduleFilter(name, f)
 	case "unique", "uniqueness":
@@ -129,7 +98,7 @@ func oneFilter(f KFilter, lists *listBag) (Rules, bool, bool, string) {
 	case "asn":
 		return asnFilter(name, f)
 	case "proxy":
-		return Rules{}, false, false, proxySkip
+		return triFilter(f, "proxy", func(n int) Rules { return Rules{Proxy: n} })
 	case "":
 		return Rules{}, true, false, ""
 	default:

@@ -55,42 +55,65 @@ func (d *engineDeps) botProfile() config.Bots {
 	return profile
 }
 
-// detectBot — bot detection based on the toggles of the selected
-// stream. Returns the bot label or "" (not a bot).
-func detectBot(lists *ipindex.Set, sigs *detect.Signatures, dataDir string, ip netip.Addr, ua, ref, lang string, b config.Bots) string {
+// botInput is the visitor facts detectBot classifies.
+// IP, UA, Ref and Lang are the address, user agent, referer and language.
+// Proxy is true when the IP is in the ip_proxy list or matches an organization template.
+// Device is detect.Phone, detect.Tablet or detect.Computer; an empty or unknown value is not a bot.
+type botInput struct {
+	IP     netip.Addr
+	UA     string
+	Ref    string
+	Lang   string
+	Proxy  bool
+	Device string
+}
+
+// detectBot classifies a visitor from the toggles in b.
+// lists is the IP index, sigs holds UA and referer signatures, and dataDir
+// is the directory saveBotIP appends crawler addresses to. in carries the
+// visitor address, user agent, referer, language, proxy flag and device.
+// It returns the bot label, or detect.BotNone when no enabled check matches.
+// It does not return an error.
+func detectBot(lists *ipindex.Set, sigs *detect.Signatures, dataDir string, in botInput, b config.Bots) string {
 	bot := detect.BotNone
 	if b.CheckUA {
-		bot = detect.BotByUA(ua, sigs.UA())
+		bot = detect.BotByUA(in.UA, sigs.UA())
 		if bot == detect.BotNone {
-			bot = detect.BotByReferer(ref, sigs.Ref())
+			bot = detect.BotByReferer(in.Ref, sigs.Ref())
 		}
 	}
-	if bot == detect.BotNone && b.IPv6 && ip.IsValid() && !ip.Is4() {
+	if bot == detect.BotNone && b.Proxy && in.Proxy {
+		bot = "proxy"
+	}
+	if bot == detect.BotNone && b.NonMobile && in.Device == detect.Computer {
+		bot = "device"
+	}
+	if bot == detect.BotNone && b.IPv6 && in.IP.IsValid() && !in.IP.Is4() {
 		bot = "ipv6"
 	}
-	if bot == detect.BotNone && b.EmptyUA && (ua == "" || ua == " ") {
+	if bot == detect.BotNone && b.EmptyUA && (in.UA == "" || in.UA == " ") {
 		bot = "empty_ua"
 	}
-	if bot == detect.BotNone && b.EmptyRef && (ref == "" || ref == "-") {
+	if bot == detect.BotNone && b.EmptyRef && (in.Ref == "" || in.Ref == "-") {
 		bot = "empty_ref"
 	}
-	if bot == detect.BotNone && b.EmptyLang && (lang == "" || lang == "-") {
+	if bot == detect.BotNone && b.EmptyLang && (in.Lang == "" || in.Lang == "-") {
 		bot = "empty_lang"
 	}
-	if bot == detect.BotNone && b.PTR && ip.IsValid() {
+	if bot == detect.BotNone && b.PTR && in.IP.IsValid() {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		if names, err := ptrResolver.LookupAddr(ctx, ip.String()); err == nil && len(names) > 0 {
+		if names, err := ptrResolver.LookupAddr(ctx, in.IP.String()); err == nil && len(names) > 0 {
 			bot = detect.BotByPTR(names[0])
 		}
 		cancel()
 	}
-	if bot == detect.BotNone && b.ListUA && detect.InUABlacklist(ua, sigs.UABlacklist()) {
+	if bot == detect.BotNone && b.ListUA && detect.InUABlacklist(in.UA, sigs.UABlacklist()) {
 		bot = detect.BotUABlacklist
 	}
 	// save_ip: append the IP of a matched search engine to its list (if not already there).
 	if bot != detect.BotNone && b.SaveIP {
-		if _, known := lists.Lookup("ip_"+bot, ip); !known {
-			saveBotIP(dataDir, bot, ip)
+		if _, known := lists.Lookup("ip_"+bot, in.IP); !known {
+			saveBotIP(dataDir, bot, in.IP)
 		}
 	}
 	// Detection via search-engine IP lists.
@@ -103,7 +126,7 @@ func detectBot(lists *ipindex.Set, sigs *detect.Signatures, dataDir string, ip n
 			{b.IPMail, "mail"}, {b.IPYahoo, "yahoo"}, {b.IPYandex, "yandex"}, {b.IPOthers, "others"},
 		} {
 			if c.on {
-				if _, ok := lists.Lookup("ip_"+c.name, ip); ok {
+				if _, ok := lists.Lookup("ip_"+c.name, in.IP); ok {
 					bot = c.name
 					break
 				}

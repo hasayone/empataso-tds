@@ -233,6 +233,94 @@ func botFilter(f KFilter) (Rules, bool, bool, string) {
 	return triFilter(f, "bot", func(v int) Rules { return Rules{Bot: v} })
 }
 
+// ipvFilter maps a Keitaro IP-version filter onto Rules.IPVersion.
+//
+// ipv4 and ipv_4 are version 4. ipv6 and ipv_6 are version 6.
+// ip_version takes the version from the payload: "4", "ipv4", "6" or "ipv6",
+// compared without case. The payload may be a string, a number, or a one-element list.
+// Accept of version 4 yields 1 (IPv4 only) and accept of version 6 yields 2 (IPv6 only).
+// Reject swaps those two codes.
+//
+// Parameters: f — the Keitaro filter.
+// Returns: rules with IPVersion set, and true when the version is known.
+// Errors: none. An unknown version returns false and empty rules.
+func ipvFilter(f KFilter) (Rules, bool) {
+	ver, known := ipvNamed(strings.ToLower(strings.TrimSpace(f.Name)))
+	if !known {
+		ver, known = ipvPayload(f.Payload)
+	}
+	if !known {
+		return Rules{}, false
+	}
+	code := 1
+	if ver == 6 {
+		code = 2
+	}
+	if isReject(f.Mode) {
+		if code == 1 {
+			code = 2
+		} else {
+			code = 1
+		}
+	}
+	return Rules{IPVersion: code}, true
+}
+
+// ipvNamed reads the IP version from a filter name.
+//
+// Parameters: name — filter name, already lower-case and trimmed.
+// Returns: 4 or 6, and true for ipv4, ipv_4, ipv6, and ipv_6.
+// Errors: none. ip_version and every other name return false.
+func ipvNamed(name string) (int, bool) {
+	switch name {
+	case "ipv4", "ipv_4":
+		return 4, true
+	case "ipv6", "ipv_6":
+		return 6, true
+	default:
+		return 0, false
+	}
+}
+
+// ipvPayload reads one IP version from a filter payload.
+//
+// Parameters: raw — JSON string, number, or a one-element list.
+// Returns: 4 or 6, and true when that single token is a known version.
+// Errors: none. Any other shape or token returns false.
+func ipvPayload(raw json.RawMessage) (int, bool) {
+	values, _, _, ok := readPayload(raw)
+	if ok {
+		if len(values) != 1 {
+			return 0, false
+		}
+		return ipvToken(values[0])
+	}
+	var n float64
+	if json.Unmarshal(raw, &n) != nil || (n != 4 && n != 6) {
+		return 0, false
+	}
+	if n == 4 {
+		return 4, true
+	}
+	return 6, true
+}
+
+// ipvToken classifies one version token.
+//
+// Parameters: raw — payload text, any case.
+// Returns: 4 or 6, and true for 4, ipv4, ipv_4, 6, ipv6, and ipv_6.
+// Errors: none.
+func ipvToken(raw string) (int, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "4", "ipv4", "ipv_4":
+		return 4, true
+	case "6", "ipv6", "ipv_6":
+		return 6, true
+	default:
+		return 0, false
+	}
+}
+
 // triFilter читает yes/no и режим accept/reject.
 // accept+yes и reject+no дают 1. accept+no и reject+yes дают 2.
 //
@@ -448,6 +536,12 @@ func mergeRules(base, add Rules) Rules {
 	}
 	if add.Bot != 0 {
 		base.Bot = add.Bot
+	}
+	if add.Proxy != 0 {
+		base.Proxy = add.Proxy
+	}
+	if add.IPVersion != 0 {
+		base.IPVersion = add.IPVersion
 	}
 	return base
 }

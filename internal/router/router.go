@@ -41,6 +41,7 @@ type Visitor struct {
 	Brand      string // Apple, Samsung, ...
 	Unique     bool
 	Bot        bool // true when the installation bot profile marked this visitor
+	Proxy      bool // true when the address or its organization looks like a proxy, VPN, or hosting network
 	IP         netip.Addr
 
 	ASN      uint32     // autonomous system number, 0 = unknown
@@ -304,6 +305,31 @@ func whyAnd(s *config.Stream, v Visitor, deps Deps) string {
 	case config.FlagB: // require absence of a referer
 		if !emptyish(v.Referer) {
 			return "has_referer"
+		}
+	}
+
+	// Proxy. FlagA keeps proxies, FlagB keeps everyone else.
+	switch r.Proxy {
+	case config.FlagA:
+		if !v.Proxy {
+			return "proxy"
+		}
+	case config.FlagB:
+		if v.Proxy {
+			return "proxy"
+		}
+	}
+
+	// IP version. FlagA keeps IPv4, FlagB keeps IPv6.
+	// An invalid address fails both. IPv4-mapped IPv6 counts as IPv4.
+	switch r.IPVersion {
+	case config.FlagA:
+		if !(v.IP.IsValid() && v.IP.Unmap().Is4()) {
+			return "ip_version"
+		}
+	case config.FlagB:
+		if !(v.IP.IsValid() && v.IP.Unmap().Is6()) {
+			return "ip_version"
 		}
 	}
 
@@ -582,6 +608,8 @@ func whyOr(s *config.Stream, v Visitor, deps Deps) string {
 		{name: "bot", on: r.Bot == config.FlagA || r.Bot == config.FlagB, rule: config.Rules{Bot: r.Bot}},
 		{name: "yabrowser", on: r.YaBrowser == config.FlagA || r.YaBrowser == config.FlagB, rule: config.Rules{YaBrowser: r.YaBrowser}},
 		{name: "has_referer", on: r.HasReferer == config.FlagA || r.HasReferer == config.FlagB, rule: config.Rules{HasReferer: r.HasReferer}},
+		{name: "proxy", on: r.Proxy == config.FlagA || r.Proxy == config.FlagB, rule: config.Rules{Proxy: r.Proxy}},
+		{name: "ip_version", on: r.IPVersion == config.FlagA || r.IPVersion == config.FlagB, rule: config.Rules{IPVersion: r.IPVersion}},
 		{name: "ip_list", on: r.IPList.Flag != config.FlagOff && r.IPList.File != "", rule: config.Rules{IPList: r.IPList}},
 		{name: "asn", on: listOn(r.ASN), rule: config.Rules{ASN: r.ASN}},
 		{name: "org", on: listOn(r.Org), rule: config.Rules{Org: r.Org}},

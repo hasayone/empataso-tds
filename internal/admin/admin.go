@@ -353,6 +353,8 @@ func (s *Server) Handler() http.Handler {
 
 	s.handle(mux, "GET /api/groups", http.HandlerFunc(s.handleGroupsGet))
 	s.handle(mux, "PUT /api/groups", http.HandlerFunc(s.handleGroupsSave))
+	s.handle(mux, "PUT /api/groups/{id}", http.HandlerFunc(s.handleGroupPut))
+	s.handle(mux, "DELETE /api/groups/{id}", http.HandlerFunc(s.handleGroupDelete))
 	registerOffers(s, mux)
 	registerLandings(s, mux)
 	registerLandingFiles(s, mux)
@@ -396,7 +398,7 @@ func (s *Server) Handler() http.Handler {
 	// Embedded web interface (SPA).
 	mux.Handle("GET /assets/", serveAssets())
 	mux.HandleFunc("GET /{$}", serveUI)
-	return securityHeaders(mux)
+	return gzipMiddleware(securityHeaders(mux))
 }
 
 func (s *Server) handleNotices(w http.ResponseWriter, r *http.Request) {

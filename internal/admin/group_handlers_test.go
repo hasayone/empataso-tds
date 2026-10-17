@@ -1,0 +1,307 @@
+package admin
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/kuztds/internal/security"
+)
+
+func groupAPIServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	hash, err := security.HashPassword("p@ss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{
+		AdminUser:    "admin",
+		PasswordHash: hash,
+		Sessions:     security.NewMemoryStore(),
+		Stats:        fakeStats{},
+		Groups:       &memGroups{},
+		Limiter:      allowAll{},
+		SessionTTL:   time.Hour,
+		CookieSecure: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func fetchGroups(t *testing.T, c *http.Client, base string) []config.Group {
+	t.Helper()
+	resp, err := c.Get(base + "/api/groups")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		t.Fatalf("GET groups %d %s", resp.StatusCode, b)
+	}
+	var got []config.Group
+	if err := json.NewDecoder(resp.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func groupIDs(gs []config.Group) []string {
+	ids := make([]string, len(gs))
+	for i, g := range gs {
+		ids[i] = g.ID
+	}
+	return ids
+}
+
+func groupByID(gs []config.Group, id string) (config.Group, bool) {
+	for _, g := range gs {
+		if g.ID == id {
+			return g, true
+		}
+	}
+	return config.Group{}, false
+}
+
+func TestGroupPutUpsert(t *testing.T) {
+	srv := groupAPIServer(t)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+
+	resp := csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups", csrf, []config.Group{
+		{ID: "a", Name: "A"},
+		{ID: "b", Name: "B"},
+		{ID: "c", Name: "C"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save list %d", resp.StatusCode)
+	}
+
+	resp = csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups/b", csrf, config.Group{ID: "b", Name: "B2"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put b %d", resp.StatusCode)
+	}
+	got := fetchGroups(t, c, srv.URL)
+	if !slices.Equal(groupIDs(got), []string{"a", "b", "c"}) {
+		t.Fatalf("ids after put b: %v", groupIDs(got))
+	}
+	b, ok := groupByID(got, "b")
+	if !ok || b.Name != "B2" {
+		t.Fatalf("b after put: %+v", b)
+	}
+
+	resp = csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups/d", csrf, config.Group{Name: "D"})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put d %d", resp.StatusCode)
+	}
+	got = fetchGroups(t, c, srv.URL)
+	if !slices.Equal(groupIDs(got), []string{"a", "b", "c", "d"}) {
+		t.Fatalf("ids after put d: %v", groupIDs(got))
+	}
+	d, ok := groupByID(got, "d")
+	if !ok || d.Name != "D" {
+		t.Fatalf("d after put: %+v", d)
+	}
+
+	resp = csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups/b", csrf, config.Group{ID: "nope", Name: "X"})
+	defer resp.Body.Close()
+	var er struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusBadRequest || er.Error != "id mismatch" {
+		t.Fatalf("mismatch %d %q", resp.StatusCode, er.Error)
+	}
+	got = fetchGroups(t, c, srv.URL)
+	if !slices.Equal(groupIDs(got), []string{"a", "b", "c", "d"}) {
+		t.Fatalf("ids after mismatch: %v", groupIDs(got))
+	}
+}
+
+func TestGroupDelete(t *testing.T) {
+	srv := groupAPIServer(t)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+
+	resp := csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups", csrf, []config.Group{
+		{ID: "a", Name: "A"},
+		{ID: "b", Name: "B"},
+		{ID: "c", Name: "C"},
+		{ID: "d", Name: "D"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save list %d", resp.StatusCode)
+	}
+
+	resp = csrfDo(t, c, http.MethodDelete, srv.URL+"/api/groups/b", csrf, nil)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete b %d", resp.StatusCode)
+	}
+	got := fetchGroups(t, c, srv.URL)
+	if !slices.Equal(groupIDs(got), []string{"a", "c", "d"}) {
+		t.Fatalf("ids after delete: %v", groupIDs(got))
+	}
+
+	resp = csrfDo(t, c, http.MethodDelete, srv.URL+"/api/groups/missing", csrf, nil)
+	defer resp.Body.Close()
+	var er struct {
+		Error string `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusNotFound || er.Error != "not found" {
+		t.Fatalf("missing delete %d %q", resp.StatusCode, er.Error)
+	}
+	got = fetchGroups(t, c, srv.URL)
+	if !slices.Equal(groupIDs(got), []string{"a", "c", "d"}) {
+		t.Fatalf("ids after missing delete: %v", groupIDs(got))
+	}
+}
+
+func TestGroupPutConcurrent(t *testing.T) {
+	srv := groupAPIServer(t)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+
+	resp := csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups", csrf, []config.Group{
+		{ID: "a", Name: "A"},
+		{ID: "b", Name: "B"},
+		{ID: "c", Name: "C"},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save list %d", resp.StatusCode)
+	}
+
+	var wg sync.WaitGroup
+	errc := make(chan error, 2)
+	put := func(id, name string) {
+		defer wg.Done()
+		code, body, err := doJSON(c, http.MethodPut, srv.URL+"/api/groups/"+id, csrf, config.Group{ID: id, Name: name})
+		if err != nil {
+			errc <- err
+			return
+		}
+		if code != http.StatusOK {
+			errc <- fmt.Errorf("put %s: %d %s", id, code, body)
+			return
+		}
+		errc <- nil
+	}
+	wg.Add(2)
+	go put("a", "A2")
+	go put("c", "C2")
+	wg.Wait()
+	close(errc)
+	for err := range errc {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got := fetchGroups(t, c, srv.URL)
+	if !slices.Equal(groupIDs(got), []string{"a", "b", "c"}) {
+		t.Fatalf("ids after concurrent put: %v", groupIDs(got))
+	}
+	a, _ := groupByID(got, "a")
+	b, _ := groupByID(got, "b")
+	gc, _ := groupByID(got, "c")
+	if a.Name != "A2" || b.Name != "B" || gc.Name != "C2" {
+		t.Fatalf("names a=%q b=%q c=%q", a.Name, b.Name, gc.Name)
+	}
+}
+
+func doJSON(c *http.Client, method, url, csrf string, body any) (int, []byte, error) {
+	var rdr io.Reader
+	if body != nil {
+		b, err := json.Marshal(body)
+		if err != nil {
+			return 0, nil, err
+		}
+		rdr = bytes.NewReader(b)
+	}
+	req, err := http.NewRequest(method, url, rdr)
+	if err != nil {
+		return 0, nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if csrf != "" {
+		req.Header.Set("X-CSRF-Token", csrf)
+	}
+	resp, err := c.Do(req)
+	if err != nil {
+		return 0, nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	return resp.StatusCode, raw, err
+}
+
+func TestReplaceGroupMergeCreated(t *testing.T) {
+	stored := []config.Group{
+		{ID: "a", Name: "A", CreatedBy: "u1"},
+		{ID: "b", Name: "B", CreatedBy: "u2"},
+		{ID: "c", Name: "C", CreatedBy: "u1"},
+	}
+	v := viewer{uid: "u1", grants: map[string]security.Grant{resCampaigns: {Mode: security.ModeCreated}}}
+	own := stored[0]
+	own.Name = "A2"
+	got, code, msg := mergeGroups(v, stored, replaceGroup(stored, own))
+	if code != 0 || msg != "" {
+		t.Fatalf("own replace: %d %s", code, msg)
+	}
+	if len(got) != 3 {
+		t.Fatalf("len %d", len(got))
+	}
+	if got[0].ID != "a" || got[0].Name != "A2" || got[0].CreatedBy != "u1" {
+		t.Fatalf("own %+v", got[0])
+	}
+	if got[1].ID != "b" || got[1].Name != "B" || got[1].CreatedBy != "u2" {
+		t.Fatalf("foreign %+v", got[1])
+	}
+	if got[2].ID != "c" || got[2].Name != "C" || got[2].CreatedBy != "u1" {
+		t.Fatalf("other own %+v", got[2])
+	}
+	if stored[0].Name != "A" || stored[1].Name != "B" || stored[2].Name != "C" {
+		t.Fatal("stored mutated")
+	}
+
+	foreign := stored[1]
+	foreign.Name = "hack"
+	_, code, msg = mergeGroups(v, stored, replaceGroup(stored, foreign))
+	if code != http.StatusForbidden || msg != "foreign campaign: b" {
+		t.Fatalf("foreign replace: %d %s", code, msg)
+	}
+
+	full, ok := dropGroup(stored, "a")
+	if !ok || len(full) != 2 || full[0].ID != "b" || full[1].ID != "c" {
+		t.Fatalf("drop a: %v %+v", ok, full)
+	}
+	full[0].Name = "mut"
+	if stored[0].Name != "A" || stored[1].Name != "B" {
+		t.Fatal("drop aliases stored")
+	}
+	if _, ok := dropGroup(stored, "missing"); ok {
+		t.Fatal("missing drop")
+	}
+}

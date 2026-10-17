@@ -81,6 +81,7 @@ type visitorInfo struct {
 	ASN      uint32 `json:"asn"`
 	Org      string `json:"org"`
 	Operator string `json:"operator"`
+	Proxy    bool   `json:"proxy"`
 	Device   string `json:"device,omitempty"`
 	OS       string `json:"os,omitempty"`
 	Browser  string `json:"browser,omitempty"`
@@ -96,10 +97,35 @@ func (s *Server) resolve(ip netip.Addr, lists *dirLists) (geo.Geo, visitorInfo) 
 	if label, ok := lists.Lookup("wap", ip); ok && label != "" {
 		op = label
 	}
+	_, proxy := lists.Lookup("ip_proxy", ip)
+	if !proxy {
+		proxy = detect.ProxyByOrg(g.Org, s.proxyOrgPatterns())
+	}
 	return g, visitorInfo{
 		IP: ip.String(), Country: g.Country, City: g.City, Region: g.Region,
-		Timezone: g.Timezone, UTC: g.UTCOffset(time.Now()), ASN: g.ASN, Org: g.Org, Operator: op,
+		Timezone: g.Timezone, UTC: g.UTCOffset(time.Now()), ASN: g.ASN, Org: g.Org,
+		Operator: op, Proxy: proxy,
 	}
+}
+
+// proxyOrgPatterns reads hosting and VPN name substrings for lookup and simulate.
+// The file is DataDir/proxy_org.dat. Blank lines and lines starting with # are
+// skipped. A missing or unreadable file returns detect.DefaultProxyOrg.
+// The result is the pattern list for detect.ProxyByOrg. It does not report an error.
+func (s *Server) proxyOrgPatterns() []string {
+	b, err := os.ReadFile(filepath.Join(s.cfg.DataDir, "proxy_org.dat"))
+	if err != nil {
+		return detect.DefaultProxyOrg()
+	}
+	var out []string
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
 }
 
 // handleLookup — what the engine would learn from an IP address: geo, network,
@@ -233,7 +259,7 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 		UA: req.Visitor.UserAgent, Referer: ref, Domain: domain, Key: req.Visitor.Key,
 		Device: info.Device, Operator: vi.Operator,
 		OS: info.OS, OSVersion: info.OSVersion, Browser: info.Browser, BrowserVer: info.BrowserVer, Brand: info.Brand,
-		Unique: !req.Visitor.Repeat, IP: ip,
+		Unique: !req.Visitor.Repeat, IP: ip, Proxy: vi.Proxy,
 		ASN: g.ASN, Org: g.Org, Timezone: g.Timezone, TZOffset: vi.UTC, Query: q,
 	}
 	deps := router.Deps{IP: lists} // no Limiter: asking must not spend a limit

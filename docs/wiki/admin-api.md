@@ -78,6 +78,26 @@
 
 `GET /api/brand` — без сессии. Ответ `{ "name", "logo" }`, заголовок `Cache-Control: no-store`. Столбцы и панели не отдаются. Нужен экрану входа и шапке до авторизации.
 
+## Кампании (`/api/groups`)
+
+`GET /api/groups` по-прежнему отдаёт массив кампаний. `PUT /api/groups` по-прежнему принимает массив целиком и отвечает `200` `{"status":"saved"}`.
+
+`PUT /api/groups/{id}` записывает одну кампанию: строка с этим id заменяется, если её не было — добавляется. Тело — один объект, не больше 8 МБ. Пустой `id` в теле берётся из пути. Непустой `id`, отличный от пути, отвечает `400` `id mismatch`. Успех — `200` `{"status":"saved"}`.
+
+`DELETE /api/groups/{id}` снимает кампанию. Нет такого id — `404` `not found`. Успех — `200` `{"status":"deleted"}`.
+
+Запись и удаление требуют раздел `flows`. Нет хранилища кампаний — `503`.
+
+Ответы админки сжимаются gzip, если в `Accept-Encoding` есть `gzip` и это не переход протокола (`Upgrade` или `Connection: upgrade`). В ответе тогда `Content-Encoding: gzip`, добавляется `Vary: Accept-Encoding`, `Content-Length` снимается. Ответ без тела уходит без `Content-Encoding`.
+
+`GET /api/lookup?ip=` (раздел `tools`) отдаёт объект `visitor`. В нём поле `proxy`: адрес есть в `ip_proxy` либо организация совпала с `proxy_org`. Негодный адрес — `400`.
+
+`POST /api/simulate` (тот же раздел) в ответе тоже кладёт `proxy` в `visitor`. Правила потока, включая `proxy` и `ip_version`, проверяются. Детекция ботов не запускается.
+
+`groups.json` пишется одним компактным JSON, без отступов. Пустые необязательные поля не пишутся. Поле `status` у кампании и у потока пишется всегда.
+
+В правилах потока `proxy` и `ip_version` устроены как `unique` и `bot`: `0` — выключено. У `proxy` значение `1` — только прокси, `2` — только не прокси. У `ip_version` значение `1` — только IPv4, `2` — только IPv6 ([правила потока](router-rules.md)). У потока поле `filter_or`: истина значит «любое из этих условий». В блоке `bots` поля `ch_proxy` и `ch_non_mobile`; оба по умолчанию выключены и в файл не пишутся, пока ложь. Смысл проверок — [защита от ботов](bot-protection.md).
+
 ## Режим `?api=`
 
 Движок принимает параметр `api`: JSON в обычном или URL-safe base64. Внутри поле `key_api`. Его принимает ключ с доступом `engine` или значение `KUZTDS_API_KEY`. Неверный ключ — `403`. Остальные поля: `id` (кампания), `ip`, `referer`, `useragent`, `se`, `lang`, `uniq` (`yes` — уникальный визит), `key`, `domain`, `page`, `cf_country`, `pars` (массив строк). Запрос идёт на домен ссылок движка, не на адрес админки. Заголовок `X-Requested-With` в этом режиме в клик не пишется.
@@ -100,7 +120,7 @@ curl -H "Api-Key: kz_..." "http://127.0.0.1:8090/api/stats/facts?from=2026-10-01
 curl -H "Api-Key: kz_..." "http://127.0.0.1:8090/api/logs/export?from=2026-10-01T00:00:00Z&to=2026-10-16T00:00:00Z&f=country:eq:PL"
 ```
 
-Кратко по адресам. `GET /api/groups` — список кампаний, `PUT /api/groups` — массив целиком. Каталоги: список `GET` и `POST`, запись `GET`, `PUT`, `DELETE` на `/{id}`. Офферы `/api/offers`, сети `/api/affiliate-networks`, лендинги `/api/landings`, источники `/api/traffic-sources`. Домены: `GET` и `POST /api/domains`, запись на `/api/domains/{id}`, проверка `POST /api/domains/{id}/check` (подробно — в [офферах и лендингах](offers-landings.md)). Журналы и срез — в примерах выше. Фильтры `f=` описаны в [фильтрах и столбцах журналов](log-filters.md). `GET /api/stats/summary`, `GET /api/stats/timeseries`, `GET /api/stats/performance` и `GET /api/stats/facts` принимают `from`, `to` и повторяемый `f=` по кликам. У ряда timeseries параметр `step` в секундах и не меньше 3600. `GET /api/spend` фильтр `f=` не принимает.
+Кратко по адресам. Кампании — в разделе выше: `GET /api/groups` массивом, `PUT /api/groups` массивом, одна запись — `PUT` и `DELETE /api/groups/{id}`. Каталоги: список `GET` и `POST`, запись `GET`, `PUT`, `DELETE` на `/{id}`. Офферы `/api/offers`, сети `/api/affiliate-networks`, лендинги `/api/landings`, источники `/api/traffic-sources`. Домены: `GET` и `POST /api/domains`, запись на `/api/domains/{id}`, проверка `POST /api/domains/{id}/check` (подробно — в [офферах и лендингах](offers-landings.md)). Журналы и срез — в примерах выше. Фильтры `f=` описаны в [фильтрах и столбцах журналов](log-filters.md). `GET /api/stats/summary`, `GET /api/stats/timeseries`, `GET /api/stats/performance` и `GET /api/stats/facts` принимают `from`, `to` и повторяемый `f=` по кликам. У ряда timeseries параметр `step` в секундах и не меньше 3600. `GET /api/spend` фильтр `f=` не принимает.
 
 Создание ключа доступно только сессии браузера:
 

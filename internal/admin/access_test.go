@@ -93,7 +93,7 @@ var expect401Routes = map[string]bool{
 	"POST /api/password": true,
 }
 
-// catalogCreateRoutes are POST catalog endpoints that require grant create rights.
+// catalogCreateRoutes lists routes that require grant create rights, not only POST.
 // A user with every section but no ModeFull/ModeCreated grant gets 403 here.
 var catalogCreateRoutes = map[string]bool{
 	"POST /api/offers":             true,
@@ -101,6 +101,7 @@ var catalogCreateRoutes = map[string]bool{
 	"POST /api/traffic-sources":    true,
 	"POST /api/affiliate-networks": true,
 	"POST /api/domains":            true,
+	"PUT /api/groups/{id}":         true,
 }
 
 // skipAllowed lists routes skipped for roles that would otherwise pass the guard.

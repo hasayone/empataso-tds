@@ -1165,3 +1165,20 @@ func TestProfileTabsSections(t *testing.T) {
 	must(t, html, `a.hidden=!name&&!logo`, "brand hidden without name and logo")
 	mustNot(t, html, `CustomTDS`, "CustomTDS branding")
 }
+
+// TestStreamProxyAndOrConditions checks the stream editor offers proxy and IP
+// version, an any-of switch, and collects every tri flag from COND.
+func TestStreamProxyAndOrConditions(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, `k:'proxy'`, "proxy condition")
+	must(t, html, `k:'ip_version'`, "ip version condition")
+	must(t, html, `id="s_filter_or"`, "and/or switch")
+	must(t, html, `'any of these holds'`, "any-of label")
+	body := spaFunctionLine(html, "collectStream")
+	if body == "" {
+		t.Fatal("collectStream not found")
+	}
+	mustNot(t, body, `['unique','yabrowser','has_referer','bot']`, "tri keys are not a fixed list")
+	must(t, html, `'ch_proxy'`, "proxy bot check")
+	must(t, html, `'ch_non_mobile'`, "non-mobile bot check")
+}

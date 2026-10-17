@@ -142,6 +142,64 @@ func TestSelect_BotFlag(t *testing.T) {
 	}
 }
 
+func TestSelect_ProxyFlag(t *testing.T) {
+	v := baseVisitor()
+	only := &config.Group{Streams: []config.Stream{stream("s", config.Rules{Proxy: config.FlagA})}}
+	if _, ok := Select(only, v, Deps{}); ok {
+		t.Error("proxies only must cut a direct visitor")
+	}
+	v.Proxy = true
+	if _, ok := Select(only, v, Deps{}); !ok {
+		t.Error("proxies only must keep a proxy")
+	}
+	humans := &config.Group{Streams: []config.Stream{stream("s", config.Rules{Proxy: config.FlagB})}}
+	if _, ok := Select(humans, v, Deps{}); ok {
+		t.Error("non-proxies only must cut a proxy")
+	}
+	v.Proxy = false
+	if _, ok := Select(humans, v, Deps{}); !ok {
+		t.Error("non-proxies only must keep a direct visitor")
+	}
+}
+
+func TestSelect_IPVersion(t *testing.T) {
+	v4 := baseVisitor()
+	v6 := baseVisitor()
+	v6.IP = netip.MustParseAddr("2001:db8::1")
+	mapped := baseVisitor()
+	mapped.IP = netip.MustParseAddr("::ffff:1.2.3.4")
+	invalid := baseVisitor()
+	invalid.IP = netip.Addr{}
+
+	only4 := &config.Group{Streams: []config.Stream{stream("s", config.Rules{IPVersion: config.FlagA})}}
+	only6 := &config.Group{Streams: []config.Stream{stream("s", config.Rules{IPVersion: config.FlagB})}}
+
+	if _, ok := Select(only4, v4, Deps{}); !ok {
+		t.Error("ipv4 only must keep ipv4")
+	}
+	if _, ok := Select(only4, v6, Deps{}); ok {
+		t.Error("ipv4 only must cut ipv6")
+	}
+	if _, ok := Select(only4, mapped, Deps{}); !ok {
+		t.Error("ipv4-mapped must count as ipv4")
+	}
+	if _, ok := Select(only4, invalid, Deps{}); ok {
+		t.Error("ipv4 only must cut an invalid address")
+	}
+	if _, ok := Select(only6, v6, Deps{}); !ok {
+		t.Error("ipv6 only must keep ipv6")
+	}
+	if _, ok := Select(only6, v4, Deps{}); ok {
+		t.Error("ipv6 only must cut ipv4")
+	}
+	if _, ok := Select(only6, mapped, Deps{}); ok {
+		t.Error("ipv4-mapped must not count as ipv6")
+	}
+	if _, ok := Select(only6, invalid, Deps{}); ok {
+		t.Error("ipv6 only must cut an invalid address")
+	}
+}
+
 func TestSelect_UniqueRefererYaBrowser(t *testing.T) {
 	v := baseVisitor()
 	// non-unique only (FlagB), but the visitor is unique -> cut
@@ -292,6 +350,32 @@ func TestFilterOrMatchesAnyCondition(t *testing.T) {
 	v.Key = "sale"
 	if why := Why(&s, v, Deps{}); why != "country" {
 		t.Fatalf("without filter_or the country still blocks, got %q", why)
+	}
+}
+
+func TestFilterOrProxyAndIPVersion(t *testing.T) {
+	s := stream("or", config.Rules{
+		Country: list(config.FlagB, "es", "es"),
+		Proxy:   config.FlagA,
+	})
+	s.FilterOr = true
+	v := baseVisitor()
+	v.Country = "ru"
+	v.Proxy = true
+	if why := Why(&s, v, Deps{}); why != "" {
+		t.Fatalf("filter_or should pass on proxy, got %q", why)
+	}
+
+	s = stream("or", config.Rules{
+		Country:   list(config.FlagB, "es", "es"),
+		IPVersion: config.FlagB,
+	})
+	s.FilterOr = true
+	v = baseVisitor()
+	v.Country = "ru"
+	v.IP = netip.MustParseAddr("2001:db8::1")
+	if why := Why(&s, v, Deps{}); why != "" {
+		t.Fatalf("filter_or should pass on ipv6, got %q", why)
 	}
 }
 

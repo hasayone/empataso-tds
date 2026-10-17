@@ -10,24 +10,60 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/kuztds/bridge/ktimport"
 )
 
-// FileGroups — a GroupsStore backed by a JSON groups configuration file.
-// Save writes atomically (via a temporary file + rename).
+// FileGroups is a GroupsStore backed by a JSON groups configuration file.
+// Save writes compact JSON atomically (temporary file, then rename) and bumps
+// a generation counter. List caches the last successful parse. The cache key
+// is the file mtime, size, and that generation.
 type FileGroups struct {
-	path string
+	path  string
+	mu    sync.Mutex
+	cache []config.Group
+	// gen is the counter Save increments. stamp.gen is the value it had
+	// when the cache was filled, so the key is file mtime, size and generation.
+	gen   uint64
+	stamp struct {
+		mod  time.Time
+		size int64
+		gen  uint64
+	}
 }
 
 // NewFileGroups creates a groups store backed by a JSON file.
 func NewFileGroups(path string) *FileGroups { return &FileGroups{path: path} }
 
+// List returns groups from the JSON file.
+// The context is accepted for the GroupsStore signature and is not used.
+// The result is a copy of the top-level slice. Nested slices such as Streams
+// are shared with the cache: handlers do not mutate them in place; they
+// replace the group as a whole.
+// A missing file returns an empty slice and a nil error.
+// It returns an error when the file cannot be read or the JSON is invalid.
 func (f *FileGroups) List(context.Context) ([]config.Group, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	info, err := os.Stat(f.path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			f.cache = nil
+			return []config.Group{}, nil
+		}
+		return nil, err
+	}
+	if f.cache != nil && f.stamp.mod.Equal(info.ModTime()) && f.stamp.size == info.Size() && f.stamp.gen == f.gen {
+		return append([]config.Group(nil), f.cache...), nil
+	}
 	b, err := os.ReadFile(f.path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			f.cache = nil
 			return []config.Group{}, nil
 		}
 		return nil, err
@@ -36,19 +72,36 @@ func (f *FileGroups) List(context.Context) ([]config.Group, error) {
 	if err := json.Unmarshal(b, &groups); err != nil {
 		return nil, err
 	}
-	return groups, nil
+	f.cache = groups
+	f.stamp.mod = info.ModTime()
+	f.stamp.size = info.Size()
+	f.stamp.gen = f.gen
+	return append([]config.Group(nil), f.cache...), nil
 }
 
+// Save writes groups to the JSON file as one compact JSON value.
+// The context is accepted for the GroupsStore signature and is not used.
+// groups is the full document to store.
+// It returns nil after the temporary file is renamed into place.
+// It returns an error when groups cannot be encoded or the disk write fails.
+// After a successful rename it increments the generation and drops the cache.
 func (f *FileGroups) Save(_ context.Context, groups []config.Group) error {
-	b, err := json.MarshalIndent(groups, "", "  ")
+	b, err := json.Marshal(groups)
 	if err != nil {
 		return err
 	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	tmp := f.path + ".tmp"
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, f.path)
+	if err := os.Rename(tmp, f.path); err != nil {
+		return err
+	}
+	f.cache = nil
+	f.gen++
+	return nil
 }
 
 // FileLists — a ListsStore backed by a directory of .dat files (IP lists, wap operators,

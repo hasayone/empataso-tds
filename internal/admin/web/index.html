@@ -166,6 +166,7 @@
   .chip.any{background:transparent;border-style:dashed;color:var(--subtle)}
   .chip.hit{background:var(--bad-soft);border-color:var(--bad);color:var(--bad)} .chip.hit .k{color:var(--bad)}
   .chip.warn{background:var(--warn-soft);border-color:var(--warn);color:var(--warn)} .chip.warn .k{color:var(--warn)} .chip svg.ic{width:13px;height:13px}
+  .orsep{font-size:11px;color:var(--subtle);align-self:center}
   .dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex:none;background:var(--subtle);vertical-align:middle} .dot.on{background:var(--ok)} .dot.bad{background:var(--bad)} .dot.warn{background:var(--warn)}
   .flowdock{position:fixed;left:max(var(--main-pad),calc(50% - var(--main-w)/2 + var(--main-pad)));right:max(var(--main-pad),calc(50% - var(--main-w)/2 + var(--main-pad)));bottom:0;z-index:30;background:var(--surface);border-top:1px solid var(--border);box-shadow:var(--shadow-1)}
   .flowsum{display:flex;flex-wrap:wrap;gap:14px 18px;align-items:center;margin:0;padding:8px 16px;background:var(--surface);border:0;border-bottom:1px solid var(--border);border-radius:0;box-shadow:none}
@@ -263,6 +264,7 @@
   .df{display:flex;align-items:center;gap:8px;padding:12px 18px;border-top:1px solid var(--border);flex:none;background:var(--surface)}
   .sec{padding:16px 0;border-bottom:1px solid var(--border)} .sec:last-child{border-bottom:none}
   .sec>.st{display:flex;align-items:center;gap:8px;font-weight:650;margin-bottom:12px}
+  .sec>.st select{height:26px;width:auto;max-width:100%;font-size:12.5px;font-weight:500;color:var(--muted)}
   .sec>.st .n,.sec>summary .n{width:20px;height:20px;border-radius:6px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-size:11px;font-weight:700}
   details.sec>summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:8px;font-weight:650}
   details.sec>summary::-webkit-details-marker{display:none}
@@ -904,7 +906,7 @@ function uiTz(){
 }
 const PHRASE_EXTRA={
 ru:{
-'When':'Когда','Then':'Тогда','Add condition':'Добавить условие','no conditions — matches every visitor':'нет условий — подходит каждому','all of these hold':'все эти условия',
+'When':'Когда','Then':'Тогда','Add condition':'Добавить условие','no conditions — matches every visitor':'нет условий — подходит каждому','all of these hold':'все эти условия','any of these holds':'любое из этих условий','or':'или',
 'Bots':'Боты','no detection':'без проверки','signal':'признак','signals':'признака','Treat as a bot when':'Считать ботом, если','Advanced':'Дополнительно',
 'Add a variant':'Добавить вариант','Remove this variant':'Убрать вариант','Remove':'Убрать','checked = allowed':'отмечено — разрешено',
 'computers':'компьютеры','phones':'телефоны','tablets':'планшеты',
@@ -932,12 +934,13 @@ ru:{
 's2s.url':'URL','s2s.method':'Метод','s2s.status':'Статусы','s2s.add':'Добавить','s2s.lead':'Лид','s2s.sale':'Продажа','s2s.rejected':'Отклонено',
 'is':'равно','is not':'не равно','contains':'содержит','does not contain':'не содержит','matches':'совпадает','does not match':'не совпадает',
 'block':'блокировать','require':'требовать','Use a list of words':'Список слов','Use a regular expression':'Регулярное выражение',
-'any':'любой','exclude':'исключить','only Yandex Browser':'только Яндекс Браузер','required':'обязателен','must be absent':'должен отсутствовать','unique only':'только уникальные','repeat visits only':'только повторные','yes':'да','no':'нет',
+'any':'любой','exclude':'исключить','only Yandex Browser':'только Яндекс Браузер','required':'обязателен','must be absent':'должен отсутствовать','unique only':'только уникальные','repeat visits only':'только повторные','yes':'да','no':'нет','proxy only':'только прокси','no proxy':'без прокси','IPv4 only':'только IPv4','IPv6 only':'только IPv6',
+'IP from the ip_proxy list or a hosting/VPN network owner (proxy_org.dat)':'IP из списка ip_proxy или владелец сети — хостинг/VPN (proxy_org.dat)',
 'adv.summary':'шанс · тип содержимого · разделение · [REMOTE] · API','for bots':'для ботов','get':'ответ',
 'Refresh':'Обновить','cols.title':'Столбцы','cols.restore':'Восстановить по умолчанию','Type':'Тип','Domain':'Домен','Page':'Страница','Operator':'Оператор','dom.groups':'Группы','dom.count':'Количество','dom.nogroup':'Групп пока нет','dom.group.clear':'Снять подпись группы? Домены останутся.'
 },
 uk:{
-'When':'Коли','Then':'Тоді','Add condition':'Додати умову','no conditions — matches every visitor':'немає умов — підходить кожному','all of these hold':'усі ці умови',
+'When':'Коли','Then':'Тоді','Add condition':'Додати умову','no conditions — matches every visitor':'немає умов — підходить кожному','all of these hold':'усі ці умови','any of these holds':'будь-яка з цих умов','or':'або',
 'Bots':'Боти','no detection':'без перевірки','signal':'ознака','signals':'ознаки','Treat as a bot when':'Вважати ботом, якщо','Advanced':'Додатково',
 'Add a variant':'Додати варіант','Remove this variant':'Прибрати варіант','Remove':'Прибрати','checked = allowed':'позначено — дозволено',
 'computers':'комп’ютери','phones':'телефони','tablets':'планшети',
@@ -965,7 +968,8 @@ uk:{
 's2s.url':'URL','s2s.method':'Метод','s2s.status':'Статуси','s2s.add':'Додати','s2s.lead':'Лід','s2s.sale':'Продаж','s2s.rejected':'Відхилено',
 'is':'дорівнює','is not':'не дорівнює','contains':'містить','does not contain':'не містить','matches':'збігається','does not match':'не збігається',
 'block':'блокувати','require':'вимагати','Use a list of words':'Список слів','Use a regular expression':'Регулярний вираз',
-'any':'будь-який','exclude':'виключити','only Yandex Browser':'лише Яндекс Браузер','required':'обов’язковий','must be absent':'має бути відсутнім','unique only':'лише унікальні','repeat visits only':'лише повторні','yes':'так','no':'ні',
+'any':'будь-який','exclude':'виключити','only Yandex Browser':'лише Яндекс Браузер','required':'обов’язковий','must be absent':'має бути відсутнім','unique only':'лише унікальні','repeat visits only':'лише повторні','yes':'так','no':'ні','proxy only':'лише проксі','no proxy':'без проксі','IPv4 only':'лише IPv4','IPv6 only':'лише IPv6',
+'IP from the ip_proxy list or a hosting/VPN network owner (proxy_org.dat)':'IP зі списку ip_proxy або власник мережі — хостинг/VPN (proxy_org.dat)',
 'adv.summary':'шанс · тип вмісту · розділення · [REMOTE] · API','for bots':'для ботів','get':'відповідь',
 'Refresh':'Оновити','cols.title':'Стовпці','cols.restore':'Відновити за замовчуванням','Type':'Тип','Domain':'Домен','Page':'Сторінка','Operator':'Оператор','dom.groups':'Групи','dom.count':'Кількість','dom.nogroup':'Груп ще немає','dom.group.clear':'Зняти підпис групи? Домени залишаться.'
 }
@@ -1551,12 +1555,68 @@ function drawer(el,onClose){
 }
 
 /* ---------- drafts and the save bar ---------- */
-let GROUPS=null, SAVED='[]';          // flows: working copy / last saved (JSON)
-let CRON=null, CRON_SAVED='';         // automation: same
-const flowsDirty=()=>GROUPS!==null&&JSON.stringify(GROUPS)!==SAVED;
+let GROUPS=null;
+// SNAP remembers each campaign object as last saved: {id, json}.
+// DIRTY holds campaign objects that differ from SNAP. DELETED holds saved ids
+// removed locally. ORDER_DIRTY is set when the array order is not what a
+// per-id upsert would produce (a duplicate inserted before the end).
+const SNAP=new Map();
+const DIRTY=new Set();
+const DELETED=new Set();
+let ORDER_DIRTY=false;
+let CRON=null, CRON_SAVED='';         // automation: working copy / last saved
+const flowsDirty=()=>DIRTY.size>0||DELETED.size>0||ORDER_DIRTY;
 const cronDirty=()=>CRON!==null&&JSON.stringify(CRON)!==CRON_SAVED;
 const anyDirty=()=>flowsDirty()||cronDirty();
-function markDirty(){syncSaveBar()}
+/** snapshotGroups stores every loaded campaign and clears the dirty flags.
+ * @return {void} */
+function snapshotGroups(){
+  SNAP.clear(); DIRTY.clear(); DELETED.clear(); ORDER_DIRTY=false;
+  (GROUPS||[]).forEach(g=>SNAP.set(g,{id:g.id,json:JSON.stringify(g)}));
+}
+/** markDirty records campaigns whose JSON differs from the snapshot.
+ * g is one campaign, or an array of them. No argument only refreshes the save bar (automation).
+ * A campaign equal to its snapshot leaves DIRTY. A new one, or a changed one, enters DIRTY.
+ * @param {object|object[]} [g]
+ * @return {void} */
+function markDirty(g){
+  if(g!=null){
+    const list=Array.isArray(g)?g:[g];
+    for(const x of list){
+      if(!x||typeof x!=='object') continue;
+      const prev=SNAP.get(x);
+      const json=JSON.stringify(x);
+      if(prev&&prev.json===json) DIRTY.delete(x);
+      else DIRTY.add(x);
+    }
+  }
+  syncSaveBar();
+}
+/** forgetGroup drops a campaign from the working sets.
+ * A campaign that was loaded is remembered in DELETED by its saved id.
+ * g is the campaign object. It returns nothing.
+ * @param {object} g
+ * @return {void} */
+function forgetGroup(g){
+  const prev=SNAP.get(g);
+  if(prev) DELETED.add(prev.id);
+  DIRTY.delete(g);
+  SNAP.delete(g);
+}
+/** restoreGroup puts one dirty campaign back, or removes it when it was never saved.
+ * g is the campaign object. It returns nothing. A broken snapshot throws from JSON.parse.
+ * @param {object} g
+ * @return {void} */
+function restoreGroup(g){
+  const prev=SNAP.get(g);
+  if(!prev){
+    if(GROUPS){const i=GROUPS.indexOf(g); if(i>=0) GROUPS.splice(i,1)}
+    return;
+  }
+  const fresh=JSON.parse(prev.json);
+  Object.keys(g).forEach(k=>{if(!Object.prototype.hasOwnProperty.call(fresh,k)) delete g[k]});
+  Object.assign(g, fresh);
+}
 function syncSaveBar(){
   let bar=q('#savebar');
   if(!anyDirty()){if(bar)bar.remove();return}
@@ -1568,7 +1628,17 @@ function syncSaveBar(){
     q('#saveall',bar).onclick=saveAll;
     q('#discard',bar).onclick=async()=>{
       if(!await ask(tr('Discard changes?'),tr('Everything changed since the last save will be lost.'),tr('Discard'),true))return;
-      if(flowsDirty())GROUPS=JSON.parse(SAVED);
+      if(flowsDirty()){
+        if(DELETED.size||ORDER_DIRTY){
+          const prev=GROUPS;
+          GROUPS=null;
+          try{await ensureGroups()}
+          catch(e){GROUPS=prev; toast(e.message,true); return}
+        }else{
+          for(const g of [...DIRTY]) restoreGroup(g);
+        }
+        DIRTY.clear(); DELETED.clear(); ORDER_DIRTY=false;
+      }
       if(cronDirty())CRON=JSON.parse(CRON_SAVED);
       closeDrawer(); syncSaveBar(); render();
     };
@@ -1578,7 +1648,10 @@ function syncSaveBar(){
   q('#dirty',bar).textContent=tr('Unsaved changes in ')+what;
 }
 async function saveAll(){
-  if(DRAWER&&DRAWER.commit)DRAWER.commit();
+  if(DRAWER&&DRAWER.commit){
+    const touched=DRAWER.commit();
+    if(touched) markDirty(touched);
+  }
   try{
     if(flowsDirty())await saveFlows();
     if(cronDirty())await saveCron();
@@ -3523,9 +3596,9 @@ ru:{
 'Under construction':'На обслуживании','403 Forbidden':'403 Forbidden','404 Not found':'404 Not found','500 Server error':'500 Server error','API response':'Ответ API','Raw output':'Сырой вывод',
 'at random':'случайно','in turn per visitor':'по очереди для посетителя','evenly in turn':'равномерно по очереди','variants':'вариантов',
 'City':'Город','Region':'Регион','Time zone':'Часовой пояс','ASN':'ASN','Organization':'Организация','Mobile operator':'Оператор','IP list':'Список IP','Device type':'Тип устройства',
-'Browser':'Браузер','Yandex Browser':'Яндекс.Браузер','Language':'Язык','Referer':'Реферер','Referer present':'Есть реферер','Source domain':'Домен источника','Keyword':'Ключевое слово','URL parameter':'Параметр URL','User-Agent':'User-Agent','Unique':'Уникальность','Days of week':'Дни недели','Impression limit':'Лимит показов',
+'Browser':'Браузер','Yandex Browser':'Яндекс.Браузер','Language':'Язык','Referer':'Реферер','Referer present':'Есть реферер','Proxy / hosting':'Прокси / хостинг','IP version':'Версия IP','Source domain':'Домен источника','Keyword':'Ключевое слово','URL parameter':'Параметр URL','User-Agent':'User-Agent','Unique':'Уникальность','Days of week':'Дни недели','Impression limit':'Лимит показов',
 'Geo':'Гео','Network':'Сеть','Request':'Запрос',
-'User-Agent signatures':'Подписи User-Agent','Empty User-Agent':'Пустой User-Agent','Empty referer':'Пустой реферер','Empty language':'Пустой язык','IPv6':'IPv6','PTR lookup':'Проверка PTR','Blacklist':'Чёрный список',
+'User-Agent signatures':'Подписи User-Agent','Empty User-Agent':'Пустой User-Agent','Empty referer':'Пустой реферер','Empty language':'Пустой язык','IPv6':'IPv6','PTR lookup':'Проверка PTR','Blacklist':'Чёрный список','Proxy / hosting network':'Прокси / сеть хостинга','Not a phone or tablet':'Не телефон и не планшет',
 'Google IPs':'IP Google','Yandex IPs':'IP Яндекса','Bing IPs':'IP Bing','Baidu IPs':'IP Baidu','Mail.ru IPs':'IP Mail.ru','Yahoo IPs':'IP Yahoo','Other bot IPs':'Прочие IP ботов',
 'URL':'URL','Text':'Текст','Script':'Скрипт','HTML':'HTML',
 'There is no flow':'Нет кампании','All flows':'Все кампании','Drag to reorder':'Перетащите, чтобы изменить порядок','On':'Вкл','Off':'Выкл','matched':'совпало','would match':'совпало бы','open flow':'открыть кампанию','no such flow':'такой кампании нет','sent on':'ушло','conv':'конв.','default':'по умолчанию',
@@ -3569,9 +3642,9 @@ uk:{
 'Under construction':'На обслуговуванні','403 Forbidden':'403 Forbidden','404 Not found':'404 Not found','500 Server error':'500 Server error','API response':'Відповідь API','Raw output':'Сирий вивід',
 'at random':'випадково','in turn per visitor':'по черзі для відвідувача','evenly in turn':'рівномірно по черзі','variants':'варіантів',
 'City':'Місто','Region':'Регіон','Time zone':'Часовий пояс','ASN':'ASN','Organization':'Організація','Mobile operator':'Оператор','IP list':'Список IP','Device type':'Тип пристрою',
-'Browser':'Браузер','Yandex Browser':'Яндекс.Браузер','Language':'Мова','Referer':'Реферер','Referer present':'Є реферер','Source domain':'Домен джерела','URL parameter':'Параметр URL','User-Agent':'User-Agent','Days of week':'Дні тижня','Impression limit':'Ліміт показів',
+'Browser':'Браузер','Yandex Browser':'Яндекс.Браузер','Language':'Мова','Referer':'Реферер','Referer present':'Є реферер','Proxy / hosting':'Проксі / хостинг','IP version':'Версія IP','Source domain':'Домен джерела','URL parameter':'Параметр URL','User-Agent':'User-Agent','Days of week':'Дні тижня','Impression limit':'Ліміт показів',
 'Geo':'Гео','Network':'Мережа','Request':'Запит',
-'User-Agent signatures':'Підписи User-Agent','Empty User-Agent':'Порожній User-Agent','Empty referer':'Порожній реферер','Empty language':'Порожня мова','IPv6':'IPv6','PTR lookup':'Перевірка PTR','Blacklist':'Чорний список',
+'User-Agent signatures':'Підписи User-Agent','Empty User-Agent':'Порожній User-Agent','Empty referer':'Порожній реферер','Empty language':'Порожня мова','IPv6':'IPv6','PTR lookup':'Перевірка PTR','Blacklist':'Чорний список','Proxy / hosting network':'Проксі / мережа хостингу','Not a phone or tablet':'Не телефон і не планшет',
 'Google IPs':'IP Google','Yandex IPs':'IP Яндекса','Bing IPs':'IP Bing','Baidu IPs':'IP Baidu','Mail.ru IPs':'IP Mail.ru','Yahoo IPs':'IP Yahoo','Other bot IPs':'Інші IP ботів',
 'URL':'URL','Text':'Текст','Script':'Скрипт','HTML':'HTML',
 'There is no flow':'Немає кампанії','All flows':'Усі кампанії','Drag to reorder':'Перетягніть, щоб змінити порядок','On':'Увімк','Off':'Вимк','matched':'збіглось','would match':'збіглося б','open flow':'відкрити кампанію','no such flow':'такої кампанії немає','sent on':'пішло','conv':'конв.','default':'за замовчуванням',
@@ -3646,6 +3719,8 @@ const COND=[
   {k:'org',l:'Organization',g:'Network',kind:'list',m:'has',rx:1,ph:'google, amazon, hetzner',hint:'the network’s owner — any part of the name'},
   {k:'operators',l:'Mobile operator',g:'Network',kind:'ops'},
   {k:'ip_list',l:'IP list',g:'Network',kind:'iplist'},
+  {k:'proxy',l:'Proxy / hosting',g:'Network',kind:'tri',opts:['any','proxy only','no proxy'],hint:'IP from the ip_proxy list or a hosting/VPN network owner (proxy_org.dat)'},
+  {k:'ip_version',l:'IP version',g:'Network',kind:'tri',opts:['any','IPv4 only','IPv6 only']},
   {k:'device',l:'Device type',g:'Device',kind:'device'},
   {k:'brand',l:'Brand',g:'Device',kind:'list',m:'is',ph:'Apple, Samsung, Xiaomi'},
   {k:'os',l:'OS',g:'Device',kind:'list',m:'is',ph:'Android, Android 13, iOS 16'},
@@ -3666,6 +3741,7 @@ const COND=[
 const COND_GROUPS=['Geo','Network','Device','Request','Visit'];
 const condOf=(k)=>COND.find(c=>c.k===k);
 const BOTCHK=[['ch_ua','User-Agent signatures'],['ch_empty_ua','Empty User-Agent'],['ch_empty_ref','Empty referer'],['ch_empty_lang','Empty language'],['ch_ipv6','IPv6'],['ch_ptr','PTR lookup'],['ch_list_ua','Blacklist'],
+  ['ch_proxy','Proxy / hosting network'],['ch_non_mobile','Not a phone or tablet'],
   ['ch_bot_ip_google','Google IPs'],['ch_bot_ip_yandex','Yandex IPs'],['ch_bot_ip_bing','Bing IPs'],['ch_bot_ip_baidu','Baidu IPs'],['ch_bot_ip_mail','Mail.ru IPs'],['ch_bot_ip_yahoo','Yahoo IPs'],['ch_bot_ip_others','Other bot IPs']];
 
 function configured(r,c){
@@ -3684,6 +3760,7 @@ function configured(r,c){
 // One chip per configured condition — a stream reads as a sentence:
 // "country ru, us", "organization contains amazon, google +5".
 function condChips(s,hit){
+  s=s||{};
   const r=s.rules||{}, out=[];
   const chip=(c,head,v,full,warn,html)=>out.push(`<span class="chip ${hit===c.k?'hit':warn?'warn':''}" title="${esc(tr(c.l)+' '+full+(warn?' — '+tr(warn)+'; '+tr('the engine cannot use it and this condition never matches'):''))}">${warn?icon('alert'):''}${head?`<span class="k">${esc(head)}</span>`:''}<span class="v">${html||''}${esc(v)}</span></span>`);
   const few=(ws,show)=>ws.slice(0,3).map(show||(w=>w)).join(', ')+(ws.length>3?' +'+(ws.length-3):'');
@@ -3692,20 +3769,22 @@ function condChips(s,hit){
     const lc=tr(c.l).toLowerCase();
     switch(c.kind){
       case 'list':{
-        const f=r[c.k], L=listForm(f,c.rx), [yes,no]=condOps(c.m,L.form), neg=f.flag===1;
+        const f=r[c.k]||{}, L=listForm(f,c.rx), [yes,no]=condOps(c.m,L.form), neg=f.flag===1;
         const head=lc+(neg?' '+(no==='is not'?'not':no):(yes==='is'?'':' '+yes));
         if(L.form==='regex'){chip(c,head,L.raw,(neg?no:yes)+' '+L.raw,rxProblem(L.raw));break}
         chip(c,head,few(L.words,w=>c.k==='country'?countryLabel(w, uiLang()):w),(neg?no:yes)+' '+L.words.join(', '),false,c.k==='country'?L.words.slice(0,3).map(flag).join(''):'');
         break}
       case 'device':{const ok=['computer','phone','tablet'].filter(d=>!r[d]);chip(c,lc,ok.join(', ')||'none','is '+(ok.join(', ')||'none'));break}
-      case 'ops':{const o=r.operators,v=Object.keys(o).map(k=>(o[k]===2?'':'not ')+k);chip(c,lc,few(v),v.join(', '));break}
-      case 'tri':{const v=c.opts[r[c.k]]||'?';chip(c,c.k==='unique'?'':lc,v,v);break}
-      case 'iplist':{const f=r.ip_list,n=String(f.file).replace(/\.dat$/,''),h=f.flag===1?'not in list':'in list';chip(c,h,n,h+' '+n);break}
-      case 'schedule':{const d=dayList(r.schedule.days);chip(c,'days',d,d);break}
-      case 'limit':{const l=r.limit,v=fmt(l.count)+' per '+(l.type===2?humanSeconds(l.seconds):'day');chip(c,'limit',v,v);break}
+      case 'ops':{const o=r.operators||{},v=Object.keys(o).map(k=>(o[k]===2?'':'not ')+k);chip(c,lc,few(v),v.join(', '));break}
+      case 'tri':{const v=tr(c.opts[r[c.k]]||'?');chip(c,c.k==='unique'?'':lc,v,v);break}
+      case 'iplist':{const f=r.ip_list||{},n=String(f.file||'').replace(/\.dat$/,''),h=f.flag===1?'not in list':'in list';chip(c,h,n,h+' '+n);break}
+      case 'schedule':{const d=dayList(r.schedule&&r.schedule.days);chip(c,'days',d,d);break}
+      case 'limit':{const l=r.limit||{},v=fmt(l.count)+' per '+(l.type===2?humanSeconds(l.seconds):'day');chip(c,'limit',v,v);break}
     }
   });
-  return out.length?out.join(''):`<span class="chip any">${tr('any visitor')}</span>`;
+  if(!out.length) return `<span class="chip any">${tr('any visitor')}</span>`;
+  if(s.filter_or&&out.length>1) return out.join(`<span class="orsep">${esc(tr('or'))}</span>`);
+  return out.join('');
 }
 const variantsOf=(out)=>splitVariants(out).length;
 // An output on the canvas: one text, or its variants one per line.
@@ -3728,10 +3807,17 @@ async function ensureGroups(refresh){
   if(GROUPS===null||(refresh&&!flowsDirty())){
     const gs=await call('GET','/api/groups');
     if(refresh&&flowsDirty()) return GROUPS;
-    GROUPS=Array.isArray(gs)?gs:[]; SAVED=JSON.stringify(GROUPS);
+    GROUPS=Array.isArray(gs)?gs:[];
+    snapshotGroups();
   }
   return GROUPS;
 }
+/** saveFlows writes campaigns. Ids and aliases are checked first; a bad one throws before any request.
+ * Few unchanged-id edits go one by one: DELETE, then PUT in list order. call throws on 404; a missing delete counts as done.
+ * A changed id, a reordered list, or more than 20 changes sends the whole array.
+ * A point save that fails midway keeps what already landed and throws the error.
+ * @return {Promise<void>}
+ */
 async function saveFlows(){
   const ids=GROUPS.map(g=>(g.id||'').trim());
   if(ids.some(x=>!x))throw new Error('Every flow needs an ID');
@@ -3742,8 +3828,30 @@ async function saveFlows(){
   if(bad)throw new Error('Flow ID "'+bad+'" must not contain spaces, /, ? or #');
   const badA=GROUPS.flatMap(g=>g.aliases||[]).find(x=>/[\s\/?#]/.test(x));
   if(badA)throw new Error('Alias "'+badA+'" must not contain spaces, /, ? or #');
-  await call('PUT','/api/groups',GROUPS);
-  SAVED=JSON.stringify(GROUPS);
+  let point=!ORDER_DIRTY&&DIRTY.size+DELETED.size<=20;
+  if(point){
+    for(const g of DIRTY){
+      const prev=SNAP.get(g);
+      if(prev&&prev.id!==g.id){point=false;break}
+    }
+  }
+  if(!point){
+    await call('PUT','/api/groups',GROUPS);
+    snapshotGroups();
+    return;
+  }
+  for(const id of [...DELETED]){
+    try{await call('DELETE','/api/groups/'+encodeURIComponent(id))}
+    catch(e){if(!e||e.status!==404) throw e}
+    DELETED.delete(id);
+  }
+  for(const g of GROUPS){
+    if(!DIRTY.has(g)) continue;
+    await call('PUT','/api/groups/'+encodeURIComponent(g.id),g);
+    DIRTY.delete(g);
+    SNAP.set(g,{id:g.id,json:JSON.stringify(g)});
+  }
+  snapshotGroups();
 }
 const newStream=(n)=>({name:'stream'+n,status:true,rules:{},out:{redirect:'http_redirect',out:'',chance:100,distribution:'random'},bots:{redirect:'skip',header:'text/html'}});
 function uniqueName(base,taken){let n=base,i=2;while(taken.includes(n)){n=base+'_'+i++}return n}
@@ -3754,22 +3862,26 @@ function nextNum(){
 }
 function ensureNums(){
   if(!GROUPS) return;
-  let changed=false;
-  GROUPS.forEach(g=>{ if(!(+g.num>=1)){ g.num=nextNum(); changed=true } });
-  if(changed) markDirty();
+  const changed=[];
+  GROUPS.forEach(g=>{ if(!(+g.num>=1)){ g.num=nextNum(); changed.push(g) } });
+  if(changed.length) markDirty(changed);
 }
 function newFlow(){
   ensureNums();
   const ids=GROUPS.map(g=>g.id); let n=GROUPS.length+1; while(ids.includes('flow'+n))n++;
-  GROUPS.push({id:'flow'+n,num:nextNum(),name:'',status:true,redirect:'stop',header:'text/html',out:'',geo:defaultGeo(),
-    uniq_method:'ip',uniq_seconds:86400,firewall:{enabled:false,queries:100,seconds:60},streams:[]});
-  OPEN_SETTINGS=true; markDirty(); go('flows/flow'+n);
+  const g={id:'flow'+n,num:nextNum(),name:'',status:true,redirect:'stop',header:'text/html',out:'',geo:defaultGeo(),
+    uniq_method:'ip',uniq_seconds:86400,firewall:{enabled:false,queries:100,seconds:60},streams:[]};
+  GROUPS.push(g);
+  OPEN_SETTINGS=true; markDirty(g); go('flows/flow'+n);
 }
 function takenNames(){const t=[]; GROUPS.forEach(g=>{t.push(g.id); (g.aliases||[]).forEach(a=>t.push(a))}); return t}
 function duplicateFlow(g, stay){
   ensureNums();
   const c=clone(g); c.id=uniqueName(g.id+'_copy',takenNames()); c.aliases=[]; c.num=nextNum(); if(c.name)c.name+=' (copy)';
-  GROUPS.splice(GROUPS.indexOf(g)+1,0,c); markDirty();
+  const at=GROUPS.indexOf(g)+1;
+  GROUPS.splice(at,0,c);
+  if(at<GROUPS.length-1) ORDER_DIRTY=true;
+  markDirty(c);
   if(stay) return c;
   go('flows/'+encodeURIComponent(c.id));
 }
@@ -3777,7 +3889,7 @@ async function deleteFlow(g){
   const refs=GROUPS.filter(x=>x!==g&&linkTargets(x).some(t=>t===g.id||(g.aliases||[]).includes(t))).map(x=>x.id);
   const extra=refs.length?' It is the destination of streams in: '+refs.join(', ')+'.':'';
   if(!await ask(tr('Delete flow')+' "'+g.id+'"?',tr('They are removed when you save.')+extra,tr('Delete'),true))return;
-  GROUPS.splice(GROUPS.indexOf(g),1); markDirty(); go('flows');
+  GROUPS.splice(GROUPS.indexOf(g),1); forgetGroup(g); syncSaveBar(); go('flows');
 }
 
 /* ---------- the list ---------- */
@@ -4215,7 +4327,7 @@ function paintFlowCards(){
           {label:tr('flows.log.conv'),icon:'conversions',on:()=>go('conversions/'+encodeURIComponent(g.id))}];
         if(edit){
           items.push({label:tr('col.spend'),icon:'conversions',on:()=>spendDialog(g.id)},
-            {label:g.status?tr('Turn off'):tr('Turn on'),icon:'play',on:()=>{g.status=!g.status;markDirty();paintFlowCards()}},
+            {label:g.status?tr('Turn off'):tr('Turn on'),icon:'play',on:()=>{g.status=!g.status;markDirty(g);paintFlowCards()}},
             {label:tr('Duplicate'),icon:'dup',on:()=>duplicateFlow(g)},'-',
             {label:tr('Delete'),icon:'trash',danger:true,on:()=>deleteFlow(g)});
         }
@@ -4265,16 +4377,16 @@ function paintFlowCards(){
       };
     });
     const picked=()=>GROUPS.filter(g=>FLOW_PICK.has(g.id));
-    const bon=q('#bulk-on',grid); if(bon) bon.onclick=()=>{picked().forEach(g=>{g.status=true}); FLOW_PICK.clear(); markDirty(); paintFlowCards()};
-    const boff=q('#bulk-off',grid); if(boff) boff.onclick=()=>{picked().forEach(g=>{g.status=false}); FLOW_PICK.clear(); markDirty(); paintFlowCards()};
+    const bon=q('#bulk-on',grid); if(bon) bon.onclick=()=>{const list=picked(); list.forEach(g=>{g.status=true}); FLOW_PICK.clear(); markDirty(list); paintFlowCards()};
+    const boff=q('#bulk-off',grid); if(boff) boff.onclick=()=>{const list=picked(); list.forEach(g=>{g.status=false}); FLOW_PICK.clear(); markDirty(list); paintFlowCards()};
     const bdup=q('#bulk-dup',grid); if(bdup) bdup.onclick=()=>{picked().forEach(g=>duplicateFlow(g,true)); FLOW_PICK.clear(); paintFlowCards()};
     const bdel=q('#bulk-del',grid); if(bdel) bdel.onclick=async()=>{
       const list=picked();
       if(!list.length) return;
       if(!await ask(tr('Delete flows?'),tr('They are removed when you save.'),tr('Delete'),true)) return;
       const drop=new Set(list);
-      for(let i=GROUPS.length-1;i>=0;i--) if(drop.has(GROUPS[i])) GROUPS.splice(i,1);
-      FLOW_PICK.clear(); markDirty(); paintFlowCards();
+      for(let i=GROUPS.length-1;i>=0;i--) if(drop.has(GROUPS[i])){forgetGroup(GROUPS[i]); GROUPS.splice(i,1)}
+      FLOW_PICK.clear(); syncSaveBar(); paintFlowCards();
     };
     bindSort(grid, FLOW_SORT, ()=>{FLOW_PAGE_I=0; paintFlowCards()});
     paintFlowSum(rows);
@@ -4322,7 +4434,7 @@ function renderFlow(){
   const share=(n)=>p.hits?Math.round(n/p.hits*100)+'%':'';
   const lbl=(n)=>`<span class="flowlbl"><b>${fmt(n)}</b>${p.hits?' · '+share(n):''}</span>`;
   const rows=st.map((s,i)=>{
-    const sp=perfOf(g,s.name), o=s.out||{}, bt=s.bots||{}, r=step&&step.streams[i];
+    const sp=perfOf(g,s.name), o=s.out||{}, bt=s.bots||{}, r=step&&step.streams&&step.streams[i];
     let verdict='', hit='';
     if(r&&r.on){
       if(r.match)verdict=step.selected===s.name&&step.streams.findIndex(x=>x.on&&x.match)===i?`<span class="verdict y">${icon('check')}${tr('matched')}</span>`:'<span class="verdict m">'+tr('would match')+'</span>';
@@ -4383,7 +4495,7 @@ function renderFlow(){
     <div id="pagehover" class="hoverline dockline"></div>`;
   document.body.classList.add('has-pagehover');
   // header
-  const gstatus=q('#gstatus'); if(gstatus) gstatus.onchange=e=>{g.status=e.target.checked;markDirty();renderFlow()};
+  const gstatus=q('#gstatus'); if(gstatus) gstatus.onchange=e=>{g.status=e.target.checked;markDirty(g);renderFlow()};
   const statusLabel=gstatus&&gstatus.closest('label');
   if(statusLabel){
     statusLabel.addEventListener('mouseenter',()=>{const line=q('#pagehover'); if(line) line.textContent=tr(g.status?'active':'off')+' → '+tr(g.status?'off':'active')});
@@ -4429,7 +4541,7 @@ function renderFlow(){
     const i=+row.dataset.s, s=st[i];
     q('.node',row).onclick=e=>{if(e.target.closest('.grip,.sw,[data-more]'))return;openStream(i)};
     q('.dest',row).onclick=e=>{if(e.target.closest('[data-goto]'))return;openStream(i,'then')};
-    const tog=q('[data-toggle]',row); if(tog) tog.onchange=e=>{s.status=e.target.checked;SIM=null;markDirty();renderFlow()};
+    const tog=q('[data-toggle]',row); if(tog) tog.onchange=e=>{s.status=e.target.checked;SIM=null;markDirty(g);renderFlow()};
     const sm=q('[data-more]',row); if(sm) sm.onclick=e=>{e.stopPropagation();streamMenu(e.currentTarget,i)};
   });
   if(flowEdit) bindSort(q('#canvas'),g);
@@ -4454,20 +4566,20 @@ function streamMenu(anchor,i){
   if(!canEdit(ME,'campaigns',g)) return;
   menu(anchor,[
     {label:tr('Edit'),icon:'settings',on:()=>openStream(i)},
-    {label:tr('Duplicate'),icon:'dup',on:()=>{const c=clone(s);c.name=uniqueName(s.name+'_copy',g.streams.map(x=>x.name));g.streams.splice(i+1,0,c);SIM=null;markDirty();renderFlow()}},
-    ...(others.length?[{cap:tr('Move to flow')},...others.map(x=>({label:x.id,icon:'move',on:()=>{g.streams.splice(i,1);x.streams=x.streams||[];x.streams.push(s);SIM=null;markDirty();renderFlow();toast(tr('Moved to')+' '+x.id)}}))]:[]),
+    {label:tr('Duplicate'),icon:'dup',on:()=>{const c=clone(s);c.name=uniqueName(s.name+'_copy',g.streams.map(x=>x.name));g.streams.splice(i+1,0,c);SIM=null;markDirty(g);renderFlow()}},
+    ...(others.length?[{cap:tr('Move to flow')},...others.map(x=>({label:x.id,icon:'move',on:()=>{g.streams.splice(i,1);x.streams=x.streams||[];x.streams.push(s);SIM=null;markDirty([g,x]);renderFlow();toast(tr('Moved to')+' '+x.id)}}))]:[]),
     '-',{label:tr('Delete'),icon:'trash',danger:true,on:()=>deleteStream(i)}]);
 }
 async function deleteStream(i){
   const g=CUR, s=g.streams[i];
   if(!await ask(tr('Delete')+' "'+(s.name||'')+'"?',tr('They are removed when you save.'),tr('Delete'),true))return;
-  closeDrawer(); g.streams.splice(i,1); SIM=null; markDirty(); renderFlow();
+  closeDrawer(); g.streams.splice(i,1); SIM=null; markDirty(g); renderFlow();
 }
 function addStream(){
   const g=CUR; if(!canEdit(ME,'campaigns',g)) return;
   g.streams=g.streams||[];
   const s=newStream(g.streams.length+1); s.name=uniqueName(s.name,g.streams.map(x=>x.name));
-  g.streams.push(s); SIM=null; markDirty(); renderFlow(); openStream(g.streams.length-1,'name');
+  g.streams.push(s); SIM=null; markDirty(g); renderFlow(); openStream(g.streams.length-1,'name');
 }
 
 // Wires: the trunk from the entry down to the default, a branch into every
@@ -4572,7 +4684,7 @@ function bindSort(root, state, onChange){
 }
 function moveStream(g,from,to){
   const a=g.streams; if(to<0||to>=a.length||to===from)return;
-  const [m]=a.splice(from,1); a.splice(to,0,m); SIM=null; markDirty();
+  const [m]=a.splice(from,1); a.splice(to,0,m); SIM=null; markDirty(g);
 }
 
 /* ---------- test a visitor ---------- */
@@ -4671,7 +4783,7 @@ function openStream(i,focus){
   q('#s_del',el).onclick=()=>deleteStream(EDIT);
   // Every edit goes straight into the model; the canvas behind catches up.
   let t=0;
-  const onEdit=()=>{collectStream();SIM=null;markDirty();clearTimeout(t);t=setTimeout(()=>{if(EDIT>=0&&q('#canvas'))renderFlow()},180)};
+  const onEdit=()=>{collectStream();SIM=null;markDirty(g);clearTimeout(t);t=setTimeout(()=>{if(EDIT>=0&&q('#canvas'))renderFlow()},180)};
   el.addEventListener('input',onEdit); el.addEventListener('change',onEdit);
   paintStream();
   if(!OFFERS||!NETS||!LANDINGS){
@@ -4694,15 +4806,21 @@ function liveOfferRows(o){return ((o&&o.offers)||[]).filter(r=>r&&String(r.id||'
 function liveLandingRows(o){return ((o&&o.landings)||[]).filter(r=>r&&String(r.id||'').trim())}
 function paintStream(){
   const body=q('#s_body'); if(!body||EDIT<0)return;
-  const g=CUR, s=g.streams[EDIT], r=s.rules||{}, o=s.out||{}, bt=s.bots||{}, rm=s.remote||{}, am=s.api_mac||{}, sp=s.separation||{};
+  const g=CUR, s=g&&g.streams&&g.streams[EDIT]; if(!s)return;
+  const r=s.rules||{}, o=s.out||{}, bt=s.bots||{}, rm=s.remote||{}, am=s.api_mac||{}, sp=s.separation||{};
   const keep=body.scrollTop, was=new Set(qa('details.sec[open]',body).map(x=>x.id));
   const shown=COND.filter(c=>configured(r,c)||COND_OPEN.has(c.k));
+  const orOn=!!s.filter_or;
+  const whenHint=(shown.length>=2||orOn)
+    ? `<select id="s_filter_or">${opt('0',tr('all of these hold'),orOn?'1':'0')+opt('1',tr('any of these holds'),orOn?'1':'0')}</select>`
+    : `<span class="hint" style="font-weight:400">${tr(shown.length?'all of these hold':'no conditions — matches every visitor')}</span>`;
   const red=o.redirect||'http_redirect', bred=bt.redirect||'skip', others=GROUPS.filter(x=>x!==g);
   const nbots=BOTCHK.filter(([id])=>bt[id]).length, nv=variantsOf(o.out);
   const offers=liveOfferRows(o), noOffer=!offers.length;
   const lands=liveLandingRows(o), noLand=!lands.length;
   const advOn=!!((o.chance&&o.chance!==100)||o.header||sp.enabled||rm.enabled||am.enabled);
-  const hitK=SIM&&SIM.path[0].streams[EDIT]&&SIM.path[0].streams[EDIT].why;
+  const step0=SIM&&SIM.path&&SIM.path[0];
+  const hitK=step0&&step0.streams&&step0.streams[EDIT]&&step0.streams[EDIT].why;
   const offerLabel=red==='landing'?tr('land.offers.hint').replace(/\{offer\}/g,'/offer'):tr('stream.offer');
   const landingHTML=red!=='landing'?'':noLand
     ?`<div class="fld"><label>${tr('land.landings')}</label><div id="landing-rows"><div class="land-row">${landingSelect('')}</div></div><button type="button" id="add-landing">${icon('plus')}${tr('Add a variant')}</button></div>`
@@ -4723,7 +4841,7 @@ function paintStream(){
         :NOOUT.has(red)?`<div class="hint">${tr('A fixed answer — there is nothing to fill in.')}</div>`:'');
   body.innerHTML=`
     <div class="sec" id="sec-when">
-      <div class="st"><span class="n">1</span>${tr('When')}<span class="hint" style="font-weight:400">${tr(shown.length?'all of these hold':'no conditions — matches every visitor')}</span></div>
+      <div class="st"><span class="n">1</span>${tr('When')}${whenHint}</div>
       <div id="conds">${shown.map(c=>condRow(c,r,hitK===c.k)).join('')}</div>
       <button id="addcond">${icon('plus')}${tr('Add condition')}</button>
     </div>
@@ -4777,17 +4895,20 @@ function paintStream(){
     const node=$(`<div class="addmenu">${COND_GROUPS.map(gr=>`<div class="grp"><div class="cap">${tr(gr)}</div>${COND.filter(c=>c.g===gr).map(c=>`<button data-c="${c.k}" ${have.has(c.k)?'disabled':''}>${tr(c.l)}</button>`).join('')}</div>`).join('')}</div>`);
     const m=menu(e.currentTarget,[{node}]);
     qa('[data-c]',m).forEach(b=>b.onclick=()=>{
-      closeMenu(); collectStream(); COND_OPEN.add(b.dataset.c); paintStream();
+      closeMenu(); collectStream(); COND_OPEN.add(b.dataset.c); markDirty(g); paintStream();
       const row=q(`.crow[data-cond="${b.dataset.c}"]`); const f=row&&(q('.tin',row)||q('input.g,select,input[type=number]',row)); if(f)f.focus({preventScroll:true});
     });
   };
   qa('[data-rm]',body).forEach(b=>b.onclick=()=>{
-    collectStream(); resetCond(CUR.streams[EDIT].rules,b.dataset.rm); COND_OPEN.delete(b.dataset.rm); COND_RX.delete(b.dataset.rm);
-    paintStream(); SIM=null; markDirty(); renderFlow();
+    collectStream();
+    const cur=CUR&&CUR.streams&&CUR.streams[EDIT];
+    if(cur) resetCond(cur.rules,b.dataset.rm);
+    COND_OPEN.delete(b.dataset.rm); COND_RX.delete(b.dataset.rm);
+    paintStream(); SIM=null; markDirty(g); renderFlow();
   });
   // A text condition switches between a word list and a regular expression.
-  qa('[data-rxon]',body).forEach(b=>b.onclick=()=>{const k=b.dataset.rxon;collectStream();COND_RX.add(k);COND_OPEN.add(k);paintStream();const f=q('#f_'+k+'_rx');if(f)f.focus()});
-  qa('[data-rxoff]',body).forEach(b=>b.onclick=()=>{const k=b.dataset.rxoff;collectStream();COND_RX.delete(k);COND_OPEN.add(k);paintStream();const f=q(`#f_${k}_t .tin`);if(f)f.focus()});
+  qa('[data-rxon]',body).forEach(b=>b.onclick=()=>{const k=b.dataset.rxon;collectStream();COND_RX.add(k);COND_OPEN.add(k);markDirty(g);paintStream();const f=q('#f_'+k+'_rx');if(f)f.focus()});
+  qa('[data-rxoff]',body).forEach(b=>b.onclick=()=>{const k=b.dataset.rxoff;collectStream();COND_RX.delete(k);COND_OPEN.add(k);markDirty(g);paintStream();const f=q(`#f_${k}_t .tin`);if(f)f.focus()});
   // As an expression is typed: what is wrong with it, and whether it still reads as words.
   qa('input.g[id$="_rx"]',body).forEach(i=>i.addEventListener('input',()=>{
     const row=i.closest('.crow'), s=rxText(i.value), p=s?rxProblem(s):'', w=q('[data-rxbad]',row), off=q('[data-rxoff]',row);
@@ -4800,6 +4921,7 @@ function paintStream(){
   bindOps(); bindTags(body); bindVariants(body); bindRewrite(body); bindOfferNet(body); bindLandingRows(body); bindStreamPage(body);
 }
 function condRow(c,r,hit){
+  r=r||{};
   let b='';
   switch(c.kind){
     case 'list':{
@@ -5188,11 +5310,13 @@ function bindLandingRows(body){
 }
 function collectStream(){
   const d=q('#sdrawer'); if(!d||!CUR||EDIT<0)return;
-  const s=CUR.streams[EDIT]; if(!s)return;
+  const s=(CUR.streams||[])[EDIT]; if(!s)return;
   const v=id=>q('#'+id,d), has=k=>!!q(`.crow[data-cond="${k}"]`,d), val=id=>{const e=v(id);return e?e.value:''}, on=id=>{const e=v(id);return !!(e&&e.checked)};
   s.name=val('s_name').trim();
   s.status=on('s_status');
   s.comment=val('s_comment').trim();
+  s.filter_or=v('s_filter_or')?val('s_filter_or')==='1':!!s.filter_or;
+  if(!s.filter_or) delete s.filter_or;
   const red=val('s_redirect'), prev=s.out||{};
   const outBox=v('s_outv');
   const outVal=red==='landing'?'':red==='group'?(v('s_group')?val('s_group'):(prev.redirect==='group'?prev.out:'')):(outBox?readVariants(outBox):(prev.redirect==='group'?'':prev.out||''));
@@ -5220,7 +5344,7 @@ function collectStream(){
   r.ip_list=has('ip_list')&&val('f_iplist_file').trim()?{flag:+val('f_iplist_f'),file:val('f_iplist_file').trim()}:{flag:0,file:''};
   if(has('device')){r.computer=on('d_computer')?0:1;r.phone=on('d_phone')?0:1;r.tablet=on('d_tablet')?0:1}
   else{r.computer=0;r.phone=0;r.tablet=0}
-  ['unique','yabrowser','has_referer','bot'].forEach(k=>r[k]=has(k)?+val('r_'+k):0);
+  COND.filter(c=>c.kind==='tri').forEach(c=>{r[c.k]=has(c.k)?+val('r_'+c.k):0});
   const ops={}; if(has('operators'))qa('#ops .oprow',d).forEach(row=>{const n=q('.op-n',row).value.trim();if(n)ops[n]=+q('.op-f',row).value});
   r.operators=ops;
   const days=[false,false,false,false,false,false,false]; if(has('schedule'))qa('.schd',d).forEach(c=>days[+c.dataset.d]=c.checked);
@@ -5236,6 +5360,7 @@ function collectStream(){
   s.curl=v('s_rw')?readRewrite(v('s_rw')):(s.curl||''); s.b_curl=v('b_rw')?readRewrite(v('b_rw')):(s.b_curl||'');
   s.remote={enabled:on('rm_en'),url:val('rm_url'),regexp:val('rm_re'),reserved:val('rm_res'),cache:+val('rm_cache')||0};
   s.api_mac={enabled:on('am_en'),code:val('am_code'),prob:+val('am_prob')||0};
+  return CUR;
 }
 
 /* ---------- flow settings (drawer) ---------- */
@@ -5360,7 +5485,8 @@ function openFlowSettings(focus){
     sel.innerHTML='<option value=""></option>'+sources.map(s=>opt(s.id, s.name||s.id, g.source_id||'')).join('');
     sel.dataset.ready='1';
     const paintLink=()=>{
-      collectFlow();
+      const touched=collectFlow();
+      if(touched) markDirty(touched);
       const src=sources.find(s=>s.id===sel.value);
       paintParams();
       const box=q('#g_srclink',el); if(box) box.value=sourceCampaignLink(g, src);
@@ -5371,7 +5497,7 @@ function openFlowSettings(focus){
     paintLink();
   });
   q('#g_close',el).onclick=closeDrawer; q('#g_done',el).onclick=closeDrawer;
-  const onEdit=()=>{collectFlow();SIM=null;markDirty()};
+  const onEdit=()=>{const touched=collectFlow();SIM=null;markDirty(touched||g)};
   el.addEventListener('input',onEdit); el.addEventListener('change',onEdit);
   if(focus==='default'){const b=q('#g_body',el);b.scrollTop=q('#sec-default',el).offsetTop-b.offsetTop-8}
   else{const id=q('#g_id',el);id.focus({preventScroll:true});if(!g.name&&!(g.streams||[]).length)id.select()}
@@ -5403,10 +5529,17 @@ function collectFlow(){
     })).filter(p=>p.url&&p.statuses.length);
   }
   // Keep the address bar and the links pointing at this flow in step with its ID.
+  const touched=[g];
   if(g.id&&g.id!==was){
-    GROUPS.forEach(x=>{if(x.redirect==='group'&&(x.out||'').trim()===was)x.out=g.id;(x.streams||[]).forEach(s=>{if(s.out&&s.out.redirect==='group'&&(s.out.out||'').trim()===was)s.out.out=g.id})});
+    GROUPS.forEach(x=>{
+      let hit=false;
+      if(x.redirect==='group'&&(x.out||'').trim()===was){x.out=g.id;hit=true}
+      (x.streams||[]).forEach(s=>{if(s&&s.out&&s.out.redirect==='group'&&(s.out.out||'').trim()===was){s.out.out=g.id;hit=true}});
+      if(hit&&x!==g) touched.push(x);
+    });
     history.replaceState(null,'','#/flows/'+encodeURIComponent(g.id));
   }
+  return touched;
 }
 
 /* ---------- report columns ---------- */
@@ -7123,7 +7256,7 @@ async function apiDocs(){
   const parts=[
     card(tr('key.docs.auth'), '<p>Запросы к админке с ключом передают заголовок <code>Api-Key: kz_...</code>. Сессионная кука и заголовок CSRF не нужны. Базовый адрес — <code>'+esc(origin)+'</code>.</p>'+pre(curl('/api/groups'))),
     card(tr('key.docs.denied'), '<p>Ключу недоступны управление ключами (<code>/api/api-keys</code>), смена пароля (<code>POST /api/password</code>), вход (<code>POST /api/login</code>) и выход (<code>POST /api/logout</code>). Эти адреса отвечают только сессии браузера.</p>'),
-    card(tr('key.docs.campaigns'), '<p><code>GET /api/groups</code> возвращает список кампаний. <code>PUT /api/groups</code> сохраняет массив целиком.</p>'+pre(curl('/api/groups'))),
+    card(tr('key.docs.campaigns'), '<p><code>GET /api/groups</code> возвращает список кампаний. <code>PUT /api/groups</code> сохраняет массив целиком. <code>PUT /api/groups/{id}</code> сохраняет одну кампанию. <code>DELETE /api/groups/{id}</code> удаляет кампанию. Ответы сжимаются gzip при <code>Accept-Encoding: gzip</code>.</p>'+pre(curl('/api/groups'))),
     card(tr('key.docs.catalogs'), '<p>У каталога один адрес на список и тот же адрес с <code>/{id}</code> на одну запись. Список: <code>GET</code> и <code>POST</code>. Запись: <code>GET</code>, <code>PUT</code>, <code>DELETE</code>.</p><p>Офферы — <code>/api/offers</code>. Сети — <code>/api/affiliate-networks</code>. Лендинги — <code>/api/landings</code>. Источники — <code>/api/traffic-sources</code>.</p>'+pre(curl('/api/offers'))+pre(curl('/api/affiliate-networks'))+pre(curl('/api/landings'))+pre(curl('/api/traffic-sources/src1'))),
     card(tr('key.docs.domains'), '<p>Домены: <code>GET</code> и <code>POST /api/domains</code>, <code>GET</code>, <code>PUT</code> и <code>DELETE /api/domains/{id}</code>. Проверка хоста — <code>POST /api/domains/{id}/check</code>.</p>'+pre(curl('/api/domains'))),
     card(tr('key.docs.clicks'), '<p><code>GET /api/logs</code> принимает <code>from</code>, <code>to</code>, <code>limit</code> (по умолчанию 100, не больше 1000), <code>offset</code> и повторяемый фильтр <code>f=field:op:value</code>. Операторы: <code>eq</code>, <code>ne</code>, <code>in</code>, <code>nin</code>. Несколько значений — несколько параметров <code>f</code> с одним и тем же полем и оператором.</p>'+pre(curl('/api/logs?from=2026-10-01T00:00:00Z&to=2026-10-16T00:00:00Z&limit=100&offset=0&f=country:eq:PL&f=device:in:mobile&f=device:in:tablet'))),
@@ -8311,7 +8444,11 @@ async function keitaroPanel(host,live){
     const s=span();
     return {domains:on('kt-domains'),networks:on('kt-networks'),offers:on('kt-offers'),landings:on('kt-landings'),sources:on('kt-sources'),campaigns:on('kt-campaigns'),users:on('kt-users'),conversions:on('kt-conversions'),clicks:on('kt-clicks'),from:s.from,to:s.to};
   };
-  const dropCatalog=()=>{if(typeof flowsDirty==='function' && !flowsDirty()) GROUPS=null};
+  const dropCatalog=()=>{
+    if(typeof flowsDirty==='function' && !flowsDirty()){
+      GROUPS=null; SNAP.clear(); DIRTY.clear(); DELETED.clear(); ORDER_DIRTY=false;
+    }
+  };
   const countKeys=['groups','offers','landings','networks','sources','domains','lists','pages','users','conversions','clicks'];
   const countBag=r=>{
     if(!r||typeof r!=='object') return {};

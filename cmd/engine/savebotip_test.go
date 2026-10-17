@@ -27,10 +27,10 @@ func TestSaveBotIPWritesEachIPOnce(t *testing.T) {
 
 	savedBotIPs.Clear()
 	for i := 0; i < 50; i++ {
-		detectBot(lists, sigs, dir, ip, uaGoogleBot, "-", "en", bots)
+		detectBot(lists, sigs, dir, botInput{IP: ip, UA: uaGoogleBot, Ref: "-", Lang: "en", Device: "phone"}, bots)
 	}
 	// a second crawler IP still gets recorded
-	detectBot(lists, sigs, dir, netip.MustParseAddr("66.249.66.2"), uaGoogleBot, "-", "en", bots)
+	detectBot(lists, sigs, dir, botInput{IP: netip.MustParseAddr("66.249.66.2"), UA: uaGoogleBot, Ref: "-", Lang: "en", Device: "phone"}, bots)
 
 	b, err := os.ReadFile(filepath.Join(dir, "ip_google.dat"))
 	if err != nil {
@@ -58,7 +58,7 @@ func TestSaveBotIPSkipsKnownIP(t *testing.T) {
 
 	savedBotIPs.Clear()
 	for i := 0; i < 10; i++ {
-		detectBot(lists, sigs, dir, netip.MustParseAddr("66.249.66.1"), uaGoogleBot, "-", "en",
+		detectBot(lists, sigs, dir, botInput{IP: netip.MustParseAddr("66.249.66.1"), UA: uaGoogleBot, Ref: "-", Lang: "en", Device: "phone"},
 			config.Bots{CheckUA: true, SaveIP: true})
 	}
 	b, _ := os.ReadFile(filepath.Join(dir, "ip_google.dat"))

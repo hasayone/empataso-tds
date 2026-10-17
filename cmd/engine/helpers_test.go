@@ -192,10 +192,10 @@ func TestDetectBotByIPList(t *testing.T) {
 	human := netip.MustParseAddr("8.8.8.8")
 	cfg := config.Bots{IPGoogle: true}
 
-	if got := detectBot(lists, sigs, dir, gbot, "Mozilla", "-", "en", cfg); got != "google" {
+	if got := detectBot(lists, sigs, dir, botInput{IP: gbot, UA: "Mozilla", Ref: "-", Lang: "en", Device: "phone"}, cfg); got != "google" {
 		t.Errorf("google IP → google bot, got %q", got)
 	}
-	if got := detectBot(lists, sigs, dir, human, "Mozilla", "-", "en", cfg); got != detect.BotNone {
+	if got := detectBot(lists, sigs, dir, botInput{IP: human, UA: "Mozilla", Ref: "-", Lang: "en", Device: "phone"}, cfg); got != detect.BotNone {
 		t.Errorf("non-bot IP → none, got %q", got)
 	}
 }
@@ -206,18 +206,46 @@ func TestDetectBotEmptyToggles(t *testing.T) {
 	sigs := detect.NewSignatures(dir, discardLog())
 	ip := netip.MustParseAddr("8.8.8.8")
 
-	if got := detectBot(lists, sigs, dir, ip, "", "-", "en", config.Bots{EmptyUA: true}); got != "empty_ua" {
+	if got := detectBot(lists, sigs, dir, botInput{IP: ip, UA: "", Ref: "-", Lang: "en", Device: "phone"}, config.Bots{EmptyUA: true}); got != "empty_ua" {
 		t.Errorf("empty UA → empty_ua, got %q", got)
 	}
-	if got := detectBot(lists, sigs, dir, ip, "Mozilla", "", "en", config.Bots{EmptyRef: true}); got != "empty_ref" {
+	if got := detectBot(lists, sigs, dir, botInput{IP: ip, UA: "Mozilla", Ref: "", Lang: "en", Device: "phone"}, config.Bots{EmptyRef: true}); got != "empty_ref" {
 		t.Errorf("empty ref → empty_ref, got %q", got)
 	}
-	if got := detectBot(lists, sigs, dir, ip, "Mozilla", "-", "-", config.Bots{EmptyLang: true}); got != "empty_lang" {
+	if got := detectBot(lists, sigs, dir, botInput{IP: ip, UA: "Mozilla", Ref: "-", Lang: "-", Device: "phone"}, config.Bots{EmptyLang: true}); got != "empty_lang" {
 		t.Errorf("empty lang → empty_lang, got %q", got)
 	}
 	ipv6 := netip.MustParseAddr("2001:4860:4860::8888")
-	if got := detectBot(lists, sigs, dir, ipv6, "Mozilla", "-", "en", config.Bots{IPv6: true}); got != "ipv6" {
+	if got := detectBot(lists, sigs, dir, botInput{IP: ipv6, UA: "Mozilla", Ref: "-", Lang: "en", Device: "phone"}, config.Bots{IPv6: true}); got != "ipv6" {
 		t.Errorf("ipv6 → ipv6 bot, got %q", got)
+	}
+	if got := detectBot(lists, sigs, dir, botInput{IP: ip, UA: "Mozilla", Ref: "-", Lang: "en", Proxy: true, Device: detect.Phone}, config.Bots{Proxy: true}); got != "proxy" {
+		t.Errorf("proxy visitor → proxy, got %q", got)
+	}
+	if got := detectBot(lists, sigs, dir, botInput{IP: ip, UA: "Mozilla", Ref: "-", Lang: "en", Device: detect.Phone}, config.Bots{Proxy: true}); got != detect.BotNone {
+		t.Errorf("non-proxy visitor → none, got %q", got)
+	}
+	if got := detectBot(lists, sigs, dir, botInput{IP: ip, UA: "Mozilla", Ref: "-", Lang: "en", Device: detect.Computer}, config.Bots{NonMobile: true}); got != "device" {
+		t.Errorf("computer → device, got %q", got)
+	}
+	if got := detectBot(lists, sigs, dir, botInput{IP: ip, UA: "Mozilla", Ref: "-", Lang: "en", Device: detect.Phone}, config.Bots{NonMobile: true}); got != detect.BotNone {
+		t.Errorf("phone → none, got %q", got)
+	}
+	if got := detectBot(lists, sigs, dir, botInput{IP: ip, UA: "Mozilla", Ref: "-", Lang: "en", Device: detect.Tablet}, config.Bots{NonMobile: true}); got != detect.BotNone {
+		t.Errorf("tablet → none, got %q", got)
+	}
+	if got := detectBot(lists, sigs, dir, botInput{IP: ip, UA: "Mozilla", Ref: "-", Lang: "en"}, config.Bots{NonMobile: true}); got != detect.BotNone {
+		t.Errorf("empty device → none, got %q", got)
+	}
+	if got := detectBot(lists, sigs, dir, botInput{IP: ip, UA: "Mozilla", Ref: "-", Lang: "en", Proxy: true, Device: detect.Computer}, config.Bots{}); got != detect.BotNone {
+		t.Errorf("flags off → none, got %q", got)
+	}
+}
+
+func TestDefaultBotProfileProxyOff(t *testing.T) {
+	p := config.DefaultBotProfile()
+	if p.Proxy || p.NonMobile {
+		t.Errorf("DefaultBotProfile Proxy=%v NonMobile=%v, want both false", p.Proxy, p.NonMobile)
 	}
 }
 

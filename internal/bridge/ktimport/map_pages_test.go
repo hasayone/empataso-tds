@@ -32,14 +32,12 @@ func TestFixturePagesCampaignBrand(t *testing.T) {
 	}
 
 	gone, _ := findGroup(res.Groups, "gone")
-	if len(gone.Streams) != 1 || !gone.Streams[0].Status || gone.Streams[0].Out.Redirect != "stop" || gone.Streams[0].Out.Out != "" {
+	if len(gone.Streams) != 1 || !gone.Streams[0].Status || gone.Streams[0].Rules.IPVersion != 1 || gone.Streams[0].Out.Redirect != "stop" || gone.Streams[0].Out.Out != "" {
 		t.Fatalf("gone = %+v", gone.Streams)
 	}
 	text := lossesText(res.Losses)
-	for _, want := range []string{"целевая кампания 999 не найдена", "фильтр ipv4 не переносится: в kuztds нет фильтра версии IP"} {
-		if !strings.Contains(text, want) {
-			t.Errorf("report missing %s\n%s", want, text)
-		}
+	if !strings.Contains(text, "целевая кампания 999 не найдена") || strings.Contains(text, "фильтр ipv") || strings.Contains(text, "нет фильтра версии IP") {
+		t.Fatalf("losses %s", text)
 	}
 
 	geo := findOffer(res.Offers, "801")
@@ -113,8 +111,8 @@ func TestCampaignTargetAndIPVersion(t *testing.T) {
 			"2": {{ID: 21, Type: "regular", State: "active", ActionType: "http", ActionPayload: "https://d.example/", Filters: []KFilter{
 				{Name: "ipv6", Mode: "accept", Payload: []byte(`["1"]`)},
 				{Name: "ipv_4", Mode: "accept", Payload: []byte(`["1"]`)},
-				{Name: "ipv_6", Mode: "reject", Payload: []byte(`["6"]`)},
 				{Name: "ip_version", Mode: "reject", Payload: []byte(`["6"]`)},
+				{Name: "ipv_6", Mode: "accept", Payload: []byte(`["1"]`)},
 				{Name: "country", Mode: "accept", Payload: []byte(`["ES"]`)},
 			}}},
 		},
@@ -138,21 +136,20 @@ func TestCampaignTargetAndIPVersion(t *testing.T) {
 		t.Fatalf("losses %s", text)
 	}
 	dst, _ := findGroup(res.Groups, "dst")
-	if !dst.Streams[0].Status || dst.Streams[0].Rules.Country.Flag != 2 {
+	if !dst.Streams[0].Status || dst.Streams[0].Rules.Country.Flag != 2 || dst.Streams[0].Rules.IPVersion != 2 {
 		t.Fatalf("dst stream = %+v", dst.Streams[0])
 	}
-	for _, want := range []string{
-		"фильтр ipv6 не переносится: в kuztds нет фильтра версии IP",
-		"фильтр ipv_4 не переносится: в kuztds нет фильтра версии IP",
-		"фильтр ipv_6 не переносится: в kuztds нет фильтра версии IP",
-		"фильтр ip_version не переносится: в kuztds нет фильтра версии IP",
+	for _, gone := range []string{
+		"фильтр ipv6",
+		"фильтр ipv_4",
+		"фильтр ipv_6",
+		"фильтр ip_version",
+		"нет фильтра версии IP",
+		"нет переносимых фильтров",
 	} {
-		if !strings.Contains(text, want) {
-			t.Errorf("missing %s\n%s", want, text)
+		if strings.Contains(text, gone) {
+			t.Errorf("still present %s\n%s", gone, text)
 		}
-	}
-	if strings.Contains(text, "нет переносимых фильтров") {
-		t.Fatal("ip version disabled the stream")
 	}
 }
 

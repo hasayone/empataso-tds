@@ -132,7 +132,7 @@ func TestMapFixture(t *testing.T) {
 		t.Fatalf("macros = %+v", macros.Streams)
 	}
 	nf, _ := findGroup(res.Groups, "netfilters")
-	if len(nf.Streams) != 1 || !nf.Streams[0].Status || nf.Streams[0].Rules.IPList.Flag != 2 {
+	if len(nf.Streams) != 1 || !nf.Streams[0].Status || nf.Streams[0].Rules.IPList.Flag != 2 || nf.Streams[0].Rules.Proxy != 2 {
 		t.Fatalf("ip = %+v", nf.Streams)
 	}
 	ipFile := nf.Streams[0].Rules.IPList.File
@@ -177,12 +177,12 @@ func TestMapFixture(t *testing.T) {
 	}
 
 	text := lossesText(res.Losses)
-	for _, want := range []string{"параметр cost", "фильтр weather", "фильтр spider", "нет переносимых фильтров", "Notaland", "фильтр proxy не переносится: в kuztds нет детектора прокси", "фильтр ip отбросил негодные записи: nope, 999.1.1.1, bad-ip", "офферы с одинаковым URL объединены: 601, 602"} {
+	for _, want := range []string{"параметр cost", "фильтр weather", "фильтр spider", "нет переносимых фильтров", "Notaland", "фильтр ip отбросил негодные записи: nope, 999.1.1.1, bad-ip", "офферы с одинаковым URL объединены: 601, 602"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("report missing %s\n%s", want, text)
 		}
 	}
-	for _, gone := range []string{"id=701 name=Land type=local", "campaign_type_weight", "share_approximated", "facebook некуда", "track.example некуда", "{bundle_id}", "HTML страницы 404 не перенесён", "also-bad", "фильтр ip не переносится", "фильтр isp не разобран", "offer_param не переносится", "action_type campaign нет соответствия", "фильтр device_model не переносится", "Polynesie Francaise", "Guyane", "French Southern and Antarctic Lands"} {
+	for _, gone := range []string{"id=701 name=Land type=local", "campaign_type_weight", "share_approximated", "facebook некуда", "track.example некуда", "{bundle_id}", "HTML страницы 404 не перенесён", "also-bad", "фильтр ip не переносится", "фильтр isp не разобран", "offer_param не переносится", "action_type campaign нет соответствия", "фильтр device_model не переносится", "фильтр proxy не переносится", "нет фильтра версии IP", "Polynesie Francaise", "Guyane", "French Southern and Antarctic Lands"} {
 		if strings.Contains(text, gone) {
 			t.Errorf("report still has %s\n%s", gone, text)
 		}

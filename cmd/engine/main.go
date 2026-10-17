@@ -45,7 +45,8 @@ var ipLists = []string{
 	"ip_blacklist",
 	"ip_google", "ip_bing", "ip_yandex", "ip_yahoo", "ip_mail", "ip_baidu",
 	"ip_others",
-	"wap", // carriers (with labels like #beeline etc.)
+	"wap",      // carriers (with labels like #beeline etc.)
+	"ip_proxy", // datacenter, VPN and proxy ranges; filled by cron
 }
 
 // shutdownPhase bounds each of the two sequential shutdown phases: draining

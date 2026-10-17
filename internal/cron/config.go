@@ -159,6 +159,11 @@ func Default() Config {
 			{URL: "https://duckduckgo.com/duckassistbot.json", Target: "ip_others", Mode: "merge"},
 			{URL: "https://index.commoncrawl.org/ccbot.json", Target: "ip_others", Mode: "merge"},
 			{URL: "https://api.ahrefs.com/v3/public/crawler-ip-ranges", Target: "ip_others", Mode: "merge"},
+			{URL: "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/datacenter/ipv4.txt", Target: "ip_proxy", Mode: "replace"},
+			{URL: "https://raw.githubusercontent.com/X4BNet/lists_vpn/main/output/vpn/ipv4.txt", Target: "ip_proxy", Mode: "merge"},
+			{URL: "https://iplists.firehol.org/files/proxylists_1d.ipset", Target: "ip_proxy", Mode: "merge"},
+			{URL: "https://iplists.firehol.org/files/socks_proxy_1d.ipset", Target: "ip_proxy", Mode: "merge"},
+			{URL: "https://iplists.firehol.org/files/tor_exits.ipset", Target: "ip_proxy", Mode: "merge"},
 		}},
 		GeoDB: GeoDB{EveryMinutes: 3 * 24 * 60, Sources: []GeoSource{
 			{Kind: "city", URL: "https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz"},

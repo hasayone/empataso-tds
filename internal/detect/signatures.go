@@ -11,15 +11,18 @@ import (
 	"time"
 )
 
-// Signatures keeps signature lists (signature_ua/ref, ua_blacklist) in memory
-// with atomic swap on hot-reload — analogous to ipindex.Set, but for strings.
+// Signatures keeps signature lists (signature_ua/ref, ua_blacklist, proxy_org)
+// in memory with atomic swap on hot-reload — analogous to ipindex.Set, but for
+// strings. proxy_org starts as the built-in hosting/VPN list and is replaced
+// when proxy_org.dat is present in the data directory.
 type Signatures struct {
 	dir string
 	log *slog.Logger
 
-	ua      atomic.Pointer[[]string]
-	ref     atomic.Pointer[[]string]
-	uaBlack atomic.Pointer[[]string]
+	ua       atomic.Pointer[[]string]
+	ref      atomic.Pointer[[]string]
+	uaBlack  atomic.Pointer[[]string]
+	proxyOrg atomic.Pointer[[]string]
 
 	stamps map[string]fileStamp
 	smu    chan struct{} // lightweight mutex for stamps (buffer 1)
@@ -31,9 +34,10 @@ type fileStamp struct {
 }
 
 const (
-	fileUA      = "signature_ua"
-	fileRef     = "signature_ref"
-	fileUABlack = "ua_blacklist"
+	fileUA       = "signature_ua"
+	fileRef      = "signature_ref"
+	fileUABlack  = "ua_blacklist"
+	fileProxyOrg = "proxy_org"
 )
 
 // NewSignatures creates the holder and performs the initial load.
@@ -47,6 +51,8 @@ func NewSignatures(dir string, log *slog.Logger) *Signatures {
 	s.ua.Store(&empty)
 	s.ref.Store(&empty)
 	s.uaBlack.Store(&empty)
+	org := DefaultProxyOrg()
+	s.proxyOrg.Store(&org)
 	s.Reload()
 	return s
 }
@@ -60,11 +66,17 @@ func (s *Signatures) Ref() []string { return *s.ref.Load() }
 // UABlacklist returns the current UA blacklist.
 func (s *Signatures) UABlacklist() []string { return *s.uaBlack.Load() }
 
+// ProxyOrg returns the current hosting and VPN organization substrings.
+// The built-in list is used until proxy_org.dat is loaded from the data directory.
+// The caller must not mutate the slice. It does not report an error.
+func (s *Signatures) ProxyOrg() []string { return *s.proxyOrg.Load() }
+
 // Reload re-reads changed files and atomically swaps the lists.
 func (s *Signatures) Reload() {
 	s.reloadOne(fileUA, &s.ua)
 	s.reloadOne(fileRef, &s.ref)
 	s.reloadOne(fileUABlack, &s.uaBlack)
+	s.reloadOne(fileProxyOrg, &s.proxyOrg)
 }
 
 func (s *Signatures) reloadOne(name string, dst *atomic.Pointer[[]string]) {

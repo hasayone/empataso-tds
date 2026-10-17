@@ -1,9 +1,12 @@
 package admin
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/egerkuzma/kuztds/internal/config"
@@ -93,5 +96,91 @@ func TestFileKeysValidation(t *testing.T) {
 	}
 	if _, err := fk.Read("g1", "../../x", false); err == nil {
 		t.Error("bad date must be rejected")
+	}
+}
+
+func TestFileGroupsSaveListCache(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "groups.json")
+	fg := NewFileGroups(path)
+	in := []config.Group{{
+		ID: "g1", Name: "demo", Status: true,
+		Streams: []config.Stream{{Name: "s", Status: true}},
+	}}
+	if err := fg.Save(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	got, err := fg.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(got, in) {
+		t.Fatalf("save/list = %+v", got)
+	}
+	got[0] = config.Group{ID: "changed"}
+	got = append(got, config.Group{ID: "extra"})
+	again, err := fg.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(again, in) {
+		t.Fatalf("cache saw caller edits: %+v", again)
+	}
+
+	prev, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := []byte(`[{"id":"from-disk","name":"rewritten-campaign-body","status":false,"streams":[{"name":"only","status":true}]}]`)
+	if err := os.WriteFile(path, body, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	now, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if now.Size() == prev.Size() {
+		t.Fatal("rewrite must change the file size")
+	}
+	got, err = fg.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "from-disk" || got[0].Status {
+		t.Fatalf("rewrite not visible: %+v", got)
+	}
+}
+
+func TestFileGroupsSaveCompact(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "groups.json")
+	fg := NewFileGroups(path)
+	in := []config.Group{{
+		ID: "g", Name: "n", Status: false,
+		Streams: []config.Stream{{Name: "s", Status: false}},
+	}}
+	if err := fg.Save(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	disk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compact, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(disk, compact) {
+		t.Fatalf("save = %s want %s", disk, compact)
+	}
+	if bytes.Contains(disk, []byte("\n")) {
+		t.Fatalf("newline in compact json: %s", disk)
+	}
+	indented, err := json.MarshalIndent(in, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(disk) >= len(indented) {
+		t.Fatalf("compact %d not smaller than indent %d", len(disk), len(indented))
 	}
 }

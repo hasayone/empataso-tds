@@ -42,10 +42,10 @@ func TestProxyOnlyStaysEnabled(t *testing.T) {
 	var losses []Loss
 	st := KStream{ID: 5, State: "active", ActionType: "http", ActionPayload: "https://a.example/", Filters: []KFilter{{Name: "proxy", Mode: "reject", Payload: json.RawMessage(`["1"]`)}}}
 	s := (&mapCtx{losses: &losses}).buildStream(st, false)
-	if !s.Status {
-		t.Fatalf("disabled %+v", losses)
+	if !s.Status || s.Rules.Proxy != 2 {
+		t.Fatalf("proxy %+v %+v", s.Rules, losses)
 	}
-	if len(losses) != 1 || losses[0].Kind != "skipped" || losses[0].Detail != proxySkip {
+	if len(losses) != 0 {
 		t.Fatalf("%+v", losses)
 	}
 }

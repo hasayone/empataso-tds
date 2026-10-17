@@ -218,28 +218,32 @@ type Stream struct {
 // Brand — модель устройства, совпадение по подстроке.
 // Unique: 0 — любой визит и в JSON не пишется, 1 — только уникальные, 2 — только повторные.
 // Bot: 0 — фильтр выключен, 1 — оставить ботов, 2 — оставить людей.
+// Proxy: 0 — фильтр выключен и в JSON не пишется, 1 — только прокси, 2 — только не прокси.
+// IPVersion: 0 — фильтр выключен и в JSON не пишется, 1 — только IPv4, 2 — только IPv6.
 type Rules struct {
-	Country  ListFilter   `json:"country,omitempty"`
-	City     ListFilter   `json:"city,omitempty"`
-	Region   ListFilter   `json:"region,omitempty"`
-	Lang     ListFilter   `json:"lang,omitempty"`
-	UAText   ListFilter   `json:"ua_text,omitempty"`
-	Referer  ListFilter   `json:"referer_text,omitempty"`
-	Key      ListFilter   `json:"key_text,omitempty"`
-	OS       ListFilter   `json:"os,omitempty"`
-	Browser  ListFilter   `json:"browser,omitempty"`
-	Brand    ListFilter   `json:"brand,omitempty"`
-	Query    ListFilter   `json:"get,omitempty"`
-	Timezone ListFilter   `json:"timezone,omitempty"`
-	ASN      ListFilter   `json:"asn,omitempty"`
-	Org      ListFilter   `json:"org,omitempty"`
-	IPList   IPListFilter `json:"ip_list,omitempty"`
-	Schedule Schedule     `json:"schedule,omitempty"`
-	Computer int          `json:"computer,omitempty"`
-	Phone    int          `json:"phone,omitempty"`
-	Tablet   int          `json:"tablet,omitempty"`
-	Unique   int          `json:"unique,omitempty"`
-	Bot      int          `json:"bot,omitempty"`
+	Country   ListFilter   `json:"country,omitempty"`
+	City      ListFilter   `json:"city,omitempty"`
+	Region    ListFilter   `json:"region,omitempty"`
+	Lang      ListFilter   `json:"lang,omitempty"`
+	UAText    ListFilter   `json:"ua_text,omitempty"`
+	Referer   ListFilter   `json:"referer_text,omitempty"`
+	Key       ListFilter   `json:"key_text,omitempty"`
+	OS        ListFilter   `json:"os,omitempty"`
+	Browser   ListFilter   `json:"browser,omitempty"`
+	Brand     ListFilter   `json:"brand,omitempty"`
+	Query     ListFilter   `json:"get,omitempty"`
+	Timezone  ListFilter   `json:"timezone,omitempty"`
+	ASN       ListFilter   `json:"asn,omitempty"`
+	Org       ListFilter   `json:"org,omitempty"`
+	IPList    IPListFilter `json:"ip_list,omitempty"`
+	Schedule  Schedule     `json:"schedule,omitempty"`
+	Computer  int          `json:"computer,omitempty"`
+	Phone     int          `json:"phone,omitempty"`
+	Tablet    int          `json:"tablet,omitempty"`
+	Unique    int          `json:"unique,omitempty"`
+	Bot       int          `json:"bot,omitempty"`
+	Proxy     int          `json:"proxy,omitempty"`
+	IPVersion int          `json:"ip_version,omitempty"`
 }
 
 // ListFilter — флаг и значения списка. 1 — исключать совпадение, 2 — только совпадение.

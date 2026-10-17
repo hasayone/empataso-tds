@@ -105,6 +105,24 @@ func separationFiles(groups *config.Groups) []string {
 	return out
 }
 
+// isProxy reports whether the visitor looks like a proxy, VPN, or hosting network.
+// d carries the IP lists and the signature holder; either field may be nil.
+// ip is the visitor address. org is the geo organization name.
+// It returns true when ip is in ip_proxy, otherwise when org matches a pattern.
+// It does not report an error.
+func isProxy(d *engineDeps, ip netip.Addr, org string) bool {
+	if d.lists != nil {
+		if _, hit := d.lists.Lookup("ip_proxy", ip); hit {
+			return true
+		}
+	}
+	patterns := detect.DefaultProxyOrg()
+	if d.sigs != nil {
+		patterns = d.sigs.ProxyOrg()
+	}
+	return detect.ProxyByOrg(org, patterns)
+}
+
 // hitPercent reports whether a p-percent chance fires: p <= 0 never, p >= 100
 // always, and exactly p times in 100 in between.
 //
@@ -219,6 +237,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	info := detect.Parse(ua)
 	device := info.Device
 	g := d.geores.Resolve(ip)
+	proxy := isProxy(d, ip, g.Org)
 	// Country has two sources: the geo database and the CDN's header. The
 	// group says which one wins when both answer; the other is the fallback.
 	//
@@ -284,6 +303,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		BrowserVer: info.BrowserVer,
 		Brand:      info.Brand,
 		Unique:     unique,
+		Proxy:      proxy,
 		IP:         ip,
 		ASN:        g.ASN,
 		Org:        g.Org,
@@ -304,7 +324,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	if d.sigs != nil && d.lists != nil {
 		profile = d.botProfile()
 	}
-	v.Bot = detectBot(d.lists, d.sigs, d.dataDir, ip, ua, refOrEmpty(ref), v.Lang, profile) != detect.BotNone
+	v.Bot = detectBot(d.lists, d.sigs, d.dataDir, botInput{IP: ip, UA: ua, Ref: refOrEmpty(ref), Lang: v.Lang, Proxy: proxy, Device: device}, profile) != detect.BotNone
 	// Output defaults — from the group; the stream overrides them.
 	//
 	// A stream (or a group's default) of type "group" hands the visitor to
@@ -363,7 +383,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	if selStream != nil {
 		botsCfg = selStream.Bots
 	}
-	bot := detectBot(d.lists, d.sigs, d.dataDir, ip, ua, refOrEmpty(ref), v.Lang, botsCfg)
+	bot := detectBot(d.lists, d.sigs, d.dataDir, botInput{IP: ip, UA: ua, Ref: refOrEmpty(ref), Lang: v.Lang, Proxy: proxy, Device: device}, botsCfg)
 	// Separate serving for bots (bot_redirect). "skip"/"" → normal stream (the bot is still logged).
 	botServed := false
 	if bot != detect.BotNone && selStream != nil && botsCfg.Redirect != "" && botsCfg.Redirect != "skip" {
