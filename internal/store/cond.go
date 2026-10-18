@@ -108,6 +108,13 @@ func buildWhere(c *CH, table string, conds []Cond) (sql string, args []any, skip
 				vals[i] = strings.ToLower(strings.TrimSpace(v))
 			}
 		}
+		if table == "conversions" && f.Name == "campaign_id" && (cond.Op == "eq" || cond.Op == "in") {
+			evCol, _ := f.tableCol("events")
+			b.WriteString(convCampaignSQL(expr, columnExpr(f, evCol), len(vals)))
+			args = append(args, stringArgs(vals)...)
+			args = append(args, stringArgs(vals)...)
+			continue
+		}
 		b.WriteString(" AND ")
 		b.WriteString(expr)
 		if cond.Op == "eq" || cond.Op == "in" {
@@ -122,11 +129,32 @@ func buildWhere(c *CH, table string, conds []Cond) (sql string, args []any, skip
 			b.WriteString(expr)
 			b.WriteString(" != ''")
 		}
-		for _, v := range vals {
-			args = append(args, v)
-		}
+		args = append(args, stringArgs(vals)...)
 	}
 	return b.String(), args, false, nil
+}
+
+// convCampaignSQL restricts conversions to the given campaigns, including
+// rows imported without a campaign id.
+// convExpr is the campaign column of the conversion row. eventsExpr is the
+// campaign column of events. n is the number of campaign ids and is at least 1.
+// A row with an empty campaign matches when its click cid appears in events
+// under one of those campaigns. The caller supplies the ids twice, in that
+// order. The fragment starts with " AND ". It does not fail.
+func convCampaignSQL(convExpr, eventsExpr string, n int) string {
+	list := placeholders(n)
+	return " AND (" + convExpr + " IN (" + list + ") OR (" + convExpr + " = '' AND cid IN " +
+		"(SELECT cid FROM events WHERE " + eventsExpr + " IN (" + list + ") AND cid != '')))"
+}
+
+// stringArgs converts a list of strings to placeholder arguments.
+// vals is the list. The result has the same length and order.
+func stringArgs(vals []string) []any {
+	out := make([]any, len(vals))
+	for i, v := range vals {
+		out[i] = v
+	}
+	return out
 }
 
 // stringType reports whether ClickHouse compares the type without toString.

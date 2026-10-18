@@ -40,6 +40,44 @@ func TestBuildWhereOps(t *testing.T) {
 	}
 }
 
+// TestBuildWhereConversionCampaign pins the SQL of a campaign filter on the
+// conversion journal: eq and in also match rows without a campaign through
+// the click cid, ne and nin stay plain, and events are unchanged.
+func TestBuildWhereConversionCampaign(t *testing.T) {
+	c := readyClient()
+	sql, args, skip, err := buildWhere(c, "conversions", []Cond{{Field: "campaign_id", Op: "eq", Values: []string{"g1"}}})
+	want := " AND (group_id IN (?) OR (group_id = '' AND cid IN (SELECT cid FROM events WHERE group_id IN (?) AND cid != '')))"
+	if err != nil || skip || sql != want || len(args) != 2 || args[0] != "g1" || args[1] != "g1" {
+		t.Fatalf("eq: %q %#v skip=%v err=%v", sql, args, skip, err)
+	}
+	sql, args, skip, err = buildWhere(c, "conversions", []Cond{{Field: "campaign_id", Op: "in", Values: []string{"g1", "g2"}}})
+	want = " AND (group_id IN (?,?) OR (group_id = '' AND cid IN (SELECT cid FROM events WHERE group_id IN (?,?) AND cid != '')))"
+	if err != nil || skip || sql != want || len(args) != 4 || args[0] != "g1" || args[1] != "g2" || args[2] != "g1" || args[3] != "g2" {
+		t.Fatalf("in: %q %#v skip=%v err=%v", sql, args, skip, err)
+	}
+	sql, args, skip, err = buildWhere(c, "conversions", []Cond{{Field: "campaign_id", Op: "ne", Values: []string{"g1"}}})
+	want = " AND group_id NOT IN (?) AND group_id != ''"
+	if err != nil || skip || sql != want || len(args) != 1 || args[0] != "g1" {
+		t.Fatalf("ne: %q %#v skip=%v err=%v", sql, args, skip, err)
+	}
+	sql, args, _, err = buildWhere(c, "conversions", []Cond{
+		{Field: "campaign_id", Op: "eq", Values: []string{"g1"}},
+		{Field: "status", Op: "eq", Values: []string{"sale"}},
+	})
+	if err != nil || len(args) != 3 || args[2] != "sale" || !strings.HasSuffix(sql, " AND status IN (?)") {
+		t.Fatalf("mixed: %q %#v err=%v", sql, args, err)
+	}
+	sql, args, _, err = buildWhere(c, "events", []Cond{{Field: "campaign_id", Op: "eq", Values: []string{"g1"}}})
+	if err != nil || sql != " AND group_id IN (?)" || len(args) != 1 {
+		t.Fatalf("events: %q %#v err=%v", sql, args, err)
+	}
+	c.readyFlags["conversions"][waveExt] = false
+	sql, args, skip, err = buildWhere(c, "conversions", []Cond{{Field: "campaign_id", Op: "eq", Values: []string{"g1"}}})
+	if err != nil || !skip || sql != "" || args != nil {
+		t.Fatalf("ext not ready: %q %#v skip=%v err=%v", sql, args, skip, err)
+	}
+}
+
 func TestBuildWhereLowerAndASN(t *testing.T) {
 	c := readyClient()
 	_, args, _, err := buildWhere(c, "conversions", []Cond{{Field: "status", Op: "eq", Values: []string{" Sale "}}})
