@@ -138,6 +138,7 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // commitGroups merges full into stored, assigns missing campaign numbers, checks links and streams, and saves.
+// Shares above 100% are refused only for campaigns that differ from stored.
 // w receives writeErr when a check or Save fails. r carries the request context.
 // v is the caller. stored is the list read under groupsMu. full is the complete candidate
 // list, never a single row: a non-admin merge of one row would drop their other campaigns.
@@ -157,6 +158,10 @@ func (s *Server) commitGroups(w http.ResponseWriter, r *http.Request, v viewer, 
 		}
 	}
 	if msg := prepareGroups(groups); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return false
+	}
+	if msg := validateChangedShares(stored, groups); msg != "" {
 		writeErr(w, http.StatusBadRequest, msg)
 		return false
 	}

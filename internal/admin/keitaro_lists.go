@@ -172,7 +172,7 @@ func s2sHasID(list []config.OutboundPostback, id string) bool {
 // merged is the merge result. incoming is the deduped mapper output.
 // conflicts are ids the merge refused to overwrite. offers is the offer catalog.
 // A group that was not part of this import is copied unchanged.
-// It returns the list to save and one skipped loss per dropped group.
+// It returns the list to save, one skipped loss per dropped group and one approximated loss per group above 100%.
 // It does not return an error.
 func selectImportedGroups(merged []config.Group, incoming []ktimport.Group, conflicts map[string]bool, offers []config.Offer) ([]config.Group, []ktimport.Loss) {
 	want := map[string]bool{}
@@ -189,6 +189,9 @@ func selectImportedGroups(merged []config.Group, incoming []ktimport.Group, conf
 		if msg := importedGroupIssue(&g, offers); msg != "" {
 			losses = append(losses, ktimport.Loss{Kind: "skipped", Ref: g.ID, Detail: msg})
 			continue
+		}
+		if sharesExceed(g) {
+			losses = append(losses, ktimport.Loss{Kind: "approximated", Ref: g.ID, Detail: errSharesExceed})
 		}
 		out = append(out, g)
 	}

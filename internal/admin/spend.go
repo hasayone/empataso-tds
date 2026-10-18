@@ -319,6 +319,61 @@ func validateStreams(groups []config.Group, offers []config.Offer) string {
 	return ""
 }
 
+// errSharesExceed is the client message for a share list that adds up to more than 100.
+const errSharesExceed = "shares exceed 100"
+
+// shareSum adds up the shares of one offer or landing list.
+// refs is the list as stored in a stream output. Negative values are not counted.
+// It returns the total in percent. It does not return an error.
+func shareSum(refs []config.ShareRef) int {
+	sum := 0
+	for _, ref := range refs {
+		if ref.Share > 0 {
+			sum += ref.Share
+		}
+	}
+	return sum
+}
+
+// sharesExceed reports whether any stream of g has an offer list or a landing list above 100%.
+// The two lists of a stream are summed separately, as the editor shows them.
+// It returns true on the first list over the limit. It does not return an error.
+func sharesExceed(g config.Group) bool {
+	for _, st := range g.Streams {
+		if shareSum(st.Out.Offers) > 100 || shareSum(st.Out.Landings) > 100 {
+			return true
+		}
+	}
+	return false
+}
+
+// validateChangedShares checks the 100% limit only for campaigns the save changed.
+// A stored campaign that already exceeds the limit does not block saving another one.
+// stored is the list on disk. groups is the candidate list after prepareGroups.
+// The cheap share sum runs first, so only a campaign above 100% is compared with its stored row.
+// The stored folder is trimmed before the comparison, as prepareGroups trims the candidate.
+// It returns an empty string when every changed campaign fits, otherwise the client message.
+func validateChangedShares(stored, groups []config.Group) string {
+	var old map[string]config.Group
+	for _, g := range groups {
+		if !sharesExceed(g) {
+			continue
+		}
+		if old == nil {
+			old = make(map[string]config.Group, len(stored))
+			for _, s := range stored {
+				old[s.ID] = s
+			}
+		}
+		prev, ok := old[g.ID]
+		prev.Folder = strings.TrimSpace(prev.Folder)
+		if !ok || !groupsEqual(prev, g) {
+			return errSharesExceed
+		}
+	}
+	return ""
+}
+
 func (s *Server) offerList(ctx context.Context) ([]config.Offer, error) {
 	if s.cfg.Offers == nil {
 		return nil, nil
