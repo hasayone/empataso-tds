@@ -209,8 +209,8 @@ func TestUsersLastAdminGuards(t *testing.T) {
 		t.Fatalf("disable self want 409, got %d", code)
 	}
 	code, _ = userJSON(t, ac, http.MethodPut, base+"/api/users/"+solo.ID, acsrf, `{"type":"USER"}`)
-	if code != http.StatusConflict {
-		t.Fatalf("demote last admin want 409, got %d", code)
+	if code != http.StatusOK {
+		t.Fatalf("demote last file admin want 200, got %d", code)
 	}
 
 	code, _ = userJSON(t, c, http.MethodPost, base+"/api/users", csrf, `{"login":"second","password":"secret1","type":"ADMIN","enabled":true}`)
@@ -220,6 +220,22 @@ func TestUsersLastAdminGuards(t *testing.T) {
 	code, _ = userJSON(t, c, http.MethodPut, base+"/api/users/"+solo.ID, csrf, `{"type":"USER"}`)
 	if code != http.StatusOK {
 		t.Fatalf("demote with backup admin want 200, got %d", code)
+	}
+}
+
+func TestUsersDeleteFileAdmin(t *testing.T) {
+	_, c, csrf, base := usersHTTP(t)
+	code, raw := userJSON(t, c, http.MethodPost, base+"/api/users", csrf, `{"login":"fileadm","password":"secret1","type":"ADMIN","enabled":true}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create admin %d %s", code, raw)
+	}
+	var u security.User
+	if err := json.Unmarshal(raw, &u); err != nil {
+		t.Fatal(err)
+	}
+	code, _ = userJSON(t, c, http.MethodDelete, base+"/api/users/"+u.ID, csrf, "")
+	if code != http.StatusNoContent {
+		t.Fatalf("delete file admin want 204, got %d", code)
 	}
 }
 

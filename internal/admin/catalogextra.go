@@ -31,7 +31,7 @@ var (
 // The id comes from the request path. The network check runs before domainMu,
 // then List, modify and Save run under that lock.
 // It writes the updated domain. A missing store is 503, a missing id is 404,
-// and a read or save failure is 500.
+// a read or save failure is 500, and 409 when the host was edited during the probe.
 func (s *Server) handleDomainCheck(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Domains == nil {
 		writeErr(w, http.StatusServiceUnavailable, "store unavailable")
@@ -84,6 +84,10 @@ func (s *Server) handleDomainCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	if idx < 0 {
 		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if list[idx].Host != host {
+		writeErr(w, http.StatusConflict, "host changed")
 		return
 	}
 	list[idx].OK = ok

@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/egerkuzma/kuztds/internal/config"
@@ -323,6 +324,8 @@ func registerDomains(s *Server, mux *http.ServeMux) {
 		validDomain,
 		&catalogHooks[config.Domain]{
 			seq: s.cfg.SeqDomains, floor: s.domainFloor, prep: prepDomain, tidy: tidyDomains, view: s.domainRows,
+			mu:        &s.domainMu,
+			keep:      keepDomainCheck,
 			res:       resDomains,
 			label:     func(d config.Domain) string { return d.Group },
 			owner:     func(d config.Domain) string { return d.CreatedBy },
@@ -348,12 +351,27 @@ func validDomain(d config.Domain) string {
 	return ""
 }
 
+// prepDomain normalizes host, role and group on d before validation.
+// d is the decoded request body. OK, Reason and Checked are server-owned and are cleared here.
 func prepDomain(d *config.Domain) {
 	d.Host = strings.ToLower(strings.TrimSpace(d.Host))
 	if d.Role == "" {
 		d.Role = "both"
 	}
 	d.Group = trimGroupLabel(d.Group)
+	d.OK = false
+	d.Reason = ""
+	d.Checked = ""
+}
+
+// keepDomainCheck carries OK, Reason and Checked from old into item when the host is unchanged.
+// item is the prepared replacement; old is the stored record. A different host leaves the
+// cleared fields, because the previous probe answered another name. It returns nothing.
+func keepDomainCheck(item *config.Domain, old config.Domain) {
+	if item.Host != old.Host {
+		return
+	}
+	item.OK, item.Reason, item.Checked = old.OK, old.Reason, old.Checked
 }
 
 const domainUserLimitMsg = "primary and admin role are set by an administrator"
@@ -377,7 +395,14 @@ func limitDomainUser(item *config.Domain, old *config.Domain) string {
 	return ""
 }
 
+// tidyDomains enforces a single primary domain. list is the full catalog; id is the row
+// create or replace touched. It returns the updated slice. A disabled domain is never primary.
 func tidyDomains(list []config.Domain, id string) []config.Domain {
+	for i := range list {
+		if list[i].ID == id && list[i].Disabled {
+			list[i].Primary = false
+		}
+	}
 	primary := false
 	for _, d := range list {
 		if d.ID == id && d.Primary {
@@ -438,6 +463,11 @@ type catalogHooks[T any] struct {
 	// view converts the list for the GET response. Nil returns the list as stored.
 	view func(ctx context.Context, list []T) (any, error)
 	res  string
+	// mu, when set, serializes List, modify and Save in create, replace and delete.
+	mu *sync.Mutex
+	// keep copies server-owned fields from the stored record into the replacement on PUT.
+	// It runs after prep and before valid. Nil keeps the request body as sent.
+	keep func(item *T, old T)
 	// label and owner feed grant checks. setOwner writes CreatedBy on create.
 	label     func(T) string
 	owner     func(T) string
@@ -501,6 +531,7 @@ func applyCatalogCreatedBy[T any](v viewer, hooks *catalogHooks[T], item *T, old
 // A nil store answers 503. PUT of an existing id replaces that record in place.
 // When hooks carries a counter, an empty id is filled under that counter's lock
 // before validation. An explicit id is left as sent and the counter moves past it.
+// hooks.mu serializes create, replace and delete when set. hooks.keep merges stored fields on PUT when set.
 func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSONStore[T], idOf func(T) string, setID func(*T, string), valid func(T) string, hooks *catalogHooks[T]) {
 	c := crudCatalog[T]{s: s, store: store, idOf: idOf, setID: setID, valid: valid, hooks: hooks}
 	wrap := func(pattern string, next http.HandlerFunc) {
@@ -594,6 +625,10 @@ func (c crudCatalog[T]) crudCreate(w http.ResponseWriter, r *http.Request) {
 	if c.hooks != nil && c.hooks.setOwner != nil {
 		c.hooks.setOwner(&item, v.uid)
 	}
+	if c.hooks != nil && c.hooks.mu != nil {
+		c.hooks.mu.Lock()
+		defer c.hooks.mu.Unlock()
+	}
 	list, err := c.store.List(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "read error")
@@ -640,6 +675,10 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 	}
 	pathID := r.PathValue("id")
 	c.setID(&item, pathID)
+	if c.hooks != nil && c.hooks.mu != nil {
+		c.hooks.mu.Lock()
+		defer c.hooks.mu.Unlock()
+	}
 	list, err := c.store.List(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "read error")
@@ -679,6 +718,9 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 		c.hooks.prep(&item)
 		c.setID(&item, pathID)
 	}
+	if c.hooks != nil && c.hooks.keep != nil {
+		c.hooks.keep(&item, old)
+	}
 	if msg := c.valid(item); msg != "" {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
@@ -696,6 +738,10 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 
 // crudDelete handles DELETE with see/write grant checks.
 func (c crudCatalog[T]) crudDelete(w http.ResponseWriter, r *http.Request) {
+	if c.hooks != nil && c.hooks.mu != nil {
+		c.hooks.mu.Lock()
+		defer c.hooks.mu.Unlock()
+	}
 	list, err := c.store.List(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "read error")

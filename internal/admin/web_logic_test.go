@@ -252,8 +252,15 @@ eq(homePage({access:{sections:[]}, pages:[]}), 'settings', 'homePage no dashboar
 eq(userIsEnv({source:'env'}), true, 'userIsEnv env');
 eq(userIsEnv({source:'file'}), false, 'userIsEnv file');
 eq(userIsEnv(null), false, 'userIsEnv null');
+eq(kpiMoney(42814.27,'USD',2),'42,814.27 $','kpiMoney USD');
+eq(kpiMoney(1234.5,'EUR',2),'1,234.50 EUR','kpiMoney other code');
+eq(kpiMoney(10,'',2),'10.00','kpiMoney without code');
+eq(kpiMoney('x','USD',2),'0.00 $','kpiMoney non-number');
 eq(flowCompactClass(true),'compact','flowCompactClass on');
 eq(flowCompactClass(false),'','flowCompactClass off');
+eq(recentRows([{ts:1},{ts:2},{ts:3}],2).length,2,'recentRows keeps n');
+eq(recentRows(null,5).length,0,'recentRows without rows');
+eq(recentRows([{ts:1},null,{ts:2}],5).length,2,'recentRows drops empties');
 
 eq(serviceBadge('geo_db', {config_error:'bad db'}), {key:'cron.cfgerr', title:'bad db'}, 'config error wins');
 eq(serviceBadge('telegram_test', {telegram_configured:false}), {key:'cron.notset', title:''}, 'telegram off');

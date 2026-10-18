@@ -207,7 +207,7 @@ type Server struct {
 	users  *security.UserSet // nil when UsersFile is empty
 	userMu sync.Mutex        // pairs user changes with Save
 
-	// domainMu serializes List, modify and Save of domains.json during a domain check.
+	// domainMu serializes every write of domains.json: create, replace, delete and check.
 	domainMu sync.Mutex
 
 	// groupsMu serializes List, modify and Save of groups.json in the admin API.
@@ -263,6 +263,9 @@ func New(cfg Config) (*Server, error) {
 			return nil, fmt.Errorf("admin: users file %s: %w", cfg.UsersFile, err)
 		}
 		s.users = us
+		if cfg.AdminUser != "" {
+			us.SetOutsideAdmins(1)
+		}
 	}
 	s.loadAPIKeys()
 	return s, nil

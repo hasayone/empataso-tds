@@ -273,7 +273,8 @@ func createdByOf[T any](item T) string {
 }
 
 // keepLocalFields returns next with Group taken from old when empty on next, then restores
-// CreatedBy from old when next left it empty. It supports catalog types with group and owner.
+// CreatedBy from old when next left it empty. For domains the operator mark and the last
+// probe result stay. It supports catalog types with group and owner.
 func keepLocalFields[T any](old, next T) T {
 	switch o := any(old).(type) {
 	case config.Offer:
@@ -305,6 +306,10 @@ func keepLocalFields[T any](old, next T) T {
 		if n.Group == "" {
 			n.Group = o.Group
 		}
+		n.Disabled = o.Disabled
+		n.OK = o.OK
+		n.Reason = o.Reason
+		n.Checked = o.Checked
 		return withOwner(any(n).(T), createdByOf(old))
 	default:
 		return withOwner(next, createdByOf(old))

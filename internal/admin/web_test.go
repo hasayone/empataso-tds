@@ -219,6 +219,30 @@ func TestDashboardUIFiltersBrand(t *testing.T) {
 	must(t, html, `let BRAND={name:''`, "BRAND defaults to an empty name")
 }
 
+// TestDashboardRecentClicks — the filter button is gone and the recent-clicks card reads the click log only with access.
+func TestDashboardRecentClicks(t *testing.T) {
+	html := string(indexHTML)
+	mustNot(t, html, `id="dash-filters"`, "dashboard filter button")
+	mustNot(t, html, `id="dash-chips"`, "dashboard filter chips")
+	dash := spaBetween(html, "async function dashboard(", "async function loadBreakdown(")
+	must(t, dash, `id="dash-panels"`, "panels gear stays")
+	must(t, dash, `id="recent"`, "recent clicks card")
+	must(t, dash, `pageAllowed(ME,'logs')`, "recent clicks only with logs access")
+	must(t, dash, "/api/logs?'+rangeQS()+'&limit=10", "recent clicks read the click log for the period")
+	must(t, dash, "recentRows(", "recent rows go through recentRows")
+	must(t, dash, "x.campaign_id||", "recent clicks link by campaign slug")
+	mustNot(t, dash, "#/flows/${esc(x.group)}", "recent clicks must not link by campaign name")
+	must(t, dash, "function recentDest(", "recent clicks destination helper")
+	must(t, dash, "idLabel('landing_id'", "landing destination shows the catalog name")
+	must(t, dash, "NOOUT.has(red)", "types without an address show the type label")
+	must(t, dash, "ensureLandings()", "recent clicks load the landing catalog")
+	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
+	must(t, pure, "function recentRows(", "recentRows in pure block")
+	must(t, html, `'dash.recent':'Последние клики'`, "ru recent clicks")
+	must(t, html, `'dash.recent':'Останні кліки'`, "uk recent clicks")
+	must(t, html, `'dash.recent.out':'Destination'`, "en destination")
+}
+
 // TestDashboardPerfControls — performance table defaults, pure helpers, export scope, KPI tiles, and fold nav.
 func TestDashboardPerfControls(t *testing.T) {
 	html := string(indexHTML)
@@ -254,6 +278,32 @@ func TestDashboardPerfControls(t *testing.T) {
 	mustNot(t, dash, `tr('Bots'),pct(bots,total),'warn'`, "bots KPI without warn tone")
 }
 
+// TestDashboardKPIMoney — money tiles use kpiMoney, tiles are ordered clicks→money→rates, and the grid is one row on desktop.
+func TestDashboardKPIMoney(t *testing.T) {
+	html := string(indexHTML)
+	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
+	must(t, pure, "function kpiMoney(", "kpiMoney in pure block")
+	must(t, pure, "Intl.NumberFormat('en-US'", "kpiMoney groups thousands")
+	dash := spaBetween(html, "async function dashboard(", "async function loadBreakdown(")
+	must(t, dash, "kpiMoney(", "dashboard tiles use kpiMoney")
+	must(t, dash, "cc.code||'USD'", "empty spend currency shows dollars on KPI tiles")
+	must(t, html, ".kpi .l span:last-child{display:none}", "phone tiles drop the sub-label")
+	mustNot(t, dash, "chartAmt(n, curCode, d)", "tiles no longer use chartAmt")
+	order := []string{"'clicks')", "'uniq')", "'conv')", "'cost')", "'rev')", "'profit')", "'cr')", "'roi')", "'bots')"}
+	last := -1
+	for _, k := range order {
+		p := strings.Index(dash, k)
+		if p < 0 || p <= last {
+			t.Errorf("KPI tile %s out of order", k)
+		}
+		last = p
+	}
+	must(t, html, ".kpis{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)", "one KPI row on desktop")
+	must(t, html, ".kpi .v{font-size:clamp(15px,1.3vw,19px)", "KPI value fits nine tiles in the page container")
+	must(t, html, ".kpis{grid-auto-flow:row;grid-template-columns:repeat(3,minmax(0,1fr))}", "three KPI tiles per row on small screens")
+	mustNot(t, html, ".kpis{grid-template-columns:repeat(2,minmax(0,1fr))}", "two-per-row KPI grid")
+}
+
 // TestDashboardChartAxes — chart axes come from shared scales, and percent series are stroked.
 func TestDashboardChartAxes(t *testing.T) {
 	html := string(indexHTML)
@@ -277,11 +327,24 @@ func TestDashboardChartAxes(t *testing.T) {
 	}
 	must(t, series, "id:'cr'", "cr is a chart series")
 	must(t, series, "id:'roi'", "roi is a chart series")
+	must(t, series, "ic:'click'", "clicks series icon")
+	must(t, series, "ic:'user'", "unique series icon")
+	must(t, series, "ic:'mail'", "conversions series icon")
+	must(t, series, "ic:'trendup'", "revenue series icon")
+	must(t, series, "ic:'trenddown'", "cost series icon")
+	must(t, series, "ic:'banknote'", "profit series icon")
+	must(t, series, "ic:'percent'", "cr series icon")
+	must(t, series, "ic:'chart'", "roi series icon")
 	mustNot(t, series, "fact:true", "fact flag on a series")
 	mustNot(t, series, "money:true", "money flag on a series")
+	dash := spaFunctionLine(html, "dashboard")
+	must(t, dash, "icon(s.ic)", "legend button uses the series icon")
+	mustNot(t, dash, `<i class="${s.sw}">`, "legend button is not a colour stroke")
 	tip := spaFunctionLine(html, "chartTip")
 	must(t, tip, "sw-cr", "tooltip marks conversion rate")
 	must(t, tip, "periodROI()", "tooltip uses period ROI")
+	must(t, html, `.ctip i{display:inline-block;width:14px;height:0;border-top:2px solid var(--chart-clicks)}`, "tooltip keeps the colour stroke")
+	must(t, html, `.lg svg.ic{width:16px;height:16px;stroke-width:2;color:var(--chart-clicks)}`, "legend icon uses the clicks colour")
 	roi := spaFunctionLine(html, "metricROI")
 	must(t, roi, "roiPct(", "ROI metric uses roiPct")
 }
@@ -296,6 +359,25 @@ func TestEditorsDoNotMoveThePage(t *testing.T) {
 	must(t, html, `.drawer{position:fixed`, "the drawer overlays the page")
 	must(t, html, `.db{flex:1;overflow-y:auto`, "the drawer body scrolls inside itself")
 	must(t, html, `scrollbar-gutter:stable`, "no width jump when a page gets a scrollbar")
+}
+
+// TestNavDropdownNoBackground — the reports dropdown button has no hover/active background while the more button keeps it.
+func TestNavDropdownNoBackground(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, ".navdrop-btn:not(.navmore-btn):hover,.navdrop.active .navdrop-btn:not(.navmore-btn){background:transparent", "reports dropdown without background")
+	must(t, html, ".navdrop.active .navdrop-btn{color:var(--fg);background:var(--surface-2)}", "more button keeps the active background")
+}
+
+// TestRefreshSpin — a refresh click turns the icon a full half-second and holds it until the reload returns.
+func TestRefreshSpin(t *testing.T) {
+	html := string(indexHTML)
+	must(t, html, ".spin svg{animation:spin .5s linear infinite", "refresh icon turns in half a second")
+	must(t, html, "const SPIN_TURN=500", "spin is held for one full turn")
+	dash := spaBetween(html, "async function dashboard(", "async function loadBreakdown(")
+	must(t, dash, "return dashboard(null, live, true)", "dashboard refresh waits for the reload")
+	must(t, dash, "busy(q('#dash-refresh'), reloadDash)", "dashboard refresh spins")
+	must(t, html, "busy(q('#flow-refresh')", "flow list refresh spins")
+	must(t, html, "busy(ref,()=>Promise.resolve(onRefresh()))", "column refresh spins")
 }
 
 func must(t *testing.T, html, needle, what string) {
@@ -789,6 +871,13 @@ func TestSPAUsersPage(t *testing.T) {
 	must(t, html, "canEdit(", "canEdit helper")
 	must(t, html, "userIsEnv(", "userIsEnv helper")
 	must(t, html, "'users.src.env'", "users.src.env i18n")
+	must(t, html, "'users.src.owner'", "env owner caption")
+	must(t, html, "userTypeLabel(", "user type caption")
+	setFn := spaFunctionLine(html, "settings")
+	mustNot(t, setFn, "prof.account.login", "profile has no account card")
+	src := spaFunctionLine(html, "userSourceLabel")
+	must(t, src, "users.src.owner", "env row names the owner")
+	mustNot(t, src, "return src", "source column does not show the raw access_source")
 	must(t, html, "'prof.account'", "prof.account i18n")
 	for _, anchor := range []string{
 		`'menu.users':'Users'`,
@@ -1107,7 +1196,7 @@ func TestSPAProfileAndReportFilters(t *testing.T) {
 		t.Fatal("report or dashboard missing")
 	}
 	must(t, rep, "filterBuilder('events'", "report filter builder")
-	must(t, dash, "filterBuilder('events'", "dashboard filter builder")
+	mustNot(t, dash, "filterBuilder('events'", "dashboard filter builder was removed with the Filters button")
 	must(t, html, "kuztds-dash-dim", "dashboard custom dimension memory")
 	must(t, dash, "bd-custom", "one extra breakdown card")
 	must(t, html, "settings:profile", "PAGES routes settings to profile")
@@ -1218,6 +1307,24 @@ func TestDomainsCatalogAndPager(t *testing.T) {
 	must(t, src, `data-more="${esc(d.id)}"`, "domain row more menu")
 	mustNot(t, html, `data-dcheck=`, "inline domain check")
 	mustNot(t, html, `data-ddel=`, "inline domain delete")
+	must(t, html, "let DOM_PICK=new Set()", "domain pick set")
+	must(t, src, `data-dpick="*"`, "domain select all")
+	must(t, src, `id="dbulk-check"`, "bulk check")
+	must(t, src, `id="dbulk-group"`, "bulk group")
+	must(t, src, `id="dbulk-del"`, "bulk delete")
+	must(t, src, "openDomainEdit(", "edit from row menu")
+	must(t, html, "function domainPayload(", "domainPayload")
+	must(t, html, "function saveDomain(", "saveDomain")
+	must(t, html, "function runPool(", "runPool")
+	mustNot(t, html, "function domainStatus(", "old status cell helper")
+	cell := spaFunctionLine(html, "domainCell")
+	must(t, cell, `<span class="dot ${domainDot(d)}" title="${esc(domainStatusText(d))}"></span> ${esc(d.host)}`, "dot before host")
+	must(t, cell, "if(id==='status') return `<td>${esc(domainStatusText(d))}</td>`", "status text without dot")
+	ld := spaFunctionLine(html, "linkDomains")
+	must(t, ld, "disabled", "linkDomains hides disabled")
+	must(t, html, "return {id:n.id, host:n.host, group:n.group||'', role:n.role||'both', primary:!!n.primary, disabled:!!n.disabled, created_by:n.created_by||''};", "payload has writable fields only")
+	must(t, html, `'dom.edit':'Править домен'`, "ru edit domain")
+	must(t, html, `'dom.off.hint':'Выключенный домен`, "ru disabled hint")
 }
 
 // TestApiKeysMenu checks rotate, edit, remove and the key table.

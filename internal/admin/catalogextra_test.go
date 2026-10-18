@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -291,5 +292,159 @@ func TestDomainCheckParallel(t *testing.T) {
 	list := readDomainFile(t, dir)
 	if len(list) != 2 || list[0].Checked == "" || list[1].Checked == "" {
 		t.Fatalf("checked = %+v", list)
+	}
+}
+
+func TestDomainPutKeepsCheck(t *testing.T) {
+	srv, dir := domainHTTPServer(t, nil, []config.Domain{
+		{ID: "1", Host: "a.example", Role: "both", OK: true, Checked: "2026-01-01T00:00:00Z"},
+	}, nil)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+	resp := csrfDo(t, c, http.MethodPut, srv.URL+"/api/domains/1", csrf, map[string]any{
+		"host": "a.example", "role": "both", "group": "g", "ok": false,
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put same host %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	list := readDomainFile(t, dir)
+	if len(list) != 1 || !list[0].OK || list[0].Checked != "2026-01-01T00:00:00Z" || list[0].Group != "g" {
+		t.Fatalf("stored = %+v", list)
+	}
+	resp = csrfDo(t, c, http.MethodPut, srv.URL+"/api/domains/1", csrf, map[string]any{
+		"host": "b.example", "role": "both", "group": "g",
+	})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put new host %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	list = readDomainFile(t, dir)
+	if len(list) != 1 || list[0].OK || list[0].Reason != "" || list[0].Checked != "" {
+		t.Fatalf("after host change = %+v", list)
+	}
+}
+
+func TestDomainPostIgnoresCheckFields(t *testing.T) {
+	srv, dir := domainHTTPServer(t, nil, nil, nil)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+	resp := csrfDo(t, c, http.MethodPost, srv.URL+"/api/domains", csrf, map[string]any{
+		"id": "7", "host": "c.example", "role": "links", "ok": true, "checked": "x",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("post %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	list := readDomainFile(t, dir)
+	if len(list) != 1 || list[0].OK || list[0].Checked != "" {
+		t.Fatalf("stored = %+v", list)
+	}
+}
+
+func TestDomainDisabledDropsPrimary(t *testing.T) {
+	list := []config.Domain{
+		{ID: "1", Primary: true, Disabled: true},
+		{ID: "2"},
+	}
+	out := tidyDomains(list, "1")
+	if len(out) != 2 || out[0].Primary {
+		t.Fatalf("disabled primary = %+v", out)
+	}
+	list = []config.Domain{
+		{ID: "1", Primary: true},
+		{ID: "2", Primary: true},
+	}
+	out = tidyDomains(list, "1")
+	if !out[0].Primary || out[1].Primary {
+		t.Fatalf("single primary = %+v", out)
+	}
+}
+
+func TestDomainCheckHostChanged(t *testing.T) {
+	var dir string
+	lookup := func(_ context.Context, _ string) ([]net.IPAddr, error) {
+		store := NewJSONStore[config.Domain](filepath.Join(dir, "domains.json"))
+		if err := store.Save(context.Background(), []config.Domain{
+			{ID: "1", Host: "other.example", Role: "both"},
+		}); err != nil {
+			return nil, err
+		}
+		return nil, errors.New("no such host")
+	}
+	srv, d := domainHTTPServer(t, nil, []config.Domain{
+		{ID: "1", Host: "a.example", Role: "both"},
+	}, lookup)
+	dir = d
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+	resp := csrfDo(t, c, http.MethodPost, srv.URL+"/api/domains/1/check", csrf, nil)
+	if resp.StatusCode != http.StatusConflict {
+		t.Fatalf("check %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+	list := readDomainFile(t, dir)
+	if len(list) != 1 || list[0].Host != "other.example" || list[0].Checked != "" {
+		t.Fatalf("stored = %+v", list)
+	}
+}
+
+func TestDomainParallelPuts(t *testing.T) {
+	domains := make([]config.Domain, 8)
+	for i := range domains {
+		id := fmt.Sprintf("%d", i+1)
+		domains[i] = config.Domain{ID: id, Host: id + ".example", Role: "both"}
+	}
+	srv, dir := domainHTTPServer(t, nil, domains, nil)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+	var wg sync.WaitGroup
+	errc := make(chan error, 8)
+	for i := 1; i <= 8; i++ {
+		wg.Add(1)
+		id := fmt.Sprintf("%d", i)
+		go func(id string) {
+			defer wg.Done()
+			var buf bytes.Buffer
+			if err := json.NewEncoder(&buf).Encode(map[string]any{
+				"host":  id + ".example",
+				"role":  "both",
+				"group": "g" + id,
+			}); err != nil {
+				errc <- err
+				return
+			}
+			req, err := http.NewRequest(http.MethodPut, srv.URL+"/api/domains/"+id, &buf)
+			if err != nil {
+				errc <- err
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-CSRF-Token", csrf)
+			resp, err := c.Do(req)
+			if err != nil {
+				errc <- err
+				return
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				errc <- fmt.Errorf("%s status %d", id, resp.StatusCode)
+			}
+		}(id)
+	}
+	wg.Wait()
+	close(errc)
+	for err := range errc {
+		t.Error(err)
+	}
+	list := readDomainFile(t, dir)
+	if len(list) != 8 {
+		t.Fatalf("len %d", len(list))
+	}
+	for _, d := range list {
+		want := "g" + d.ID
+		if d.Group != want {
+			t.Fatalf("id %s group %q want %q", d.ID, d.Group, want)
+		}
 	}
 }

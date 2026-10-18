@@ -48,6 +48,7 @@ type Offer struct {
 
 // Domain is a host parked on this tracker.
 // Role is admin, links or both. Primary marks the default base for campaign links.
+// Disabled is a catalog mark only.
 // OK is set only after a check received this tracker's own answer on that host.
 // Reason is the code of the last failed check (dns, private, connect, foreign).
 // It is empty when OK is true.
@@ -57,6 +58,9 @@ type Domain struct {
 	Group   string `json:"group,omitempty"`
 	Role    string `json:"role"`
 	Primary bool   `json:"primary,omitempty"`
+	// Disabled hides the host from new campaign links. The engine does not read it
+	// and keeps accepting clicks on this host.
+	Disabled bool `json:"disabled,omitempty"`
 	OK      bool   `json:"ok,omitempty"`
 	Reason  string `json:"reason,omitempty"`
 	Checked string `json:"checked,omitempty"`

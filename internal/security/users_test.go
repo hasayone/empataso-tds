@@ -215,6 +215,22 @@ func TestErrLastAdminRemove(t *testing.T) {
 	}
 }
 
+func TestOutsideAdminLetsRemoveLastFileAdmin(t *testing.T) {
+	s := NewUserSet()
+	hash, _ := HashPassword("p")
+	if err := s.Add(User{Login: "a", Type: UserAdmin, Enabled: true, Hash: hash, Access: Access{Grants: map[string]Grant{}}}); err != nil {
+		t.Fatal(err)
+	}
+	u, _ := s.ByLogin("a")
+	if err := s.Remove(u.ID); !errors.Is(err, ErrLastAdmin) {
+		t.Fatalf("remove last file admin: %v", err)
+	}
+	s.SetOutsideAdmins(1)
+	if err := s.Remove(u.ID); err != nil {
+		t.Fatalf("remove with outside admin: %v", err)
+	}
+}
+
 func TestUserCreatedAtDefault(t *testing.T) {
 	s := NewUserSet()
 	before := time.Now().UTC()

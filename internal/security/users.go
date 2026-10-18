@@ -148,10 +148,11 @@ var (
 
 // UserSet is the in-memory users.json collection.
 type UserSet struct {
-	mu      sync.RWMutex
-	users   []*User
-	byID    map[string]*User
-	byLogin map[string]*User
+	mu            sync.RWMutex
+	users         []*User
+	byID          map[string]*User
+	byLogin       map[string]*User
+	outsideAdmins int
 }
 
 // NewUserSet returns an empty set safe for concurrent use.
@@ -293,10 +294,23 @@ func (s *UserSet) countEnabledAdminsLocked() int {
 	return n
 }
 
+// SetOutsideAdmins records how many enabled administrators live outside this set.
+// n is that count; a negative value is stored as 0. It returns nothing.
+// Update and Remove then treat those administrators as still present, so the
+// last administrator stored in the set can be demoted or removed.
+func (s *UserSet) SetOutsideAdmins(n int) {
+	if n < 0 {
+		n = 0
+	}
+	s.mu.Lock()
+	s.outsideAdmins = n
+	s.mu.Unlock()
+}
+
 // countEnabledAdminsExceptLocked counts enabled administrators other than exceptID.
 // The caller holds s.mu for writing.
 func (s *UserSet) countEnabledAdminsExceptLocked(exceptID string) int {
-	n := 0
+	n := s.outsideAdmins
 	for _, u := range s.users {
 		if u != nil && u.ID != exceptID && u.Enabled && u.Type == UserAdmin {
 			n++
