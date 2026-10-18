@@ -255,10 +255,22 @@ func TestDashboardPerfControls(t *testing.T) {
 	dash := spaBetween(html, "async function dashboard(", "async function loadBreakdown(")
 	must(t, dash, `id="perftop"`, "perf top button")
 	must(t, dash, `id="perffold"`, "perf fold button")
+	must(t, dash, `<div class="legend">${legs}</div>`, "chart legend under the title")
+	must(t, dash, `id="perfexport"`, "perf export button")
+	must(t, dash, `menu(e.currentTarget,[{label:tr('Export CSV'),on:()=>exportPerf(`, "perf export menu")
+	mustNot(t, dash, `id="perfcsv"`, "no separate csv button")
+	mustNot(t, dash, `id="perfhtml"`, "no separate html button")
+	must(t, dash, `class="lg-name"`, "legend button keeps its name")
+	must(t, html, `.legend{display:flex;flex-wrap:nowrap;justify-content:flex-end`, "legend stays one row on the right")
+	must(t, html, `.legend .lg:hover .lg-name,.legend .lg:active .lg-name`, "mobile legend name shows on hover and press")
+	must(t, html, `.legend .lg{position:relative;width:32px;height:32px`, "mobile legend is an icon button")
+	must(t, html, `@media(min-width:1181px){.bars .k{width:auto;flex:1 1 auto;min-width:0} .bars .tr{flex:0 0 140px;max-width:140px}}`, "wide breakdown bar is 140px")
 	sorted := spaFunctionLine(html, "perfSorted")
 	must(t, sorted, "perfCmp(", "perfSorted uses perfCmp")
 	render := spaFunctionLine(html, "renderPerf")
 	must(t, render, "PERF_FOLD", "renderPerf respects fold flag")
+	must(t, render, `icon(PERF_FOLD?'expand':'collapse')`, "fold button is an icon")
+	mustNot(t, render, `btnFold.textContent=`, "fold button is not a text label")
 	mustNot(t, spaFunctionLine(html, "exportPerf"), "perfTop(", "export skips perfTop")
 	mustNot(t, spaFunctionLine(html, "perfSheet"), "perfTop(", "html export skips perfTop")
 	mustNot(t, spaFunctionLine(html, "paintFlowCards"), "perfTop(", "flow cards skip perfTop")
@@ -283,13 +295,16 @@ func TestDashboardKPIMoney(t *testing.T) {
 	html := string(indexHTML)
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
 	must(t, pure, "function kpiMoney(", "kpiMoney in pure block")
-	must(t, pure, "Intl.NumberFormat('en-US'", "kpiMoney groups thousands")
+	must(t, pure, "moneyText(", "kpiMoney delegates to moneyText")
 	dash := spaBetween(html, "async function dashboard(", "async function loadBreakdown(")
 	must(t, dash, "kpiMoney(", "dashboard tiles use kpiMoney")
 	must(t, dash, "cc.code||'USD'", "empty spend currency shows dollars on KPI tiles")
-	must(t, html, ".kpi .l span:last-child{display:none}", "phone tiles drop the sub-label")
+	mustNot(t, dash, "tr('conv / visits')", "CR tile without conv/visits sub-label")
+	must(t, dash, "class=\"vp", "KPI percent uses vp")
+	must(t, dash, "vp-end", "bots KPI percent at tile end")
+	must(t, html, ".kpi .vp{font-size:8px", "KPI percent font size")
 	mustNot(t, dash, "chartAmt(n, curCode, d)", "tiles no longer use chartAmt")
-	order := []string{"'clicks')", "'uniq')", "'conv')", "'cost')", "'rev')", "'profit')", "'cr')", "'roi')", "'bots')"}
+	order := []string{"'clicks')", "'uniq',pct(", "'conv')", "'cost')", "'rev')", "'profit')", "'cr')", "'roi')", "'bots',pct("}
 	last := -1
 	for _, k := range order {
 		p := strings.Index(dash, k)
@@ -377,7 +392,7 @@ func TestRefreshSpin(t *testing.T) {
 	must(t, dash, "return dashboard(null, live, true)", "dashboard refresh waits for the reload")
 	must(t, dash, "busy(q('#dash-refresh'), reloadDash)", "dashboard refresh spins")
 	must(t, html, "busy(q('#flow-refresh')", "flow list refresh spins")
-	must(t, html, "busy(ref,()=>Promise.resolve(onRefresh()))", "column refresh spins")
+	must(t, html, "busy(ref,()=>Promise.resolve(onRefresh())).catch(e=>toast(e.message,true))", "column refresh spins and toasts errors")
 }
 
 func must(t *testing.T, html, needle, what string) {
@@ -436,8 +451,8 @@ func TestCampaignMoneyAndROIDisplay(t *testing.T) {
 	if mt == "" || cm == "" || cr == "" || ratio == "" {
 		t.Fatal("moneyText, campaignMoney, metricROI or cellRatio not found in SPA")
 	}
-	must(t, cm, "moneyMap(by,4)", "campaignMoney uses moneyMap with 4 digits")
-	must(t, mt, ".toFixed(d)+' '+suf", "moneyText formats amount and currency suffix")
+	must(t, cm, "moneyMap(by)", "campaignMoney uses moneyMap")
+	must(t, mt, "Intl.NumberFormat('en-US'", "moneyText groups with en-US locale")
 	must(t, cr, "return '0.00%'", "metricROI without a base is 0.00%")
 	mustNot(t, cr, "return NA", "metricROI does not return NA")
 	mustNot(t, cr, "'100%'", "metricROI is not 100% without spend")
@@ -607,6 +622,10 @@ func TestCatalogNames(t *testing.T) {
 	must(t, conv, "nameOf(GROUPS, PB.campaignId)", "conversion title is the campaign name")
 	must(t, pb, "r.count", "conversion counter uses the filtered count")
 	must(t, pb, "typeof r.total==='number'", "missing profit total is not drawn as zero")
+	must(t, pb, "paintPbPage(", "conversion page paints the fixed pager")
+	mustNot(t, pb, "pb-more", "conversion log has no show-more button")
+	must(t, conv, "has-pager", "conversion log pins the pager")
+	must(t, conv, `id="pbpage"`, "conversion pager dock")
 	must(t, one, "campaign_id", "open campaign refetches its performance")
 	must(t, page, "loadPerfFor(", "flow page loads that campaign before drawing")
 	must(t, html, "#/flows/", "campaign address stays a slug path")
@@ -1110,6 +1129,21 @@ func spaBetween(html, start, end string) string {
 	return rest[:j]
 }
 
+// pageFnBody returns one top-level async page handler up to the next handler declaration.
+func pageFnBody(html, fn string) string {
+	start := "async function " + fn + "("
+	i := strings.Index(html, start)
+	if i < 0 {
+		return ""
+	}
+	tail := html[i+len(start):]
+	j := strings.Index(tail, "\nasync function ")
+	if j < 0 {
+		return html[i:]
+	}
+	return html[i : i+len(start)+j]
+}
+
 // TestCatalogSearchAndGroups checks shared catalog filters, group window, and save bodies.
 func TestCatalogSearchAndGroups(t *testing.T) {
 	html := string(indexHTML)
@@ -1125,6 +1159,9 @@ func TestCatalogSearchAndGroups(t *testing.T) {
 	bar := spaFunctionLine(html, "catalogBar")
 	must(t, bar, `id="${kind}-q"`, "catalogBar search id template")
 	must(t, bar, `id="${kind}-group"`, "catalogBar group id template")
+	must(t, bar, `class="lft"`, "catalogBar left cluster")
+	must(t, bar, `class="rgt"`, "catalogBar right cluster")
+	must(t, bar, `-refresh"`, "catalogBar refresh id template")
 	must(t, html, "function groupLabels(", "groupLabels helper")
 	must(t, html, "function fillGroupSelect(", "fillGroupSelect helper")
 	must(t, html, "function openGroupWindow(", "openGroupWindow helper")
@@ -1149,6 +1186,55 @@ func TestCatalogSearchAndGroups(t *testing.T) {
 	netCat := catalogBranch(html, "networks")
 	must(t, landCat, "['group','off.group',1]", "landings catalog group column")
 	must(t, netCat, "['group','off.group',1]", "networks catalog group column")
+}
+
+// TestHeaderPattern — shared page header: catalog toolbar layout and refresh/export controls.
+func TestHeaderPattern(t *testing.T) {
+	html := string(indexHTML)
+	tools := spaBetween(html, "function colTools(", "\n}")
+	mustNot(t, tools, "data-col-refresh", "colTools without refresh button")
+	must(t, tools, "data-col-gear", "colTools keeps column gear")
+	for _, fn := range []string{"offers", "landings", "networks", "sources", "domains"} {
+		body := pageFnBody(html, fn)
+		if body == "" {
+			t.Fatalf("SPA function %q missing", fn)
+		}
+		phStart := strings.Index(body, `<div class="ph">`)
+		if phStart < 0 {
+			t.Fatalf("%s: ph missing", fn)
+		}
+		phEnd := strings.Index(body[phStart:], "</div>\n")
+		if phEnd < 0 {
+			t.Fatalf("%s: ph end missing", fn)
+		}
+		ph := body[phStart : phStart+phEnd]
+		mustNot(t, ph, `-new"`, fn+" ph without create button")
+		mustNot(t, ph, `-groups"`, fn+" ph without groups button")
+	}
+	logs := spaBetween(html, "async function logs(", "async function loadLogs(")
+	must(t, logs, `id="log-refresh"`, "logs refresh control")
+	must(t, logs, `data-col-refresh="logs"`, "logs refresh kind")
+	if n := strings.Count(logs, "data-col-refresh="); n != 1 {
+		t.Errorf("logs must have exactly one data-col-refresh, got %d", n)
+	}
+	must(t, logs, `id="log-export"`, "logs export menu")
+	mustNot(t, logs, `id="export"`, "logs without standalone csv button")
+	mustNot(t, logs, `id="exporthtml"`, "logs without standalone html button")
+	rep := spaBetween(html, "function paintReport(", "async function integrations(")
+	must(t, rep, `id="rep-refresh"`, "report refresh control")
+	must(t, rep, `data-col-refresh="report"`, "report refresh kind")
+	if n := strings.Count(rep, "data-col-refresh="); n != 1 {
+		t.Errorf("paintReport must have exactly one data-col-refresh, got %d", n)
+	}
+	must(t, rep, `id="rep-export"`, "report export menu")
+	mustNot(t, rep, `id="rcsv"`, "report without rcsv button")
+	mustNot(t, rep, `id="rhtml"`, "report without rhtml button")
+	conv := spaBetween(html, "async function conversions(", "function paintPbPage(")
+	must(t, conv, `id="pb-refresh"`, "conversions refresh control")
+	must(t, conv, `data-col-refresh="conv"`, "conversions refresh kind")
+	if n := strings.Count(conv, "data-col-refresh="); n != 1 {
+		t.Errorf("conversions must have exactly one data-col-refresh, got %d", n)
+	}
 }
 
 // TestSPALogFilters checks the journal filter builder, column ids and the conversion page size.
@@ -1348,7 +1434,7 @@ func TestApiKeysMenu(t *testing.T) {
 	mustNot(t, html, `data-revoke=`, "inline revoke button")
 }
 
-// TestProfileTabsSections checks profile tabs, settings sections and the TDS title.
+// TestProfileTabsSections checks profile tabs, settings sections and the tab title.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestProfileTabsSections(t *testing.T) {
 	html := string(indexHTML)
@@ -1357,10 +1443,39 @@ func TestProfileTabsSections(t *testing.T) {
 	must(t, html, `<section class="setsec">`, "settings section")
 	must(t, html, `'set.sec.access':'Компания и доступ'`, "ru access section")
 	must(t, html, `.setsec h2{`, "section heading style")
-	must(t, html, `<title>TDS</title>`, "document title")
-	must(t, html, `document.title=name||'TDS'`, "title falls back to TDS")
+	must(t, html, `<title></title>`, "empty document title in markup")
+	mustNot(t, html, `<title>TDS</title>`, "TDS placeholder title")
 	must(t, html, `a.hidden=!name&&!logo`, "brand hidden without name and logo")
 	mustNot(t, html, `CustomTDS`, "CustomTDS branding")
+}
+
+// TestBrowserTabTitle checks tab title helpers and wiring in the SPA script.
+func TestBrowserTabTitle(t *testing.T) {
+	html := string(indexHTML)
+	script := spaBetween(html, "<script>\n", "</script>")
+	mustNot(t, script, `'TDS'`, "TDS string literal in script")
+	mustNot(t, script, `"TDS"`, "TDS string literal in script")
+	pt := spaFunctionLine(html, "pageTitle")
+	if pt == "" {
+		t.Fatal("pageTitle missing")
+	}
+	must(t, pt, "BRAND_KNOWN", "pageTitle waits for brand")
+	must(t, pt, "menu.settings", "pageTitle settings label")
+	must(t, pt, "menu.integrations", "pageTitle integrations label")
+	must(t, pt, "titleText(", "pageTitle builds via titleText")
+	render := spaFunctionLine(html, "render")
+	if render == "" {
+		t.Fatal("render missing")
+	}
+	must(t, render, "pageTitle(page)", "render sets title before page load")
+	chrome := spaFunctionLine(html, "paintChrome")
+	if chrome == "" {
+		t.Fatal("paintChrome missing")
+	}
+	must(t, chrome, "pageTitle()", "paintChrome refreshes title")
+	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
+	must(t, pure, "function titleText(", "titleText in pure block")
+	must(t, pure, "n+' - '+l", "title joins name and page")
 }
 
 // TestStreamProxyAndOrConditions checks the stream editor offers proxy and IP

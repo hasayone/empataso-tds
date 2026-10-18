@@ -29,8 +29,18 @@ func TestLogicHelpers(t *testing.T) {
 	if m == nil {
 		t.Fatal("the pure helpers block is not in the SPA")
 	}
+	html := string(indexHTML)
+	var prelude strings.Builder
+	for _, name := range []string{"moneyText", "bareMoney"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		prelude.WriteString(fn)
+		prelude.WriteByte('\n')
+	}
 	f := filepath.Join(t.TempDir(), "logic.js")
-	if err := os.WriteFile(f, []byte(m[1]+logicChecks), 0o644); err != nil {
+	if err := os.WriteFile(f, []byte(prelude.String()+m[1]+logicChecks), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
@@ -254,7 +264,7 @@ eq(userIsEnv({source:'file'}), false, 'userIsEnv file');
 eq(userIsEnv(null), false, 'userIsEnv null');
 eq(kpiMoney(42814.27,'USD',2),'42,814.27 $','kpiMoney USD');
 eq(kpiMoney(1234.5,'EUR',2),'1,234.50 EUR','kpiMoney other code');
-eq(kpiMoney(10,'',2),'10.00','kpiMoney without code');
+eq(kpiMoney(10,'',2),'10.00 $','kpiMoney without code uses USD on tiles');
 eq(kpiMoney('x','USD',2),'0.00 $','kpiMoney non-number');
 eq(flowCompactClass(true),'compact','flowCompactClass on');
 eq(flowCompactClass(false),'','flowCompactClass off');
@@ -318,6 +328,12 @@ eq(ipEntries('1.2.3.4-1.2.3.9'), ['1.2.3.4-1.2.3.9'], 'a range is one entry');
 eq(ipEntries('10.0.0.0/8'), ['10.0.0.0/8'], 'a prefix is one entry');
 eq(ipEntries('1.2.3.4\n\n  \n5.6.7.8\n'), ['1.2.3.4','5.6.7.8'], 'empty lines dropped');
 
+eq(titleText(false, 'EmpatASO', 'Кампании'), '', 'unknown brand');
+eq(titleText(true, 'EmpatASO', 'Кампании'), 'EmpatASO - Кампании', 'name and page');
+eq(titleText(true, 'EmpatASO', ''), 'EmpatASO', 'name only');
+eq(titleText(true, '', 'Кампании'), 'Кампании', 'empty company name keeps page');
+eq(titleText(true, '', ''), '', 'known brand without name or page');
+
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `
 
@@ -332,7 +348,7 @@ func TestMoneyDisplay(t *testing.T) {
 	}
 	html := string(indexHTML)
 	var b strings.Builder
-	for _, name := range []string{"moneyText", "bareMoney", "cellRatio", "moneyMap", "costCode", "costCodesList", "roiPct", "metricROI", "cpcCell", "moneyOf", "profitOf", "clickCostBy", "addBy", "pct", "periodSpendBy", "campaignCostOnly", "spendShare", "overlapShare", "rangeBounds"} {
+	for _, name := range []string{"moneyText", "bareMoney", "plainMoney", "cellRatio", "moneyMap", "costCode", "costCodesList", "roiPct", "metricROI", "cpcCell", "moneyOf", "profitOf", "clickCostBy", "addBy", "pct", "periodSpendBy", "campaignCostOnly", "spendShare", "overlapShare", "rangeBounds"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -367,16 +383,23 @@ rangeBounds=function(){return {from:new Date('2020-01-01T00:00:00Z'),to:new Date
 eq(metricROI(12.34, {}, true), '0.00%', 'revenue and no spend');
 eq(metricROI(12.34, {EUR:100, USD:100}, true), 'EUR · USD', 'two currencies list codes');
 eq(moneyOf(12.34, {EUR:100, USD:100}, true, 2), '12.34', 'multi revenue has no currency mark');
-eq(profitOf(12.34, {EUR:100, USD:100}, true), '12.34 · 1.0000 EUR · 1.0000 $', 'multi profit lists spend');
+eq(profitOf(12.34, {EUR:100, USD:100}, true), '12.34 · 1.00 EUR · 1.00 $', 'multi profit lists spend');
 eq(moneyOf(12.34, {EUR:0, GBP:100}, true, 2), '12.34 GBP', 'revenue keeps the nonzero currency');
-eq(moneyMap({EUR:0, GBP:100}, 4), '0.0000 EUR · 1.0000 GBP', 'zero keys stay in the spend list');
+eq(moneyMap({EUR:0, GBP:100}, 2), '0.00 EUR · 1.00 GBP', 'zero keys stay in the spend list');
 eq(moneyOf(0, {EUR:100}, false, 2), '0.00 EUR', 'unready facts keep EUR');
 eq(cpcCell({hits:0, costBy:{EUR:100}}), '—', 'zero clicks are not a price');
+eq(moneyText(42814.27,'USD'), '42,814.27 $', 'moneyText USD groups thousands');
+eq(moneyText(1234.5,'eur'), '1,234.50 EUR', 'moneyText other code');
+eq(moneyText(10,''), '10.00', 'moneyText bare number');
+eq(moneyText('x','USD'), '0.00 $', 'moneyText non-number');
+eq(bareMoney(1234567.891), '1,234,567.89', 'bareMoney groups');
+eq(plainMoney('1,234,567.89 $ · 1,000.00 EUR'), '1234567.89 $ · 1000.00 EUR', 'plainMoney strips grouping');
+eq(plainMoney('12.50%'), '12.50%', 'plainMoney leaves percents');
 eq(moneyText(1, '', 2), '1.00', 'no currency at all is the number');
 eq(moneyText(1, 'USD', 2), '1.00 $', 'USD is dollars');
 eq(clickCostBy(), {USD:150}, 'click prices sum by currency');
 eq(clickCostBy(function(r){return r.group_id==='g2'}), {}, 'zero cents add no key');
-eq(moneyMap({'':300}, 4), '3.0000', 'empty currency is a bare number');
+eq(moneyMap({'':300}, 2), '3.00', 'empty currency is a bare number');
 eq(costCode({'':300}).code, '', 'empty bucket is one currency');
 eq(costCode({'':300}).multi, false, 'empty bucket is not multi');
 eq(metricROI(6, {'':300}, true), '100.00%', 'roi of one empty bucket');
