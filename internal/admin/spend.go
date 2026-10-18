@@ -347,16 +347,18 @@ func sharesExceed(g config.Group) bool {
 	return false
 }
 
-// validateChangedShares checks the 100% limit only for campaigns the save changed.
-// A stored campaign that already exceeds the limit does not block saving another one.
+// changedFault runs a per-campaign check and reports only faults of campaigns the save changed.
+// A stored campaign that already has the fault does not block saving another one.
 // stored is the list on disk. groups is the candidate list after prepareGroups.
-// The cheap share sum runs first, so only a campaign above 100% is compared with its stored row.
+// fault is the cheap check: it returns the client message, or "" when the campaign is fine.
+// It runs first, so only a faulty campaign is compared with its stored row.
 // The stored folder is trimmed before the comparison, as prepareGroups trims the candidate.
-// It returns an empty string when every changed campaign fits, otherwise the client message.
-func validateChangedShares(stored, groups []config.Group) string {
+// It returns "" when no changed campaign has a fault, otherwise the first message.
+func changedFault(stored, groups []config.Group, fault func(config.Group) string) string {
 	var old map[string]config.Group
 	for _, g := range groups {
-		if !sharesExceed(g) {
+		msg := fault(g)
+		if msg == "" {
 			continue
 		}
 		if old == nil {
@@ -368,10 +370,43 @@ func validateChangedShares(stored, groups []config.Group) string {
 		prev, ok := old[g.ID]
 		prev.Folder = strings.TrimSpace(prev.Folder)
 		if !ok || !groupsEqual(prev, g) {
-			return errSharesExceed
+			return msg
 		}
 	}
 	return ""
+}
+
+// sharesFault returns errSharesExceed when any stream of g has a list above 100%, else "".
+func sharesFault(g config.Group) string {
+	if sharesExceed(g) {
+		return errSharesExceed
+	}
+	return ""
+}
+
+// subIDFault checks the Sub ID rules of every stream of g.
+// It returns the client message naming the group id and the stream, or "" when the rules are valid.
+func subIDFault(g config.Group) string {
+	for _, st := range g.Streams {
+		if msg := st.Rules.SubIDRulesError(); msg != "" {
+			return msg + " (group " + g.ID + ", stream " + st.Name + ")"
+		}
+	}
+	return ""
+}
+
+// validateChangedShares checks the 100% limit only for campaigns the save changed.
+// stored is the list on disk, groups the candidate list after prepareGroups.
+// It returns an empty string when every changed campaign fits, otherwise the client message.
+func validateChangedShares(stored, groups []config.Group) string {
+	return changedFault(stored, groups, sharesFault)
+}
+
+// validateChangedSubIDs checks the Sub ID rules only for campaigns the save changed.
+// stored is the list on disk, groups the candidate list after prepareGroups.
+// It returns an empty string when every changed campaign is valid, otherwise the client message.
+func validateChangedSubIDs(stored, groups []config.Group) string {
+	return changedFault(stored, groups, subIDFault)
 }
 
 func (s *Server) offerList(ctx context.Context) ([]config.Offer, error) {

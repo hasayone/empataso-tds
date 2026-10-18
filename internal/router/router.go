@@ -39,6 +39,7 @@ type Visitor struct {
 	Browser    string // Chrome, Safari, ...
 	BrowserVer string
 	Brand      string // Apple, Samsung, ...
+	Model      string // SM-S918B, Pixel 8, ... or ""
 	Unique     bool
 	Bot        bool // true when the installation bot profile marked this visitor
 	Proxy      bool // true when the address or its organization looks like a proxy, VPN, or hosting network
@@ -49,6 +50,7 @@ type Visitor struct {
 	Timezone string     // IANA name ("Europe/Moscow"), or Empty
 	TZOffset string     // current UTC offset ("+3", "+5:30"), or Empty
 	Query    url.Values // query-string variables of the request
+	Subs     [config.MaxSubID]string
 }
 
 // IPLister checks whether an IP belongs to a named list (implemented by ipindex.Set).
@@ -219,7 +221,6 @@ func whyAnd(s *config.Stream, v Visitor, deps Deps) string {
 	if rejectList(r.Brand.Flag, len(r.Brand.Values) > 0, exactAny(r.Brand.Values, v.Brand)) {
 		return "brand"
 	}
-
 	// Schedule by days of the week.
 	if r.Schedule.Enabled {
 		now := time.Now()
@@ -353,9 +354,8 @@ func whyAnd(s *config.Stream, v Visitor, deps Deps) string {
 	if rejectList(r.Timezone.Flag, len(r.Timezone.Values) > 0, tzAny(r.Timezone.Values, v.Timezone, v.TZOffset)) {
 		return "timezone"
 	}
-	// Query-string variable: "name" (present and non-empty) or "name=value".
-	if rejectList(r.Query.Flag, len(r.Query.Values) > 0, queryAny(r.Query.Values, v.Query)) {
-		return "get"
+	if why := whyExtra(r, v); why != "" { // query variable, model, sub ids
+		return why
 	}
 
 	// Limits (Redis in phase 4).
@@ -582,13 +582,8 @@ func buildRegexp(raw string) *regexp.Regexp {
 func whyOr(s *config.Stream, v Visitor, deps Deps) string {
 	probe := deps
 	probe.Limiter = nil
-	type one struct {
-		name string
-		on   bool
-		rule config.Rules
-	}
 	r := s.Rules
-	checks := []one{
+	checks := []ruleCheck{
 		{name: "lang", on: listOn(r.Lang), rule: config.Rules{Lang: r.Lang}},
 		{name: "country", on: listOn(r.Country), rule: config.Rules{Country: r.Country}},
 		{name: "city", on: listOn(r.City), rule: config.Rules{City: r.City}},
@@ -616,6 +611,7 @@ func whyOr(s *config.Stream, v Visitor, deps Deps) string {
 		{name: "timezone", on: listOn(r.Timezone), rule: config.Rules{Timezone: r.Timezone}},
 		{name: "get", on: listOn(r.Query), rule: config.Rules{Query: r.Query}},
 	}
+	checks = append(checks, extraChecks(r)...)
 	passed := false
 	first := ""
 	active := 0

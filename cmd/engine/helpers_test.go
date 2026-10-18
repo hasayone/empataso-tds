@@ -166,21 +166,6 @@ func TestDomainOf(t *testing.T) {
 	}
 }
 
-func TestNewCID(t *testing.T) {
-	a, b := newCID(), newCID()
-	if len(a) != 10 {
-		t.Errorf("cid len = %d, want 10", len(a))
-	}
-	if a == b {
-		t.Errorf("cids should differ: %q == %q", a, b)
-	}
-	for _, c := range a {
-		if !strings.ContainsRune("0123456789abcdef", c) {
-			t.Errorf("cid has non-hex char %q", c)
-		}
-	}
-}
-
 func TestDetectBotByIPList(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "ip_google.dat"), []byte("66.249.66.1\n"), 0o644)

@@ -243,10 +243,7 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 		strings.TrimSpace(info.Browser+" "+info.BrowserVer), info.Brand
 	q, _ := url.ParseQuery(strings.TrimPrefix(req.Visitor.Query, "?"))
 	ref := strings.TrimSpace(req.Visitor.Referer)
-	domain := router.Empty
-	if u, err := url.Parse(ref); err == nil && u.Host != "" {
-		domain = strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
-	}
+	domain := simDomain(ref)
 	if ref == "" {
 		ref = router.Empty
 	}
@@ -254,13 +251,14 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 	if lang == "" {
 		lang = router.Empty
 	}
+	subsOf := s.simSubs(r.Context(), q)
 	v := router.Visitor{
 		Lang: lang, Country: vi.Country, City: g.City, Region: g.Region,
 		UA: req.Visitor.UserAgent, Referer: ref, Domain: domain, Key: req.Visitor.Key,
 		Device: info.Device, Operator: vi.Operator,
-		OS: info.OS, OSVersion: info.OSVersion, Browser: info.Browser, BrowserVer: info.BrowserVer, Brand: info.Brand,
+		OS: info.OS, OSVersion: info.OSVersion, Browser: info.Browser, BrowserVer: info.BrowserVer, Brand: info.Brand, Model: info.Model,
 		Unique: !req.Visitor.Repeat, IP: ip, Proxy: vi.Proxy,
-		ASN: g.ASN, Org: g.Org, Timezone: g.Timezone, TZOffset: vi.UTC, Query: q,
+		ASN: g.ASN, Org: g.Org, Timezone: g.Timezone, TZOffset: vi.UTC, Query: q, Subs: subsOf(grp),
 	}
 	deps := router.Deps{IP: lists} // no Limiter: asking must not spend a limit
 	if req.Roll != nil {
@@ -314,9 +312,51 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 		if step.Error != "" {
 			break
 		}
-		grp = next
+		grp, v.Subs = next, subsOf(next)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"visitor": vi, "unique": v.Unique, "lang": lang, "path": path})
+}
+
+// simDomain returns the referer host without "www." for the simulator, or
+// router.Empty when ref is not an absolute URL with a host.
+func simDomain(ref string) string {
+	if u, err := url.Parse(ref); err == nil && u.Host != "" {
+		return strings.TrimPrefix(strings.ToLower(u.Hostname()), "www.")
+	}
+	return router.Empty
+}
+
+// simSubs returns a function that reads the sub ids of a group the way the
+// engine does: through the traffic source the group names.
+//
+// ctx bounds the read of the source store; q is the simulated query. The sources
+// are read once per simulation. Without a store, or on a read error, the plain
+// parameter names are used.
+func (s *Server) simSubs(ctx context.Context, q url.Values) func(*config.Group) [config.MaxSubID]string {
+	sources := s.simSources(ctx)
+	return func(g *config.Group) [config.MaxSubID]string {
+		_, subs := config.ApplySource(q, sources[g.SourceID])
+		return subs
+	}
+}
+
+// simSources indexes the stored traffic sources by id for one simulation.
+// ctx bounds the read. A missing store or a read error returns an empty map,
+// so a group's sub ids are then read under their own names. The pointers in the
+// map are never nil; a missing id yields a nil pointer, which ApplySource accepts.
+func (s *Server) simSources(ctx context.Context) map[string]*config.TrafficSource {
+	out := map[string]*config.TrafficSource{}
+	if s.cfg.Sources == nil {
+		return out
+	}
+	list, err := s.cfg.Sources.List(ctx)
+	if err != nil {
+		return out
+	}
+	for i := range list {
+		out[list[i].ID] = &list[i]
+	}
+	return out
 }
 
 // simCatalogs builds the offer and landing maps for one simulation.

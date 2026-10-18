@@ -75,8 +75,8 @@ func TestBotProtectionProxyStream(t *testing.T) {
 	if rules.UAText.Flag != 2 || strings.Join(rules.UAText.Values, "|") != "sdk_gphone|emulator" {
 		t.Fatalf("ua = %+v", rules.UAText)
 	}
-	if rules.Query.Flag != 2 || strings.Join(rules.Query.Values, "|") != "sub_id_3=V2439" {
-		t.Fatalf("get = %+v", rules.Query)
+	if sub := rules.SubIDs["sub_id_3"]; sub.Flag != 2 || strings.Join(sub.Values, "|") != "V2439" || rules.Query.Flag != 0 {
+		t.Fatalf("sub_ids = %+v get = %+v", rules.SubIDs, rules.Query)
 	}
 	body := res.Lists[rules.IPList.File]
 	if rules.IPList.Flag != 2 || body != "1.2.3.4\n" || rules.IPList.File != IPListName(body) {

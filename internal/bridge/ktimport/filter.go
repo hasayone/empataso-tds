@@ -8,10 +8,12 @@ import (
 
 // mapFilters переводит фильтры потока в правила kuztds.
 //
-// Параметры: filters — фильтры Keitaro; lists — файлы списков IP, которые собрал этот прогон.
+// Параметры: filters — фильтры Keitaro; lists — файлы списков IP, которые собрал этот прогон;
+// or — поток Keitaro работает по ИЛИ.
 // Результат: правила, true если поток можно оставить включённым, причина выключения и строки отчёта.
-// Ошибки: нет. Неизвестное имя пропускается. Поток выключается только когда ни один фильтр не перенёсся.
-func mapFilters(filters []KFilter, lists *listBag) (Rules, bool, string, []Loss) {
+// Ошибки: нет. Неизвестное имя пропускается. Фильтр, который нельзя склеить с прежним без смены
+// смысла, пропускается с записью в отчёте. Поток выключается только когда ни один фильтр не перенёсся.
+func mapFilters(filters []KFilter, lists *listBag, or bool) (Rules, bool, string, []Loss) {
 	var rules Rules
 	var losses []Loss
 	named, mapped := 0, 0
@@ -29,12 +31,20 @@ func mapFilters(filters []KFilter, lists *listBag) (Rules, bool, string, []Loss)
 			losses = append(losses, Loss{Kind: "skipped", Detail: why})
 			continue
 		}
+		if conflict := mergeConflict(rules, part, or); conflict != "" {
+			losses = append(losses, Loss{Kind: "skipped", Detail: conflict})
+			continue
+		}
 		mapped++
 		if approx {
 			if why == "" {
 				why = "фильтр " + name + " перенесён приближённо"
 			}
-			losses = append(losses, Loss{Kind: "approximated", Detail: why})
+			kind := "approximated"
+			if strings.HasPrefix(why, skippedValuesNote) {
+				kind = "skipped"
+			}
+			losses = append(losses, Loss{Kind: kind, Detail: why})
 		}
 		rules = mergeRules(rules, part)
 	}
@@ -51,6 +61,12 @@ func mapFilters(filters []KFilter, lists *listBag) (Rules, bool, string, []Loss)
 // Ошибки: нет.
 func oneFilter(f KFilter, lists *listBag) (Rules, bool, bool, string) {
 	name := strings.ToLower(strings.TrimSpace(f.Name))
+	if n, ok := subIDNumber(name); ok {
+		if n < 1 || n > maxRuleSubID {
+			return Rules{}, false, false, "фильтр " + name + " не переносится: правила Sub ID идут от 1 до " + strconv.Itoa(maxRuleSubID)
+		}
+		return subIDFilter("sub_id_"+strconv.Itoa(n), f)
+	}
 	if name == "param" || name == "parameter" || name == "sub_id" || strings.HasPrefix(name, "sub_id_") {
 		return queryFilter(name, f)
 	}
@@ -78,7 +94,7 @@ func oneFilter(f KFilter, lists *listBag) (Rules, bool, bool, string) {
 	case "device_type", "device":
 		return deviceFilter(f)
 	case "device_model":
-		return listRule(name, f, func(v ListFilter) Rules { return Rules{Brand: v} })
+		return modelFilter(f)
 	case "ipv4", "ipv6", "ipv_4", "ipv_6", "ip_version":
 		part, ok := ipvFilter(f)
 		if !ok {
@@ -104,6 +120,127 @@ func oneFilter(f KFilter, lists *listBag) (Rules, bool, bool, string) {
 	default:
 		return Rules{}, false, false, "фильтр " + name + " не переносится"
 	}
+}
+
+// modelFilter кладёт список моделей устройства в точное правило model.
+//
+// Параметры: f — фильтр device_model.
+// Результат: правила Model. Режим подстроки или регулярного выражения и значение вида /regex/
+// не переносятся: движок сравнивает модель точно, и иначе правило стало бы шире или уже.
+// Ошибки: нет.
+func modelFilter(f KFilter) (Rules, bool, bool, string) {
+	values, mode, _, why := exactValues("device_model", f)
+	if why != "" {
+		return Rules{}, false, false, why
+	}
+	return Rules{Model: listFlag(mode, values)}, true, true, "фильтр device_model перенесён приближённо: словарь моделей Keitaro отличается от токена UA"
+}
+
+// exactValues читает значения фильтра, который движок сравнивает только точно.
+//
+// Параметры: label — имя фильтра для отчёта; f — фильтр.
+// Результат: значения, режим accept или reject, признак угаданной формы и причина отказа.
+// Пустой payload, режим подстроки или regex и значение /…/ дают причину отказа: пустой фильтр
+// не ограничивал бы никого, а подстрока или regex сделали бы правило шире или уже.
+// Ошибки: нет.
+func exactValues(label string, f KFilter) ([]string, string, bool, string) {
+	if emptyPayload(f.Payload) {
+		return nil, "", false, "фильтр " + label + ": пустой список значений не переносится"
+	}
+	values, mode, approx, ok := readPayload(f.Payload)
+	if !ok || len(values) == 0 {
+		return nil, "", false, "фильтр " + label + " не разобран"
+	}
+	if mode == "" {
+		mode = f.Mode
+	}
+	if inexactMode(mode) {
+		return nil, "", false, "фильтр " + label + ": режим " + strings.TrimSpace(mode) + " (подстрока или regex) не переносится"
+	}
+	for _, v := range values {
+		if len(v) > 1 && strings.HasPrefix(v, "/") && strings.HasSuffix(v, "/") {
+			return nil, "", false, "фильтр " + label + ": регулярное выражение не переносится"
+		}
+	}
+	return values, mode, approx, ""
+}
+
+// subIDFilter кладёт Sub ID источника в точное правило sub_ids.
+//
+// Параметры: name — ключ правила вида sub_id_N; f — фильтр.
+// Результат: правила SubIDs с ключом sub_id_N. Подстрока и regex не переносятся.
+// Ошибки: нет.
+func subIDFilter(name string, f KFilter) (Rules, bool, bool, string) {
+	values, mode, approx, why := exactValues(name, f)
+	if why != "" {
+		return Rules{}, false, false, why
+	}
+	values, dropped := keepShort(values, maxSubIDValueLen)
+	if len(values) == 0 {
+		return Rules{}, false, false, "фильтр " + name + ": все значения длиннее " + strconv.Itoa(maxSubIDValueLen) + " байт, не переносится"
+	}
+	note := ""
+	if dropped > 0 {
+		approx = true
+		note = skippedValuesNote + strconv.Itoa(dropped) + " (длиннее " + strconv.Itoa(maxSubIDValueLen) + " байт), фильтр " + name
+	}
+	lf := listFlag(mode, values)
+	return Rules{SubIDs: map[string]SubIDFilter{name: {Flag: lf.Flag, Values: lf.Values}}}, true, approx, note
+}
+
+// maxSubIDValueLen — наибольшая длина значения правила sub_ids в байтах; админка
+// не сохраняет кампанию с более длинным значением.
+const maxSubIDValueLen = 255
+
+// skippedValuesNote начинает пояснение фильтра, из которого перенос отбросил часть значений.
+// mapFilters пишет такое пояснение как потерю skipped, а не approximated.
+const skippedValuesNote = "отброшены значения: "
+
+// keepShort оставляет значения не длиннее limit байт.
+//
+// Параметры: values — значения фильтра; limit — наибольшая длина в байтах.
+// Результат: оставшиеся значения в прежнем порядке и число отброшенных.
+// Ошибки: нет.
+func keepShort(values []string, limit int) ([]string, int) {
+	kept := make([]string, 0, len(values))
+	for _, v := range values {
+		if len(v) <= limit {
+			kept = append(kept, v)
+		}
+	}
+	return kept, len(values) - len(kept)
+}
+
+// maxRuleSubID — наибольший номер Sub ID, который есть в правилах движка.
+const maxRuleSubID = 12
+
+// subIDNumber разбирает имя фильтра вида sub_id_N.
+//
+// Параметры: name — имя фильтра в нижнем регистре.
+// Результат: номер N и true, если имя вида sub_id_<число без знака>.
+// Ошибки: нет.
+func subIDNumber(name string) (int, bool) {
+	rest, ok := strings.CutPrefix(name, "sub_id_")
+	if !ok || rest == "" || strings.TrimLeft(rest, "0123456789") != "" {
+		return 0, false
+	}
+	n, err := strconv.Atoi(rest)
+	return n, err == nil
+}
+
+// inexactMode сообщает, что режим фильтра сравнивает не точно.
+//
+// Параметры: mode — режим фильтра.
+// Результат: true для contains, substring, regex и родственных названий.
+// Ошибки: нет.
+func inexactMode(mode string) bool {
+	m := strings.ToLower(strings.TrimSpace(mode))
+	for _, key := range []string{"contain", "substr", "regex", "regexp", "like", "pattern"} {
+		if strings.Contains(m, key) {
+			return true
+		}
+	}
+	return false
 }
 
 // ispFilter кладёт имена провайдеров в фильтр организации.

@@ -26,6 +26,7 @@ func (c *CH) ensureSchema() {
 	c.schemaAlter("events", waveClick)
 	c.schemaAlter("events", waveCost)
 	c.schemaAlter("events", waveExt)
+	c.schemaAlter("events", waveModel)
 	c.schemaExec(`CREATE TABLE IF NOT EXISTS conversions (
 		ts DateTime DEFAULT now(),
 		domain String,
@@ -45,6 +46,7 @@ func (c *CH) ensureSchema() {
 	TTL ts + INTERVAL 365 DAY`)
 	c.schemaAlter("conversions", waveClick)
 	c.schemaAlter("conversions", waveExt)
+	c.schemaAlter("conversions", waveModel)
 	c.schemaExec(`CREATE TABLE IF NOT EXISTS postback_log (
 		ts DateTime DEFAULT now(),
 		subid String,
@@ -62,6 +64,8 @@ func (c *CH) ensureSchema() {
 	c.costCols = c.ready("events", waveCost)
 	c.extEvents = c.ready("events", waveExt)
 	c.extConv = c.ready("conversions", waveExt)
+	c.modelEvents = c.ready("events", waveModel)
+	c.modelConv = c.ready("conversions", waveModel)
 }
 
 // schemaAlter runs ADD COLUMN for one wave when that wave has columns.
@@ -142,7 +146,7 @@ func readyFromColumns(have map[string]map[string]bool) map[string]map[wave]bool 
 	}
 	for _, table := range []string{"events", "conversions"} {
 		present := have[table]
-		for _, w := range []wave{waveNet, waveClick, waveCost, waveExt} {
+		for _, w := range []wave{waveNet, waveClick, waveCost, waveExt, waveModel} {
 			cols := columnsOf(table, w)
 			if len(cols) == 0 {
 				continue

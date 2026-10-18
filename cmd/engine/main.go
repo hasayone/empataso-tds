@@ -206,6 +206,7 @@ func main() {
 		dataDir: dataDir, keysDir: keysDir, postbackKey: postbackKey, keys: apiKeys{env: apiEnv, set: keySet},
 		trashMode: trashMode, trashURL: trashURL, curlCacheMin: curlCacheMin,
 		botPath:   botPath,
+		cids:      newCIDSigner(os.Getenv("KUZTDS_CID_KEY"), cidKeyPath(os.Getenv("KUZTDS_CID_KEY_FILE"), groupsFile), log),
 		pages:     pages,
 		landServe: lands,
 	}
@@ -299,7 +300,14 @@ var demoGroup = &config.Group{
 // flags and a correct TTL = UniqSeconds.
 // First visit (no cookie) → unique and the cookie is set; repeat → not unique.
 func cookieUnique(w http.ResponseWriter, r *http.Request, grp *config.Group) bool {
-	name := "ztu_" + grp.ID
+	return cookieUniqueNamed(w, r, grp, "ztu_"+grp.ID)
+}
+
+// cookieUniqueNamed is the cookie check behind cookieUnique for any cookie name.
+// w receives the cookie on a first visit, r is the request, grp gives the TTL
+// (UniqSeconds, a day when unset) and name is the cookie. It returns true when
+// the cookie was absent.
+func cookieUniqueNamed(w http.ResponseWriter, r *http.Request, grp *config.Group, name string) bool {
 	if _, err := r.Cookie(name); err == nil {
 		return false
 	}
@@ -312,16 +320,6 @@ func cookieUnique(w http.ResponseWriter, r *http.Request, grp *config.Group) boo
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
 	})
 	return true
-}
-
-// newCID generates a short click identifier (for [CID]/postback).
-func newCID() string {
-	const cs = "0123456789abcdef"
-	b := make([]byte, 10)
-	for i := range b {
-		b[i] = cs[rand.Intn(len(cs))]
-	}
-	return string(b)
 }
 
 // extraParams returns GET parameter values (except q) in URL order, up to 5.

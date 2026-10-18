@@ -364,8 +364,8 @@ func TestE2E_AllMacros(t *testing.T) {
 			t.Errorf("macro %s not expanded (no %q); body=%q", what, sub, b)
 		}
 	}
-	if !regexp.MustCompile(`cid=[0-9a-f]{10}\b`).MatchString(b) {
-		t.Errorf("[CID] does not look like 10 hex; body=%q", b)
+	if !regexp.MustCompile(`cid=[0-9a-z]{12}\b`).MatchString(b) {
+		t.Errorf("[CID] does not look like 12 base36; body=%q", b)
 	}
 	if !regexp.MustCompile(`rs=[ab]{4}\b`).MatchString(b) {
 		t.Errorf("[RANDSTR] not from set (ab) of length 4; body=%q", b)

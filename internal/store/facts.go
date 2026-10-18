@@ -12,6 +12,7 @@ import (
 // Without cost columns both cost fields stay zero and empty.
 type ClickFact struct {
 	OfferID   string `json:"offer_id"`
+	LandingID string `json:"landing_id"`
 	NetworkID string `json:"network_id"`
 	GroupID   string `json:"group_id"`
 	Stream    string `json:"stream"`
@@ -131,7 +132,7 @@ func (c *CH) clickFacts(ctx context.Context, from, to time.Time, where string, w
 }
 
 // clickFactsSQL is the click breakdown for one window.
-// clickCols adds offer_id and network_id. costCols adds cost_cur and
+// clickCols adds offer_id, landing_id and network_id. costCols adds cost_cur and
 // sum(cost_cents) and groups by cost_cur, so one key can return several rows.
 // where is empty or an events filter that starts with " AND ", placed after
 // "ts < ?". Placeholders are from, to, then that filter. It does not fail.
@@ -139,8 +140,8 @@ func clickFactsSQL(clickCols, costCols bool, where string) string {
 	cols := "group_id, stream_name"
 	group := "group_id, stream_name"
 	if clickCols {
-		cols += ", offer_id, network_id"
-		group += ", offer_id, network_id"
+		cols += ", offer_id, landing_id, network_id"
+		group += ", offer_id, landing_id, network_id"
 	}
 	cols += ", count(), countIf(uniq = 1)"
 	if costCols {
@@ -165,9 +166,9 @@ func scanClickFact(rows factRow, clickCols, costCols bool) (ClickFact, error) {
 	var err error
 	switch {
 	case clickCols && costCols:
-		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.NetworkID, &hits, &uniq, &row.CostCur, &row.CostCents)
+		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.LandingID, &row.NetworkID, &hits, &uniq, &row.CostCur, &row.CostCents)
 	case clickCols:
-		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.NetworkID, &hits, &uniq)
+		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.LandingID, &row.NetworkID, &hits, &uniq)
 	case costCols:
 		err = rows.Scan(&row.GroupID, &row.Stream, &hits, &uniq, &row.CostCur, &row.CostCents)
 	default:

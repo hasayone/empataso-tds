@@ -70,6 +70,7 @@ type clickSnap struct {
 	offer, landing, source, network             string
 	subs                                        [12]string
 	site, adCampaign, creative, externalID, xrw string
+	deviceModel                                 string
 }
 
 // readClick loads the newest event with cid.
@@ -106,6 +107,10 @@ func (c *CH) readClick(ctx context.Context, cid string) (clickSnap, error) {
 			cols = append(cols, col)
 			dest = append(dest, clickExtPtr(&s, col))
 		}
+	}
+	if c.modelEvents {
+		cols = append(cols, "device_model")
+		dest = append(dest, &s.deviceModel)
 	}
 	q := "SELECT " + strings.Join(cols, ", ") + " FROM events WHERE cid = ? ORDER BY ts DESC LIMIT 1"
 	err := c.conn.QueryRow(ctx, q, cid).Scan(dest...)
@@ -179,6 +184,10 @@ func (c *CH) writeConversion(ctx context.Context, snap clickSnap, in PostbackIn,
 			row = append(row, conversionExtValue(copied, col))
 		}
 	}
+	if c.modelConv {
+		cols += ", device_model"
+		row = append(row, snap.deviceModel)
+	}
 	batch, err := c.conn.PrepareBatch(ctx, `INSERT INTO conversions (`+cols+`)`)
 	if err != nil {
 		return err
@@ -235,6 +244,7 @@ type PostbackRow struct {
 	CreativeID     string    `json:"creative_id,omitempty"`
 	ExternalID     string    `json:"external_id,omitempty"`
 	XRW            string    `json:"xrw,omitempty"`
+	DeviceModel    string    `json:"device_model,omitempty"`
 }
 
 // PostbackQuery filters the conversion journal.
@@ -287,7 +297,7 @@ func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow
 	}
 	where += extra
 	args = append(args, extraArgs...)
-	from := conversionFrom(c.clickCols, c.extConv)
+	from := conversionUnion(c.clickCols, c.extConv, c.modelConv)
 	var tot PostbackTotals
 	var n uint64
 	if err := c.conn.QueryRow(ctx, "SELECT sum(profit), count() FROM ("+from+") WHERE "+where, args...).Scan(&tot.Profit, &n); err != nil {
@@ -302,15 +312,7 @@ func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow
 	if off < 0 {
 		off = 0
 	}
-	sel := "ts, group_name, stream_name, domain, page, device, country, city, profit, cid, status"
-	if c.clickCols {
-		sel += ", offer_id, landing_id, source_id, network_id, " + subColList()
-	}
-	var extCols []string
-	if c.extConv {
-		extCols = columnsOf("conversions", waveExt)
-		sel += ", " + strings.Join(extCols, ", ")
-	}
+	sel, extCols := c.postbackColumns()
 	rows, err := c.conn.Query(ctx,
 		"SELECT "+sel+" FROM ("+from+") WHERE "+where+" ORDER BY ts DESC LIMIT ? OFFSET ?",
 		append(args, limit, off)...)
@@ -321,18 +323,8 @@ func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow
 	var out []PostbackRow
 	for rows.Next() {
 		var p PostbackRow
-		dest := []any{&p.TS, &p.Group, &p.Stream, &p.Domain, &p.Page, &p.Device, &p.Country, &p.City, &p.Profit, &p.CID, &p.Status}
 		subs := make([]string, 12)
-		if c.clickCols {
-			dest = append(dest, &p.Offer, &p.Landing, &p.Source, &p.Network)
-			for i := range subs {
-				dest = append(dest, &subs[i])
-			}
-		}
-		if len(extCols) > 0 {
-			dest = append(dest, postbackExtDest(&p, extCols)...)
-		}
-		if err := rows.Scan(dest...); err != nil {
+		if err := rows.Scan(c.postbackDest(&p, subs, extCols)...); err != nil {
 			return nil, PostbackTotals{}, err
 		}
 		if p.ClickTS.Unix() <= 0 {
@@ -510,16 +502,60 @@ func subColList() string {
 	return strings.Join(parts, ", ")
 }
 
-// conversionFrom is the old postbacks table plus one row per cid and status.
-// click adds the click-wave columns. ext adds the ext-wave columns.
-// The postbacks branch uses typed stand-ins so the union lines up.
-// Both flags false keep the original two-column status shape.
+// postbackColumns builds the SELECT list of the conversion log for the waves
+// that are ready. It returns the list and the ext-wave column names in the order
+// postbackDest scans them.
+func (c *CH) postbackColumns() (sel string, extCols []string) {
+	sel = "ts, group_name, stream_name, domain, page, device, country, city, profit, cid, status"
+	if c.clickCols {
+		sel += ", offer_id, landing_id, source_id, network_id, " + subColList()
+	}
+	if c.extConv {
+		extCols = columnsOf("conversions", waveExt)
+		sel += ", " + strings.Join(extCols, ", ")
+	}
+	if c.modelConv {
+		sel += ", device_model"
+	}
+	return sel, extCols
+}
+
+// postbackDest lists the scan targets for one row of postbackColumns.
+// p is the row being filled, subs the twelve sub id slots and extCols the ext-wave
+// names that postbackColumns returned.
+func (c *CH) postbackDest(p *PostbackRow, subs []string, extCols []string) []any {
+	dest := []any{&p.TS, &p.Group, &p.Stream, &p.Domain, &p.Page, &p.Device, &p.Country, &p.City, &p.Profit, &p.CID, &p.Status}
+	if c.clickCols {
+		dest = append(dest, &p.Offer, &p.Landing, &p.Source, &p.Network)
+		for i := range subs {
+			dest = append(dest, &subs[i])
+		}
+	}
+	if len(extCols) > 0 {
+		dest = append(dest, postbackExtDest(p, extCols)...)
+	}
+	if c.modelConv {
+		dest = append(dest, &p.DeviceModel)
+	}
+	return dest
+}
+
+// conversionFrom is conversionUnion without the model wave.
+// click and ext select the waves; see conversionUnion.
 func conversionFrom(click, ext bool) string {
+	return conversionUnion(click, ext, false)
+}
+
+// conversionUnion is the old postbacks table plus one row per cid and status.
+// click adds the click-wave columns, ext the ext-wave columns and model the
+// device_model column. The postbacks branch uses typed stand-ins so the union
+// lines up. All flags false keep the original two-column status shape.
+func conversionUnion(click, ext, model bool) string {
 	base := `ts, domain, page, device, operator, country, city, profit, group_name, stream_name, cid`
 	post := `SELECT ` + base + `, '' AS status`
 	conv := `SELECT ` + base + `, status`
-	if click || ext {
-		stubs, cols := convExtra(click, ext)
+	if click || ext || model {
+		stubs, cols := convExtra(click, ext, model)
 		if stubs != "" {
 			post += ", " + stubs
 			conv += ", " + cols
@@ -530,11 +566,11 @@ func conversionFrom(click, ext bool) string {
 		` + conv + ` FROM conversions`
 }
 
-// convExtra lists stand-ins and real names for the click and ext waves.
-// click and ext select which waves are included. Base columns are omitted.
-// The two strings have the same length and the same order. Both are empty
-// when neither flag is set or the waves add nothing.
-func convExtra(click, ext bool) (stubs, cols string) {
+// convExtra lists stand-ins and real names for the click, ext and model waves.
+// click, ext and model select which waves are included. Base columns are
+// omitted. The two strings have the same length and the same order. Both are
+// empty when no flag is set or the waves add nothing.
+func convExtra(click, ext, model bool) (stubs, cols string) {
 	var stubParts, colParts []string
 	for _, f := range fields {
 		if f.Conv == "" || f.ConvWave == waveBase {
@@ -546,7 +582,10 @@ func convExtra(click, ext bool) (stubs, cols string) {
 		if f.ConvWave == waveExt && !ext {
 			continue
 		}
-		if f.ConvWave != waveClick && f.ConvWave != waveExt {
+		if f.ConvWave == waveModel && !model {
+			continue
+		}
+		if f.ConvWave != waveClick && f.ConvWave != waveExt && f.ConvWave != waveModel {
 			continue
 		}
 		stubParts = append(stubParts, convStub(f))

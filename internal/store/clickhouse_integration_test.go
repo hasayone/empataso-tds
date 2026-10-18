@@ -412,7 +412,7 @@ func TestCHPerformanceByGroupID(t *testing.T) {
 	from, to := now.Add(-time.Hour), now.Add(time.Hour)
 	t.Cleanup(func() { cleanupGroup(t, ch, name) })
 	events := []logbuf.Event{
-		{Ts: now, GroupID: idA, GroupName: name, Stream: "s1", IP: "10.1.0.1", CID: idA},
+		{Ts: now, GroupID: idA, GroupName: name, Stream: "s1", IP: "10.1.0.1", CID: idA, Uniq: 1, LandingID: "l1"},
 		{Ts: now, GroupID: idB, GroupName: name, Stream: "s1", IP: "10.1.0.2", CID: idB},
 	}
 	if err := ch.InsertEvents(ctx, events); err != nil {
@@ -445,8 +445,16 @@ func TestCHPerformanceByGroupID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ClickFactsFiltered: %v", err)
 	}
-	if len(facts.Clicks) != 1 || facts.Clicks[0].GroupID != idA || facts.Clicks[0].Hits != 1 {
+	if len(facts.Clicks) != 1 || facts.Clicks[0].GroupID != idA || facts.Clicks[0].Hits != 1 ||
+		facts.Clicks[0].Uniq != 1 || facts.Clicks[0].LandingID != "l1" {
 		t.Fatalf("clicks %+v", facts.Clicks)
+	}
+	slice, err := ch.SliceFiltered(ctx, from, to, []Cond{{Field: "campaign_id", Op: "eq", Values: []string{idA}}})
+	if err != nil {
+		t.Fatalf("SliceFiltered: %v", err)
+	}
+	if len(slice) == 0 || slice[0].Hits != 1 || slice[0].Unique != 1 {
+		t.Fatalf("slice %+v", slice)
 	}
 	var saw bool
 	for _, st := range facts.Status {
@@ -456,6 +464,77 @@ func TestCHPerformanceByGroupID(t *testing.T) {
 	}
 	if !saw {
 		t.Fatalf("status %+v", facts.Status)
+	}
+}
+
+// TestCHConversionCampaignByClick inserts two clicks in different campaigns and
+// two conversions with an empty group_id, as an import writes them. The
+// campaign filter must find each conversion through its own click only.
+// Cleanup deletes the group's events and conversions.
+func TestCHConversionCampaignByClick(t *testing.T) {
+	ch := chFromEnv(t)
+	if !ch.extConv {
+		t.Fatal("conversions group_id is not ready")
+	}
+	ctx := context.Background()
+	name := fmt.Sprintf("itest_cvc_%d", os.Getpid())
+	idA, idB := name+"_a", name+"_b"
+	cidA, cidB := name+"_ca", name+"_cb"
+	now := time.Now()
+	from, to := now.Add(-time.Hour), now.Add(time.Hour)
+	t.Cleanup(func() { cleanupGroup(t, ch, name) })
+	events := []logbuf.Event{
+		{Ts: now, GroupID: idA, GroupName: name, Stream: "s1", IP: "10.2.0.1", CID: cidA},
+		{Ts: now, GroupID: idB, GroupName: name, Stream: "s1", IP: "10.2.0.2", CID: cidB},
+	}
+	if err := ch.InsertEvents(ctx, events); err != nil {
+		t.Fatalf("InsertEvents: %v", err)
+	}
+	for _, cid := range []string{cidA, cidB} {
+		batch, err := ch.conn.PrepareBatch(ctx, `INSERT INTO conversions (group_name, stream_name, cid, status, profit, group_id)`)
+		if err != nil {
+			t.Fatalf("PrepareBatch: %v", err)
+		}
+		if err := batch.Append(name, "s1", cid, "sale", 1.0, ""); err != nil {
+			t.Fatalf("Append: %v", err)
+		}
+		if err := batch.Send(); err != nil {
+			t.Fatalf("Send: %v", err)
+		}
+	}
+	time.Sleep(200 * time.Millisecond)
+
+	cids := func(op string, ids ...string) []string {
+		rows, tot, err := ch.QueryPostbacks(ctx, PostbackQuery{
+			From: from, To: to, Group: name, Limit: 20,
+			Conds: []Cond{{Field: "campaign_id", Op: op, Values: ids}},
+		})
+		if err != nil {
+			t.Fatalf("QueryPostbacks %s %v: %v", op, ids, err)
+		}
+		if int(tot.Count) != len(rows) {
+			t.Fatalf("count %d, rows %d", tot.Count, len(rows))
+		}
+		out := make([]string, len(rows))
+		for i, r := range rows {
+			out[i] = r.CID
+		}
+		return out
+	}
+	if got := cids("eq", idA); len(got) != 1 || got[0] != cidA {
+		t.Fatalf("eq A: %v", got)
+	}
+	if got := cids("eq", idB); len(got) != 1 || got[0] != cidB {
+		t.Fatalf("eq B: %v", got)
+	}
+	if got := cids("in", idA, idB); len(got) != 2 {
+		t.Fatalf("in A,B: %v", got)
+	}
+	if got := cids("eq", name+"_other"); len(got) != 0 {
+		t.Fatalf("eq other: %v", got)
+	}
+	if got := cids("ne", idA); len(got) != 0 {
+		t.Fatalf("ne A: %v", got)
 	}
 }
 

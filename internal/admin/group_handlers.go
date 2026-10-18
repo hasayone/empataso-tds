@@ -165,6 +165,10 @@ func (s *Server) commitGroups(w http.ResponseWriter, r *http.Request, v viewer, 
 		writeErr(w, http.StatusBadRequest, msg)
 		return false
 	}
+	if msg := validateChangedSubIDs(stored, groups); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return false
+	}
 	assignGroupNums(groups)
 	offers, err := s.offerList(r.Context())
 	if err != nil {

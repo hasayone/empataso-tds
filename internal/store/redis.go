@@ -34,12 +34,26 @@ func OpenRedis(addr, password string, db int) (*redis.Client, error) {
 }
 
 // Unique returns true if the pair (id, ip) is seen for the first time within ttl.
-// Implemented atomically via SET NX.
+// Implemented atomically via SET NX. It is the key of the first step (landing or direct offer).
 func (c *Counters) Unique(ctx context.Context, id string, ip netip.Addr, ttl time.Duration) (bool, error) {
+	return c.firstSeen(ctx, "uniq:", id, ip, ttl)
+}
+
+// UniqueOffer is Unique for the offer step: its own key, so the first move to
+// the offer inside the window is unique even though the landing step already
+// took the landing key. Arguments, result and failure behaviour match Unique.
+func (c *Counters) UniqueOffer(ctx context.Context, id string, ip netip.Addr, ttl time.Duration) (bool, error) {
+	return c.firstSeen(ctx, "uniqo:", id, ip, ttl)
+}
+
+// firstSeen takes prefix+id+ip with SET NX for ttl; a non-positive ttl is 24h.
+// It returns true when the key was free. On a Redis failure it returns true
+// with the error (fail-open).
+func (c *Counters) firstSeen(ctx context.Context, prefix, id string, ip netip.Addr, ttl time.Duration) (bool, error) {
 	if ttl <= 0 {
 		ttl = 24 * time.Hour
 	}
-	key := "uniq:" + id + ":" + ip.String()
+	key := prefix + id + ":" + ip.String()
 	ok, err := c.rdb.SetNX(ctx, key, 1, ttl).Result()
 	if err != nil {
 		return true, err // fail-open: on failure treat as unique

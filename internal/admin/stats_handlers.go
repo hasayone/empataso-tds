@@ -307,7 +307,7 @@ func logExportHeader() []string {
 	for i := 1; i <= 12; i++ {
 		h = append(h, fmt.Sprintf("sub_id_%d", i))
 	}
-	return append(h, "site", "ad_campaign_id", "creative_id", "external_id", "xrw")
+	return append(h, "site", "ad_campaign_id", "creative_id", "external_id", "xrw", "device_model")
 }
 
 // logExportRecord builds one CSV row in logExportHeader order.
@@ -328,7 +328,7 @@ func logExportRecord(x store.LogRow) []string {
 		}
 		rec = append(rec, cell)
 	}
-	rec = append(rec, x.Site, x.AdCampaignID, x.CreativeID, x.ExternalID, x.XRW)
+	rec = append(rec, x.Site, x.AdCampaignID, x.CreativeID, x.ExternalID, x.XRW, x.DeviceModel)
 	for i := range rec {
 		rec[i] = csvSafe(rec[i])
 	}

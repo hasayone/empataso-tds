@@ -15,6 +15,8 @@ const (
 	waveClick wave = "click"
 	waveCost  wave = "cost"
 	waveExt   wave = "ext"
+	// waveModel adds device_model to events and conversions.
+	waveModel wave = "model"
 )
 
 // Field is one journal column shared by filters, breakdown and the SPA.
@@ -66,6 +68,7 @@ func buildFields() []Field {
 		{Name: "browser", Events: "browser", Conv: "browser", Type: lc, EventsWave: waveBase, ConvWave: waveExt, Dim: true},
 		{Name: "browser_ver", Events: "browser_ver", Conv: "browser_ver", Type: lc, EventsWave: waveBase, ConvWave: waveExt, Dim: true},
 		{Name: "brand", Events: "brand", Conv: "brand", Type: lc, EventsWave: waveBase, ConvWave: waveExt, Dim: true},
+		{Name: "device_model", Events: "device_model", Conv: "device_model", Type: lc, EventsWave: waveModel, ConvWave: waveModel, Dim: true},
 		{Name: "ip", Events: "ip", Conv: "ip", Type: "String", EventsWave: waveBase, ConvWave: waveExt},
 		{Name: "keyword", Events: "keyword", Conv: "keyword", Type: "String", EventsWave: waveBase, ConvWave: waveExt},
 		{Name: "se", Events: "se", Conv: "se", Type: lc, EventsWave: waveBase, ConvWave: waveExt, Dim: true},
@@ -242,7 +245,7 @@ func (c *CH) Fields() FieldsInfo {
 	info := FieldsInfo{Fields: StaticFields(), Ready: map[string]map[string]bool{}}
 	for _, table := range []string{"events", "conversions"} {
 		info.Ready[table] = map[string]bool{}
-		for _, w := range []wave{waveBase, waveNet, waveClick, waveCost, waveExt} {
+		for _, w := range []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel} {
 			info.Ready[table][string(w)] = c.ready(table, w)
 		}
 	}

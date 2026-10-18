@@ -396,21 +396,6 @@ func queryWithout(raw, name string) string {
 	return strings.Join(kept, "&")
 }
 
-// reusedCID reports whether s is a click id the offer step may keep.
-// s must be exactly ten lowercase hex characters. Anything else is a new id.
-func reusedCID(s string) bool {
-	if len(s) != 10 {
-		return false
-	}
-	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
-}
-
 // landingClientIP is the visitor address already stored on the request.
 // The realip middleware wins. Otherwise the host of RemoteAddr is used.
 // An address that cannot be parsed returns "".

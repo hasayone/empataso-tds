@@ -27,7 +27,7 @@ func (c *captureIns) InsertEvents(_ context.Context, batch []logbuf.Event) error
 }
 
 // curlEnv builds an engine with a live event buffer and the given trash mode.
-func curlEnv(t *testing.T, groups *config.Groups, trashMode string) (http.Handler, *captureIns, func()) {
+func curlEnv(t *testing.T, groups *config.Groups, trashMode string, opts ...func(*engineDeps)) (http.Handler, *captureIns, func()) {
 	t.Helper()
 	dir := t.TempDir()
 	log := discardLog()
@@ -41,6 +41,9 @@ func curlEnv(t *testing.T, groups *config.Groups, trashMode string) (http.Handle
 		log: log, lists: lists, sigs: detect.NewSignatures(dir, log), geores: geo.Nop{},
 		groups: groups, logs: buf, fetcher: fetch.New("", nil),
 		dataDir: dir, keysDir: dir, trashMode: trashMode,
+	}
+	for _, o := range opts {
+		o(d)
 	}
 	realIP, err := server.NewRealIP([]string{"127.0.0.1/32"})
 	if err != nil {

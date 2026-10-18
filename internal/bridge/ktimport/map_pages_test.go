@@ -26,9 +26,12 @@ func TestFixturePagesCampaignBrand(t *testing.T) {
 	if len(hop.Streams) != 1 || !hop.Streams[0].Status || hop.Streams[0].Out.Redirect != "group" || hop.Streams[0].Out.Out != "offer-es" {
 		t.Fatalf("hop = %+v", hop.Streams)
 	}
-	brand := hop.Streams[0].Rules.Brand
-	if brand.Flag != 2 || strings.Join(brand.Values, "|") != "iPhone|Pixel" {
-		t.Fatalf("brand = %+v", brand)
+	model := hop.Streams[0].Rules.Model
+	if model.Flag != 2 || strings.Join(model.Values, "|") != "iPhone|Pixel" {
+		t.Fatalf("model = %+v", model)
+	}
+	if hop.Streams[0].Rules.Brand.Flag != 0 {
+		t.Fatalf("device_model must not fill brand: %+v", hop.Streams[0].Rules.Brand)
 	}
 
 	gone, _ := findGroup(res.Groups, "gone")

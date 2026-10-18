@@ -16,6 +16,7 @@ type SliceRow struct {
 	Offer   string  `json:"offer"`
 	Source  string  `json:"source"`
 	Hits    int64   `json:"hits"`
+	Unique  int64   `json:"unique"`
 	Bots    int64   `json:"bots"`
 	Conv    int64   `json:"conv"`
 	Profit  float64 `json:"profit"`
@@ -69,7 +70,7 @@ func (c *CH) SliceFiltered(ctx context.Context, from, to time.Time, conds []Cond
 		offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
 	}
 	q := fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s,
-		count() AS hits, countIf(bot != '' AND bot != '-') AS bots
+		count() AS hits, countIf(uniq = 1) AS uniq_hits, countIf(bot != '' AND bot != '-') AS bots
 		FROM events WHERE ts >= ? AND ts < ?`, offer, source) + evSQL + fmt.Sprintf(`
 		GROUP BY group_name, stream_name, country%s
 		ORDER BY hits DESC LIMIT 2000`, extra)
@@ -83,11 +84,11 @@ func (c *CH) SliceFiltered(ctx context.Context, from, to time.Time, conds []Cond
 	index := map[key]int{}
 	for rows.Next() {
 		var row SliceRow
-		var hits, bots uint64
-		if err := rows.Scan(&row.Group, &row.Stream, &row.Country, &row.Offer, &row.Source, &hits, &bots); err != nil {
+		var hits, uniq, bots uint64
+		if err := rows.Scan(&row.Group, &row.Stream, &row.Country, &row.Offer, &row.Source, &hits, &uniq, &bots); err != nil {
 			return nil, err
 		}
-		row.Hits, row.Bots = int64(hits), int64(bots)
+		row.Hits, row.Unique, row.Bots = int64(hits), int64(uniq), int64(bots)
 		index[key{row.Group, row.Stream, row.Country, row.Offer, row.Source}] = len(out)
 		out = append(out, row)
 	}
@@ -128,16 +129,16 @@ func (c *CH) SliceFiltered(ctx context.Context, from, to time.Time, conds []Cond
 }
 
 // sliceConvSQL is the conversion half of the period report.
-// c selects the click and ext waves of conversionFrom, so the outer WHERE
+// c selects the click, ext and model waves of conversionUnion, so the outer WHERE
 // sees every conversions column, including ones the postbacks table lacks.
 // cvSQL is the extra AND fragment from buildWhere, or empty.
 // The payout sum is named profit_sum so a profit filter stays the column.
 // The string is a full SELECT. It does not fail.
 func sliceConvSQL(c *CH, cvSQL string) string {
 	offer, source, extra := "''", "''", ""
-	click, ext := false, false
+	click, ext, model := false, false, false
 	if c != nil {
-		click, ext = c.clickCols, c.extConv
+		click, ext, model = c.clickCols, c.extConv, c.modelConv
 		if c.clickCols {
 			offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
 		}
@@ -147,5 +148,5 @@ func sliceConvSQL(c *CH, cvSQL string) string {
 		%s
 		) WHERE ts >= ? AND ts < ?%s
 		GROUP BY group_name, stream_name, country%s`,
-		offer, source, conversionFrom(click, ext), cvSQL, extra)
+		offer, source, conversionUnion(click, ext, model), cvSQL, extra)
 }

@@ -97,6 +97,7 @@ type LogRow struct {
 	CreativeID   string   `json:"creative_id,omitempty"`
 	ExternalID   string   `json:"external_id,omitempty"`
 	XRW          string   `json:"xrw,omitempty"`
+	DeviceModel  string   `json:"device_model,omitempty"`
 }
 
 // Logs returns the click rows that match f and the total number of matches.
@@ -185,7 +186,8 @@ func (c *CH) Logs(ctx context.Context, f LogFilter) ([]LogRow, int64, error) {
 // for this query, computed once by the caller; nil omits that wave.
 // page, os_version, browser_ver, se and group_id are always present on events.
 // asn/org/timezone are stubbed when the net wave is missing; via is selected
-// only with that wave. It does not fail.
+// only with that wave; device_model is selected only with the model wave.
+// It does not fail.
 func logSelect(c *CH, extCols []string) string {
 	cols := []string{
 		"ts", "group_name", "stream_name", "country", "city", "device", "os", "browser",
@@ -205,6 +207,9 @@ func logSelect(c *CH, extCols []string) string {
 		cols = append(cols, "offer_id", "landing_id", "source_id", "network_id")
 	}
 	cols = append(cols, extCols...)
+	if c.modelEvents {
+		cols = append(cols, "device_model")
+	}
 	return strings.Join(cols, ", ")
 }
 
@@ -235,6 +240,9 @@ func logDest(c *CH, r *LogRow, extCols []string) ([]any, []string) {
 	}
 	for _, col := range extCols {
 		dest = append(dest, logExtPtr(r, col))
+	}
+	if c.modelEvents {
+		dest = append(dest, &r.DeviceModel)
 	}
 	return dest, subs
 }
@@ -288,6 +296,9 @@ func eventColumns(c *CH) []string {
 	}
 	if c.extEvents {
 		cols = append(cols, columnsOf("events", waveExt)...)
+	}
+	if c.modelEvents {
+		cols = append(cols, columnsOf("events", waveModel)...)
 	}
 	return cols
 }
@@ -412,6 +423,8 @@ func eventWaveValue(e logbuf.Event, col string) any {
 		return e.ExternalID
 	case "xrw":
 		return e.XRW
+	case "device_model":
+		return e.DeviceModel
 	default:
 		return ""
 	}

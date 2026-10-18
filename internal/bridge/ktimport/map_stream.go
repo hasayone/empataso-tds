@@ -210,7 +210,7 @@ func typeRank(t string) int {
 // Ошибки: нет.
 func (c *mapCtx) buildStream(st KStream, forceOff bool) Stream {
 	s, extra := streamOutput(st, c.offers, c.landings, c.losses, c.pages, c.aliases)
-	rules, ok, why, flosses := mapFilters(st.Filters, c.lists)
+	rules, ok, why, flosses := mapFilters(st.Filters, c.lists, st.FilterOr)
 	ref := streamRef(int(st.ID))
 	for _, l := range flosses {
 		l.Ref = ref

@@ -73,6 +73,9 @@ type Event struct {
 	CreativeID   string
 	ExternalID   string
 	XRW          string
+	// DeviceModel is the phone or tablet model from the User-Agent or the
+	// Sec-CH-UA-Model header. Empty when the visitor did not reveal one.
+	DeviceModel string
 }
 
 // Inserter inserts a batch of events into storage (implemented by store.CH).

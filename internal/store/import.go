@@ -30,6 +30,8 @@ type ConversionInsert struct {
 	UserAgent, Referer, SE, Keyword                           string
 	ASN                                                       uint32
 	Org, Site, AdCampaignID, CreativeID, ExternalID, XRW      string
+	// DeviceModel is written only when the model wave is present.
+	DeviceModel string
 }
 
 // conversionColumns returns the INSERT column list for conversions and how
@@ -97,11 +99,39 @@ func conversionValuesExt(row ConversionInsert, click, ext bool) []any {
 	return vals
 }
 
-// conversionExtValue returns one ext-wave value from row.
+// conversionColumnsModel is conversionColumnsExt plus the model-wave columns.
+// click and ext are as in conversionColumnsExt. model appends device_model
+// after every other column. n counts every name. It does not touch the database.
+func conversionColumnsModel(click, ext, model bool) (cols string, n int) {
+	cols, n = conversionColumnsExt(click, ext)
+	if model {
+		extra := columnsOf("conversions", waveModel)
+		cols += ", " + strings.Join(extra, ", ")
+		n += len(extra)
+	}
+	return cols, n
+}
+
+// conversionValuesModel builds one batch row in conversionColumnsModel order.
+// row supplies the fields and the flags select the same waves as
+// conversionColumnsModel. Returns the values for batch.Append.
+func conversionValuesModel(row ConversionInsert, click, ext, model bool) []any {
+	vals := conversionValuesExt(row, click, ext)
+	if model {
+		for _, col := range columnsOf("conversions", waveModel) {
+			vals = append(vals, conversionExtValue(row, col))
+		}
+	}
+	return vals
+}
+
+// conversionExtValue returns one ext-wave or model-wave value from row.
 // col is the physical conversions column. A zero ClickTS is the Unix epoch,
 // because ClickHouse DateTime cannot store year 1. An unknown column returns "".
 func conversionExtValue(row ConversionInsert, col string) any {
 	switch col {
+	case "device_model":
+		return row.DeviceModel
 	case "group_id":
 		return row.GroupID
 	case "click_ts":
@@ -175,13 +205,13 @@ func (c *CH) InsertConversions(ctx context.Context, rows []ConversionInsert) err
 	if c.conn == nil {
 		return fmt.Errorf("clickhouse: nil client")
 	}
-	cols, n := conversionColumnsExt(c.clickCols, c.extConv)
+	cols, n := conversionColumnsModel(c.clickCols, c.extConv, c.modelConv)
 	batch, err := c.conn.PrepareBatch(ctx, "INSERT INTO conversions ("+cols+")")
 	if err != nil {
 		return fmt.Errorf("clickhouse: prepare batch: %w", err)
 	}
 	for _, row := range rows {
-		vals := conversionValuesExt(row, c.clickCols, c.extConv)
+		vals := conversionValuesModel(row, c.clickCols, c.extConv, c.modelConv)
 		if len(vals) != n {
 			return fmt.Errorf("clickhouse: conversion row has %d values, want %d", len(vals), n)
 		}

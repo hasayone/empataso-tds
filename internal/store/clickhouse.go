@@ -31,6 +31,10 @@ type CH struct {
 	// extConv: conversions carry the ext wave. Writes and the journal select
 	// name those columns only after ensureSchema has seen them.
 	extConv bool
+	// modelEvents and modelConv: events and conversions carry device_model.
+	// Writes and the journal name the column only after ensureSchema has seen
+	// it, otherwise the whole insert or select fails.
+	modelEvents, modelConv bool
 	// readyFlags is table → wave → columns present. The bools above are
 	// derived from it.
 	readyFlags map[string]map[wave]bool

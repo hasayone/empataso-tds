@@ -53,6 +53,7 @@ type engineDeps struct {
 	trashURL     string
 	curlCacheMin int
 	botPath      string
+	cids         *cidSigner
 	pages        *pageCache
 	landServe    *landingServer
 }
@@ -236,6 +237,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 
 	// 2) Device/OS/browser/brand and geo (phases 2, 7).
 	info := detect.Parse(ua)
+	applyModelHint(&info, r, apiMode)
 	device := info.Device
 	g := d.geores.Resolve(ip)
 	proxy := isProxy(d, ip, g.Org)
@@ -262,15 +264,12 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	tzOffset := g.UTCOffset(time.Now())
 
 	// 3.5) Uniqueness: the api client sends its own; otherwise cookie/Redis.
-	unique := true
+	unique, loggedUnique := true, true
 	if apiMode {
 		unique = apiReq.Uniq == "yes"
-	} else if grp.UniqMethod == "cookie" {
-		unique = cookieUnique(w, r, grp)
-	} else if d.counters != nil {
-		if u, _ := d.counters.Unique(rctx, grp.ID, ip, secs(grp.UniqSeconds)); !u {
-			unique = false
-		}
+		loggedUnique = unique
+	} else {
+		unique, loggedUnique = d.visitUnique(w, r, grp, ip, offerStep)
 	}
 
 	// Input (key/lang/domain/extra params): from the api request or from HTTP.
@@ -303,6 +302,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		Browser:    info.Browser,
 		BrowserVer: info.BrowserVer,
 		Brand:      info.Brand,
+		Model:      info.Model,
 		Unique:     unique,
 		Proxy:      proxy,
 		IP:         ip,
@@ -312,13 +312,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		TZOffset:   tzOffset,
 		Query:      r.URL.Query(),
 	}
-	src, _ := d.sourceOf(grp)
-	kw, subs := config.ApplySource(r.URL.Query(), src)
-	extras := config.SourceExtras(r.URL.Query(), src)
-	if kw != "" {
-		key = kw
-		v.Key = kw
-	}
+	subs, extras := d.sourceReads(grp, r.URL.Query(), &v, key)
 	// The installation profile decides the bot flag before a stream is chosen.
 	// The selected stream still decides where a bot is sent.
 	profile := config.Bots{}
@@ -345,7 +339,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			deps.Limiter = limiter{c: d.counters, ctx: rctx, id: grp.ID}
 		}
 		streamName, redirect, outRaw, ctype, selStream = "-", grp.Redirect, grp.Out, grp.Header, nil
-		if s, ok := router.Select(grp, v, deps); ok {
+		if s, ok := d.selectStream(w, r, grp, v, deps, apiMode); ok {
 			selStream = s
 			streamName = s.Name
 			if s.Out.Redirect != "" {
@@ -377,6 +371,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			via = grp.ID + "/" + streamName
 		}
 		grp = next
+		subs, extras = d.sourceReads(grp, r.URL.Query(), &v, key) // the new group's own source
 	}
 
 	// 4.5) Bot detection by the selected stream's toggles (after selection).
@@ -452,9 +447,9 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	outRaw = d.applyPage(outRaw)
 
 	// 5) Render the output: macros, api_mac, CURL fetch, or a normal redirect.
-	cid := newCID()
+	cid := d.cids.newCID()
 	if offerStep {
-		if c := r.URL.Query().Get("cid"); reusedCID(c) {
+		if c := r.URL.Query().Get("cid"); d.cids.reusedCID(c) {
 			cid = c
 		}
 	}
@@ -522,7 +517,9 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 
 	// 6) Event log — asynchronous, the response does not wait for the write (phase 4).
 	costCents, costCur, costOK := config.IncomingCost(r.URL.Query(), grp.CostParam, grp.CurrencyParam)
-	if !costOK {
+	// The offer step carries the landing's query, so its price is already on
+	// the landing row; the offer row stays free to keep the cost single.
+	if !costOK || offerStep {
 		costCents, costCur = 0, ""
 	}
 	if d.logs != nil {
@@ -530,7 +527,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			Ts: time.Now(), GroupID: grp.ID, GroupName: grp.Name,
 			Stream: streamName, Out: out, Redirect: logRedirect, Device: device,
 			Operator: operator, Country: country, City: g.City, Region: g.Region,
-			Lang: v.Lang, Uniq: b2u8(unique), Bot: bot, IP: ip.String(),
+			Lang: v.Lang, Uniq: b2u8(loggedUnique), Bot: bot, IP: ip.String(),
 			Referer: v.Referer, UserAgent: ua, Domain: v.Domain, Keyword: v.Key,
 			OS: info.OS, OSVersion: info.OSVersion, Browser: info.Browser,
 			BrowserV: info.BrowserVer, Brand: info.Brand, CID: cid,
@@ -539,6 +536,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			Subs: storedSubs(subs), CostCents: costCents, CostCur: costCur,
 			Site: extras.Site, AdCampaignID: extras.AdCampaignID, CreativeID: extras.CreativeID,
 			ExternalID: extras.ExternalID, XRW: requestXRW(r, apiMode),
+			DeviceModel: info.Model,
 		})
 	}
 

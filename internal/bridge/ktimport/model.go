@@ -220,7 +220,7 @@ type Stream struct {
 
 // Rules — фильтры потока.
 // Для списков флаг 1 исключает совпадение, флаг 2 оставляет только совпадение.
-// Brand — модель устройства, совпадение по подстроке.
+// Brand — бренд устройства, точное совпадение. Model — модель устройства, точное совпадение.
 // Unique: 0 — любой визит и в JSON не пишется, 1 — только уникальные, 2 — только повторные.
 // Bot: 0 — фильтр выключен, 1 — оставить ботов, 2 — оставить людей.
 // Proxy: 0 — фильтр выключен и в JSON не пишется, 1 — только прокси, 2 — только не прокси.
@@ -236,6 +236,7 @@ type Rules struct {
 	OS        ListFilter   `json:"os,omitempty"`
 	Browser   ListFilter   `json:"browser,omitempty"`
 	Brand     ListFilter   `json:"brand,omitempty"`
+	Model     ListFilter   `json:"model,omitempty"`
 	Query     ListFilter   `json:"get,omitempty"`
 	Timezone  ListFilter   `json:"timezone,omitempty"`
 	ASN       ListFilter   `json:"asn,omitempty"`
@@ -249,6 +250,9 @@ type Rules struct {
 	Bot       int          `json:"bot,omitempty"`
 	Proxy     int          `json:"proxy,omitempty"`
 	IPVersion int          `json:"ip_version,omitempty"`
+
+	// SubIDs — правила Sub ID источника по ключам sub_id_1..sub_id_12, точное совпадение.
+	SubIDs map[string]SubIDFilter `json:"sub_ids,omitempty"`
 }
 
 // ListFilter — флаг и значения списка. 1 — исключать совпадение, 2 — только совпадение.
@@ -256,6 +260,14 @@ type ListFilter struct {
 	Flag   int      `json:"flag,omitempty"`
 	Raw    string   `json:"raw,omitempty"`
 	Values []string `json:"values,omitempty"`
+}
+
+// SubIDFilter — правило одного Sub ID источника, зеркало config.SubIDFilter.
+// Flag 1 исключает совпадение, Flag 2 оставляет только совпадение. Empty означает пустое значение.
+type SubIDFilter struct {
+	Flag   int      `json:"flag"`
+	Values []string `json:"values,omitempty"`
+	Empty  bool     `json:"empty,omitempty"`
 }
 
 // IPListFilter — файл списка IP в каталоге данных движка.

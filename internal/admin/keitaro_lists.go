@@ -211,6 +211,9 @@ func importedGroupIssue(g *config.Group, offers []config.Offer) string {
 	if utf8.RuneCountInString(g.Folder) > maxFolderRunes {
 		return "folder is longer than 64 characters: " + g.ID
 	}
+	if msg := subIDFault(*g); msg != "" {
+		return msg
+	}
 	return validateStreams([]config.Group{*g}, offers)
 }
 

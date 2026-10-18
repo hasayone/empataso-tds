@@ -506,10 +506,12 @@ func mergeRules(base, add Rules) Rules {
 	base.OS = mergeList(base.OS, add.OS, false)
 	base.Browser = mergeList(base.Browser, add.Browser, false)
 	base.Brand = mergeList(base.Brand, add.Brand, false)
+	base.Model = mergeList(base.Model, add.Model, false)
 	base.Timezone = mergeList(base.Timezone, add.Timezone, false)
 	base.ASN = mergeList(base.ASN, add.ASN, false)
 	base.Org = mergeList(base.Org, add.Org, false)
 	base.Query = mergeList(base.Query, add.Query, true)
+	base.SubIDs = mergeSubIDs(base.SubIDs, add.SubIDs)
 	if add.IPList.File != "" {
 		base.IPList = add.IPList
 	}
@@ -549,7 +551,7 @@ func mergeRules(base, add Rules) Rules {
 // mergeList заменяет фильтр или, для query, дописывает значения.
 //
 // Параметры: dst и src — фильтры; concat — склеивать значения при одинаковом флаге.
-// Результат: итоговый фильтр.
+// Результат: итоговый фильтр. При склейке с разными флагами остаётся dst: флаг никогда не переворачивается.
 // Ошибки: нет.
 func mergeList(dst, src ListFilter, concat bool) ListFilter {
 	if src.Flag == 0 {
@@ -558,6 +560,61 @@ func mergeList(dst, src ListFilter, concat bool) ListFilter {
 	if !concat || dst.Flag == 0 {
 		return src
 	}
-	vals := append(append([]string{}, dst.Values...), src.Values...)
+	if dst.Flag != src.Flag {
+		return dst
+	}
+	vals := unique(append(append([]string{}, dst.Values...), src.Values...))
 	return ListFilter{Flag: dst.Flag, Raw: strings.Join(vals, ","), Values: vals}
+}
+
+// exactJoin сообщает, что два фильтра одного ключа склеиваются без смены смысла.
+//
+// Параметры: a и b — флаги фильтров; or — поток работает по ИЛИ.
+// Результат: true для двух исключающих фильтров при И (исключить любое совпадение) и для двух
+// разрешающих при ИЛИ (пропустить любое совпадение). Остальные пары склейка исказила бы.
+// Ошибки: нет.
+func exactJoin(a, b int, or bool) bool {
+	return a == b && ((a == 1 && !or) || (a == 2 && or))
+}
+
+// mergeConflict ищет фильтр, который нельзя склеить с уже набранными правилами.
+//
+// Параметры: base — набранные правила; part — правила нового фильтра; or — поток работает по ИЛИ.
+// Результат: пояснение для отчёта или пустая строка, если склейка точная.
+// Ошибки: нет.
+func mergeConflict(base, part Rules, or bool) string {
+	if base.Query.Flag != 0 && part.Query.Flag != 0 && !exactJoin(base.Query.Flag, part.Query.Flag, or) {
+		return "фильтр get не склеен с прежним: смысл И/ИЛИ или режим accept/reject изменился бы"
+	}
+	for key, f := range part.SubIDs {
+		if prev, has := base.SubIDs[key]; has && !exactJoin(prev.Flag, f.Flag, or) {
+			return "фильтр " + key + " не склеен с прежним: смысл И/ИЛИ или режим accept/reject изменился бы"
+		}
+	}
+	return ""
+}
+
+// mergeSubIDs склеивает правила Sub ID. Один ключ объединяет значения и признак пустого.
+//
+// Параметры: base и add — правила по ключам sub_id_N.
+// Результат: новая карта; nil, если оба набора пусты. Входные карты не меняются.
+// Ошибки: нет. Флаги одного ключа проверил mergeConflict; при расхождении остаётся значение base.
+func mergeSubIDs(base, add map[string]SubIDFilter) map[string]SubIDFilter {
+	if len(base) == 0 && len(add) == 0 {
+		return nil
+	}
+	out := make(map[string]SubIDFilter, len(base)+len(add))
+	for key, f := range base {
+		out[key] = f
+	}
+	for key, f := range add {
+		prev, has := out[key]
+		switch {
+		case !has:
+			out[key] = f
+		case prev.Flag == f.Flag:
+			out[key] = SubIDFilter{Flag: prev.Flag, Values: unique(append(append([]string{}, prev.Values...), f.Values...)), Empty: prev.Empty || f.Empty}
+		}
+	}
+	return out
 }

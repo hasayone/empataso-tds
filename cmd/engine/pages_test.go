@@ -187,7 +187,7 @@ func TestPageFileExpandsSubID(t *testing.T) {
 	if strings.Contains(body, "{subid}") || strings.Contains(body, "@page:") {
 		t.Fatalf("body %q", body)
 	}
-	if !regexp.MustCompile(`<h1>[0-9a-f]{10}</h1>`).MatchString(body) {
+	if !regexp.MustCompile(`<h1>[0-9a-z]{12}</h1>`).MatchString(body) {
 		t.Fatalf("expanded subid missing: %q", body)
 	}
 	if rec.Header().Get("X-Kuztds-Stream") != "s" {

@@ -46,6 +46,38 @@ func TestUnique(t *testing.T) {
 	}
 }
 
+func TestUniqueOfferOwnKey(t *testing.T) {
+	c, mr := newCounters(t)
+	ctx := context.Background()
+	ip := netip.MustParseAddr("1.2.3.4")
+
+	if ok, _ := c.Unique(ctx, "g1", ip, time.Minute); !ok {
+		t.Fatal("the landing step must be unique")
+	}
+	if ok, _ := c.UniqueOffer(ctx, "g1", ip, time.Minute); !ok {
+		t.Error("the first offer step must be unique after the landing step")
+	}
+	if ok, _ := c.UniqueOffer(ctx, "g1", ip, time.Minute); ok {
+		t.Error("a repeat offer step must not be unique")
+	}
+	if !mr.Exists("uniqo:g1:1.2.3.4") || !mr.Exists("uniq:g1:1.2.3.4") {
+		t.Error("landing and offer steps must keep separate keys")
+	}
+	mr.FastForward(2 * time.Minute)
+	if ok, _ := c.UniqueOffer(ctx, "g1", ip, time.Minute); !ok {
+		t.Error("after the TTL the offer step is unique again")
+	}
+}
+
+func TestUniqueOfferFailOpen(t *testing.T) {
+	c, mr := newCounters(t)
+	mr.Close()
+	ok, err := c.UniqueOffer(context.Background(), "g1", netip.MustParseAddr("1.2.3.4"), time.Minute)
+	if !ok || err == nil {
+		t.Fatalf("a Redis failure must be unique with an error, got %v %v", ok, err)
+	}
+}
+
 func TestFirewall(t *testing.T) {
 	c, _ := newCounters(t)
 	ctx := context.Background()

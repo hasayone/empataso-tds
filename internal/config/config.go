@@ -5,7 +5,10 @@
 // loaded separately into a RAM cache with hot-reload — see ARCHITECTURE.md.
 package config
 
-import "time"
+import (
+	"strconv"
+	"time"
+)
 
 // App is the static process configuration (from yaml + env).
 type App struct {
@@ -71,6 +74,12 @@ type Group struct {
 	// Weight, when true, picks among matching streams by Stream.Weight
 	// instead of taking the first match.
 	Weight bool `json:"weight,omitempty"`
+	// StickyStream, when true, sends a returning visitor to the stream they got
+	// last time. The stream is remembered by name for UniqSeconds: in the cookie
+	// zts_<group> with uniq_method=cookie, in Redis st:<group>:<ip> with
+	// uniq_method=ip. It works only with Weight, in the engine's own mode (not the
+	// api), and a stream that no longer matches the visitor is drawn again.
+	StickyStream bool `json:"sticky_stream,omitempty"`
 	// Num is the stable number shown in the campaign list. It is not the link.
 	Num int `json:"num,omitempty"`
 	// DomainID picks the parked host used as the public link base.
@@ -223,6 +232,31 @@ type ListFilter struct {
 	Values []string `json:"values,omitempty"`
 }
 
+// MaxRuleSubID is the highest sub id a stream rule can filter on.
+const MaxRuleSubID = 12
+
+// SubIDFilter is one sub id rule. Flag is FlagA (exclude on match) or FlagB
+// (only on match); any other flag disables it. Values are compared exactly,
+// ignoring case. Empty makes an absent or blank sub id part of the matching set.
+// The rule is applied when Values is not empty or Empty is set.
+type SubIDFilter struct {
+	Flag   Flag     `json:"flag"`
+	Values []string `json:"values,omitempty"`
+	Empty  bool     `json:"empty,omitempty"`
+}
+
+// Active reports whether the rule filters anything: the flag is FlagA or FlagB
+// and there is a value or the empty marker.
+func (f SubIDFilter) Active() bool {
+	return (f.Flag == FlagA || f.Flag == FlagB) && (len(f.Values) > 0 || f.Empty)
+}
+
+// SubIDRuleKey returns the Rules.SubIDs key of sub id n, "sub_id_<n>".
+// n outside 1..MaxRuleSubID gives a key no rule uses.
+func SubIDRuleKey(n int) string {
+	return "sub_id_" + strconv.Itoa(n)
+}
+
 // IPListFilter filters by an IP list (.dat in DataDir).
 type IPListFilter struct {
 	Flag Flag   `json:"flag"`
@@ -260,6 +294,7 @@ type Rules struct {
 	OS      ListFilter `json:"os,omitzero"`      // by "name version", substring (Android, Android 13, iOS 16)
 	Browser ListFilter `json:"browser,omitzero"` // by "name version", substring (Chrome, Safari 16)
 	Brand   ListFilter `json:"brand,omitzero"`   // by device brand, exact (Apple, Samsung, Xiaomi)
+	Model   ListFilter `json:"model,omitzero"`   // by device model, exact (SM-S918B, Pixel 8)
 
 	// By what the IP says about the network and the clock (needs the geo databases).
 	ASN      ListFilter `json:"asn,omitzero"`      // AS number, exact ("15169" or "AS15169")
@@ -268,6 +303,11 @@ type Rules struct {
 
 	// By a query-string variable: "name" (present) or "name=value".
 	Query ListFilter `json:"get,omitzero"`
+
+	// SubIDs filters by the traffic source's sub ids: the key is sub_id_1
+	// through sub_id_12. A key is checked against the value the campaign's
+	// traffic source maps to that sub id, not against a fixed query name.
+	SubIDs map[string]SubIDFilter `json:"sub_ids,omitempty"`
 
 	Schedule Schedule `json:"schedule,omitzero"` // stream working schedule by day of week
 
