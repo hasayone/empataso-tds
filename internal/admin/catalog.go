@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"unicode/utf8"
@@ -317,139 +316,6 @@ func registerSources(s *Server, mux *http.ServeMux) {
 	)
 }
 
-func registerDomains(s *Server, mux *http.ServeMux) {
-	registerCRUD(s, mux, "/api/domains", s.cfg.Domains,
-		func(o config.Domain) string { return o.ID },
-		func(o *config.Domain, id string) { o.ID = id },
-		validDomain,
-		&catalogHooks[config.Domain]{
-			seq: s.cfg.SeqDomains, floor: s.domainFloor, prep: prepDomain, tidy: tidyDomains, view: s.domainRows,
-			mu:        &s.domainMu,
-			keep:      keepDomainCheck,
-			res:       resDomains,
-			label:     func(d config.Domain) string { return d.Group },
-			owner:     func(d config.Domain) string { return d.CreatedBy },
-			setOwner:  func(d *config.Domain, uid string) { d.CreatedBy = uid },
-			userLimit: limitDomainUser,
-		},
-	)
-}
-
-func validDomain(d config.Domain) string {
-	if msg := validCatalogID(d.ID); msg != "" {
-		return msg
-	}
-	host := strings.TrimSpace(d.Host)
-	if host == "" || strings.Contains(host, "://") || strings.ContainsAny(host, " /\\") {
-		return "host required"
-	}
-	switch d.Role {
-	case "admin", "links", "both":
-	default:
-		return "role must be admin, links or both"
-	}
-	return ""
-}
-
-// prepDomain normalizes host, role and group on d before validation.
-// d is the decoded request body. OK, Reason and Checked are server-owned and are cleared here.
-func prepDomain(d *config.Domain) {
-	d.Host = strings.ToLower(strings.TrimSpace(d.Host))
-	if d.Role == "" {
-		d.Role = "both"
-	}
-	d.Group = trimGroupLabel(d.Group)
-	d.OK = false
-	d.Reason = ""
-	d.Checked = ""
-}
-
-// keepDomainCheck carries OK, Reason and Checked from old into item when the host is unchanged.
-// item is the prepared replacement; old is the stored record. A different host leaves the
-// cleared fields, because the previous probe answered another name. It returns nothing.
-func keepDomainCheck(item *config.Domain, old config.Domain) {
-	if item.Host != old.Host {
-		return
-	}
-	item.OK, item.Reason, item.Checked = old.OK, old.Reason, old.Checked
-}
-
-const domainUserLimitMsg = "primary and admin role are set by an administrator"
-
-// limitDomainUser rejects domain fields a panel user may not set.
-// item is the request body; old is nil on POST and the stored row on PUT.
-// It returns a 403 message, or an empty string when the fields are allowed.
-// prepDomain runs after this hook on POST, so empty Role becomes links here first.
-func limitDomainUser(item *config.Domain, old *config.Domain) string {
-	if old == nil {
-		if item.Role == "" {
-			item.Role = "links"
-		}
-		if item.Primary || item.Role == "admin" || item.Role == "both" {
-			return domainUserLimitMsg
-		}
-		return ""
-	}
-	item.Primary = old.Primary
-	item.Role = old.Role
-	return ""
-}
-
-// tidyDomains enforces a single primary domain. list is the full catalog; id is the row
-// create or replace touched. It returns the updated slice. A disabled domain is never primary.
-func tidyDomains(list []config.Domain, id string) []config.Domain {
-	for i := range list {
-		if list[i].ID == id && list[i].Disabled {
-			list[i].Primary = false
-		}
-	}
-	primary := false
-	for _, d := range list {
-		if d.ID == id && d.Primary {
-			primary = true
-		}
-	}
-	if !primary {
-		return list
-	}
-	for i := range list {
-		if list[i].ID != id {
-			list[i].Primary = false
-		}
-	}
-	return list
-}
-
-// domainRow is one parked domain and the number of campaigns that use it.
-type domainRow struct {
-	config.Domain
-	Campaigns int `json:"campaigns"`
-}
-
-// domainRows attaches a campaign count to each domain for GET /api/domains.
-// list is the stored domains. A nil Groups store counts every domain as zero.
-// It returns a non-nil slice, empty when list is empty, so the JSON body is an array.
-// An error comes from Groups.List.
-func (s *Server) domainRows(ctx context.Context, list []config.Domain) (any, error) {
-	counts := map[string]int{}
-	if s.cfg.Groups != nil {
-		groups, err := s.cfg.Groups.List(ctx)
-		if err != nil {
-			return nil, err
-		}
-		for _, g := range groups {
-			if g.DomainID != "" {
-				counts[g.DomainID]++
-			}
-		}
-	}
-	rows := make([]domainRow, 0, len(list))
-	for _, d := range list {
-		rows = append(rows, domainRow{Domain: d, Campaigns: counts[d.ID]})
-	}
-	return rows, nil
-}
-
 // catalogHooks assigns a number and tidies the list around one catalog.
 // A nil hooks value keeps the old rule: an empty id is rejected by valid.
 // onDelete runs after the record is removed and the file is saved.
@@ -468,6 +334,18 @@ type catalogHooks[T any] struct {
 	// keep copies server-owned fields from the stored record into the replacement on PUT.
 	// It runs after prep and before valid. Nil keeps the request body as sent.
 	keep func(item *T, old T)
+	// guard runs on PUT after keep and may adjust item. A non-zero status refuses the write
+	// with that status and message. Nil allows every replacement.
+	guard func(item *T, old T) (int, string)
+	// guardDelete runs on DELETE before the record is removed. A non-zero status refuses
+	// the delete with that status and message. Nil allows every delete.
+	guardDelete func(old T) (int, string)
+	// beforeInsert runs inside insert, under mu, after the id check and with the stored list.
+	// A non-zero status refuses the new record with that status and message. Nil allows it.
+	beforeInsert func(item T, list []T) (int, string)
+	// preDelete runs first on DELETE, before any lock is taken. It returns true when it has
+	// answered the request itself. Nil leaves every DELETE to the common path.
+	preDelete func(w http.ResponseWriter, r *http.Request) bool
 	// label and owner feed grant checks. setOwner writes CreatedBy on create.
 	label     func(T) string
 	owner     func(T) string
@@ -533,7 +411,13 @@ func applyCatalogCreatedBy[T any](v viewer, hooks *catalogHooks[T], item *T, old
 // before validation. An explicit id is left as sent and the counter moves past it.
 // hooks.mu serializes create, replace and delete when set. hooks.keep merges stored fields on PUT when set.
 func registerCRUD[T any](s *Server, mux *http.ServeMux, base string, store *JSONStore[T], idOf func(T) string, setID func(*T, string), valid func(T) string, hooks *catalogHooks[T]) {
-	c := crudCatalog[T]{s: s, store: store, idOf: idOf, setID: setID, valid: valid, hooks: hooks}
+	mountCRUD(s, mux, base, crudCatalog[T]{s: s, store: store, idOf: idOf, setID: setID, valid: valid, hooks: hooks})
+}
+
+// mountCRUD registers the five catalog routes of c under base.
+// s is the server and mux receives the routes. A nil store answers 503.
+func mountCRUD[T any](s *Server, mux *http.ServeMux, base string, c crudCatalog[T]) {
+	store := c.store
 	wrap := func(pattern string, next http.HandlerFunc) {
 		s.handle(mux, pattern, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if store == nil {
@@ -592,63 +476,12 @@ func (c crudCatalog[T]) crudCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if c.hooks != nil && c.hooks.seq != nil {
-		c.hooks.seq.mu.Lock()
-		defer c.hooks.seq.mu.Unlock()
-	}
-	if c.hooks != nil && c.hooks.prep != nil {
-		c.hooks.prep(&item)
-	}
-	if c.idOf(item) == "" && c.hooks != nil && c.hooks.seq != nil {
-		floor := 1
-		if c.hooks.floor != nil {
-			n, err := c.hooks.floor()
-			if err != nil {
-				writeErr(w, http.StatusInternalServerError, "read error")
-				return
-			}
-			floor = n
-		}
-		n, err := c.hooks.seq.take(floor)
-		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "save error")
-			return
-		}
-		c.setID(&item, strconv.Itoa(n))
-	} else if c.hooks != nil && c.hooks.seq != nil {
-		c.hooks.seq.note(c.idOf(item))
-	}
-	if msg := c.valid(item); msg != "" {
-		writeErr(w, http.StatusBadRequest, msg)
+	stored, code, msg := c.insert(r.Context(), item, v.uid)
+	if code != http.StatusCreated {
+		writeErr(w, code, msg)
 		return
 	}
-	if c.hooks != nil && c.hooks.setOwner != nil {
-		c.hooks.setOwner(&item, v.uid)
-	}
-	if c.hooks != nil && c.hooks.mu != nil {
-		c.hooks.mu.Lock()
-		defer c.hooks.mu.Unlock()
-	}
-	list, err := c.store.List(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "read error")
-		return
-	}
-	for _, cur := range list {
-		if c.idOf(cur) == c.idOf(item) {
-			writeErr(w, http.StatusConflict, "already exists")
-			return
-		}
-	}
-	list = append(list, item)
-	if c.hooks != nil && c.hooks.tidy != nil {
-		list = c.hooks.tidy(list, c.idOf(item))
-	}
-	if err := c.store.Save(r.Context(), list); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	writeJSON(w, http.StatusCreated, item)
+	writeJSON(w, http.StatusCreated, stored)
 }
 
 // crudGet handles GET by id and hides invisible rows as 404.
@@ -721,6 +554,12 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 	if c.hooks != nil && c.hooks.keep != nil {
 		c.hooks.keep(&item, old)
 	}
+	if c.hooks != nil && c.hooks.guard != nil {
+		if code, msg := c.hooks.guard(&item, old); code != 0 {
+			writeErr(w, code, msg)
+			return
+		}
+	}
 	if msg := c.valid(item); msg != "" {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
@@ -738,6 +577,9 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 
 // crudDelete handles DELETE with see/write grant checks.
 func (c crudCatalog[T]) crudDelete(w http.ResponseWriter, r *http.Request) {
+	if c.hooks != nil && c.hooks.preDelete != nil && c.hooks.preDelete(w, r) {
+		return
+	}
 	if c.hooks != nil && c.hooks.mu != nil {
 		c.hooks.mu.Lock()
 		defer c.hooks.mu.Unlock()
@@ -771,6 +613,12 @@ func (c crudCatalog[T]) crudDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	if c.hooks != nil && c.hooks.guardDelete != nil {
+		if code, msg := c.hooks.guardDelete(old); code != 0 {
+			writeErr(w, code, msg)
+			return
+		}
+	}
 	next := append(list[:idx], list[idx+1:]...)
 	if err := c.store.Save(r.Context(), next); err != nil {
 		writeErr(w, http.StatusInternalServerError, "save error")
@@ -795,89 +643,4 @@ func findCatalog[T any](r *http.Request, store *JSONStore[T], idOf func(T) strin
 		}
 	}
 	return zero, list, false, http.StatusNotFound, "not found"
-}
-
-func (s *Server) handleCampaignPostbacksGet(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Groups == nil {
-		writeErr(w, http.StatusServiceUnavailable, "groups store unavailable")
-		return
-	}
-	groups, err := s.cfg.Groups.List(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "groups error")
-		return
-	}
-	id := r.PathValue("id")
-	v := s.viewerFrom(r.Context())
-	for _, g := range groups {
-		if g.ID == id {
-			if !v.canSee(resCampaigns, campaignRef(g)) {
-				writeErr(w, http.StatusNotFound, "not found")
-				return
-			}
-			if g.Postbacks == nil {
-				g.Postbacks = []config.OutboundPostback{}
-			}
-			writeJSON(w, http.StatusOK, g.Postbacks)
-			return
-		}
-	}
-	writeErr(w, http.StatusNotFound, "not found")
-}
-
-func (s *Server) handleCampaignPostbacksPut(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Groups == nil {
-		writeErr(w, http.StatusServiceUnavailable, "groups store unavailable")
-		return
-	}
-	var list []config.OutboundPostback
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&list); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad json")
-		return
-	}
-	for i := range list {
-		if strings.TrimSpace(list[i].Method) == "" {
-			list[i].Method = http.MethodGet
-		}
-		list[i].Method = strings.ToUpper(list[i].Method)
-		if msg := validPostback(list[i]); msg != "" {
-			writeErr(w, http.StatusBadRequest, msg)
-			return
-		}
-	}
-	v := s.viewerFrom(r.Context())
-	s.groupsMu.Lock()
-	defer s.groupsMu.Unlock()
-	groups, err := s.cfg.Groups.List(r.Context())
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "groups error")
-		return
-	}
-	id := r.PathValue("id")
-	found := false
-	for i := range groups {
-		if groups[i].ID == id {
-			ref := campaignRef(groups[i])
-			if !v.canSee(resCampaigns, ref) {
-				writeErr(w, http.StatusNotFound, "not found")
-				return
-			}
-			if !v.canWrite(resCampaigns, ref) {
-				writeErr(w, http.StatusForbidden, "forbidden")
-				return
-			}
-			groups[i].Postbacks = list
-			found = true
-			break
-		}
-	}
-	if !found {
-		writeErr(w, http.StatusNotFound, "not found")
-		return
-	}
-	if err := s.cfg.Groups.Save(r.Context(), groups); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	writeJSON(w, http.StatusOK, list)
 }

@@ -107,7 +107,7 @@ func TestConversionInsertExtended(t *testing.T) {
 	if got.OriginalStatus != "Sale" || got.PrevStatus != "lead" || got.Status != "sale" {
 		t.Fatalf("status %+v", got)
 	}
-	if got.TID != "99" || got.Lang != "pl" || got.OS != "Android" || got.OSVersion != "14" || got.Browser != "Chrome" || got.BrowserV != "120" || got.Brand != "Pixel" {
+	if got.TID != "99" || got.Lang != "pl" || got.OS != "Android" || got.OSVersion != "14" || got.Browser != "Chrome" || got.BrowserV != "120" || got.Brand != "" || got.DeviceModel != "Pixel" {
 		t.Fatalf("client %+v", got)
 	}
 	if got.IP != "8.8.8.8" || got.Region != "MZ" || got.UserAgent != "UA" || got.Referer != "https://ex" || got.SE != "Google" || got.Keyword != "shoes" || got.Org != "Orange" {
@@ -124,10 +124,13 @@ func TestConversionInsertExtended(t *testing.T) {
 		t.Fatalf("fallback status %+v", plain)
 	}
 	var click ktimport.ClickRow
-	if err := json.Unmarshal([]byte(`{"ad_campaign_id":12,"creative_id":"c","external_id":"e"}`), &click); err != nil {
+	if err := json.Unmarshal([]byte(`{"ad_campaign_id":12,"creative_id":"c","external_id":"e","device_model":"SM-S918B"}`), &click); err != nil {
 		t.Fatal(err)
 	}
 	ev := clickEvent(click, "tracker.example", logPlace{})
+	if ev.DeviceModel != "SM-S918B" || ev.Brand != "" {
+		t.Fatalf("click model %q brand %q: the Keitaro export has no brand", ev.DeviceModel, ev.Brand)
+	}
 	if ev.AdCampaignID != "12" || ev.CreativeID != "c" || ev.ExternalID != "e" || ev.Site != "" || ev.XRW != "" {
 		t.Fatalf("click %+v", ev)
 	}

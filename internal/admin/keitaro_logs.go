@@ -74,6 +74,7 @@ func parseKeitaroTime(raw string) time.Time {
 
 // logImport is the window and campaign map for one log import.
 // from and to are tracker range strings. host is the tracker hostname.
+// creds is the origin and key of the run that started this import.
 // aliases maps a campaign id to its group id and is nil when campaigns
 // were not fetched in this request. groups is the groups-store snapshot
 // used to build the name index once for this import.
@@ -81,6 +82,7 @@ type logImport struct {
 	from    string
 	to      string
 	host    string
+	creds   ktCreds
 	aliases map[int]string
 	groups  []config.Group
 }
@@ -110,7 +112,7 @@ type logSpan struct {
 // counts and losses are updated. It returns a tracker or warehouse error.
 func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImport, counts map[string]int, losses *[]ktimport.Loss) error {
 	place := logPlace{aliases: li.aliases, names: groupNames(li.groups)}
-	client := s.keitaroClient()
+	client := s.keitaroClient(li.creds)
 	var clickIdx keitaroClickFillIndex
 	if req.Clicks {
 		if s.cfg.Warehouse == nil || li.host == "" {
@@ -308,7 +310,7 @@ func conversionInsert(row ktimport.ConversionRow, host string, place logPlace, c
 		OSVersion:      row.OSVersion,
 		Browser:        row.Browser,
 		BrowserV:       row.BrowserVersion,
-		Brand:          row.DeviceModel,
+		DeviceModel:    row.DeviceModel,
 		UserAgent:      row.UserAgent,
 		Referer:        row.Referrer,
 		SE:             row.SearchEngine,
@@ -355,7 +357,7 @@ func clickEvent(row ktimport.ClickRow, host string, place logPlace) logbuf.Event
 		OSVersion:    row.OSVersion,
 		Browser:      row.Browser,
 		BrowserV:     row.BrowserVersion,
-		Brand:        row.DeviceModel,
+		DeviceModel:  row.DeviceModel,
 		Uniq:         uniq,
 		Bot:          bot,
 		IP:           row.IP,

@@ -9,10 +9,11 @@ import (
 )
 
 // importLandingFiles downloads each local landing archive and stores its files.
-// res is the mapper output. The catalog row Entry is set from the unpacked directory when that row exists.
+// creds is the tracker origin and key of this import run. res is the mapper output.
+// The catalog row Entry is set from the unpacked directory when that row exists.
 // It returns how many archives were stored and one skipped loss per archive that could not be fetched or unpacked.
 // A catalog save failure is returned. One landing's failure does not stop the rest.
-func (s *Server) importLandingFiles(ctx context.Context, res ktimport.Result) (int, []ktimport.Loss, error) {
+func (s *Server) importLandingFiles(ctx context.Context, creds ktCreds, res ktimport.Result) (int, []ktimport.Loss, error) {
 	ids := res.LocalLandingIDs()
 	if len(ids) == 0 {
 		return 0, nil, nil
@@ -31,15 +32,16 @@ func (s *Server) importLandingFiles(ctx context.Context, res ktimport.Result) (i
 	var losses []ktimport.Loss
 	entries := map[string]string{}
 	n := 0
+	client := s.keitaroClient(creds)
 	for _, id := range ids {
-		body, err := s.keitaroClient().FetchLandingArchive(ctx, id)
+		body, err := client.FetchLandingArchive(ctx, id)
 		if err != nil {
-			losses = append(losses, landingArchiveLoss(id, s.cfg.KeitaroKey, err))
+			losses = append(losses, landingArchiveLoss(id, creds.Key, err))
 			continue
 		}
 		sid := strconv.Itoa(id)
 		if _, err := s.cfg.LandingFiles.Unzip(sid, body); err != nil {
-			losses = append(losses, landingArchiveLoss(id, s.cfg.KeitaroKey, err))
+			losses = append(losses, landingArchiveLoss(id, creds.Key, err))
 			continue
 		}
 		entries[sid] = s.cfg.LandingFiles.Entry(sid)

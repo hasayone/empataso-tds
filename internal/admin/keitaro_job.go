@@ -216,7 +216,7 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.needsTracker() && !s.keitaroConfigured() {
+	if req.needsTracker() && !s.keitaroCreds().configured() {
 		writeErr(w, http.StatusServiceUnavailable, "keitaro not configured")
 		return
 	}
@@ -228,11 +228,14 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, msg)
 		return
 	}
+	// Settings cannot change while the job holds the lock, so this copy is the
+	// one for the whole run. Settings can only be replaced, never cleared.
+	creds := s.keitaroCreds()
 	ctx, cancel := context.WithTimeout(context.Background(), keitaroJobTimeout)
 	owner := sessionFrom(r.Context()).UID
 	go func() {
 		defer cancel()
-		s.runKeitaroImport(ctx, req, owner)
+		s.runKeitaroImport(ctx, req, owner, creds)
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
 }
@@ -249,6 +252,7 @@ func (s *Server) handleKeitaroJob(w http.ResponseWriter, r *http.Request) {
 // before catalogs. res is the mapper output; list and page stages update it.
 // owner is the importing session UID for CreatedBy on new catalog rows.
 // fail is empty until a stage stops the run, and then it is safe to show.
+// creds is the tracker origin and key copied when the job started.
 type importState struct {
 	counts map[string]int
 	losses []ktimport.Loss
@@ -256,6 +260,7 @@ type importState struct {
 	res    ktimport.Result
 	owner  string
 	fail   string
+	creds  ktCreds
 }
 
 // runStage runs one save stage and publishes the job when that stage succeeds.
@@ -275,25 +280,27 @@ func (s *Server) runStage(st *importState, name, key string, step func() (int, [
 		return false
 	}
 	st.counts[key] = n
-	if err := s.saveRunManifest(st.prev, st.res); err != nil {
+	if err := s.saveRunManifest(st.prev, st.res, st.creds.host()); err != nil {
 		st.fail = "save error"
 		return false
 	}
-	s.ktJob.publish(st.counts, st.losses, s.cfg.KeitaroKey)
+	s.ktJob.publish(st.counts, st.losses, st.creds.Key)
 	return true
 }
 
 // runKeitaroImport performs one import and stores the outcome on the job.
 // ctx bounds the tracker calls. req is the body already accepted by the handler.
+// creds is the origin and key copied at the start; every stage, mask and manifest
+// host of this run comes from it.
 // On failure the stage is failed and the error is safe to show. Counts and losses
 // collected before the failure stay in the state. It does not return an error.
 // It logs one line with the counts and the duration. The key and URLs are not logged.
-func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, owner string) {
+func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, owner string, creds ktCreds) {
 	started := time.Now()
-	st := &importState{counts: map[string]int{}, losses: []ktimport.Loss{}, owner: owner}
+	st := &importState{counts: map[string]int{}, losses: []ktimport.Loss{}, owner: owner, creds: creds}
 	defer func() {
 		s.logKeitaro("keitaro import", st.counts, time.Since(started))
-		s.ktJob.finish(st.fail, st.counts, st.losses, s.cfg.KeitaroKey)
+		s.ktJob.finish(st.fail, st.counts, st.losses, creds.Key)
 	}()
 	var from, to string
 	if req.Conversions || req.Clicks {
@@ -306,9 +313,9 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 	}
 	var aliases map[int]string
 	if req.catalog() {
-		snap, err := s.keitaroClient().FetchSnapshot(ctx)
+		snap, err := s.keitaroClient(creds).FetchSnapshot(ctx)
 		if err != nil {
-			st.fail = sanitize(err, s.cfg.KeitaroKey)
+			st.fail = sanitize(err, creds.Key)
 			return
 		}
 		st.prev, err = s.loadManifest()
@@ -328,13 +335,13 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 			st.fail = "save error"
 			return
 		}
-		if err := s.saveRunManifest(st.prev, st.res); err != nil {
+		if err := s.saveRunManifest(st.prev, st.res, creds.host()); err != nil {
 			st.fail = "save error"
 			return
 		}
-		s.ktJob.publish(st.counts, st.losses, s.cfg.KeitaroKey)
+		s.ktJob.publish(st.counts, st.losses, creds.Key)
 		if req.Landings && !s.runStage(st, "landing_files", "landing_files", func() (int, []ktimport.Loss, error) {
-			return s.importLandingFiles(ctx, st.res)
+			return s.importLandingFiles(ctx, creds, st.res)
 		}) {
 			return
 		}
@@ -364,9 +371,9 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 			st.fail = "groups unavailable"
 			return
 		}
-		li := logImport{from: from, to: to, host: keitaroHost(s.cfg.KeitaroBase), aliases: aliases, groups: groups}
+		li := logImport{from: from, to: to, host: creds.host(), creds: creds, aliases: aliases, groups: groups}
 		if err := s.importLogs(ctx, req, li, st.counts, &st.losses); err != nil {
-			st.fail = sanitize(err, s.cfg.KeitaroKey)
+			st.fail = sanitize(err, creds.Key)
 			return
 		}
 	}

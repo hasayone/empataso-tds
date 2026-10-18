@@ -56,45 +56,11 @@ func main() {
 		KeitaroKey:   os.Getenv("KEITARO_API_KEY"),
 	}
 
-	// Redis: sessions (survive restart) + login rate-limit.
-	if a := os.Getenv("KUZTDS_REDIS_ADDR"); a != "" {
-		if rdb, err := store.OpenRedis(a, os.Getenv("KUZTDS_REDIS_PASSWORD"), 0); err != nil {
-			log.Warn("redis not connected, using in-memory sessions", "err", err)
-		} else {
-			cfg.Sessions = store.NewRedisSessions(rdb)
-			cfg.Limiter = limiterAdapter{c: store.NewCounters(rdb)}
-			log.Info("redis connected", "addr", a)
-		}
-	}
+	connectRedis(&cfg, log)
 
 	// Groups config (same JSON as the engine) — read and save.
 	if f := os.Getenv("KUZTDS_GROUPS_FILE"); f != "" {
-		cfg.Groups = admin.NewFileGroups(f)
-		log.Info("groups file", "path", f)
-		dir := filepath.Dir(f)
-		cfg.Offers = admin.NewJSONStore[config.Offer](getenv("KUZTDS_OFFERS_FILE", filepath.Join(dir, "offers.json")))
-		cfg.S2S = admin.NewJSONStore[config.OutboundPostback](getenv("KUZTDS_S2S_FILE", filepath.Join(dir, "s2s.json")))
-		cfg.Landings = admin.NewJSONStore[config.Landing](getenv("KUZTDS_LANDINGS_FILE", filepath.Join(dir, "landings.json")))
-		cfg.Sources = admin.NewJSONStore[config.TrafficSource](getenv("KUZTDS_SOURCES_FILE", filepath.Join(dir, "sources.json")))
-		cfg.Networks = admin.NewJSONStore[config.AffiliateNetwork](getenv("KUZTDS_NETWORKS_FILE", filepath.Join(dir, "networks.json")))
-		cfg.Domains = admin.NewJSONStore[config.Domain](getenv("KUZTDS_DOMAINS_FILE", filepath.Join(dir, "domains.json")))
-		cfg.SeqOffers = admin.NewIDSeq(getenv("KUZTDS_OFFER_SEQ_FILE", filepath.Join(dir, "offer_seq.json")))
-		cfg.SeqLandings = admin.NewIDSeq(getenv("KUZTDS_LANDING_SEQ_FILE", filepath.Join(dir, "landing_seq.json")))
-		cfg.SeqSources = admin.NewIDSeq(getenv("KUZTDS_SOURCE_SEQ_FILE", filepath.Join(dir, "source_seq.json")))
-		cfg.SeqNetworks = admin.NewIDSeq(getenv("KUZTDS_NETWORK_SEQ_FILE", filepath.Join(dir, "network_seq.json")))
-		cfg.SeqDomains = admin.NewIDSeq(getenv("KUZTDS_DOMAIN_SEQ_FILE", filepath.Join(dir, "domain_seq.json")))
-		cfg.SpendPath = getenv("KUZTDS_SPEND_FILE", filepath.Join(dir, "spend.json"))
-		cfg.BotPath = getenv("KUZTDS_BOT_FILE", filepath.Join(dir, "bot_protection.json"))
-		cfg.UIPath = getenv("KUZTDS_UI_FILE", filepath.Join(dir, "ui.json"))
-		pagesDir := getenv("KUZTDS_PAGES_DIR", filepath.Join(dir, "pages"))
-		cfg.Pages = admin.NewFilePages(pagesDir)
-		log.Info("pages dir", "path", pagesDir)
-		cfg.Manifest = admin.NewFileManifest(filepath.Join(dir, "keitaro-import.json"))
-		landingsDir := getenv("KUZTDS_LANDINGS_DIR", filepath.Join(dir, "landings"))
-		cfg.LandingFiles = admin.NewFileLandings(landingsDir)
-		log.Info("landings dir", "path", landingsDir)
-		cfg.UsersFile = getenv("KUZTDS_USERS_FILE", filepath.Join(dir, "users.json"))
-		log.Info("users file", "path", cfg.UsersFile)
+		applyDataFiles(&cfg, f, log)
 	}
 
 	// .dat lists (IP, WAP operators, signatures) — editor.
@@ -107,33 +73,14 @@ func main() {
 	// databases the engine uses. Automation: the cron service's config file.
 	cfg.DataDir = os.Getenv("KUZTDS_DATA_DIR")
 	cfg.CronFile = os.Getenv("KUZTDS_CRON_FILE")
-	cfg.GeoCityPath, cfg.GeoASNPath = os.Getenv("KUZTDS_GEO_DB"), os.Getenv("KUZTDS_ASN_DB")
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if cfg.GeoCityPath != "" || cfg.GeoASNPath != "" {
-		db, err := geo.Open(cfg.GeoCityPath, cfg.GeoASNPath, log)
-		if err != nil {
-			log.Warn("geo db not loaded yet, will keep watching", "err", err)
-		}
-		cfg.Geo = db
-		go db.Watch(ctx, time.Minute)
-	}
+	startGeo(ctx, &cfg, log)
 
 	// Keywords.
 	cfg.Keys = admin.NewFileKeys(getenv("KUZTDS_KEYS_DIR", "keys"))
 
-	// ClickHouse: statistics (store.CH implements admin.StatsProvider directly).
-	if a := os.Getenv("KUZTDS_CLICKHOUSE_ADDR"); a != "" {
-		ch, err := store.OpenCH(a, getenv("KUZTDS_CLICKHOUSE_DB", "kuztds"),
-			getenv("KUZTDS_CLICKHOUSE_USER", "kuztds"), os.Getenv("KUZTDS_CLICKHOUSE_PASSWORD"))
-		if err != nil {
-			log.Warn("clickhouse not connected, stats disabled", "err", err)
-		} else {
-			cfg.Stats = ch
-			cfg.Warehouse = ch
-			log.Info("clickhouse connected", "addr", a)
-		}
-	}
+	connectClickHouse(&cfg, log)
 
 	// A hash we cannot use is a reason not to start. Booting anyway means every
 	// login answers "invalid credentials" and the operator hunts a password
@@ -164,6 +111,94 @@ func main() {
 	defer scancel()
 	_ = srv.Shutdown(sctx)
 	log.Info("admin api stopped")
+}
+
+// applyDataFiles points cfg at the catalogs, counters, settings files and directories that sit
+// next to the groups file. groupsFile is that file; each path can be overridden by its
+// KUZTDS_* variable. log receives one line per directory in use.
+func applyDataFiles(cfg *admin.Config, groupsFile string, log *slog.Logger) {
+	f := groupsFile
+	cfg.Groups = admin.NewFileGroups(f)
+	log.Info("groups file", "path", f)
+	dir := filepath.Dir(f)
+	cfg.Offers = admin.NewJSONStore[config.Offer](getenv("KUZTDS_OFFERS_FILE", filepath.Join(dir, "offers.json")))
+	cfg.S2S = admin.NewJSONStore[config.OutboundPostback](getenv("KUZTDS_S2S_FILE", filepath.Join(dir, "s2s.json")))
+	cfg.Landings = admin.NewJSONStore[config.Landing](getenv("KUZTDS_LANDINGS_FILE", filepath.Join(dir, "landings.json")))
+	cfg.Sources = admin.NewJSONStore[config.TrafficSource](getenv("KUZTDS_SOURCES_FILE", filepath.Join(dir, "sources.json")))
+	cfg.Networks = admin.NewJSONStore[config.AffiliateNetwork](getenv("KUZTDS_NETWORKS_FILE", filepath.Join(dir, "networks.json")))
+	cfg.Domains = admin.NewJSONStore[config.Domain](getenv("KUZTDS_DOMAINS_FILE", filepath.Join(dir, "domains.json")))
+	cfg.SeqOffers = admin.NewIDSeq(getenv("KUZTDS_OFFER_SEQ_FILE", filepath.Join(dir, "offer_seq.json")))
+	cfg.SeqLandings = admin.NewIDSeq(getenv("KUZTDS_LANDING_SEQ_FILE", filepath.Join(dir, "landing_seq.json")))
+	cfg.SeqSources = admin.NewIDSeq(getenv("KUZTDS_SOURCE_SEQ_FILE", filepath.Join(dir, "source_seq.json")))
+	cfg.SeqNetworks = admin.NewIDSeq(getenv("KUZTDS_NETWORK_SEQ_FILE", filepath.Join(dir, "network_seq.json")))
+	cfg.SeqDomains = admin.NewIDSeq(getenv("KUZTDS_DOMAIN_SEQ_FILE", filepath.Join(dir, "domain_seq.json")))
+	cfg.SpendPath = getenv("KUZTDS_SPEND_FILE", filepath.Join(dir, "spend.json"))
+	cfg.BotPath = getenv("KUZTDS_BOT_FILE", filepath.Join(dir, "bot_protection.json"))
+	cfg.UIPath = getenv("KUZTDS_UI_FILE", filepath.Join(dir, "ui.json"))
+	pagesDir := getenv("KUZTDS_PAGES_DIR", filepath.Join(dir, "pages"))
+	cfg.Pages = admin.NewFilePages(pagesDir)
+	log.Info("pages dir", "path", pagesDir)
+	cfg.Manifest = admin.NewFileManifest(filepath.Join(dir, "keitaro-import.json"))
+	cfg.KeitaroFile = getenv("KUZTDS_KEITARO_FILE", filepath.Join(dir, "keitaro.json"))
+	cfg.NamecheapFile = getenv("KUZTDS_NAMECHEAP_FILE", filepath.Join(dir, "namecheap.json"))
+	cfg.NamecheapURL = os.Getenv("KUZTDS_NAMECHEAP_URL")
+	cfg.NamecheapSandboxURL = os.Getenv("KUZTDS_NAMECHEAP_SANDBOX_URL")
+	landingsDir := getenv("KUZTDS_LANDINGS_DIR", filepath.Join(dir, "landings"))
+	cfg.LandingFiles = admin.NewFileLandings(landingsDir)
+	log.Info("landings dir", "path", landingsDir)
+	cfg.UsersFile = getenv("KUZTDS_USERS_FILE", filepath.Join(dir, "users.json"))
+	log.Info("users file", "path", cfg.UsersFile)
+}
+
+// connectRedis moves sessions and the login rate limit to Redis when KUZTDS_REDIS_ADDR is set.
+// cfg is updated in place. A connection failure is logged and the in-memory store stays.
+func connectRedis(cfg *admin.Config, log *slog.Logger) {
+	a := os.Getenv("KUZTDS_REDIS_ADDR")
+	if a == "" {
+		return
+	}
+	rdb, err := store.OpenRedis(a, os.Getenv("KUZTDS_REDIS_PASSWORD"), 0)
+	if err != nil {
+		log.Warn("redis not connected, using in-memory sessions", "err", err)
+		return
+	}
+	cfg.Sessions = store.NewRedisSessions(rdb)
+	cfg.Limiter = limiterAdapter{c: store.NewCounters(rdb)}
+	log.Info("redis connected", "addr", a)
+}
+
+// connectClickHouse wires statistics and the warehouse when KUZTDS_CLICKHOUSE_ADDR is set.
+// cfg is updated in place. A connection failure is logged and statistics stay disabled.
+func connectClickHouse(cfg *admin.Config, log *slog.Logger) {
+	a := os.Getenv("KUZTDS_CLICKHOUSE_ADDR")
+	if a == "" {
+		return
+	}
+	ch, err := store.OpenCH(a, getenv("KUZTDS_CLICKHOUSE_DB", "kuztds"),
+		getenv("KUZTDS_CLICKHOUSE_USER", "kuztds"), os.Getenv("KUZTDS_CLICKHOUSE_PASSWORD"))
+	if err != nil {
+		log.Warn("clickhouse not connected, stats disabled", "err", err)
+		return
+	}
+	cfg.Stats = ch
+	cfg.Warehouse = ch
+	log.Info("clickhouse connected", "addr", a)
+}
+
+// startGeo opens the geo databases named by KUZTDS_GEO_DB and KUZTDS_ASN_DB and keeps them
+// reloaded until ctx ends. cfg is updated in place; nothing happens when no path is set. A database that
+// cannot be loaded yet is logged and watched, so a later file replacement is picked up.
+func startGeo(ctx context.Context, cfg *admin.Config, log *slog.Logger) {
+	cfg.GeoCityPath, cfg.GeoASNPath = os.Getenv("KUZTDS_GEO_DB"), os.Getenv("KUZTDS_ASN_DB")
+	if cfg.GeoCityPath == "" && cfg.GeoASNPath == "" {
+		return
+	}
+	db, err := geo.Open(cfg.GeoCityPath, cfg.GeoASNPath, log)
+	if err != nil {
+		log.Warn("geo db not loaded yet, will keep watching", "err", err)
+	}
+	cfg.Geo = db
+	go db.Watch(ctx, time.Minute)
 }
 
 // limiterAdapter limits login to 10 attempts per minute per key (IP).

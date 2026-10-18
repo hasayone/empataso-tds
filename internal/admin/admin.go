@@ -157,10 +157,21 @@ type Config struct {
 	CronFile    string // cron service config
 
 	// KeitaroBase is the tracker origin. KeitaroKey is the Admin API key.
-	// Warehouse receives imported clicks and conversions. All three are optional.
+	// Both are start values used when KeitaroFile does not exist.
+	// KeitaroFile is keitaro.json, written by PUT /api/keitaro/settings; empty disables saving.
+	// Warehouse receives imported clicks and conversions. All of them are optional.
 	KeitaroBase string
 	KeitaroKey  string
+	KeitaroFile string
 	Warehouse   ImportSink
+
+	// NamecheapFile is namecheap.json, the registrar account; empty disables saving it.
+	// NamecheapURL and NamecheapSandboxURL replace the Namecheap API endpoints; empty keeps the
+	// public ones. NamecheapHTTP replaces the HTTP client; nil keeps the default.
+	NamecheapFile       string
+	NamecheapURL        string
+	NamecheapSandboxURL string
+	NamecheapHTTP       *http.Client
 }
 
 // slogLogger — minimal logger interface (to avoid pulling in a hard dependency).
@@ -225,6 +236,24 @@ type Server struct {
 	// New always sets it. Import and purge share its mutex.
 	ktJob *keitaroJob
 
+	// ktMu guards ktBase, ktKey and ktSource, the tracker settings in use.
+	// Readers go through keitaroCreds and take a copy.
+	ktMu     sync.RWMutex
+	ktBase   string
+	ktKey    string
+	ktSource string
+
+	// ncMu guards ncAcct and ncErr. Readers take a copy through namecheapAccount.
+	// ncErr is why namecheap.json was not used at start; it is empty otherwise.
+	// ncBuy holds the domains being registered and ncPrices the cached one-year prices.
+	ncMu     sync.RWMutex
+	ncAcct   ncAccount
+	ncErr    string
+	ncBuy    ncBuyState
+	ncPrices ncPriceCache
+	// ncNow is the clock of the purchase flow; nil means the system clock. Tests set it.
+	ncNow func() time.Time
+
 	// routes lists mux patterns registered via handle during Handler().
 	// Handler runs once at startup; no mutex is required.
 	routes []string
@@ -257,6 +286,10 @@ func New(cfg Config) (*Server, error) {
 	if err := s.publish(hash); err != nil {
 		return nil, err
 	}
+	if err := s.loadKeitaro(); err != nil {
+		return nil, err
+	}
+	s.loadNamecheap()
 	if cfg.UsersFile != "" {
 		us, err := security.LoadUserSet(cfg.UsersFile)
 		if err != nil {
@@ -366,6 +399,7 @@ func (s *Server) Handler() http.Handler {
 	registerNetworks(s, mux)
 	registerDomains(s, mux)
 	s.handle(mux, "POST /api/domains/{id}/check", http.HandlerFunc(s.handleDomainCheck))
+	registerNamecheap(s, mux)
 	s.handle(mux, "GET /api/spend", http.HandlerFunc(s.handleSpendList))
 	s.handle(mux, "POST /api/spend", http.HandlerFunc(s.handleSpendCreate))
 	s.handle(mux, "DELETE /api/spend/{id}", http.HandlerFunc(s.handleSpendDelete))
@@ -396,6 +430,8 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "POST /api/cron/run", http.HandlerFunc(s.handleCronRun))
 
 	s.handle(mux, "GET /api/keitaro/status", http.HandlerFunc(s.handleKeitaroStatus))
+	s.handle(mux, "GET /api/keitaro/settings", cookieOnly(http.HandlerFunc(s.handleKeitaroSettingsGet)))
+	s.handle(mux, "PUT /api/keitaro/settings", cookieOnly(http.HandlerFunc(s.handleKeitaroSettingsPut)))
 	s.handle(mux, "POST /api/keitaro/check", http.HandlerFunc(s.handleKeitaroCheck))
 	s.handle(mux, "POST /api/keitaro/import", http.HandlerFunc(s.handleKeitaroImport))
 	s.handle(mux, "GET /api/keitaro/job", http.HandlerFunc(s.handleKeitaroJob))

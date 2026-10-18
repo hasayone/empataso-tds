@@ -29,7 +29,8 @@ type keitaroRemoved struct {
 
 // handleKeitaroPurge removes catalogs, files and warehouse rows listed in the manifest.
 // An empty manifest returns zeros and does not read or write anything else.
-// The warehouse host is the manifest host, or the tracker hostname when that is empty.
+// The warehouse host is the manifest host exactly as recorded, because that is the text the
+// import wrote into the domain column, or the lower-case tracker hostname when that is empty.
 // Landing directories named in the manifest are removed after the warehouse.
 // The manifest is then saved empty. An import in progress, or a purge that already
 // holds the lock, is 409 and removes nothing. A warehouse error is 502.
@@ -39,6 +40,7 @@ func (s *Server) handleKeitaroPurge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.ktJob.endPurge()
+	creds := s.keitaroCreds()
 	manifest, err := s.loadManifest()
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "save error")
@@ -56,18 +58,18 @@ func (s *Server) handleKeitaroPurge(w http.ResponseWriter, r *http.Request) {
 	}
 	host := manifest.Host
 	if host == "" {
-		host = keitaroHost(s.cfg.KeitaroBase)
+		host = creds.host()
 	}
 	if s.cfg.Warehouse != nil && host != "" {
 		events, conv, err := s.cfg.Warehouse.CountByDomain(ctx, host)
 		if err != nil {
 			s.logPurge(removed)
-			writeErr(w, http.StatusBadGateway, sanitize(err, s.cfg.KeitaroKey))
+			writeErr(w, http.StatusBadGateway, sanitize(err, creds.Key))
 			return
 		}
 		if err := s.cfg.Warehouse.PurgeImported(ctx, host); err != nil {
 			s.logPurge(removed)
-			writeErr(w, http.StatusBadGateway, sanitize(err, s.cfg.KeitaroKey))
+			writeErr(w, http.StatusBadGateway, sanitize(err, creds.Key))
 			return
 		}
 		removed.Events = events

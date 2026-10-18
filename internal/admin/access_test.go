@@ -87,6 +87,14 @@ var cookieOnlyRoutes = map[string]bool{
 	"DELETE /api/users/{id}":         true,
 	"PUT /api/users/{id}/password":   true,
 	"PUT /api/users/{id}/access":     true,
+	"GET /api/keitaro/settings":      true,
+	"PUT /api/keitaro/settings":      true,
+
+	"GET /api/registrars/namecheap":           true,
+	"PUT /api/registrars/namecheap":           true,
+	"POST /api/registrars/namecheap/test":     true,
+	"POST /api/registrars/namecheap/register": true,
+	"POST /api/domains/{id}/ns":               true,
 }
 
 var expect401Routes = map[string]bool{

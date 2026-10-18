@@ -154,6 +154,12 @@ func addCatalogRoutes(m map[string]routeRule, rule func(section) routeRule, addC
 	m["DELETE /api/landings/{id}/files/{path...}"] = land
 
 	m["POST /api/domains/{id}/check"] = rule(secDomains)
+	m["POST /api/domains/{id}/ns"] = routeRule{sec: secDomains, admin: true}
+	m["GET /api/registrars/namecheap"] = rule(secIntegrations)
+	m["PUT /api/registrars/namecheap"] = rule(secIntegrations)
+	m["POST /api/registrars/namecheap/test"] = rule(secIntegrations)
+	m["POST /api/registrars/namecheap/check"] = routeRule{sec: secDomains, admin: true}
+	m["POST /api/registrars/namecheap/register"] = routeRule{sec: secDomains, admin: true}
 
 	m["GET /api/lists"] = rule(secLists)
 	m["GET /api/lists/{name}"] = rule(secLists)
@@ -179,6 +185,8 @@ func addAdminRoutes(m map[string]routeRule, rule func(section) routeRule) {
 	m["POST /api/cron/run"] = rule(secAutomation)
 
 	m["GET /api/keitaro/status"] = rule(secIntegrations)
+	m["GET /api/keitaro/settings"] = rule(secIntegrations)
+	m["PUT /api/keitaro/settings"] = rule(secIntegrations)
 	m["POST /api/keitaro/check"] = rule(secIntegrations)
 	m["POST /api/keitaro/import"] = rule(secIntegrations)
 	m["GET /api/keitaro/job"] = rule(secIntegrations)

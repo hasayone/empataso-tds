@@ -154,11 +154,11 @@ func TestRunStageStepErrorKeepsLosses(t *testing.T) {
 // The helper returns true, sets both counts, and publishes masked losses.
 // It expects no failure of the test itself.
 func TestRunStageSuccessPublishesCount(t *testing.T) {
-	s := &Server{ktJob: newKeitaroJob(), cfg: Config{KeitaroKey: "stage-key"}}
+	s := &Server{ktJob: newKeitaroJob()}
 	if msg := s.ktJob.beginImport(); msg != "" {
 		t.Fatal(msg)
 	}
-	st := &importState{counts: map[string]int{}, losses: []ktimport.Loss{}}
+	st := &importState{counts: map[string]int{}, losses: []ktimport.Loss{}, creds: ktCreds{Key: "stage-key"}}
 	ok := s.runStage(st, "lists", "lists", func() (int, []ktimport.Loss, error) {
 		st.res.Lists = map[string]string{"a": "1"}
 		return 1, []ktimport.Loss{{Kind: "skip", Ref: "a", Detail: "stage-key"}}, nil

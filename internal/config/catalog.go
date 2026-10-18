@@ -60,14 +60,28 @@ type Domain struct {
 	Primary bool   `json:"primary,omitempty"`
 	// Disabled hides the host from new campaign links. The engine does not read it
 	// and keeps accepting clicks on this host.
-	Disabled bool `json:"disabled,omitempty"`
-	OK      bool   `json:"ok,omitempty"`
-	Reason  string `json:"reason,omitempty"`
-	Checked string `json:"checked,omitempty"`
+	Disabled bool   `json:"disabled,omitempty"`
+	OK       bool   `json:"ok,omitempty"`
+	Reason   string `json:"reason,omitempty"`
+	Checked  string `json:"checked,omitempty"`
 	// CreatedBy is the users.json id of the panel user who created this record.
 	// Empty means the environment administrator or a record older than this field.
 	// The engine does not read it.
 	CreatedBy string `json:"created_by,omitempty"`
+	// Registrar and RegistrarAccount name the registrar and the account that registered
+	// the domain through the panel. RegistrarStatus is "pending" while the outcome of a
+	// registration is not confirmed. RegistrarCharged is the amount the registrar reported
+	// as charged and stays zero while that amount is unknown. RegistrarExpected is the total
+	// the panel priced before the purchase. RegistrarPendingSince is the UTC time in RFC 3339
+	// at which the pending row was written; a pending row without it counts as old.
+	// The admin API owns these fields and the engine does not read them.
+	Registrar         string  `json:"registrar,omitempty"`
+	RegistrarAccount  string  `json:"registrar_account,omitempty"`
+	RegistrarStatus   string  `json:"registrar_status,omitempty"`
+	RegistrarCharged  float64 `json:"registrar_charged,omitempty"`
+	RegistrarExpected float64 `json:"registrar_expected,omitempty"`
+	// RegistrarPendingSince is documented above.
+	RegistrarPendingSince string `json:"registrar_pending_since,omitempty"`
 }
 
 // AffiliateNetwork is a partner that sends the inbound postback.

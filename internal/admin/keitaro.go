@@ -36,9 +36,10 @@ type keitaroImportReq struct {
 // It does not call the tracker. The host is the origin's hostname.
 // The key is never written.
 func (s *Server) handleKeitaroStatus(w http.ResponseWriter, r *http.Request) {
+	creds := s.keitaroCreds()
 	writeJSON(w, http.StatusOK, map[string]any{
-		"configured": s.keitaroConfigured(),
-		"host":       keitaroHost(s.cfg.KeitaroBase),
+		"configured": creds.configured(),
+		"host":       creds.host(),
 	})
 }
 
@@ -47,15 +48,16 @@ func (s *Server) handleKeitaroStatus(w http.ResponseWriter, r *http.Request) {
 // On success it returns ok and the campaign count. A tracker error is 502.
 // The key is removed from the error text.
 func (s *Server) handleKeitaroCheck(w http.ResponseWriter, r *http.Request) {
-	if !s.keitaroConfigured() {
+	creds := s.keitaroCreds()
+	if !creds.configured() {
 		writeErr(w, http.StatusServiceUnavailable, "keitaro not configured")
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), keitaroCheckTimeout)
 	defer cancel()
-	n, err := s.keitaroClient().CountCampaigns(ctx)
+	n, err := s.keitaroClient(creds).CountCampaigns(ctx)
 	if err != nil {
-		writeErr(w, http.StatusBadGateway, sanitize(err, s.cfg.KeitaroKey))
+		writeErr(w, http.StatusBadGateway, sanitize(err, creds.Key))
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "campaigns": n})
@@ -87,21 +89,15 @@ func (req keitaroImportReq) selection() ktimport.Selection {
 	}
 }
 
-// keitaroConfigured reports whether origin and key are both non-empty.
-// Blank space does not count. It does not touch the network.
-func (s *Server) keitaroConfigured() bool {
-	return strings.TrimSpace(s.cfg.KeitaroBase) != "" && strings.TrimSpace(s.cfg.KeitaroKey) != ""
-}
-
-// keitaroClient builds a tracker client from the server config.
-// The key is sent as a header by the client and is not placed in the URL.
+// keitaroClient builds a tracker client for one origin and key.
+// creds is the copy a job took at its start. The key is sent as a header and is not placed in the URL.
 // Progress updates the running import. Reports while no import is running are ignored.
-// The HTTP client has no own deadline; the caller context does.
-func (s *Server) keitaroClient() *ktimport.Client {
+// The HTTP client does not follow a redirect to another host and has no own deadline; the caller context does.
+func (s *Server) keitaroClient(creds ktCreds) *ktimport.Client {
 	c := &ktimport.Client{
-		Base: strings.TrimRight(strings.TrimSpace(s.cfg.KeitaroBase), "/"),
-		Key:  s.cfg.KeitaroKey,
-		HTTP: http.DefaultClient,
+		Base: strings.TrimRight(strings.TrimSpace(creds.Base), "/"),
+		Key:  creds.Key,
+		HTTP: keitaroHTTP,
 	}
 	if s.ktJob != nil {
 		c.Progress = s.ktJob.progress
@@ -125,7 +121,7 @@ func (s *Server) keitaroStoreMissing(req keitaroImportReq) string {
 	return ""
 }
 
-// keitaroHost returns the hostname of a tracker origin.
+// keitaroHost returns the lower-case hostname of a tracker origin.
 // base is the configured URL. It returns an empty string when base has no host.
 // It does not return an error and does not include userinfo or a query.
 func keitaroHost(base string) string {
@@ -133,7 +129,7 @@ func keitaroHost(base string) string {
 	if err != nil || u == nil {
 		return ""
 	}
-	return u.Hostname()
+	return strings.ToLower(u.Hostname())
 }
 
 // sanitize replaces every copy of the tracker key in an error.
@@ -273,8 +269,8 @@ func createdByOf[T any](item T) string {
 }
 
 // keepLocalFields returns next with Group taken from old when empty on next, then restores
-// CreatedBy from old when next left it empty. For domains the operator mark and the last
-// probe result stay. It supports catalog types with group and owner.
+// CreatedBy from old when next left it empty. For domains the operator mark, the last
+// probe result and the registrar fields stay. It supports catalog types with group and owner.
 func keepLocalFields[T any](old, next T) T {
 	switch o := any(old).(type) {
 	case config.Offer:
@@ -310,6 +306,9 @@ func keepLocalFields[T any](old, next T) T {
 		n.OK = o.OK
 		n.Reason = o.Reason
 		n.Checked = o.Checked
+		n.Registrar, n.RegistrarAccount = o.Registrar, o.RegistrarAccount
+		n.RegistrarStatus, n.RegistrarCharged, n.RegistrarExpected = o.RegistrarStatus, o.RegistrarCharged, o.RegistrarExpected
+		n.RegistrarPendingSince = o.RegistrarPendingSince
 		return withOwner(any(n).(T), createdByOf(old))
 	default:
 		return withOwner(next, createdByOf(old))
@@ -390,7 +389,8 @@ func mergeCatalog[B any, T any](ctx context.Context, incoming []B, cm catalogMer
 // existing is the file. incoming is the mapper output. prev is the manifest from before this run.
 // owner is the importing session UID for CreatedBy on new groups, or empty for root.
 // A group is replaced only when prev already lists its id. Otherwise the stored group is kept.
-// A replaced import keeps its stored number when the incoming row has none.
+// A replaced import keeps its stored number when the incoming row has none,
+// and always keeps the stored sticky_stream switch, which Keitaro does not carry.
 // A new import keeps the number from the merge. Missing numbers are filled for ids in this import.
 // Losses are the bridge merge report. An error means a JSON conversion failed.
 func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, prev ktimport.Manifest, owner string) ([]config.Group, []ktimport.Loss, error) {
@@ -434,6 +434,7 @@ func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, pre
 			if cg.CreatedBy == "" {
 				cg.CreatedBy = old.CreatedBy
 			}
+			cg.StickyStream = old.StickyStream
 			out = append(out, cg)
 			continue
 		}
@@ -481,11 +482,11 @@ func (s *Server) loadManifest() (ktimport.Manifest, error) {
 
 // saveRunManifest stores this run's manifest on top of the one loaded at the start.
 // base is that earlier manifest and is not modified. res is the mapper output.
-// Host is the tracker hostname. A nil store does nothing.
+// host is the tracker hostname of this run's snapshot. A nil store does nothing.
 // It returns an error when the file cannot be written.
-func (s *Server) saveRunManifest(base ktimport.Manifest, res ktimport.Result) error {
+func (s *Server) saveRunManifest(base ktimport.Manifest, res ktimport.Result, host string) error {
 	next := base.Merge(res.Manifest)
-	next.Host = keitaroHost(s.cfg.KeitaroBase)
+	next.Host = host
 	if s.cfg.Manifest == nil {
 		return nil
 	}
