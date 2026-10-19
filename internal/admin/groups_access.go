@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 
 	"github.com/egerkuzma/kuztds/internal/config"
@@ -95,14 +96,78 @@ func campaignRef(g config.Group) ref {
 	return ref{id: g.ID, label: g.Folder, owner: g.CreatedBy}
 }
 
-// groupsEqual reports whether a and b serialize to the same JSON.
+// groupsEqual reports whether a and b are the same campaign.
+// a and b are compared as saved JSON, after empty slices and maps are treated as absent,
+// so a nil value, [] and {} are one value and a zero-valued optional object equals a missing one.
+// Any other difference, including a changed number, owner or rule flag, makes them unequal.
+// It returns false when either side cannot be encoded. Neither argument is modified.
 func groupsEqual(a, b config.Group) bool {
 	ba, err1 := json.Marshal(a)
 	bb, err2 := json.Marshal(b)
 	if err1 != nil || err2 != nil {
 		return false
 	}
-	return bytes.Equal(ba, bb)
+	if bytes.Equal(ba, bb) {
+		return true
+	}
+	ca, ok1 := canonicalGroupJSON(ba)
+	cb, ok2 := canonicalGroupJSON(bb)
+	return ok1 && ok2 && bytes.Equal(ca, cb)
+}
+
+// canonicalGroupJSON decodes one marshaled campaign into a fresh Group, clears every empty
+// slice and map, and marshals it again, so the omitempty and omitzero rules drop what is empty.
+// raw is the JSON of a Group. It returns the canonical JSON and true,
+// or nil and false when raw does not decode or encode.
+func canonicalGroupJSON(raw []byte) ([]byte, bool) {
+	var g config.Group
+	if err := json.Unmarshal(raw, &g); err != nil {
+		return nil, false
+	}
+	clearEmpty(reflect.ValueOf(&g).Elem())
+	out, err := json.Marshal(g)
+	return out, err == nil
+}
+
+// clearEmpty sets every empty slice and map under v to its nil value, recursively.
+// v must be addressable and owned by the caller, because it is modified in place.
+// Slice elements are kept even when empty, so the length of a list is never changed.
+func clearEmpty(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Slice:
+		if v.Len() == 0 {
+			v.SetZero()
+			return
+		}
+		for i := 0; i < v.Len(); i++ {
+			clearEmpty(v.Index(i))
+		}
+	case reflect.Map:
+		if v.Len() == 0 {
+			v.SetZero()
+			return
+		}
+		for _, k := range v.MapKeys() {
+			elem := reflect.New(v.Type().Elem()).Elem()
+			elem.Set(v.MapIndex(k))
+			clearEmpty(elem)
+			v.SetMapIndex(k, elem)
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			if v.Field(i).CanSet() {
+				clearEmpty(v.Field(i))
+			}
+		}
+	case reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			clearEmpty(v.Index(i))
+		}
+	case reflect.Pointer:
+		if !v.IsNil() {
+			clearEmpty(v.Elem())
+		}
+	}
 }
 
 // linkCatalog maps grant resource names to catalog id→ref rows for link checks.

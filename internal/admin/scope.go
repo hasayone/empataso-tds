@@ -17,13 +17,15 @@ const (
 
 // viewer is the resolved access of one request: who asks and what they may touch.
 type viewer struct {
-	admin  bool
-	uid    string
-	grants map[string]security.Grant
-	hidden map[string]bool
+	admin    bool
+	uid      string
+	grants   map[string]security.Grant
+	hidden   map[string]bool
+	sections map[string]bool
 }
 
 // viewerFrom loads session access for ctx. Administrators get admin=true and nil grants.
+// For other users the grants and the hidden set come from accessOf.
 func (s *Server) viewerFrom(ctx context.Context) viewer {
 	sess := sessionFrom(ctx)
 	if s.isAdmin(sess) {
@@ -31,14 +33,23 @@ func (s *Server) viewerFrom(ctx context.Context) viewer {
 	}
 	v := viewer{uid: sess.UID, grants: map[string]security.Grant{}, hidden: map[string]bool{}}
 	if u, ok := s.sessionUser(sess); ok {
-		if u.Access.Grants != nil {
-			v.grants = u.Access.Grants
+		acc := s.accessOf(u)
+		if acc.Grants != nil {
+			v.grants = acc.Grants
 		}
-		for _, m := range u.Access.Hidden {
-			v.hidden[m] = true
+		v.hidden = expandHidden(acc.Hidden)
+		v.sections = make(map[string]bool, len(acc.Sections))
+		for _, sec := range acc.Sections {
+			v.sections[sec] = true
 		}
 	}
 	return v
+}
+
+// hasSection reports whether the panel section sec is open for v.
+// Administrators have every section.
+func (v viewer) hasSection(sec section) bool {
+	return v.admin || v.sections[string(sec)]
 }
 
 // mode returns the grant mode for res. Administrators get ModeFull.
@@ -84,6 +95,8 @@ func grantHasLabel(labels []string, label string) bool {
 }
 
 // canSee reports whether v may read the record described by r in res.
+// Mode created shows only the records the user owns; an id or label list kept in
+// such a grant opens nothing.
 func (v viewer) canSee(res string, r ref) bool {
 	switch v.mode(res) {
 	case security.ModeFull, security.ModeRead:
@@ -91,11 +104,7 @@ func (v viewer) canSee(res string, r ref) bool {
 	case security.ModeSelected:
 		return grantHasID(v.grants[res].IDs, r.id) || grantHasLabel(v.grants[res].Labels, r.label)
 	case security.ModeCreated:
-		if r.owner == v.uid && v.uid != "" {
-			return true
-		}
-		g := v.grants[res]
-		return grantHasID(g.IDs, r.id) || grantHasLabel(g.Labels, r.label)
+		return r.owner == v.uid && v.uid != ""
 	default:
 		return false
 	}

@@ -80,13 +80,14 @@ func writeBadFilter(w http.ResponseWriter, err error) {
 
 // handleLogFields writes the journal field list and wave readiness.
 // When stats are not configured the list is the static catalog and ready is empty, still 200.
-// It does not fail.
+// Fields hidden for the viewer are left out of the list; each entry says whether it may be
+// hidden by a role. It does not fail.
 func (s *Server) handleLogFields(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeJSON(w, http.StatusOK, store.FieldsInfo{Fields: store.StaticFields(), Ready: map[string]map[string]bool{}})
-		return
+	info := store.FieldsInfo{Fields: store.StaticFields(), Ready: map[string]map[string]bool{}}
+	if s.cfg.Stats != nil {
+		info = s.cfg.Stats.Fields()
 	}
-	writeJSON(w, http.StatusOK, s.cfg.Stats.Fields())
+	writeJSON(w, http.StatusOK, fieldsResponseOf(visibleFields(s.viewerFrom(r.Context()), info)))
 }
 
 // handleLogValues writes the top values of one dimension.
@@ -106,7 +107,7 @@ func (s *Server) handleLogValues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	field := q.Get("field")
-	if hiddenFilterField(s.viewerFrom(r.Context()), field) {
+	if fieldHidden(s.viewerFrom(r.Context()), field) {
 		writeErr(w, http.StatusBadRequest, "bad filter: hidden field "+field)
 		return
 	}

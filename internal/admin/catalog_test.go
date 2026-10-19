@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,9 +17,14 @@ import (
 	"github.com/egerkuzma/kuztds/internal/security"
 )
 
-type memGroups struct{ list []config.Group }
+// memGroups is an in-memory campaign store. lists counts the List calls.
+type memGroups struct {
+	list  []config.Group
+	lists atomic.Int32
+}
 
 func (m *memGroups) List(context.Context) ([]config.Group, error) {
+	m.lists.Add(1)
 	return append([]config.Group(nil), m.list...), nil
 }
 

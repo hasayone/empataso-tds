@@ -9,7 +9,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"sync"
 	"unicode/utf8"
 
 	"github.com/egerkuzma/kuztds/internal/config"
@@ -158,10 +157,13 @@ func registerOffers(s *Server, mux *http.ServeMux) {
 		validOffer,
 		&catalogHooks[config.Offer]{
 			seq: s.cfg.SeqOffers, floor: s.offerFloor, prep: prepOffer,
-			res:      resOffers,
-			label:    func(o config.Offer) string { return o.Group },
-			owner:    func(o config.Offer) string { return o.CreatedBy },
-			setOwner: func(o *config.Offer, uid string) { o.CreatedBy = uid },
+			res:       resOffers,
+			label:     func(o config.Offer) string { return o.Group },
+			owner:     func(o config.Offer) string { return o.CreatedBy },
+			setOwner:  func(o *config.Offer, uid string) { o.CreatedBy = uid },
+			userCheck: s.offerCheck,
+			maskOut:   maskOfferPayout,
+			keepIn:    keepOfferPayout,
 		},
 	)
 }
@@ -245,6 +247,9 @@ func registerNetworks(s *Server, mux *http.ServeMux) {
 			label:    func(n config.AffiliateNetwork) string { return n.Group },
 			owner:    func(n config.AffiliateNetwork) string { return n.CreatedBy },
 			setOwner: func(n *config.AffiliateNetwork, uid string) { n.CreatedBy = uid },
+			userCheck: func(_ context.Context, v viewer, n config.AffiliateNetwork, old *config.AffiliateNetwork) string {
+				return macroCheck(v, n, old)
+			},
 		},
 	)
 }
@@ -279,10 +284,17 @@ func validOfferQuery(s string) string {
 	return ""
 }
 
-// validLanding checks a landing id and, for a remote landing, its URL.
+// validLanding checks a landing id, for a remote landing its URL, and a non-empty Entry.
+// An Entry that config.SafeLandingRel refuses is a value the engine silently ignores in
+// favour of index.php or index.html, so it is rejected instead of stored.
 // o is the landing. It returns an empty string when the record is acceptable.
 // It does not return an error; the string is the client message.
 func validLanding(o config.Landing) string {
+	if entry := strings.TrimSpace(o.Entry); entry != "" {
+		if _, ok := config.SafeLandingRel(entry); !ok {
+			return "entry must be a relative path inside the landing"
+		}
+	}
 	return validDestination(o.ID, o.URL, o.Local)
 }
 
@@ -297,6 +309,9 @@ func registerLandings(s *Server, mux *http.ServeMux) {
 			label:    func(l config.Landing) string { return l.Group },
 			owner:    func(l config.Landing) string { return l.CreatedBy },
 			setOwner: func(l *config.Landing, uid string) { l.CreatedBy = uid },
+			userCheck: func(_ context.Context, v viewer, l config.Landing, old *config.Landing) string {
+				return s.landingCheck(v, l, old)
+			},
 		},
 	)
 }
@@ -308,101 +323,13 @@ func registerSources(s *Server, mux *http.ServeMux) {
 		validSource,
 		&catalogHooks[config.TrafficSource]{
 			seq: s.cfg.SeqSources, floor: s.sourceFloor, prep: prepSource,
-			res:      resSources,
-			label:    func(src config.TrafficSource) string { return src.Group },
-			owner:    func(src config.TrafficSource) string { return src.CreatedBy },
-			setOwner: func(src *config.TrafficSource, uid string) { src.CreatedBy = uid },
+			res:       resSources,
+			label:     func(src config.TrafficSource) string { return src.Group },
+			owner:     func(src config.TrafficSource) string { return src.CreatedBy },
+			setOwner:  func(src *config.TrafficSource, uid string) { src.CreatedBy = uid },
+			userCheck: s.sourceCheck,
 		},
 	)
-}
-
-// catalogHooks assigns a number and tidies the list around one catalog.
-// A nil hooks value keeps the old rule: an empty id is rejected by valid.
-// onDelete runs after the record is removed and the file is saved.
-// view, when set, shapes the GET list response.
-type catalogHooks[T any] struct {
-	seq      *idSeq
-	floor    func() (int, error)
-	prep     func(*T)
-	tidy     func([]T, string) []T
-	onDelete func(id string)
-	// view converts the list for the GET response. Nil returns the list as stored.
-	view func(ctx context.Context, list []T) (any, error)
-	res  string
-	// mu, when set, serializes List, modify and Save in create, replace and delete.
-	mu *sync.Mutex
-	// keep copies server-owned fields from the stored record into the replacement on PUT.
-	// It runs after prep and before valid. Nil keeps the request body as sent.
-	keep func(item *T, old T)
-	// guard runs on PUT after keep and may adjust item. A non-zero status refuses the write
-	// with that status and message. Nil allows every replacement.
-	guard func(item *T, old T) (int, string)
-	// guardDelete runs on DELETE before the record is removed. A non-zero status refuses
-	// the delete with that status and message. Nil allows every delete.
-	guardDelete func(old T) (int, string)
-	// beforeInsert runs inside insert, under mu, after the id check and with the stored list.
-	// A non-zero status refuses the new record with that status and message. Nil allows it.
-	beforeInsert func(item T, list []T) (int, string)
-	// preDelete runs first on DELETE, before any lock is taken. It returns true when it has
-	// answered the request itself. Nil leaves every DELETE to the common path.
-	preDelete func(w http.ResponseWriter, r *http.Request) bool
-	// label and owner feed grant checks. setOwner writes CreatedBy on create.
-	label     func(T) string
-	owner     func(T) string
-	setOwner  func(*T, string)
-	userLimit func(*T, *T) string
-}
-
-// crudCatalog holds shared state for one JSON catalog's HTTP handlers.
-type crudCatalog[T any] struct {
-	s     *Server
-	store *JSONStore[T]
-	idOf  func(T) string
-	setID func(*T, string)
-	valid func(T) string
-	hooks *catalogHooks[T]
-}
-
-// catalogItemRef builds a grant ref for item using hooks label and owner funcs.
-func catalogItemRef[T any](idOf func(T) string, hooks *catalogHooks[T], item T) ref {
-	r := ref{id: idOf(item)}
-	if hooks != nil {
-		if hooks.label != nil {
-			r.label = hooks.label(item)
-		}
-		if hooks.owner != nil {
-			r.owner = hooks.owner(item)
-		}
-	}
-	return r
-}
-
-// visibleCatalog returns list entries the viewer may read for hooks.res.
-func visibleCatalog[T any](v viewer, hooks *catalogHooks[T], idOf func(T) string, list []T) []T {
-	if v.admin || hooks == nil || hooks.res == "" {
-		return list
-	}
-	out := make([]T, 0, len(list))
-	for _, item := range list {
-		if v.canSee(hooks.res, catalogItemRef(idOf, hooks, item)) {
-			out = append(out, item)
-		}
-	}
-	return out
-}
-
-// applyCatalogCreatedBy sets CreatedBy on item from old unless an admin sent a non-empty value.
-func applyCatalogCreatedBy[T any](v viewer, hooks *catalogHooks[T], item *T, old T) {
-	if hooks == nil || hooks.setOwner == nil || hooks.owner == nil {
-		return
-	}
-	if v.admin {
-		if hooks.owner(*item) == "" {
-			hooks.setOwner(item, hooks.owner(old))
-		}
-		return
-	}
-	hooks.setOwner(item, hooks.owner(old))
 }
 
 // registerCRUD mounts list, create, read, replace and delete for one catalog.
@@ -442,7 +369,7 @@ func (c crudCatalog[T]) crudList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := c.s.viewerFrom(r.Context())
-	list = visibleCatalog(v, c.hooks, c.idOf, list)
+	list = maskedCatalog(v, c.hooks, visibleCatalog(v, c.hooks, c.idOf, list))
 	if list == nil {
 		list = []T{}
 	}
@@ -476,12 +403,23 @@ func (c crudCatalog[T]) crudCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !v.admin && c.hooks != nil {
+		if c.hooks.userCheck != nil {
+			if msg := c.hooks.userCheck(r.Context(), v, item, nil); msg != "" {
+				writeErr(w, http.StatusBadRequest, msg)
+				return
+			}
+		}
+		if c.hooks.keepIn != nil {
+			c.hooks.keepIn(v, &item, nil)
+		}
+	}
 	stored, code, msg := c.insert(r.Context(), item, v.uid)
 	if code != http.StatusCreated {
 		writeErr(w, code, msg)
 		return
 	}
-	writeJSON(w, http.StatusCreated, stored)
+	writeJSON(w, http.StatusCreated, maskedItem(v, c.hooks, stored))
 }
 
 // crudGet handles GET by id and hides invisible rows as 404.
@@ -496,7 +434,7 @@ func (c crudCatalog[T]) crudGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeJSON(w, http.StatusOK, maskedItem(v, c.hooks, item))
 }
 
 // crudPut handles PUT with write grants, userLimit and CreatedBy preservation.
@@ -546,6 +484,12 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if !v.admin && c.hooks != nil && c.hooks.userCheck != nil {
+		if msg := c.hooks.userCheck(r.Context(), v, item, &old); msg != "" {
+			writeErr(w, http.StatusBadRequest, msg)
+			return
+		}
+	}
 	applyCatalogCreatedBy(v, c.hooks, &item, old)
 	if c.hooks != nil && c.hooks.prep != nil {
 		c.hooks.prep(&item)
@@ -553,6 +497,9 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.hooks != nil && c.hooks.keep != nil {
 		c.hooks.keep(&item, old)
+	}
+	if !v.admin && c.hooks != nil && c.hooks.keepIn != nil {
+		c.hooks.keepIn(v, &item, &old)
 	}
 	if c.hooks != nil && c.hooks.guard != nil {
 		if code, msg := c.hooks.guard(&item, old); code != 0 {
@@ -572,7 +519,7 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeJSON(w, http.StatusOK, maskedItem(v, c.hooks, item))
 }
 
 // crudDelete handles DELETE with see/write grant checks.

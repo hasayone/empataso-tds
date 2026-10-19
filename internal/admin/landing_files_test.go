@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -231,4 +232,167 @@ func landingMultipart(t *testing.T, c *http.Client, url, csrf string, payload []
 		t.Fatal(err)
 	}
 	return landingDo(t, c, http.MethodPost, url, csrf, mw.FormDataContentType(), buf.Bytes())
+}
+
+// corruptZip returns a stored zip of two files in order whose second entry has a wrong
+// checksum: the first reads fine, the second fails with zip.ErrChecksum.
+func corruptZip(t *testing.T, first, second string) []byte {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	for _, f := range [][2]string{{"index.html", first}, {"page.html", second}} {
+		w, err := zw.CreateHeader(&zip.FileHeader{Name: f[0], Method: zip.Store})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := io.WriteString(w, f[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	raw := buf.Bytes()
+	at := bytes.Index(raw, []byte("SECOND-BODY"))
+	if at < 0 {
+		t.Fatal("second body not found in the archive")
+	}
+	raw[at] ^= 0xFF
+	return raw
+}
+
+func TestUnzipCorruptEntryLeavesDirectoryUntouched(t *testing.T) {
+	dir := t.TempDir()
+	files := NewFileLandings(dir)
+	if err := files.Write("705", "old.txt", []byte("old")); err != nil {
+		t.Fatal(err)
+	}
+	_, err := files.Unzip("705", corruptZip(t, "<p>[CID]</p>", "SECOND-BODY"))
+	if !errors.Is(err, errLandingArchive) {
+		t.Fatalf("corrupt entry: %v", err)
+	}
+	got, err := files.Read("705", "old.txt")
+	if err != nil || string(got) != "old" {
+		t.Fatalf("old file after failure: %q, %v", got, err)
+	}
+	if _, err := files.Read("705", "index.html"); err == nil {
+		t.Error("a file of the failed archive was left in the landing")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "705" {
+		t.Errorf("staging directory left behind: %v", entries)
+	}
+	if _, err := files.Unzip("705", zipBytes(t, map[string]string{"new.html": "n"})); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := files.Read("705", "old.txt"); err == nil {
+		t.Error("old file survived a successful replacement")
+	}
+	if entries, _ = os.ReadDir(dir); len(entries) != 1 {
+		t.Errorf("staging or backup left after success: %v", entries)
+	}
+}
+
+func TestUnzipKeepsTheModesPHPNeeds(t *testing.T) {
+	dir := t.TempDir()
+	files := NewFileLandings(dir)
+	if _, err := files.Unzip("706", zipBytes(t, map[string]string{"index.php": "<?php", "sub/a.css": "a"})); err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"706", "706/sub"} {
+		info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm&0o700 != 0o700 || perm&0o005 != 0o005 {
+			t.Errorf("directory %s is %v: the web server user must be able to enter it", rel, perm)
+		}
+	}
+	for _, rel := range []string{"706/index.php", "706/sub/a.css"} {
+		info, err := os.Stat(filepath.Join(dir, filepath.FromSlash(rel)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if perm := info.Mode().Perm(); perm != 0o644 {
+			t.Errorf("file %s is %v, want 0644", rel, perm)
+		}
+	}
+}
+
+func TestUnzipRefusesAHiddenID(t *testing.T) {
+	files := NewFileLandings(t.TempDir())
+	if _, err := files.Unzip(".unzip-1", zipBytes(t, map[string]string{"index.html": "x"})); err == nil {
+		t.Error("an id with a leading dot was accepted")
+	}
+	if err := files.Write(".hidden", "a.txt", []byte("x")); err == nil {
+		t.Error("a file was written into a hidden landing")
+	}
+	if _, err := files.Unzip("kt-ip.1_a", zipBytes(t, map[string]string{"index.html": "x"})); err != nil {
+		t.Errorf("an id with dot, dash and underscore inside: %v", err)
+	}
+}
+
+func TestRecoverUnzip(t *testing.T) {
+	dir := t.TempDir()
+	mk := func(name string, age time.Duration) {
+		full := filepath.Join(dir, name)
+		if err := os.MkdirAll(full, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(full, "f.txt"), []byte(name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		when := time.Now().Add(-age)
+		if err := os.Chtimes(full, when, when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exists := func(name string) bool {
+		_, err := os.Stat(filepath.Join(dir, name))
+		return err == nil
+	}
+	mk(".unzip-710-123.old", time.Minute)
+	mk(".unzip-710-123", time.Minute)
+	mk(".unzip-a-b-9.old", 3*time.Hour)
+	mk(".unzip-711-5", 2*time.Hour)
+	mk(".unzip-712-6", time.Minute)
+	mk("713", time.Minute)
+	mk(".unzip-713-7.old", 2*time.Hour)
+	mk(".unzip-nodash", 2*time.Hour)
+	mk("714", 5*time.Hour)
+
+	restored, removed, err := NewFileLandings(dir).RecoverUnzip(time.Hour)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored != 2 || removed != 2 {
+		t.Errorf("restored %d removed %d", restored, removed)
+	}
+	if !exists("710/f.txt") || exists(".unzip-710-123.old") {
+		t.Error("the backup of a landing with no directory was not put back")
+	}
+	if !exists(".unzip-710-123") {
+		t.Error("a fresh staging directory was deleted")
+	}
+	if !exists("a-b/f.txt") {
+		t.Error("an id with a dash was not recovered")
+	}
+	if exists(".unzip-711-5") {
+		t.Error("a stale staging directory was kept")
+	}
+	if !exists(".unzip-712-6") {
+		t.Error("a fresh staging directory was deleted")
+	}
+	if !exists("713/f.txt") || exists(".unzip-713-7.old") {
+		t.Error("a stale backup beside an existing landing was not deleted")
+	}
+	if !exists(".unzip-nodash") || !exists("714/f.txt") {
+		t.Error("an unrelated directory was touched")
+	}
+	if _, _, err := NewFileLandings(filepath.Join(dir, "absent")).RecoverUnzip(time.Hour); err != nil {
+		t.Errorf("missing landings directory: %v", err)
+	}
 }

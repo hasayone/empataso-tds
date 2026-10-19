@@ -308,6 +308,11 @@ func loadBotProfile(path string) config.Bots {
 	return profile
 }
 
+// handleFacts writes the click and conversion breakdown of the catalog tables.
+//
+// Filters come from condsFrom. For a viewer who may not see the conversion status the
+// status rows are folded by foldConfirmed, so the totals match the report and no
+// status value leaks. Missing stats answers an empty body, a query error 500.
 func (s *Server) handleFacts(w http.ResponseWriter, r *http.Request) {
 	from, to := parseRange(r)
 	if s.cfg.Stats == nil {
@@ -334,6 +339,11 @@ func (s *Server) handleFacts(w http.ResponseWriter, r *http.Request) {
 	}
 	if facts.Status == nil {
 		facts.Status = []store.StatusFact{}
+	}
+	if fieldHidden(s.viewerFrom(r.Context()), "status") {
+		facts.Status = foldConfirmed(facts.Status)
+		s.writeStatsWith(w, r, http.StatusOK, facts, statsOpts{keep: map[string]bool{"status": true}})
+		return
 	}
 	s.writeStats(w, r, http.StatusOK, facts)
 }

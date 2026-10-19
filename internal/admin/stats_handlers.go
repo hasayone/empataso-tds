@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/store"
 )
 
@@ -78,7 +80,7 @@ func (s *Server) handleTimeSeries(w http.ResponseWriter, r *http.Request) {
 // handleBreakdown writes the top values of one dimension.
 // r supplies from, to, dim, limit and optional f= for events.
 // Conditions call BreakdownFiltered. No conditions call Breakdown.
-// The body is a list of key/count pairs. A bad f= is 400.
+// The body is a list of key/count pairs. A bad f= and a hidden dim are 400.
 // ErrUnknownField and ErrBadCond are 400. ErrFieldNotReady is 200 with an empty list.
 // Any other query error is 500. Missing stats is 503.
 func (s *Server) handleBreakdown(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +94,10 @@ func (s *Server) handleBreakdown(w http.ResponseWriter, r *http.Request) {
 	}
 	from, to := parseRange(r)
 	dim := r.URL.Query().Get("dim")
+	if fieldHidden(s.viewerFrom(r.Context()), dim) {
+		writeErr(w, http.StatusBadRequest, "bad filter: hidden field "+dim)
+		return
+	}
 	limit := atoiDef(r.URL.Query().Get("limit"), 50)
 	var kv []store.KV
 	var err error
@@ -146,11 +152,12 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 }
 
 // logFilter reads the click-journal query.
-// w and r supply the period, legacy parameters and f=. A bad filter writes 400 to w.
+// w and r supply the period, legacy parameters and f=. A bad filter and a filter
+// by a hidden field write 400 to w.
 func (s *Server) logFilter(w http.ResponseWriter, r *http.Request) (store.LogFilter, bool) {
 	q := r.URL.Query()
 	conds, ok := s.condsFrom(w, r, "events")
-	if !ok {
+	if !ok || !s.rejectHiddenParams(w, r, q, legacyLogParams) {
 		return store.LogFilter{}, false
 	}
 	from, to := parseRange(r)
@@ -222,7 +229,11 @@ func (s *Server) handleLogFilters(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from, to := parseRange(r)
+	vw := s.viewerFrom(r.Context())
 	for _, dim := range []string{"group", "stream", "country", "device", "os", "browser", "brand"} {
+		if fieldHidden(vw, dim) {
+			continue
+		}
 		var kv []store.KV
 		var err error
 		if len(conds) > 0 {
@@ -269,6 +280,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 
 // handleLogsExport writes the click journal for the period as CSV.
 // r supplies the same filter as the table, but the row cap is the export size and the offset is zero.
+// Columns of fields hidden for the viewer are left out of the header and of every row.
 // A bad f= is 400. Missing stats is 503. A query failure is 500.
 func (s *Server) handleLogsExport(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Stats == nil {
@@ -285,12 +297,14 @@ func (s *Server) handleLogsExport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "logs error")
 		return
 	}
+	header := logExportHeader()
+	keep := visibleColumns(s.viewerFrom(r.Context()), header)
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", "attachment; filename=logs.csv")
 	cw := csv.NewWriter(w)
-	_ = cw.Write(logExportHeader())
+	_ = cw.Write(pickColumns(header, keep))
 	for _, x := range rows {
-		_ = cw.Write(logExportRecord(x))
+		_ = cw.Write(pickColumns(logExportRecord(x), keep))
 	}
 	cw.Flush()
 }
@@ -387,11 +401,30 @@ func (s *Server) handlePostbackLog(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, rows)
 }
 
+// sliceMeter is the optional report source that also says the visit rows were cut at store.SliceLimit.
+type sliceMeter interface {
+	SliceMeta(ctx context.Context, from, to time.Time, conds []store.Cond) ([]store.SliceRow, bool, error)
+}
+
+// reportMeta is the body of /api/report?meta=1: the rows and whether they stop at store.SliceLimit.
+type reportMeta struct {
+	Rows      []store.SliceRow `json:"rows"`
+	Truncated bool             `json:"truncated"`
+}
+
 // handleReport writes the period slice.
 // r supplies from, to and optional f=. When f= is present the slice is filtered.
+// With meta=1 the body is {rows, truncated} instead of the bare array, and truncated is
+// true when the store cut the visit groups at store.SliceLimit; a store without that
+// answer reports false. Without meta the body is the array, as other clients expect.
 // A bad f= is 400. Missing stats yields an empty list with 200. A query failure is 500.
 func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	meta := r.URL.Query().Get("meta") == "1"
 	if s.cfg.Stats == nil {
+		if meta {
+			writeJSON(w, http.StatusOK, reportMeta{Rows: []store.SliceRow{}})
+			return
+		}
 		writeJSON(w, http.StatusOK, []store.SliceRow{})
 		return
 	}
@@ -401,8 +434,11 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 	from, to := parseRange(r)
 	var rows []store.SliceRow
+	truncated := false
 	var err error
-	if len(conds) > 0 {
+	if sm, ok := s.cfg.Stats.(sliceMeter); ok && meta {
+		rows, truncated, err = sm.SliceMeta(r.Context(), from, to, conds)
+	} else if len(conds) > 0 {
 		rows, err = s.cfg.Stats.SliceFiltered(r.Context(), from, to, conds)
 	} else {
 		rows, err = s.cfg.Stats.Slice(r.Context(), from, to)
@@ -411,7 +447,14 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "report error")
 		return
 	}
-	s.writeStats(w, r, http.StatusOK, rows)
+	if !meta {
+		s.writeStats(w, r, http.StatusOK, rows)
+		return
+	}
+	if rows == nil {
+		rows = []store.SliceRow{}
+	}
+	s.writeStats(w, r, http.StatusOK, reportMeta{Rows: rows, Truncated: truncated})
 }
 
 // handlePostbacks writes one page of the conversion journal, the profit sum and the match count.
@@ -424,11 +467,11 @@ func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	conds, ok := s.condsFrom(w, r, "conversions")
-	if !ok {
+	q := r.URL.Query()
+	if !ok || !s.rejectHiddenParams(w, r, q, legacyPostbackParams) {
 		return
 	}
 	from, to := parseRange(r)
-	q := r.URL.Query()
 	rows, tot, err := s.cfg.Stats.QueryPostbacks(r.Context(), store.PostbackQuery{
 		From: from, To: to, Group: q.Get("group"), Status: q.Get("status"),
 		Stream: q.Get("stream"), Offer: q.Get("offer"), Landing: q.Get("landing"),
@@ -444,8 +487,59 @@ func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
 	if rows == nil {
 		rows = []store.PostbackRow{}
 	}
+	if err := s.fillCampaignNames(r.Context(), rows); err != nil {
+		writeErr(w, http.StatusInternalServerError, "groups error")
+		return
+	}
 	s.writeStatsExtra(w, r, http.StatusOK, map[string]any{"total": tot.Profit, "count": tot.Count, "rows": rows},
 		map[string][]string{"profit": {"total"}})
+}
+
+// fillCampaignNames sets the campaign name of journal rows that have a campaign id and no name.
+// ctx carries the viewer. rows is changed in place. The name is the stored campaign name,
+// or its id when the name is empty. A campaign the viewer may not see is left unnamed.
+// The groups list is read only when a row needs a name; a missing store changes nothing.
+// It runs before the hidden fields are stripped, so a hidden campaign still drops the name.
+// It returns an error only when the groups list cannot be read.
+func (s *Server) fillCampaignNames(ctx context.Context, rows []store.PostbackRow) error {
+	need := false
+	for _, p := range rows {
+		if p.CampaignID != "" && p.Group == "" {
+			need = true
+			break
+		}
+	}
+	if !need || s.cfg.Groups == nil {
+		return nil
+	}
+	groups, err := s.cfg.Groups.List(ctx)
+	if err != nil {
+		return err
+	}
+	v := s.viewerFrom(ctx)
+	byID := make(map[string]config.Group, len(groups))
+	for _, g := range groups {
+		if _, ok := byID[g.ID]; !ok && v.canSee(resCampaigns, campaignRef(g)) {
+			byID[g.ID] = g
+		}
+	}
+	for i := range rows {
+		if rows[i].CampaignID == "" || rows[i].Group != "" {
+			continue
+		}
+		if g, ok := byID[rows[i].CampaignID]; ok {
+			rows[i].Group = campaignName(g)
+		}
+	}
+	return nil
+}
+
+// campaignName is the display name of a campaign: its name, or its id when the name is empty.
+func campaignName(g config.Group) string {
+	if g.Name != "" {
+		return g.Name
+	}
+	return g.ID
 }
 
 // parseRange reads from/to (RFC3339) from the query; defaults to the last 24 hours.

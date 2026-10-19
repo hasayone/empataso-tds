@@ -241,6 +241,7 @@ func clickFillFromEvent(ev logbuf.Event) store.ClickFill {
 	return store.ClickFill{
 		TS:         ev.Ts,
 		GroupID:    ev.GroupID,
+		GroupName:  ev.GroupName,
 		IP:         ev.IP,
 		UserAgent:  ev.UserAgent,
 		OS:         ev.OS,

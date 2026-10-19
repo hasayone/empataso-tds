@@ -130,7 +130,7 @@ func (s *Server) purgeStores(ctx context.Context, manifest ktimport.Manifest) (k
 // purgeUsers removes or detaches Keitaro-imported panel users listed in the manifest.
 //
 // imported is true for keitaro_id strings from the manifest. Disabled users without a
-// hash are removed; active accounts keep login but lose keitaro_id.
+// hash and without a role are removed; other accounts keep login but lose keitaro_id.
 // It returns how many users were removed. An error means users.json could not be saved.
 func (s *Server) purgeUsers(imported func(string) bool) (int, error) {
 	if !s.usersEnabled() || imported == nil {
@@ -148,7 +148,7 @@ func (s *Server) purgeUsers(imported func(string) bool) (int, error) {
 		if !ok {
 			continue
 		}
-		if !u.Enabled && u.Hash == "" {
+		if !u.Enabled && u.Hash == "" && u.RoleID == "" {
 			if err := s.users.Remove(pub.ID); err != nil {
 				return removed, err
 			}

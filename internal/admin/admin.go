@@ -144,7 +144,9 @@ type Config struct {
 	PublicURL    string // address opened in the browser; empty uses EngineURL
 	PasswordFile string // file with the argon2id hash (overrides PasswordHash, written on change)
 	// UsersFile is users.json; empty leaves only the environment administrator.
-	UsersFile   string
+	UsersFile string
+	// RolesFile is roles.json; empty disables roles, and a user with a role then has no access.
+	RolesFile   string
 	APIKeysFile string // API key file; empty disables keys and rejects the Api-Key header
 	Log         slogLogger
 
@@ -216,7 +218,11 @@ type Server struct {
 	keyMu sync.Mutex       // pairs Generate or Revoke with the following Save
 
 	users  *security.UserSet // nil when UsersFile is empty
-	userMu sync.Mutex        // pairs user changes with Save
+	userMu sync.Mutex        // pairs user and role changes with Save
+
+	// roles is nil when RolesFile is empty. Its Failure is why roles.json is not
+	// in use; it is empty when the file was accepted.
+	roles *security.RoleSet
 
 	// domainMu serializes every write of domains.json: create, replace, delete and check.
 	domainMu sync.Mutex
@@ -300,6 +306,7 @@ func New(cfg Config) (*Server, error) {
 			us.SetOutsideAdmins(1)
 		}
 	}
+	s.loadRoles()
 	s.loadAPIKeys()
 	return s, nil
 }
@@ -371,6 +378,7 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "POST /api/password", cookieOnly(http.HandlerFunc(s.handlePassword)))
 	registerAPIKeys(s, mux)
 	registerUsers(s, mux)
+	registerRoles(s, mux)
 
 	s.handle(mux, "GET /api/stats/summary", http.HandlerFunc(s.handleSummary))
 	s.handle(mux, "GET /api/stats/timeseries", http.HandlerFunc(s.handleTimeSeries))
@@ -476,6 +484,10 @@ func (s *Server) handleKeys(w http.ResponseWriter, r *http.Request) {
 	}
 	q := r.URL.Query()
 	v := s.viewerFrom(r.Context())
+	if fieldHidden(v, "keyword") {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	groupID := q.Get("group")
 	if !v.admin && groupID != "" {
 		ref, ok, err := s.campaignRefByID(r.Context(), groupID)

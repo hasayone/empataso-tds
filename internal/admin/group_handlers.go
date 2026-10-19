@@ -139,6 +139,8 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 
 // commitGroups merges full into stored, assigns missing campaign numbers, checks links and streams, and saves.
 // Shares above 100% are refused only for campaigns that differ from stored.
+// A non-admin save that adds or edits a link with a macro the caller may not write, or
+// rebinds a hidden keyword, Sub ID or price to another click parameter, is refused with 400.
 // w receives writeErr when a check or Save fails. r carries the request context.
 // v is the caller. stored is the list read under groupsMu. full is the complete candidate
 // list, never a single row: a non-admin merge of one row would drop their other campaigns.
@@ -153,6 +155,19 @@ func (s *Server) commitGroups(w http.ResponseWriter, r *http.Request, v viewer, 
 	if !v.admin {
 		cat := s.loadLinkCatalog(r.Context(), groups)
 		if msg := validateUserGroupLinks(v, stored, groups, cat); msg != "" {
+			writeErr(w, http.StatusBadRequest, msg)
+			return false
+		}
+		if msg := validateGroupMacros(v, stored, groups); msg != "" {
+			writeErr(w, http.StatusBadRequest, msg)
+			return false
+		}
+		sources, err := s.hiddenSourceList(r.Context(), v)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "read error")
+			return false
+		}
+		if msg := validateGroupParams(v, stored, groups, sources); msg != "" {
 			writeErr(w, http.StatusBadRequest, msg)
 			return false
 		}

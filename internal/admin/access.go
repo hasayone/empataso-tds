@@ -53,7 +53,6 @@ var (
 
 	grantResources = []string{resCampaigns, resOffers, resLandings, resSources, resNetworks, resDomains}
 	grantModes     = []security.Mode{security.ModeFull, security.ModeRead, security.ModeSelected, security.ModeCreated}
-	hiddenMetrics  = []string{"profit", "cost"}
 )
 
 var (
@@ -61,7 +60,7 @@ var (
 	errAccessResource = errors.New("unknown access resource")
 	errAccessMode     = errors.New("unknown access mode")
 	errAccessLimit    = errors.New("access list too long")
-	errAccessHidden   = errors.New("unknown hidden metric")
+	errAccessHidden   = errors.New("unknown hidden field")
 )
 
 // routeRule binds one mux pattern to a section and optional administrator-only flag.
@@ -169,7 +168,7 @@ func addCatalogRoutes(m map[string]routeRule, rule func(section) routeRule, addC
 	m["POST /api/simulate"] = rule(secTools)
 }
 
-// addAdminRoutes registers settings, bot protection, pages, cron, Keitaro, API keys, and users.
+// addAdminRoutes registers settings, bot protection, pages, cron, Keitaro, API keys, users, and roles.
 func addAdminRoutes(m map[string]routeRule, rule func(section) routeRule) {
 	m["PUT /api/ui"] = rule(secSettings)
 	m["GET /api/bot-protection"] = rule(secBotProtection)
@@ -207,6 +206,13 @@ func addAdminRoutes(m map[string]routeRule, rule func(section) routeRule) {
 	m["DELETE /api/users/{id}"] = users
 	m["PUT /api/users/{id}/password"] = users
 	m["PUT /api/users/{id}/access"] = users
+
+	m["GET /api/roles"] = users
+	m["POST /api/roles"] = users
+	m["POST /api/roles/reload"] = users
+	m["GET /api/roles/{id}"] = users
+	m["PUT /api/roles/{id}"] = users
+	m["DELETE /api/roles/{id}"] = users
 }
 
 // isAdminSection reports whether sec is visible only to administrators.
@@ -255,7 +261,7 @@ func (s *Server) allowed(sess security.Session, rule routeRule) bool {
 		return false
 	}
 	want := string(rule.sec)
-	for _, sec := range u.Access.Sections {
+	for _, sec := range s.accessOf(u).Sections {
 		if sec == want {
 			return true
 		}
@@ -290,12 +296,13 @@ func (s *Server) handle(mux *http.ServeMux, pattern string, h http.Handler) {
 }
 
 // userPages returns panel section ids visible to u in userSections order.
-func userPages(u security.User) []string {
+// acc is the access in force for u, from accessOf. An administrator sees every section.
+func userPages(u security.User, acc security.Access) []string {
 	if u.Type == security.UserAdmin {
 		return sectionStrings(allSections)
 	}
-	allowed := make(map[string]struct{}, len(u.Access.Sections))
-	for _, sec := range u.Access.Sections {
+	allowed := make(map[string]struct{}, len(acc.Sections))
+	for _, sec := range acc.Sections {
 		allowed[sec] = struct{}{}
 	}
 	out := make([]string, 0, len(userSections))
@@ -322,6 +329,7 @@ func sectionStrings(list []section) []string {
 }
 
 // normalizeAccess trims and validates access for storage on a USER account.
+// The modes full, read and created keep no id or label lists: they list no records.
 func normalizeAccess(a security.Access) (security.Access, error) {
 	out := security.Access{}
 	if a.Sections == nil {
@@ -361,7 +369,7 @@ func normalizeAccess(a security.Access) (security.Access, error) {
 				return security.Access{}, fmt.Errorf("%w: %s", errAccessMode, mode)
 			}
 			ng := security.Grant{Mode: mode}
-			if mode == security.ModeFull || mode == security.ModeRead {
+			if mode == security.ModeFull || mode == security.ModeRead || mode == security.ModeCreated {
 				ng.IDs = nil
 				ng.Labels = nil
 			} else {
@@ -383,7 +391,7 @@ func normalizeAccess(a security.Access) (security.Access, error) {
 			if m == "" {
 				continue
 			}
-			if !hiddenMetricOK(m) {
+			if !hiddenIDOK(m) {
 				return security.Access{}, fmt.Errorf("%w: %s", errAccessHidden, m)
 			}
 			if _, ok := seen[m]; ok {
@@ -420,16 +428,6 @@ func grantResourceOK(name string) bool {
 func grantModeOK(mode security.Mode) bool {
 	for _, m := range grantModes {
 		if m == mode {
-			return true
-		}
-	}
-	return false
-}
-
-// hiddenMetricOK reports whether name is an allowed hidden metric id.
-func hiddenMetricOK(name string) bool {
-	for _, h := range hiddenMetrics {
-		if h == name {
 			return true
 		}
 	}

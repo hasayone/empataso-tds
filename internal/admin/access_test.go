@@ -87,6 +87,12 @@ var cookieOnlyRoutes = map[string]bool{
 	"DELETE /api/users/{id}":         true,
 	"PUT /api/users/{id}/password":   true,
 	"PUT /api/users/{id}/access":     true,
+	"GET /api/roles":                 true,
+	"POST /api/roles":                true,
+	"POST /api/roles/reload":         true,
+	"GET /api/roles/{id}":            true,
+	"PUT /api/roles/{id}":            true,
+	"DELETE /api/roles/{id}":         true,
 	"GET /api/keitaro/settings":      true,
 	"PUT /api/keitaro/settings":      true,
 
@@ -395,8 +401,8 @@ func errorsIsAccess(err, target error) bool {
 
 func TestUserPages(t *testing.T) {
 	admin := security.User{Type: security.UserAdmin}
-	if len(userPages(admin)) != len(allSections) {
-		t.Fatalf("admin pages len %d", len(userPages(admin)))
+	if len(userPages(admin, admin.Access)) != len(allSections) {
+		t.Fatalf("admin pages len %d", len(userPages(admin, admin.Access)))
 	}
 	u := security.User{
 		Type: security.UserRegular,
@@ -404,7 +410,7 @@ func TestUserPages(t *testing.T) {
 			Sections: []string{"tools", "dashboard"},
 		},
 	}
-	pages := userPages(u)
+	pages := userPages(u, u.Access)
 	if len(pages) != 2 || pages[0] != "dashboard" || pages[1] != "tools" {
 		t.Fatalf("user pages order: %v", pages)
 	}

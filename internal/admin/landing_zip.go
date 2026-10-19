@@ -25,7 +25,11 @@ var errLandingArchive = errors.New("invalid landing archive")
 // id is the catalog id. data is the raw zip. It returns how many files were written.
 // Archives over 50 MiB or 2000 entries are rejected. Directory entries and __MACOSX are skipped.
 // A single shared top-level directory is removed. An unsafe path is errBadLandingPath.
-// The previous directory contents are removed only after every path has been checked.
+// The files are extracted into a temporary directory beside the landing and swapped in
+// by rename only when every file was written, so a failure leaves the previous
+// directory untouched. The staging directory is made 0755 like the landing directory
+// before, because MkdirTemp creates it 0700 and the PHP service reads the tree as
+// another user. An entry that cannot be opened or read is errLandingArchive.
 func (f *FileLandings) Unzip(id string, data []byte) (int, error) {
 	if _, err := cleanLandingID(id); err != nil {
 		return 0, err
@@ -64,26 +68,60 @@ func (f *FileLandings) Unzip(id string, data []byte) (int, error) {
 		total += size
 		cleaned[i] = c
 	}
-	if err := f.Remove(id); err != nil {
-		return 0, err
+	if len(cleaned) == 0 {
+		return 0, f.Remove(id)
 	}
 	root, err := f.root(id)
 	if err != nil {
 		return 0, err
 	}
-	if len(cleaned) > 0 {
-		if err := os.MkdirAll(root, 0o755); err != nil {
-			return 0, err
-		}
+	if err := os.MkdirAll(f.dir, 0o755); err != nil {
+		return 0, err
+	}
+	staging, err := os.MkdirTemp(f.dir, unzipPrefix+id+"-")
+	if err != nil {
+		return 0, err
+	}
+	defer os.RemoveAll(staging)
+	if err := os.Chmod(staging, 0o755); err != nil {
+		return 0, err
 	}
 	seen := map[string]bool{}
 	for i, rel := range cleaned {
-		if err := writeZipFile(root, rel, files[i]); err != nil {
+		if err := writeZipFile(staging, rel, files[i]); err != nil {
 			return 0, err
 		}
 		seen[rel] = true
 	}
+	if err := swapDir(root, staging); err != nil {
+		return 0, err
+	}
 	return len(seen), nil
+}
+
+// swapDir replaces the directory root with the directory staging by rename.
+// root may be missing. staging must be on the same volume. When the second rename
+// fails the old directory is put back, so root is never left half replaced.
+// It returns the rename error; the old directory is deleted only after the swap.
+func swapDir(root, staging string) error {
+	old := staging + unzipBackupSuffix
+	hadOld := true
+	if err := os.Rename(root, old); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		hadOld = false
+	}
+	if err := os.Rename(staging, root); err != nil {
+		if hadOld {
+			_ = os.Rename(old, root)
+		}
+		return err
+	}
+	if hadOld {
+		_ = os.RemoveAll(old)
+	}
+	return nil
 }
 
 // skipZipEntry reports entries that are not landing files.
@@ -141,7 +179,9 @@ func stripTopDir(paths []string) []string {
 
 // writeZipFile extracts one archive entry under root.
 // root is the landing directory. rel is a cleaned relative path. zf is the entry.
-// It returns an error when the file escapes root, expands past 50 MiB, or cannot be written.
+// It returns errBadLandingPath when the file escapes root, errLandingArchive when the entry
+// cannot be opened or read (checksum, unsupported compression) or expands past 50 MiB,
+// and a disk error when it cannot be written.
 func writeZipFile(root, rel string, zf *zip.File) error {
 	full := filepath.Join(root, filepath.FromSlash(rel))
 	back, err := filepath.Rel(root, full)
@@ -153,12 +193,12 @@ func writeZipFile(root, rel string, zf *zip.File) error {
 	}
 	rc, err := zf.Open()
 	if err != nil {
-		return err
+		return errLandingArchive
 	}
 	defer rc.Close()
 	data, err := io.ReadAll(io.LimitReader(rc, landingArchiveLimit+1))
 	if err != nil {
-		return err
+		return errLandingArchive
 	}
 	if len(data) > landingArchiveLimit {
 		return errLandingArchive
@@ -169,7 +209,7 @@ func writeZipFile(root, rel string, zf *zip.File) error {
 // handleLandingArchive replaces a landing directory from an uploaded zip.
 // The body is application/zip or a multipart field named file, at most 50 MiB.
 // Success is the file count and the detected entry. When the catalog has this id, Entry is saved.
-// A bad id or archive is 400. A nil store is 503. A catalog save failure is 500.
+// An archive that cannot be read whole (corrupt entry, bad checksum) is 400 bad archive for every caller and nothing is changed. A file with a macro the caller may not write, or an archive whose entry is such a file, is 400. A bad id is 400. A nil store is 503. A catalog save failure is 500.
 func (s *Server) handleLandingArchive(w http.ResponseWriter, r *http.Request) {
 	files := s.landingFilesStore(w)
 	if files == nil {
@@ -179,6 +219,15 @@ func (s *Server) handleLandingArchive(w http.ResponseWriter, r *http.Request) {
 	data, err := readZipUpload(w, r)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad archive")
+		return
+	}
+	archive, ok := readArchive(data)
+	if !ok {
+		writeErr(w, http.StatusBadRequest, "bad archive")
+		return
+	}
+	if msg := s.archiveMacroUse(r.Context(), newMacroGuard(s.viewerFrom(r.Context())), files, id, archive); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	n, err := files.Unzip(id, data)

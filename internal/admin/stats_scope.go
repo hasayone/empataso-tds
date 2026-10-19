@@ -10,26 +10,6 @@ import (
 	"github.com/egerkuzma/kuztds/internal/store"
 )
 
-// moneyFields maps a hidden metric id to journal filter field names.
-var moneyFields = map[string][]string{
-	"profit": {"profit"},
-	"cost":   {"cost_cents", "cost_cur"},
-}
-
-// moneyKeys maps a hidden metric id to JSON keys stripped from stats responses.
-var moneyKeys = map[string][]string{
-	"profit": {"profit", "revenue", "payout"},
-	"cost":   {"cost_cents", "cost", "cost_cur", "currency", "spend"},
-}
-
-// hides reports whether metric is hidden for this viewer. Administrators see all metrics.
-func (v viewer) hides(metric string) bool {
-	if v.admin {
-		return false
-	}
-	return v.hidden[metric]
-}
-
 // campaignScope returns a Scope condition limiting stats to campaigns the viewer may see.
 // Administrators and read/full campaign grants get nil. List errors propagate to the caller.
 func (s *Server) campaignScope(ctx context.Context) ([]store.Cond, error) {
@@ -64,7 +44,7 @@ func (s *Server) campaignScope(ctx context.Context) ([]store.Cond, error) {
 	}}, nil
 }
 
-// condsFrom parses f=, rejects hidden metric filters, and appends campaign scope.
+// condsFrom parses f=, rejects filters on hidden fields, and appends campaign scope.
 // w receives 400 on a bad filter or 500 when groups cannot be listed.
 // The bool is false after an error response has been written.
 func (s *Server) condsFrom(w http.ResponseWriter, r *http.Request, table string) ([]store.Cond, bool) {
@@ -75,7 +55,7 @@ func (s *Server) condsFrom(w http.ResponseWriter, r *http.Request, table string)
 	}
 	v := s.viewerFrom(r.Context())
 	for _, c := range conds {
-		if hiddenFilterField(v, c.Field) {
+		if fieldHidden(v, c.Field) {
 			writeErr(w, http.StatusBadRequest, "bad filter: hidden field "+c.Field)
 			return nil, false
 		}
@@ -92,27 +72,50 @@ func (s *Server) condsFrom(w http.ResponseWriter, r *http.Request, table string)
 	return append(conds, scope...), true
 }
 
-// hiddenFilterField reports whether field is a money column hidden for v.
-func hiddenFilterField(v viewer, field string) bool {
-	for metric, fields := range moneyFields {
-		for _, f := range fields {
-			if f == field && v.hides(metric) {
-				return true
-			}
+// writeStats writes a stats JSON body without the keys of fields hidden for the viewer.
+func (s *Server) writeStats(w http.ResponseWriter, r *http.Request, code int, v any) {
+	s.writeStatsWith(w, r, code, v, statsOpts{})
+}
+
+// statsOpts tunes writeStatsWith.
+type statsOpts struct {
+	// extra maps a hidden id to the response keys it also covers.
+	extra map[string][]string
+	// keep lists field names whose keys stay in the body even when hidden, because
+	// the handler has already made the rows safe for them.
+	keep map[string]bool
+}
+
+// writeStatsExtra is writeStats plus extra keys to drop per hidden field.
+// extra maps a hidden id to the response keys it also covers.
+func (s *Server) writeStatsExtra(w http.ResponseWriter, r *http.Request, code int, v any, extra map[string][]string) {
+	s.writeStatsWith(w, r, code, v, statsOpts{extra: extra})
+}
+
+// writeStatsWith writes v as JSON for the viewer of r.
+//
+// Keys of hidden fields (and opts.extra for hidden ids) are removed at every depth,
+// except the keys of the names in opts.keep that no other hidden field carries.
+// Hidden Sub IDs are blanked inside every subs array.
+// A body with nothing to hide is written as is. An encode error answers 500.
+func (s *Server) writeStatsWith(w http.ResponseWriter, r *http.Request, code int, v any, opts statsOpts) {
+	vw := s.viewerFrom(r.Context())
+	keys := statsStripKeys(vw, opts.extra)
+	for name := range opts.keep {
+		for _, k := range fieldJSONKeys(name) {
+			delete(keys, k)
 		}
 	}
-	return false
-}
-
-// writeStats writes a stats JSON body and strips keys for hidden money metrics.
-func (s *Server) writeStats(w http.ResponseWriter, r *http.Request, code int, v any) {
-	s.writeStatsExtra(w, r, code, v, nil)
-}
-
-// writeStatsExtra is writeStats plus extra top-level keys to drop per hidden metric.
-func (s *Server) writeStatsExtra(w http.ResponseWriter, r *http.Request, code int, v any, extra map[string][]string) {
-	keys := statsStripKeys(s.viewerFrom(r.Context()), extra)
-	if len(keys) == 0 {
+	for id := range vw.hidden {
+		if opts.keep[id] {
+			continue
+		}
+		for _, k := range fieldJSONKeys(id) {
+			keys[k] = true
+		}
+	}
+	subs := hiddenSubIndexes(vw)
+	if len(keys) == 0 && len(subs) == 0 {
 		writeJSON(w, code, v)
 		return
 	}
@@ -126,22 +129,20 @@ func (s *Server) writeStatsExtra(w http.ResponseWriter, r *http.Request, code in
 		writeErr(w, http.StatusInternalServerError, "encode error")
 		return
 	}
-	writeJSON(w, code, stripKeys(raw, keys))
+	writeJSON(w, code, blankSubs(stripKeys(raw, keys), subs))
 }
 
-// statsStripKeys collects JSON keys to remove for the current viewer.
+// statsStripKeys collects the JSON keys to remove for the viewer: the keys of every
+// hidden field, plus the extra keys of each hidden id in extra.
 func statsStripKeys(v viewer, extra map[string][]string) map[string]bool {
 	out := map[string]bool{}
-	for metric, jsonKeys := range moneyKeys {
-		if !v.hides(metric) {
-			continue
-		}
-		for _, k := range jsonKeys {
+	for id := range v.hidden {
+		for _, k := range fieldJSONKeys(id) {
 			out[k] = true
 		}
 	}
-	for metric, keys := range extra {
-		if !v.hides(metric) {
+	for id, keys := range extra {
+		if !fieldHidden(v, id) {
 			continue
 		}
 		for _, k := range keys {
@@ -151,27 +152,24 @@ func statsStripKeys(v viewer, extra map[string][]string) map[string]bool {
 	return out
 }
 
-// stripKeys returns v with keys removed recursively from maps.
+// stripKeys deletes keys from every map inside v, in place, and returns v.
+// v is a decoded JSON tree and is changed; nothing is copied.
 func stripKeys(v any, keys map[string]bool) any {
 	switch x := v.(type) {
 	case map[string]any:
-		out := make(map[string]any, len(x))
 		for k, val := range x {
 			if keys[k] {
+				delete(x, k)
 				continue
 			}
-			out[k] = stripKeys(val, keys)
+			x[k] = stripKeys(val, keys)
 		}
-		return out
 	case []any:
-		out := make([]any, len(x))
 		for i, val := range x {
-			out[i] = stripKeys(val, keys)
+			x[i] = stripKeys(val, keys)
 		}
-		return out
-	default:
-		return v
 	}
+	return v
 }
 
 // campaignRefByID loads one campaign by id and builds its access ref.

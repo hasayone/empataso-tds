@@ -156,7 +156,16 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 
+// meRole names the role of the current user in GET /api/me.
+type meRole struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // meResponse is the JSON body of GET /api/me for the SPA.
+// Access is the access in force: the role access for a user with a role.
+// Hidden is the enforced hidden set, sorted and never null: journal field names
+// plus the money group ids "profit" and "cost" when covered.
 type meResponse struct {
 	User   string            `json:"user"`
 	UID    string            `json:"uid,omitempty"`
@@ -166,6 +175,8 @@ type meResponse struct {
 	Prefs  security.Prefs    `json:"prefs"`
 	Pages  []string          `json:"pages"`
 	Access *security.Access  `json:"access,omitempty"`
+	Role   *meRole           `json:"role,omitempty"`
+	Hidden []string          `json:"hidden"`
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -175,6 +186,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		CSRF:   sess.CSRF,
 		Engine: s.linkBase(),
 		Type:   security.UserAdmin,
+		Hidden: []string{},
 	}
 	if sess.UID != "" {
 		u, ok := s.userByID(sess.UID)
@@ -182,16 +194,30 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 			out.UID = u.ID
 			out.Type = u.Type
 			out.Prefs = u.Prefs
-			out.Pages = userPages(u)
+			acc := s.accessOf(u)
+			out.Pages = userPages(u, acc)
 			if u.Type != security.UserAdmin {
-				acc := u.Access
 				out.Access = &acc
+				out.Role = s.roleOf(u)
+				out.Hidden = hiddenList(s.viewerFrom(r.Context()))
 			}
 		}
 	} else {
 		out.Pages = rootPages()
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// roleOf returns the role of u for the SPA, nil when u has none or the role is gone.
+func (s *Server) roleOf(u security.User) *meRole {
+	if u.RoleID == "" || s.roles == nil {
+		return nil
+	}
+	role, ok := s.roles.Get(u.RoleID)
+	if !ok {
+		return nil
+	}
+	return &meRole{ID: role.ID, Name: role.Name}
 }
 
 // linkBase is the engine address shown in campaign links and postbacks.

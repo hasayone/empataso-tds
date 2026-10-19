@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 
@@ -14,10 +13,6 @@ import (
 )
 
 const landingTextLimit = 2 << 20
-
-// landingIDRe matches one landing directory name.
-// Dot and dot-dot also match and are rejected separately.
-var landingIDRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
 
 var landingTextExt = map[string]bool{
 	".html": true,
@@ -72,9 +67,9 @@ func NewFileLandings(dir string) *FileLandings { return &FileLandings{dir: dir} 
 
 // cleanLandingID checks a landing directory name.
 // id is the catalog id. It returns the same id when it is one safe path segment.
-// It returns errBadLandingID for an empty name, dot, dot-dot, or any other character.
+// It returns errBadLandingID when config.SafeLandingID refuses it: empty, over 128 characters, a leading dot, or a character outside letters, digits, dot, underscore and hyphen.
 func cleanLandingID(id string) (string, error) {
-	if id == "." || id == ".." || !landingIDRe.MatchString(id) {
+	if !config.SafeLandingID(id) {
 		return "", errBadLandingID
 	}
 	return id, nil
@@ -271,22 +266,35 @@ func (f *FileLandings) Entry(id string) string {
 	if err != nil {
 		return ""
 	}
+	paths := make([]string, len(infos))
+	for i, info := range infos {
+		paths[i] = info.Path
+	}
+	return detectEntry(paths)
+}
+
+// detectEntry picks the catalog Entry for a landing from its file paths.
+// paths are cleaned relative paths. It returns index.php, otherwise index.html,
+// otherwise the first root file ending in .php or .html, otherwise an empty string.
+// The pick is only the value stored in the catalog; the file the engine serves is
+// config.LandingEntry over that value.
+func detectEntry(paths []string) string {
 	indexPHP, indexHTML, first := "", "", ""
-	for _, info := range infos {
-		if strings.Contains(info.Path, "/") {
+	for _, p := range paths {
+		if strings.Contains(p, "/") {
 			continue
 		}
-		low := strings.ToLower(info.Path)
+		low := strings.ToLower(p)
 		switch low {
 		case "index.php":
-			indexPHP = info.Path
+			indexPHP = p
 		case "index.html":
 			if indexHTML == "" {
-				indexHTML = info.Path
+				indexHTML = p
 			}
 		}
 		if first == "" && (strings.HasSuffix(low, ".php") || strings.HasSuffix(low, ".html")) {
-			first = info.Path
+			first = p
 		}
 	}
 	if indexPHP != "" {
@@ -439,7 +447,8 @@ func (s *Server) handleLandingFileGet(w http.ResponseWriter, r *http.Request) {
 
 // handleLandingFilePut replaces one text file from the raw body.
 // id and path are URL segments. The body is limited to 2 MiB.
-// A bad path is 400. A nil store is 503. Success is status saved.
+// A file with a macro the caller may not write, or one that makes such a file the
+// entry, is 400. A bad path is 400. A nil store is 503. Success is status saved.
 func (s *Server) handleLandingFilePut(w http.ResponseWriter, r *http.Request) {
 	files := s.landingFilesStore(w)
 	if files == nil {
@@ -455,6 +464,10 @@ func (s *Server) handleLandingFilePut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusRequestEntityTooLarge, "file too large")
 		return
 	}
+	if msg := s.fileOpMacro(r.Context(), newMacroGuard(s.viewerFrom(r.Context())), files, r.PathValue("id"), fileOp{rel: rel, data: data}); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
 	if err := files.Write(r.PathValue("id"), rel, data); err != nil {
 		writeLandingErr(w, err)
 		return
@@ -464,11 +477,18 @@ func (s *Server) handleLandingFilePut(w http.ResponseWriter, r *http.Request) {
 
 // handleLandingFileDelete removes one file.
 // id and path are URL segments. Any safe relative path is accepted.
-// A nil store is 503. Success is status deleted. A missing file is also success.
+// A removal that hands the entry to a file with a macro the caller may not write is 400. A nil store is 503. Success is status deleted. A missing file is
+// also success.
 func (s *Server) handleLandingFileDelete(w http.ResponseWriter, r *http.Request) {
 	files := s.landingFilesStore(w)
 	if files == nil {
 		return
+	}
+	if rel, err := cleanLandingPath(r.PathValue("path")); err == nil {
+		if msg := s.fileOpMacro(r.Context(), newMacroGuard(s.viewerFrom(r.Context())), files, r.PathValue("id"), fileOp{rel: rel, deleted: true}); msg != "" {
+			writeErr(w, http.StatusBadRequest, msg)
+			return
+		}
 	}
 	if err := files.Delete(r.PathValue("id"), r.PathValue("path")); err != nil {
 		writeLandingErr(w, err)

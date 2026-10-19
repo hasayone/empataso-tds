@@ -58,8 +58,12 @@ func TestCanSeeBranches(t *testing.T) {
 		t.Fatal("created other uid")
 	}
 	createdExtra := viewer{uid: "u2", grants: map[string]security.Grant{resOffers: {Mode: security.ModeCreated, IDs: []string{"1"}}}}
-	if !createdExtra.canSee(resOffers, r) {
-		t.Fatal("created plus id list")
+	if createdExtra.canSee(resOffers, r) || createdExtra.canWrite(resOffers, r) {
+		t.Fatal("created: an id list opens nothing, only own records")
+	}
+	createdLabel := viewer{uid: "u2", grants: map[string]security.Grant{resOffers: {Mode: security.ModeCreated, Labels: []string{"L"}}}}
+	if createdLabel.canSee(resOffers, r) {
+		t.Fatal("created: a label list opens nothing")
 	}
 	emptyLabel := viewer{grants: map[string]security.Grant{resOffers: {Mode: security.ModeSelected, Labels: []string{""}}}}
 	if emptyLabel.canSee(resOffers, ref{id: "x", label: ""}) {

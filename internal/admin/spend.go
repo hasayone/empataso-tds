@@ -353,9 +353,13 @@ func sharesExceed(g config.Group) bool {
 // fault is the cheap check: it returns the client message, or "" when the campaign is fine.
 // It runs first, so only a faulty campaign is compared with its stored row.
 // The stored folder is trimmed before the comparison, as prepareGroups trims the candidate.
+// A stored campaign that had no number is not changed by receiving exactly the number
+// assignGroupNums gives it over the stored list: the editor numbers old campaigns that way
+// on save. Any other number, a duplicate one included, is a change.
 // It returns "" when no changed campaign has a fault, otherwise the first message.
 func changedFault(stored, groups []config.Group, fault func(config.Group) string) string {
 	var old map[string]config.Group
+	var assigned []config.Group
 	for _, g := range groups {
 		msg := fault(g)
 		if msg == "" {
@@ -366,14 +370,31 @@ func changedFault(stored, groups []config.Group, fault func(config.Group) string
 			for _, s := range stored {
 				old[s.ID] = s
 			}
+			assigned = append([]config.Group(nil), stored...)
+			assignGroupNums(assigned)
 		}
 		prev, ok := old[g.ID]
 		prev.Folder = strings.TrimSpace(prev.Folder)
+		if ok && prev.Num <= 0 && g.Num == serverNum(assigned, g.ID) {
+			prev.Num = g.Num
+		}
 		if !ok || !groupsEqual(prev, g) {
 			return msg
 		}
 	}
 	return ""
+}
+
+// serverNum returns the Num of the campaign with the given id in a numbered list.
+// numbered is a list after assignGroupNums. id is the campaign id.
+// It returns 0 when the id is absent. It does not return an error.
+func serverNum(numbered []config.Group, id string) int {
+	for _, g := range numbered {
+		if g.ID == id {
+			return g.Num
+		}
+	}
+	return 0
 }
 
 // sharesFault returns errSharesExceed when any stream of g has a list above 100%, else "".

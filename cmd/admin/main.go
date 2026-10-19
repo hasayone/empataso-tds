@@ -144,10 +144,20 @@ func applyDataFiles(cfg *admin.Config, groupsFile string, log *slog.Logger) {
 	cfg.NamecheapURL = os.Getenv("KUZTDS_NAMECHEAP_URL")
 	cfg.NamecheapSandboxURL = os.Getenv("KUZTDS_NAMECHEAP_SANDBOX_URL")
 	landingsDir := getenv("KUZTDS_LANDINGS_DIR", filepath.Join(dir, "landings"))
-	cfg.LandingFiles = admin.NewFileLandings(landingsDir)
+	landings := admin.NewFileLandings(landingsDir)
+	cfg.LandingFiles = landings
 	log.Info("landings dir", "path", landingsDir)
+	restored, removed, err := landings.RecoverUnzip(time.Hour)
+	if err != nil {
+		log.Warn("landings recovery", "err", err)
+	}
+	if restored+removed > 0 {
+		log.Info("landings recovery", "restored", restored, "removed", removed)
+	}
 	cfg.UsersFile = getenv("KUZTDS_USERS_FILE", filepath.Join(dir, "users.json"))
 	log.Info("users file", "path", cfg.UsersFile)
+	cfg.RolesFile = getenv("KUZTDS_ROLES_FILE", filepath.Join(dir, "roles.json"))
+	log.Info("roles file", "path", cfg.RolesFile)
 }
 
 // connectRedis moves sessions and the login rate limit to Redis when KUZTDS_REDIS_ADDR is set.

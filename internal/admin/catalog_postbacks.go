@@ -77,6 +77,10 @@ func (s *Server) handleCampaignPostbacksPut(w http.ResponseWriter, r *http.Reque
 				writeErr(w, http.StatusForbidden, "forbidden")
 				return
 			}
+			if msg := hiddenMacroUse(v, list, groups[i].Postbacks); msg != "" {
+				writeErr(w, http.StatusBadRequest, msg)
+				return
+			}
 			groups[i].Postbacks = list
 			found = true
 			break

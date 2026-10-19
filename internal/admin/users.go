@@ -58,10 +58,11 @@ func (s *Server) handleUsersList(w http.ResponseWriter, _ *http.Request) {
 
 // handleUsersCreate adds one users.json record and returns the public row.
 //
-// The body is login, password, type, enabled, prefs and access. An empty type
-// becomes USER. ErrUserLogin, ErrUserType, errPasswordShort and errAccess*
-// answer 400 with the error text. errUserReserved and ErrUserExists answer 409.
-// errUsersUnavailable answers 503 "users disabled". Success is 201 with Hash cleared.
+// The body is login, password, type, enabled, prefs, access and role_id. An empty
+// type becomes USER. ErrUserLogin, ErrUserType, errPasswordShort, errAccess*,
+// errRoleUnknown, errRoleAdmin and errRoleOwnAccess answer 400 with the error text. errUserReserved
+// and ErrUserExists answer 409. errUsersUnavailable answers 503 "users disabled".
+// Success is 201 with Hash cleared.
 func (s *Server) handleUsersCreate(w http.ResponseWriter, r *http.Request) {
 	if !s.usersEnabled() {
 		writeErr(w, http.StatusServiceUnavailable, "users disabled")
@@ -74,6 +75,7 @@ func (s *Server) handleUsersCreate(w http.ResponseWriter, r *http.Request) {
 		Enabled  bool              `json:"enabled"`
 		Prefs    security.Prefs    `json:"prefs"`
 		Access   security.Access   `json:"access"`
+		RoleID   string            `json:"role_id"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, userBodyLimit)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
@@ -93,6 +95,7 @@ func (s *Server) handleUsersCreate(w http.ResponseWriter, r *http.Request) {
 		Enabled:  body.Enabled,
 		Prefs:    body.Prefs,
 		Access:   body.Access,
+		RoleID:   strings.TrimSpace(body.RoleID),
 	})
 	if err != nil {
 		writeUserErr(w, err)
@@ -118,13 +121,15 @@ func (s *Server) handleUsersGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u.Public())
 }
 
-// handleUsersUpdate patches login, type, enabled and prefs for one user.
+// handleUsersUpdate patches login, type, enabled, prefs and role for one user.
 //
 // Omitted or empty login and type leave the current values. enabled and prefs
-// are applied only when present in JSON. A reserved environment login answers
-// 409 "login reserved". Disabling your own session answers 409. ErrLastAdmin and
-// ErrUserExists answer 409. Invalid prefs answer 400. Success is 200 with the
-// public record. Access and password are not changed here.
+// are applied only when present in JSON. role_id is applied when present: an
+// empty string detaches the role, an id attaches it. A user turned into ADMIN
+// loses the role. A reserved environment login answers 409 "login reserved".
+// Disabling your own session answers 409. ErrLastAdmin and ErrUserExists answer
+// 409. Invalid prefs, an unknown role and a role on an administrator answer 400.
+// Success is 200 with the public record. Access and password are not changed here.
 func (s *Server) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 	if !s.usersEnabled() {
 		writeErr(w, http.StatusNotFound, "not found")
@@ -136,6 +141,7 @@ func (s *Server) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 		Type    security.UserType `json:"type"`
 		Enabled *bool             `json:"enabled"`
 		Prefs   *security.Prefs   `json:"prefs"`
+		RoleID  *string           `json:"role_id"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, userBodyLimit)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
@@ -166,13 +172,37 @@ func (s *Server) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 			}
 			u.Prefs = merged
 		}
-		return nil
+		return s.applyRole(u, body.RoleID)
 	})
 	if err != nil {
 		writeUserUpdateErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, u)
+}
+
+// applyRole sets or clears u.RoleID inside an updateUser callback.
+// roleID nil keeps the role, "" clears it, any other value attaches that role.
+// A user that is an administrator after the update has no role; asking for one
+// returns errRoleAdmin. It returns errRoleUnknown for a missing role.
+func (s *Server) applyRole(u *security.User, roleID *string) error {
+	if roleID == nil {
+		if u.Type == security.UserAdmin {
+			u.RoleID = ""
+		}
+		return nil
+	}
+	id := strings.TrimSpace(*roleID)
+	if id == "" {
+		u.RoleID = ""
+		return nil
+	}
+	if err := s.checkRoleAssign(id, u.Type); err != nil {
+		return err
+	}
+	u.RoleID = id
+	u.Access = emptyAccess()
+	return nil
 }
 
 // handleUsersDelete removes one user by path id.
@@ -227,7 +257,9 @@ func (s *Server) handleUsersPassword(w http.ResponseWriter, r *http.Request) {
 // handleUsersAccess replaces access for one user after normalizeAccess.
 //
 // The body is a full security.Access object. errAccess* answers 400. A missing
-// user answers 404. Success is 200 with the public record and AccessSource manual.
+// user answers 404. A user with a role answers 409 "user has a role": the role
+// replaces the own access, so detach the role first. Success is 200 with the
+// public record and AccessSource manual.
 func (s *Server) handleUsersAccess(w http.ResponseWriter, r *http.Request) {
 	if !s.usersEnabled() {
 		writeErr(w, http.StatusNotFound, "not found")
@@ -245,6 +277,9 @@ func (s *Server) handleUsersAccess(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := s.updateUser(id, func(u *security.User) error {
+		if u.RoleID != "" {
+			return errRoleAssigned
+		}
 		u.Access = acc
 		u.AccessSource = "manual"
 		return nil
@@ -286,7 +321,12 @@ func validatePrefs(p security.Prefs) error {
 }
 
 // writeUserErr maps user creation and password errors to HTTP statuses.
+// Role errors are mapped by roleErrStatus.
 func writeUserErr(w http.ResponseWriter, err error) {
+	if code, msg, ok := roleErrStatus(err); ok {
+		writeErr(w, code, msg)
+		return
+	}
 	switch {
 	case errors.Is(err, errUsersUnavailable):
 		writeErr(w, http.StatusServiceUnavailable, "users disabled")
@@ -309,7 +349,12 @@ func writeUserErr(w http.ResponseWriter, err error) {
 }
 
 // writeUserUpdateErr maps update and delete errors to HTTP statuses.
+// Role errors are mapped by roleErrStatus.
 func writeUserUpdateErr(w http.ResponseWriter, err error) {
+	if code, msg, ok := roleErrStatus(err); ok {
+		writeErr(w, code, msg)
+		return
+	}
 	switch {
 	case errors.Is(err, security.ErrUserNotFound):
 		writeErr(w, http.StatusNotFound, "not found")

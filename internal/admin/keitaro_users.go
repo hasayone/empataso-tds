@@ -47,6 +47,7 @@ func (s *Server) importUsers(users []ktimport.CatUser) (int, []ktimport.Loss, er
 //
 // cu is the mapped Keitaro user. It returns saved when the row counts toward the import
 // total, changed when users.json must be written, and loss when the row is skipped.
+// A user that has a role is left as it is, like a user with manual access.
 func (s *Server) importUser(cu ktimport.CatUser) (saved, changed bool, loss *ktimport.Loss) {
 	ref := "user " + cu.ID
 	if strings.EqualFold(cu.Login, s.cfg.AdminUser) {
@@ -73,6 +74,9 @@ func (s *Server) importUser(cu ktimport.CatUser) (saved, changed bool, loss *kti
 		}
 	}
 	if existing, ok := s.users.ByKeitaroID(kid); ok {
+		if existing.RoleID != "" {
+			return true, false, loss
+		}
 		switch existing.AccessSource {
 		case "manual":
 			return true, false, loss

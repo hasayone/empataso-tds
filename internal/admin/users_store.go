@@ -21,6 +21,7 @@ type userDraft struct {
 	Enabled  bool
 	Prefs    security.Prefs
 	Access   security.Access
+	RoleID   string
 }
 
 // usersEnabled reports whether users.json storage is configured.
@@ -59,6 +60,9 @@ func (s *Server) userByID(id string) (security.User, bool) {
 //
 // It returns the public record. users must be enabled; the login must not
 // match the environment administrator; apikey-prefixed logins are rejected.
+// A non-empty RoleID must name an existing role and the type must be USER; the
+// draft then carries no own access (errRoleOwnAccess otherwise), and the record
+// stores an empty one.
 func (s *Server) createUser(d userDraft) (security.User, error) {
 	if !s.usersEnabled() {
 		return security.User{}, errUsersUnavailable
@@ -69,11 +73,17 @@ func (s *Server) createUser(d userDraft) (security.User, error) {
 	if d.Password != "" && len(d.Password) < 6 {
 		return security.User{}, errPasswordShort
 	}
+	if d.RoleID != "" && !accessBlank(d.Access) {
+		return security.User{}, errRoleOwnAccess
+	}
 	acc, err := normalizeAccess(d.Access)
 	if err != nil {
 		return security.User{}, err
 	}
 	d.Access = acc
+	if d.RoleID != "" {
+		d.Access = emptyAccess()
+	}
 	hash := ""
 	if d.Password != "" {
 		h, err := security.HashPassword(d.Password)
@@ -93,9 +103,15 @@ func (s *Server) createUser(d userDraft) (security.User, error) {
 		Prefs:        d.Prefs,
 		Access:       d.Access,
 		AccessSource: "manual",
+		RoleID:       d.RoleID,
 	}
 	s.userMu.Lock()
 	defer s.userMu.Unlock()
+	if d.RoleID != "" {
+		if err := s.checkRoleAssign(d.RoleID, d.Type); err != nil {
+			return security.User{}, err
+		}
+	}
 	if err := s.users.Add(u); err != nil {
 		return security.User{}, err
 	}
