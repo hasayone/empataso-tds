@@ -140,6 +140,21 @@ func normSQL(s string) string {
 	return strings.Join(strings.Fields(s), " ")
 }
 
+// migrationSQLBody returns executable SQL from a migration file text: trimmed
+// non-empty lines that are not line comments (--). raw is the full file
+// contents. The result is one space-separated string for normSQL comparison.
+func migrationSQLBody(raw string) string {
+	var lines []string
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "--") {
+			continue
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, " ")
+}
+
 func jsonTagSet(v any) map[string]bool {
 	t := reflect.TypeOf(v)
 	out := map[string]bool{}
