@@ -345,6 +345,8 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	// uniqueness, country source — belongs to the group the visitor entered
 	// through; what follows, including the log line, belongs to the group
 	// that finally served them.
+	originID, originName := d.resolveOrigin(r, grp, apiMode, apiReq)
+
 	var (
 		streamName, redirect, outRaw, ctype string
 		selStream                           *config.Stream
@@ -465,12 +467,16 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 
 	// 5) Render the output: macros, api_mac, CURL fetch, or a normal redirect.
 	q := v.Query
+	originTok := ""
+	if originID != "" && d.cids != nil {
+		originTok = d.cids.signOrigin(originID)
+	}
 	md := render.MacroDeps{
 		Key: v.Key, Path: r.Host, IP: ip.String(), Country: country, City: g.City,
 		Region: g.Region, Lang: v.Lang, Device: device, Operator: operator,
 		Domain: v.Domain, UserAgent: ua, CID: cid, Pars: pars, SubIDs: subs,
 		ASN: asnText(g.ASN), Org: dashEmpty(g.Org), Timezone: g.Timezone, TZOffset: tzOffset,
-		DataDir: d.dataDir, Offer: offerStepURL(gid, cid, r.URL.RawQuery),
+		DataDir: d.dataDir, Offer: offerStepURL(gid, cid, r.URL.RawQuery), Origin: originTok,
 		Query: func(n string) (string, bool) {
 			v, ok := q[n]
 			if !ok || len(v) == 0 {
@@ -540,6 +546,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	if d.logs != nil {
 		d.logs.Push(logbuf.Event{
 			Ts: time.Now(), GroupID: grp.ID, GroupName: grp.Name,
+			OriginID: originID, OriginName: originName,
 			Stream: streamName, Out: out, Redirect: logRedirect, Device: device,
 			Operator: operator, Country: country, City: g.City, Region: g.Region,
 			Lang: v.Lang, Uniq: b2u8(loggedUnique), Bot: bot, IP: ip.String(),
@@ -659,4 +666,33 @@ func dashEmpty(s string) string {
 		return ""
 	}
 	return s
+}
+
+// resolveOrigin picks the first-entry campaign for this visit.
+//
+// r carries ?origin=. grp is the group the visitor entered. apiMode marks an
+// api request; apiReq holds its campaign id. A verified origin token naming an
+// active group wins; otherwise the entry group is used. In api mode the
+// campaign id from the request is the origin. It returns the id and display name.
+func (d *engineDeps) resolveOrigin(r *http.Request, grp *config.Group, apiMode bool, apiReq *apiRequest) (id, name string) {
+	if apiMode && apiReq != nil {
+		id = strings.TrimSpace(apiReq.ID)
+		if id != "" && d.groups != nil {
+			if g, ok := d.groups.Get(id); ok {
+				name = g.Name
+			}
+		}
+		return id, name
+	}
+	if tok := strings.TrimSpace(r.URL.Query().Get("origin")); tok != "" && d.cids != nil {
+		if gid, ok := d.cids.verifyOrigin(tok); ok && d.groups != nil {
+			if g, ok := d.groups.Get(gid); ok && g.Status {
+				return g.ID, g.Name
+			}
+		}
+	}
+	if grp != nil {
+		return grp.ID, grp.Name
+	}
+	return "", ""
 }

@@ -1,10 +1,20 @@
-FROM golang:1.25-bookworm AS build
+FROM golang:1.25-bookworm AS deps
 
 WORKDIR /src
 
 COPY go.mod go.sum ./
 COPY internal/bridge/go.mod internal/bridge/go.mod
 RUN go mod download
+
+FROM deps AS test
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY . .
+
+FROM deps AS build
 
 COPY . .
 

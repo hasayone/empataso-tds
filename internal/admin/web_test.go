@@ -8,6 +8,11 @@ import (
 	"testing"
 )
 
+// spaSource returns the embedded SPA with LF line endings for substring checks.
+func spaSource() string {
+	return strings.ReplaceAll(string(indexHTML), "\r\n", "\n")
+}
+
 // TestServeUIServesSPA — the embedded SPA is served at the root without auth,
 // with the correct Content-Type and a non-empty body.
 func TestServeUIServesSPA(t *testing.T) {
@@ -41,7 +46,7 @@ func TestSPAServedViaHandler(t *testing.T) {
 // one top bar with the navigation (and no sidebar), the flow canvas with its
 // wires, the drawer editors, the save bar, and both themes.
 func TestSPAStructure(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 
 	// Shell: a single top bar; the navigation is built from the NAV table.
 	must(t, html, `class="top"`, "top bar")
@@ -129,7 +134,7 @@ func TestSPAStructure(t *testing.T) {
 // TestSPAKeyFunctions — critical UI functions are present (protection against
 // accidental removal when refactoring the markup/script).
 func TestSPAKeyFunctions(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	for _, fn := range []string{
 		"function app(", "function render(", "function route(",
 		"function flows(", "function flowPage(", "function renderFlow(",
@@ -154,7 +159,7 @@ func TestSPAKeyFunctions(t *testing.T) {
 
 // TestFlowBandsByPosition checks stripe bands follow visible metric columns in display order.
 func TestFlowBandsByPosition(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	mustNot(t, html, `FLOW_BAND`, "fixed band id set")
 	must(t, html, `const FLOW_METRIC=new Set(`, "metric column set")
 	i := strings.Index(html, `const FLOW_METRIC=new Set(`)
@@ -180,7 +185,7 @@ func TestFlowBandsByPosition(t *testing.T) {
 
 // TestDashboardUIFiltersBrand — dashboard quiet refresh, UI prefs, brand, integrations, and chart tokens.
 func TestDashboardUIFiltersBrand(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	form := spaFunctionLine(html, "formModal")
 	must(t, form, `if(res!=='stay') render()`, "formModal skips render when onSave returns stay")
 	must(t, html, "function dashQS(", "dashQS helper")
@@ -221,7 +226,7 @@ func TestDashboardUIFiltersBrand(t *testing.T) {
 
 // TestDashboardRecentClicks — the filter button is gone and the recent-clicks card reads the click log only with access.
 func TestDashboardRecentClicks(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	mustNot(t, html, `id="dash-filters"`, "dashboard filter button")
 	mustNot(t, html, `id="dash-chips"`, "dashboard filter chips")
 	dash := spaBetween(html, "async function dashboard(", "async function loadBreakdown(")
@@ -245,7 +250,7 @@ func TestDashboardRecentClicks(t *testing.T) {
 
 // TestDashboardPerfControls — performance table defaults, pure helpers, export scope, KPI tiles, and fold nav.
 func TestDashboardPerfControls(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `PSORT={k:'conv'`, "default perf sort by conversions")
 	must(t, html, `let PERF_TOP=true, PERF_FOLD=true`, "perf fold and top flags")
 	must(t, html, `const PERF_TOP_N=10`, "perf top limit")
@@ -292,7 +297,7 @@ func TestDashboardPerfControls(t *testing.T) {
 
 // TestDashboardKPIMoney — money tiles use moneyText, tiles are ordered clicks→money→rates, and the grid is one row on desktop.
 func TestDashboardKPIMoney(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
 	mustNot(t, pure, "function kpiMoney(", "the tile helper is moneyText itself")
 	dash := spaBetween(html, "async function dashboard(", "async function loadBreakdown(")
@@ -320,7 +325,7 @@ func TestDashboardKPIMoney(t *testing.T) {
 
 // TestDashboardChartAxes — chart axes come from shared scales, and percent series are stroked.
 func TestDashboardChartAxes(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	draw := spaFunctionLine(html, "drawChart")
 	mustNot(t, draw, "maxN*k/4", "fixed quarter of the count max")
 	mustNot(t, draw, "k/4*h", "fixed quarter of the plot height")
@@ -368,7 +373,7 @@ func TestDashboardChartAxes(t *testing.T) {
 // are drawers that overlay the page and scroll inside themselves; if
 // scrollIntoView reappears, a layout that needs chasing has crept back in.
 func TestEditorsDoNotMoveThePage(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	mustNot(t, html, ".scrollIntoView(", "page-scrolling hack")
 	must(t, html, `.drawer{position:fixed`, "the drawer overlays the page")
 	must(t, html, `.db{flex:1;overflow-y:auto`, "the drawer body scrolls inside itself")
@@ -377,14 +382,14 @@ func TestEditorsDoNotMoveThePage(t *testing.T) {
 
 // TestNavDropdownNoBackground — the reports dropdown button has no hover/active background while the more button keeps it.
 func TestNavDropdownNoBackground(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, ".navdrop-btn:not(.navmore-btn):hover,.navdrop.active .navdrop-btn:not(.navmore-btn){background:transparent", "reports dropdown without background")
 	must(t, html, ".navdrop.active .navdrop-btn{color:var(--fg);background:var(--surface-2)}", "more button keeps the active background")
 }
 
 // TestRefreshSpin — a refresh click turns the icon a full half-second and holds it until the reload returns.
 func TestRefreshSpin(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, ".spin svg{animation:spin .5s linear infinite", "refresh icon turns in half a second")
 	must(t, html, "const SPIN_TURN=500", "spin is held for one full turn")
 	dash := spaBetween(html, "async function dashboard(", "async function loadBreakdown(")
@@ -430,7 +435,7 @@ func spaFunctionLine(html, name string) string {
 
 // TestSettingsMasonry — settings cards keep content height in two columns.
 func TestSettingsMasonry(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	src := spaFunctionLine(html, "settings")
 	if src == "" {
 		t.Fatal("settings not found in SPA")
@@ -445,7 +450,7 @@ func TestSettingsMasonry(t *testing.T) {
 
 // TestCampaignMoneyAndROIDisplay — money and ROI cells show zeros, not em dashes.
 func TestCampaignMoneyAndROIDisplay(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	mt := spaFunctionLine(html, "moneyText")
 	cm := spaFunctionLine(html, "campaignMoney")
 	cr := spaFunctionLine(html, "metricROI")
@@ -480,7 +485,7 @@ func TestCampaignMoneyAndROIDisplay(t *testing.T) {
 
 // TestFlowsLockedColumnsAndActions — number and name stay on and pinned, the actions cell follows the name.
 func TestFlowsLockedColumnsAndActions(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, "const FLOW_LOCKED=new Set(['num','name'])", "number and name stay locked")
 	cols := spaFunctionLine(html, "loadCols")
 	open := spaFunctionLine(html, "openCols")
@@ -497,7 +502,7 @@ func TestFlowsLockedColumnsAndActions(t *testing.T) {
 
 // TestFlowsFolderField — the campaign group is stored in folder, shown in the editor and the table, and is not a metric column.
 func TestFlowsFolderField(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	open := spaFunctionLine(html, "openFlowSettings")
 	collect := spaFunctionLine(html, "collectFlow")
 	cell := spaFunctionLine(html, "flowMetricCell")
@@ -506,8 +511,8 @@ func TestFlowsFolderField(t *testing.T) {
 	if open == "" || collect == "" || cell == "" || cat == "" || bands == "" {
 		t.Fatal("openFlowSettings, collectFlow, flowMetricCell, colCatalog or flowBands not found in SPA")
 	}
-	must(t, open, `id="g_folder"`, "editor folder input")
-	must(t, open, `id="g_folders"`, "editor folder datalist")
+	must(t, open, `groupFieldHTML('g_folder'`, "editor folder combobox field")
+	must(t, open, `bindPickCombo(gf`, "editor folder combobox bind")
 	must(t, collect, "delete g.folder", "empty folder deletes the key")
 	must(t, collect, "g.folder=", "non-empty folder is stored")
 	must(t, cell, "id==='folder'", "folder column cell")
@@ -530,7 +535,7 @@ func TestFlowsFolderField(t *testing.T) {
 
 // TestFlowsEPCDefault — flows columns default to EPC, the summary chip is revenue per click, and the uEPC cell formula stays rev/uniq.
 func TestFlowsEPCDefault(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	cat := spaFunctionLine(html, "colCatalog")
 	sum := spaFunctionLine(html, "paintFlowSum")
 	cell := spaFunctionLine(html, "flowMetricCell")
@@ -555,7 +560,7 @@ func TestFlowsEPCDefault(t *testing.T) {
 
 // TestSpendShareByOverlap — tiles and tables take the share of a spend record that overlaps the period.
 func TestSpendShareByOverlap(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, "function spendShare(", "period overlap share of a spend record")
 	mustNot(t, html, "function spendOpen(", "all-or-nothing spend window")
 	share := spaFunctionLine(html, "spendShare")
@@ -574,7 +579,7 @@ func TestSpendShareByOverlap(t *testing.T) {
 
 // TestClickCostInSpend — click prices join manual spend, and the new labels exist in every language.
 func TestClickCostInSpend(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, "function clickCostBy(", "click prices fold into spend")
 	period := spaFunctionLine(html, "periodSpendBy")
 	camp := spaFunctionLine(html, "campaignCostOnly")
@@ -598,7 +603,7 @@ func TestClickCostInSpend(t *testing.T) {
 
 // TestCatalogNames — breakdowns, the report and conversions show catalog names, and an open campaign refetches its rows.
 func TestCatalogNames(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	bd := spaFunctionLine(html, "loadBreakdown")
 	rep := spaFunctionLine(html, "paintReport")
 	conv := spaFunctionLine(html, "conversions")
@@ -620,12 +625,18 @@ func TestCatalogNames(t *testing.T) {
 	must(t, conv, "f:'campaign_id'", "conversion filter uses campaign id")
 	mustNot(t, conv, "f:'campaign',", "conversion filter is not the campaign name")
 	must(t, conv, "nameOf(GROUPS, PB.campaignId)", "conversion title is the campaign name")
-	must(t, pb, "r.count", "conversion counter uses the filtered count")
+	must(t, pb, "dockTotal(r", "conversion counter uses the filtered count")
 	must(t, pb, "typeof r.total==='number'", "missing profit total is not drawn as zero")
-	must(t, pb, "paintPbPage(", "conversion page paints the fixed pager")
+	pbPage := spaFunctionLine(html, "paintPbPage")
+	must(t, pbPage, "paintServerPager(", "conversion page uses shared pager")
+	must(t, pb, "paintPbDock(", "conversion dock totals")
+	must(t, conv, "dockHTML('pb','pb-export')", "conversion dock markup")
+	dock := spaFunctionLine(html, "dockHTML")
+	must(t, dock, `id="${prefix}sum"`, "dock summary row id")
+	must(t, dock, `id="${prefix}page"`, "dock pager id")
 	mustNot(t, pb, "pb-more", "conversion log has no show-more button")
 	must(t, conv, "has-pager", "conversion log pins the pager")
-	must(t, conv, `id="pbpage"`, "conversion pager dock")
+	must(t, conv, "dockHTML('pb','pb-export')", "conversion pager in dock helper")
 	must(t, one, "campaign_id", "open campaign refetches its performance")
 	must(t, page, "loadPerfFor(", "flow page loads that campaign before drawing")
 	must(t, html, "#/flows/", "campaign address stays a slug path")
@@ -633,7 +644,7 @@ func TestCatalogNames(t *testing.T) {
 
 // TestNavExportAndCampaignTable — icon nav, HTML export, period label, campaign table.
 func TestNavExportAndCampaignTable(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, "nav-icons", "icon-first navigation")
 	fit := spaFunctionLine(html, "fitNav")
 	iIcons := strings.Index(fit, "nav-icons")
@@ -682,12 +693,12 @@ func flowsTitleNearHTML(html string) bool {
 
 // TestFlowsHeaderExportMenu checks that Create follows the column gear and the search field, filters sit in the bar, Export sits in the dock after the pager, and the menu can open above its anchor.
 func TestFlowsHeaderExportMenu(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	flows := spaFunctionLine(html, "flows")
 	if flows == "" {
 		t.Fatal("flows missing")
 	}
-	must(t, flows, `id="flowexport"`, "export menu button")
+	must(t, flows, "dockHTML('flow','flowexport')", "flows dock with export")
 	must(t, flows, "exportFlows(false)", "CSV export action")
 	must(t, flows, "exportFlows(true)", "HTML export action")
 	must(t, flows, "tr('Create')", "create button label")
@@ -709,10 +720,11 @@ func TestFlowsHeaderExportMenu(t *testing.T) {
     <div class="toolbar" id="fbar">`)
 	mustNot(t, ph, `id="newflow"`, "create not in page header")
 	mustNot(t, ph, `id="fq"`, "search not in page header")
-	page := strings.Index(flows, `id="flowpage"`)
-	exp := strings.Index(flows, `id="flowexport"`)
+	dockFn := spaFunctionLine(html, "dockHTML")
+	page := strings.Index(dockFn, `id="${prefix}page"`)
+	exp := strings.Index(dockFn, `id="${exp}"`)
 	if page < 0 || exp < 0 || exp <= page {
-		t.Errorf("export must follow the pager: page=%d export=%d", page, exp)
+		t.Errorf("export must follow the pager in dockHTML: page=%d export=%d", page, exp)
 	}
 	cards := spaFunctionLine(html, "paintFlowCards")
 	must(t, cards, `id="bulk-on"`, "bulk enable")
@@ -733,7 +745,7 @@ func TestFlowsHeaderExportMenu(t *testing.T) {
 
 // TestSpaPureAndConvMarkers checks sort helpers, conversion labels, dates, and country data markers.
 func TestSpaPureAndConvMarkers(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
 	must(t, pure, "function nameSortKey(", "nameSortKey in pure block")
 	must(t, pure, "function capFirst(", "capFirst in pure block")
@@ -758,7 +770,7 @@ func TestSpaPureAndConvMarkers(t *testing.T) {
 
 // TestFlowsFilterBar checks that campaign rows filter by source and folder and that the filter helpers exist.
 func TestFlowsFilterBar(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	rows := spaFunctionLine(html, "campaignRows")
 	must(t, rows, "FLOW_SOURCE", "source predicate")
 	must(t, rows, "FLOW_FOLDER", "folder predicate")
@@ -774,7 +786,7 @@ func TestFlowsFilterBar(t *testing.T) {
 // settings, the page calls the import endpoints, and it polls the background job.
 // Losses are grouped, and the redirect type list includes show_html_404.
 func TestKeitaroPage(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	menuAt := strings.Index(html, `q('#userbtn',root).onclick`)
 	if menuAt < 0 {
 		t.Fatal("user menu missing")
@@ -859,7 +871,7 @@ func TestKeitaroPage(t *testing.T) {
 
 // TestStreamThen checks the Then mode tabs, share rows and shared S2S templates.
 func TestStreamThen(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `.share-row`, "share row grid")
 	must(t, html, `max="100"`, "share percent ceiling")
 	must(t, html, `class="icon ghost" data-delshare`, "remove button on a share row")
@@ -875,7 +887,7 @@ func TestStreamThen(t *testing.T) {
 
 // TestSPAFlowCompact checks compact flow canvas toggle, i18n, breakdown label tooltips.
 func TestSPAFlowCompact(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, "FLOW_COMPACT_KEY", "flow compact localStorage key")
 	must(t, html, "canvas-toggle", "compact canvas toggle button")
 	must(t, html, "'flow.compact'", "flow.compact i18n")
@@ -886,7 +898,7 @@ func TestSPAFlowCompact(t *testing.T) {
 // TestSPAUsersPage checks the users tab, access helpers, Keitaro users import,
 // and that menu.users appears in all three interface dictionaries.
 func TestSPAUsersPage(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `data-ptab="users"`, "profile users tab")
 	must(t, html, `id="kt-users"`, "keitaro users checkbox")
 	must(t, html, "/api/users", "users API")
@@ -934,7 +946,7 @@ func TestSPAUsersPage(t *testing.T) {
 // TestStreamPageEditor — a stream output of @page:<name>.html opens that file
 // in a modal. The field on the stream stays the reference.
 func TestStreamPageEditor(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	for _, needle := range []string{"/api/pages/", "tr('page.open')", "@page:"} {
 		must(t, html, needle, "stream page editor")
 	}
@@ -942,7 +954,7 @@ func TestStreamPageEditor(t *testing.T) {
 
 // TestCodeEditorAndFilepick — Ace loads dynamically, landing editor sits above the scrim, file inputs use filepick.
 func TestCodeEditorAndFilepick(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, "/assets/ace/ace.js", "ace asset path")
 	must(t, html, "function codeEditor", "codeEditor helper")
 	must(t, html, `class="filepick"`, "filepick wrapper")
@@ -955,7 +967,7 @@ func TestCodeEditorAndFilepick(t *testing.T) {
 // TestLandingTextAndDeleteConfirm checks LAND_TEXT matches server landingTextExt,
 // landingText has no .htaccess shortcut, and delete asks with name and id.
 func TestLandingTextAndDeleteConfirm(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, "const LAND_TEXT=new Set(['html','htm','php','css','js','txt','json','xml','svg'])", "LAND_TEXT matches server landingTextExt")
 	lt := spaBetween(html, "function landingText(path)", "\n// landingFileURL")
 	mustNot(t, lt, ".htaccess", "landingText must not treat .htaccess as text")
@@ -968,7 +980,7 @@ func TestLandingTextAndDeleteConfirm(t *testing.T) {
 // the timezone letter buffer resets after 3 seconds, and the theme-pick
 // handler sets data-theme without calling toggleTheme.
 func TestSPASettingsPickers(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	mustNot(t, html, `id="cfind"`, "country search field")
 	mustNot(t, html, `id="tzfind"`, "timezone search field")
 	mustNot(t, html, `id="sp-find"`, "spend timezone search")
@@ -1024,7 +1036,7 @@ func TestSPASettingsPickers(t *testing.T) {
 
 // TestNavIconTooltips checks nav tooltips only while icon mode hides labels.
 func TestNavIconTooltips(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	fit := spaFunctionLine(html, "fitNav")
 	titles := spaFunctionLine(html, "navTitles")
 	paint := spaFunctionLine(html, "paintNav")
@@ -1047,7 +1059,7 @@ func TestNavIconTooltips(t *testing.T) {
 // Campaign ids stay hits, uniq and conv. The report catalog has no cost column.
 // The URL builder stops at sub_id_15 and does not offer status.
 func TestOfferFormAndColumns(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	flows := catalogBranch(html, "flows")
 	must(t, flows, "['hits'", "campaign column id hits")
 	must(t, flows, "['uniq'", "campaign column id uniq")
@@ -1151,7 +1163,7 @@ func pageFnBody(html, fn string) string {
 
 // TestCatalogSearchAndGroups checks shared catalog filters, group window, and save bodies.
 func TestCatalogSearchAndGroups(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	for _, kind := range []string{"offers", "landings", "networks", "sources", "domains"} {
 		fn := spaFunctionLine(html, kind)
 		if fn == "" {
@@ -1195,7 +1207,7 @@ func TestCatalogSearchAndGroups(t *testing.T) {
 
 // TestHeaderPattern — shared page header: catalog toolbar layout and refresh/export controls.
 func TestHeaderPattern(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	tools := spaBetween(html, "function colTools(", "\n}")
 	mustNot(t, tools, "data-col-refresh", "colTools without refresh button")
 	must(t, tools, "data-col-gear", "colTools keeps column gear")
@@ -1222,7 +1234,9 @@ func TestHeaderPattern(t *testing.T) {
 	if n := strings.Count(logs, "data-col-refresh="); n != 1 {
 		t.Errorf("logs must have exactly one data-col-refresh, got %d", n)
 	}
-	must(t, logs, `id="log-export"`, "logs export menu")
+	must(t, logs, `q('#log-export')`, "logs export menu")
+	must(t, logs, "dockHTML('log','log-export')", "logs export in dock")
+	must(t, logs, "paintLogDock(", "logs dock pager")
 	mustNot(t, logs, `id="export"`, "logs without standalone csv button")
 	mustNot(t, logs, `id="exporthtml"`, "logs without standalone html button")
 	rep := spaBetween(html, "function paintReport(", "async function integrations(")
@@ -1244,7 +1258,7 @@ func TestHeaderPattern(t *testing.T) {
 
 // TestSPALogFilters checks the journal filter builder, column ids and the conversion page size.
 func TestSPALogFilters(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, "function filterBuilder(", "filter builder")
 	must(t, html, "/api/log-fields", "log field catalog")
 	must(t, html, "/api/log-values", "log field values")
@@ -1266,15 +1280,115 @@ func TestSPALogFilters(t *testing.T) {
 	must(t, pb, "offset", "conversion query offset")
 	must(t, html, "'fld.sale_period'", "sale period label")
 	must(t, html, "'flt.apply'", "apply label")
+	must(t, html, "function fltFieldSuggest(", "filter field classifier")
+	must(t, html, "function bindFltCombo(", "filter combobox")
+	must(t, html, "function bindPickCombo(", "shared combobox")
+	must(t, html, "function fetchExport(", "export fetch helper")
+	must(t, html, `role="combobox"`, "filter combobox a11y")
+	mustNot(t, html, "<datalist", "no native datalist in SPA")
+	must(t, html, "'flt.ungrouped'", "ungrouped filter i18n")
+	must(t, html, "'export.truncated'", "export truncation i18n")
+	must(t, spaConstLangBody(html, "I18N", "ru"), "'ROI':'ROI'", "ROI in I18N ru")
+	must(t, spaConstLangBody(html, "I18N", "uk"), "'ROI':'ROI'", "ROI in I18N uk")
 	rep := catalogBranch(html, "report")
 	must(t, rep, "['group','conv.campaign',1]", "report catalog stays the last return")
 	must(t, html, `<select id="dgroup"`, "domain group select")
 }
 
+var jsSetRe = regexp.MustCompile(`'((?:[^'\\]|\\.)*)'`)
+
+// jsSetLiterals reads string keys from a `const Name=new Set([...]);` block in the SPA.
+func jsSetLiterals(html, constName string) map[string]bool {
+	re := regexp.MustCompile(`const ` + constName + `=new Set\(\[(.*?)\]\);`)
+	m := re.FindStringSubmatch(html)
+	out := map[string]bool{}
+	if len(m) < 2 {
+		return out
+	}
+	for _, k := range jsSetRe.FindAllStringSubmatch(m[1], -1) {
+		out[k[1]] = true
+	}
+	return out
+}
+
+// fltGroupsFields lists every journal field name declared in FLT_GROUPS.
+func fltGroupsFields(html string) []string {
+	i := strings.Index(html, "const FLT_GROUPS=")
+	if i < 0 {
+		return nil
+	}
+	rest := html[i+len("const FLT_GROUPS="):]
+	if !strings.HasPrefix(rest, "[") {
+		return nil
+	}
+	depth, j := 0, 0
+	for j < len(rest) {
+		switch rest[j] {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				var out []string
+				for _, k := range jsSetRe.FindAllStringSubmatch(rest[:j+1], -1) {
+					out = append(out, k[1])
+				}
+				return out
+			}
+		}
+		j++
+	}
+	return nil
+}
+
+// TestFLTGroupsFieldClassification ensures every filter field in FLT_GROUPS is strict, suggest, or free by design.
+func TestFLTGroupsFieldClassification(t *testing.T) {
+	html := spaSource()
+	fields := fltGroupsFields(html)
+	if len(fields) < 20 {
+		t.Fatalf("FLT_GROUPS fields: got %d", len(fields))
+	}
+	catalog := jsSetLiterals(html, "FLT_CATALOG")
+	suggest := jsSetLiterals(html, "FLT_SUGGEST")
+	strict := map[string]bool{}
+	for k := range catalog {
+		strict[k] = true
+	}
+	for _, k := range []string{"country", "status", "original_status", "prev_status"} {
+		strict[k] = true
+	}
+	for _, f := range fields {
+		if strict[f] && suggest[f] {
+			t.Errorf("field %q is both strict and suggest", f)
+		}
+	}
+	for _, f := range []string{"site", "ad_campaign_id", "creative_id", "external_id", "out", "keyword", "referer", "cid"} {
+		if strict[f] || suggest[f] {
+			t.Errorf("field %q must be free text", f)
+		}
+	}
+	for _, f := range []string{"campaign", "offer_id", "country", "status"} {
+		if !strict[f] {
+			t.Errorf("field %q must be strict", f)
+		}
+	}
+	for _, f := range []string{"stream", "device", "city", "xrw"} {
+		if f == "xrw" {
+			if strict[f] {
+				t.Errorf("field %q must not be strict", f)
+			}
+			continue
+		}
+		if !suggest[f] {
+			t.Errorf("field %q must be suggest", f)
+		}
+	}
+}
+
 // TestSPAProfileAndReportFilters checks the profile page, API keys and report filters.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestSPAProfileAndReportFilters(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, "function profile(", "profile page")
 	must(t, html, "/api/api-keys", "api key routes")
 	must(t, html, "#/settings/docs", "docs hash")
@@ -1316,7 +1430,7 @@ func TestSPAProfileAndReportFilters(t *testing.T) {
 // TestAppearanceAccents checks accent tokens, the swatch picker and row hover.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestAppearanceAccents(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `:root[data-accent="blue"]`, "blue accent tokens")
 	must(t, html, `:root[data-accent="green"]`, "green accent tokens")
 	must(t, html, `:root[data-accent="graphite"]`, "graphite accent tokens")
@@ -1331,7 +1445,7 @@ func TestAppearanceAccents(t *testing.T) {
 // TestNavMoreMenu checks the overflow menu for hidden nav items.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestNavMoreMenu(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `function navHidden(`, "navHidden")
 	must(t, html, `navmore-btn`, "more button")
 	must(t, html, `'nav.more':'Прочее'`, "ru nav.more")
@@ -1347,7 +1461,7 @@ func TestNavMoreMenu(t *testing.T) {
 // TestTimezoneKyiv checks the Kiev alias and the canonical timezone name.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestTimezoneKyiv(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `'Europe/Kiev':'Europe/Kyiv'`, "Kiev alias")
 	must(t, html, `function tzCanon(`, "tzCanon")
 }
@@ -1355,7 +1469,7 @@ func TestTimezoneKyiv(t *testing.T) {
 // TestFilePickAndCrop checks logo crop, file drop and the header logo box.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestFilePickAndCrop(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `function cropImage(`, "cropImage")
 	must(t, html, `function bindFilePick(`, "bindFilePick")
 	must(t, html, `upload:'<path`, "upload icon")
@@ -1366,7 +1480,7 @@ func TestFilePickAndCrop(t *testing.T) {
 // TestButtonSizes checks icon and tag button sizes.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestButtonSizes(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `button.icon.sm{height:26px;width:26px`, "small icon button")
 	must(t, html, `button.tagbtn{`, "tag button")
 	mustNot(t, html, `button.sm,.btn.sm{`, "shared small text button rule")
@@ -1378,7 +1492,7 @@ func TestButtonSizes(t *testing.T) {
 // TestDomainsCatalogAndPager checks domain columns, the pager and the row menu.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestDomainsCatalogAndPager(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `if(kind==='domains') return [['id','flows.col.num',1],['host','dom.host',1]`, "domains column set")
 	must(t, html, `const DOM_LOCKED=new Set(['id','host'])`, "locked domain columns")
 	must(t, html, `domains:'kuztds-dom-cols'`, "domains column storage key")
@@ -1394,7 +1508,7 @@ func TestDomainsCatalogAndPager(t *testing.T) {
 	if src == "" {
 		src = html
 	}
-	must(t, src, `c.id==='host'?'<th class="acts"></th>':''`, "actions header after host")
+	must(t, src, `<th class="acts"></th>`, "actions header on domains table")
 	must(t, src, `data-more="${esc(d.id)}"`, "domain row more menu")
 	mustNot(t, html, `data-dcheck=`, "inline domain check")
 	mustNot(t, html, `data-ddel=`, "inline domain delete")
@@ -1421,7 +1535,7 @@ func TestDomainsCatalogAndPager(t *testing.T) {
 // TestApiKeysMenu checks rotate, edit, remove and the key table.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestApiKeysMenu(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `/rotate'`, "rotate path")
 	must(t, html, `'?hard=1'`, "hard delete query")
 	must(t, html, `function rotateKey(`, "rotateKey")
@@ -1442,7 +1556,7 @@ func TestApiKeysMenu(t *testing.T) {
 // TestProfileTabsSections checks profile tabs, settings sections and the tab title.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestProfileTabsSections(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `class="vseg" role="tablist"`, "profile tab list")
 	must(t, html, `role="tab" data-ptab="profile"`, "profile tab")
 	must(t, html, `<section class="setsec">`, "settings section")
@@ -1456,7 +1570,7 @@ func TestProfileTabsSections(t *testing.T) {
 
 // TestBrowserTabTitle checks tab title helpers and wiring in the SPA script.
 func TestBrowserTabTitle(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	script := spaBetween(html, "<script>\n", "</script>")
 	mustNot(t, script, `'TDS'`, "TDS string literal in script")
 	mustNot(t, script, `"TDS"`, "TDS string literal in script")
@@ -1486,7 +1600,7 @@ func TestBrowserTabTitle(t *testing.T) {
 // TestStreamProxyAndOrConditions checks the stream editor offers proxy and IP
 // version, an any-of switch, and collects every tri flag from COND.
 func TestStreamProxyAndOrConditions(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `k:'proxy'`, "proxy condition")
 	must(t, html, `k:'ip_version'`, "ip version condition")
 	must(t, html, `id="s_filter_or"`, "and/or switch")
@@ -1498,6 +1612,121 @@ func TestStreamProxyAndOrConditions(t *testing.T) {
 	mustNot(t, body, `['unique','yabrowser','has_referer','bot']`, "tri keys are not a fixed list")
 	must(t, html, `'ch_proxy'`, "proxy bot check")
 	must(t, html, `'ch_non_mobile'`, "non-mobile bot check")
+}
+
+var trStaticKeyRe = regexp.MustCompile(`\btr(?:Fill)?\('((?:[^'\\]|\\.)+)'\)`)
+
+// trKeyExceptions lists tr keys that stay untranslated in every language on purpose.
+var trKeyExceptions = map[string]struct{}{
+	"CR": {}, "CSV": {}, "HTML": {}, "ROI": {}, "TID": {}, "ASN": {}, "IP": {}, "OS": {}, "URL": {},
+	"API": {}, "CDN": {}, "DNS": {}, "NS": {}, "Sub ID": {}, "User-Agent": {}, "JavaScript": {},
+	"Telegram": {}, "Iframe": {}, "HTTP redirect": {}, "Meta refresh": {}, "JS redirect": {},
+	"Click ID": {}, "Api-Key": {}, "HTTP": {}, "JSON": {}, "gzip": {}, "base64": {}, "RE2": {},
+	"IPv4": {}, "IPv6": {}, "PTR lookup": {}, "MaxMind": {}, "GeoLite2": {}, "DB-IP Lite": {},
+	"VirusTotal": {}, "Namecheap": {}, "Keitaro": {}, "ClickHouse": {}, "Postman": {},
+	"Google IPs": {}, "Yandex IPs": {}, "Bing IPs": {}, "Baidu IPs": {}, "Mail.ru IPs": {},
+	"Yahoo IPs": {}, "Other bot IPs": {}, "Yandex Browser": {}, "Generic S2S": {},
+	"Ad Campaign ID": {}, "External ID": {}, "Creative ID": {}, "X-Requested-With": {},
+	"Subid": {}, "OK": {}, "404 Not found": {}, "403 Forbidden": {}, "500 Server error": {},
+}
+
+// spaConstLangBody returns the inner source of one language object in a const map.
+func spaConstLangBody(html, constName, lang string) string {
+	prefix := "const " + constName + "={"
+	i := strings.Index(html, prefix)
+	if i < 0 {
+		return ""
+	}
+	rest := html[i+len(prefix):]
+	marker := "\n" + lang + ":{"
+	j := strings.Index(rest, marker)
+	if j < 0 {
+		return ""
+	}
+	sub := rest[j+len(marker)-1:]
+	if len(sub) == 0 || sub[0] != '{' {
+		return ""
+	}
+	depth := 0
+	for k := 0; k < len(sub); k++ {
+		switch sub[k] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return sub[1:k]
+			}
+		}
+	}
+	return ""
+}
+
+// spaDictKeys collects dictionary keys from one language object body.
+func spaDictKeys(body string) map[string]struct{} {
+	if body == "" {
+		return nil
+	}
+	return dictKeys("{" + body + "}")
+}
+
+// trKeyDefined reports whether tr() can resolve a key for lang without falling back to the raw key.
+func trKeyDefined(html, lang, key string) bool {
+	if _, ok := trKeyExceptions[key]; ok {
+		return true
+	}
+	check := func(dict, l string) bool {
+		_, ok := spaDictKeys(spaConstLangBody(html, dict, l))[key]
+		return ok
+	}
+	if check("I18N", lang) {
+		return true
+	}
+	if lang != "en" {
+		if check("PHRASE", lang) || check("PHRASE_EXTRA", lang) {
+			return true
+		}
+		if check("I18N", "en") {
+			return true
+		}
+		return false
+	}
+	if check("I18N", "en") {
+		return true
+	}
+	// English UI keys often live only in PHRASE (ru/uk translate the English key text).
+	return check("PHRASE", "ru") || check("PHRASE", "uk") || check("PHRASE_EXTRA", "ru") || check("PHRASE_EXTRA", "uk")
+}
+
+// spaTrStaticKeys lists literal keys passed to tr() / trFill() in the SPA script.
+func spaTrStaticKeys(html string) []string {
+	seen := map[string]struct{}{}
+	var out []string
+	for _, m := range trStaticKeyRe.FindAllStringSubmatch(html, -1) {
+		k := m[1]
+		if _, ok := seen[k]; ok {
+			continue
+		}
+		seen[k] = struct{}{}
+		out = append(out, k)
+	}
+	return out
+}
+
+// TestTrStaticKeys ensures every literal tr('…') key resolves in en, ru and uk.
+func TestTrStaticKeys(t *testing.T) {
+	html := spaSource()
+	keys := spaTrStaticKeys(html)
+	if len(keys) < 100 {
+		t.Fatalf("too few tr keys: %d", len(keys))
+	}
+	for _, lang := range []string{"en", "ru", "uk"} {
+		for _, key := range keys {
+			if !trKeyDefined(html, lang, key) {
+				t.Errorf("tr(%q) missing for lang %q", key, lang)
+			}
+		}
+	}
 }
 
 // dictBetween returns the SPA source from start up to end.
@@ -1535,7 +1764,7 @@ func dictDupes(t *testing.T, body, name string) {
 
 // TestTerms checks campaign wording, breakdown captions and unique dictionary keys.
 func TestTerms(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	dicts := dictBetween(t, html, "const PHRASE_EXTRA={", "const TYPES=")
 	mustNot(t, dicts, "Ветк", "russian branch word")
 	mustNot(t, dicts, "Гілк", "ukrainian branch word")
@@ -1591,14 +1820,14 @@ func sameDictKeys(t *testing.T, a, b map[string]struct{}, an, bn string) {
 // TestFlowFooter checks the campaign canvas strip labels revenue and reads cost.
 // t is the test handle. It returns nothing and fails when the footer markup regresses.
 func TestFlowFooter(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `tr('col.revenue')`, "campaign footer labels revenue")
 	must(t, html, `campaignCostOnly`, "campaign footer reads click and manual cost")
 	mustNot(t, html, `${moneyText(p.profit,'USD')}</b>${tr('profit')}`, "footer no longer calls revenue profit")
 }
 
 func TestSPALiterals(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, `function serviceBadge(`, "service badge helper")
 	must(t, html, `CRONST.telegram_configured`, "telegram readiness from the panel")
 	must(t, html, `value="uk"`, "ukrainian language option")

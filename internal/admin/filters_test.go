@@ -48,6 +48,58 @@ func TestParseCondsGroups(t *testing.T) {
 	}
 }
 
+func TestParseCondsLegacyInList(t *testing.T) {
+	q := url.Values{}
+	q.Add("f", "country:in:ru,us")
+	conds, err := parseConds(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conds) != 1 || conds[0].Field != "country" || conds[0].Op != "in" {
+		t.Fatalf("shape %+v", conds)
+	}
+	if strings.Join(conds[0].Values, ",") != "ru,us" {
+		t.Fatalf("values %+v", conds[0].Values)
+	}
+}
+
+func TestParseCondsEscapedComma(t *testing.T) {
+	q := url.Values{}
+	q.Add("f", "campaign:eq:Foo\\, Bar")
+	conds, err := parseConds(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conds) != 1 || len(conds[0].Values) != 1 || conds[0].Values[0] != `Foo\, Bar` {
+		t.Fatalf("eq keeps literal backslash-comma %+v", conds[0])
+	}
+	q = url.Values{}
+	q.Add("f", "country:in:ru\\,us,de")
+	conds, err = parseConds(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conds) != 1 || strings.Join(conds[0].Values, "|") != "ru,us|de" {
+		t.Fatalf("in escaped comma %+v", conds[0].Values)
+	}
+}
+
+func TestParseCondsCommaAndColon(t *testing.T) {
+	q := url.Values{}
+	q.Add("f", "campaign:eq:Foo, Bar")
+	q.Add("f", "site:eq:a:b:c")
+	conds, err := parseConds(q)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(conds) != 2 || conds[0].Field != "campaign" || len(conds[0].Values) != 1 || conds[0].Values[0] != "Foo, Bar" {
+		t.Fatalf("comma in value %+v", conds[0])
+	}
+	if conds[1].Field != "site" || conds[1].Values[0] != "a:b:c" {
+		t.Fatalf("colon in value %+v", conds[1])
+	}
+}
+
 // filterStats records the filters the journal handlers pass to the store.
 type filterStats struct {
 	fakeStats

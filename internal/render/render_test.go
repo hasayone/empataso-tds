@@ -21,6 +21,17 @@ func TestExpandKeyPath(t *testing.T) {
 	}
 }
 
+func TestExpandOriginMacro(t *testing.T) {
+	got := Expand("https://b/?origin={origin}", MacroDeps{Origin: "a.sig"})
+	if got != "https://b/?origin=a.sig" {
+		t.Fatalf("origin macro: %s", got)
+	}
+	got = Expand("https://b/?origin={origin}", MacroDeps{Origin: "a+b/c"})
+	if got != "https://b/?origin=a%2Bb%2Fc" {
+		t.Fatalf("origin encoding: %s", got)
+	}
+}
+
 func TestExpandCurlyKeitaroMacros(t *testing.T) {
 	var subs [15]string
 	subs[0] = "one"

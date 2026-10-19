@@ -38,6 +38,10 @@ func (s *Server) viewerFrom(ctx context.Context) viewer {
 			v.grants = acc.Grants
 		}
 		v.hidden = expandHidden(acc.Hidden)
+		if scopedCampaigns(v) {
+			v.hidden["origin_campaign"] = true
+			v.hidden["origin_campaign_id"] = true
+		}
 		v.sections = make(map[string]bool, len(acc.Sections))
 		for _, sec := range acc.Sections {
 			v.sections[sec] = true
@@ -124,6 +128,20 @@ func (v viewer) canWrite(res string, r ref) bool {
 		return v.canSee(res, r)
 	default:
 		return false
+	}
+}
+
+// scopedCampaigns reports whether v may see only some campaigns, not every one.
+// Administrators and read/full campaign grants return false.
+func scopedCampaigns(v viewer) bool {
+	if v.admin {
+		return false
+	}
+	switch v.mode(resCampaigns) {
+	case security.ModeFull, security.ModeRead:
+		return false
+	default:
+		return true
 	}
 }
 

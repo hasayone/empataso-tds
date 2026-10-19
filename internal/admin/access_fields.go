@@ -96,6 +96,7 @@ func buildMacroFields() map[string]string {
 		"[useragent]": "useragent",
 		"[cid]":       "cid", "{subid}": "cid",
 		"{status}": "status", "{payout}": "profit",
+		"{origin}": "origin_campaign_id",
 	}
 	for n := 1; n <= config.MaxRuleSubID; n++ {
 		field := config.SubIDRuleKey(n)

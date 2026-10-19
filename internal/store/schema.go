@@ -18,6 +18,12 @@ const schemaTimeout = 10 * time.Second
 // The base wave is not probed: it ships with the table, and ready reports
 // it present even when a probe of a later wave fails.
 func (c *CH) ensureSchema() {
+	c.ensureSchemaWaves(true)
+}
+
+// ensureSchemaWaves adds missing columns and records which later waves are present.
+// withOrigin selects whether origin_group_* ALTER runs on events and conversions.
+func (c *CH) ensureSchemaWaves(withOrigin bool) {
 	c.readyFlags = map[string]map[wave]bool{
 		"events":      {},
 		"conversions": {},
@@ -28,6 +34,9 @@ func (c *CH) ensureSchema() {
 	c.schemaAlter("events", waveExt)
 	c.schemaAlter("events", waveModel)
 	c.schemaAlter("events", waveStep)
+	if withOrigin {
+		c.schemaAlter("events", waveOrigin)
+	}
 	c.schemaExec(`CREATE TABLE IF NOT EXISTS conversions (
 		ts DateTime DEFAULT now(),
 		domain String,
@@ -48,6 +57,9 @@ func (c *CH) ensureSchema() {
 	c.schemaAlter("conversions", waveClick)
 	c.schemaAlter("conversions", waveExt)
 	c.schemaAlter("conversions", waveModel)
+	if withOrigin {
+		c.schemaAlter("conversions", waveOrigin)
+	}
 	c.schemaExec(`CREATE TABLE IF NOT EXISTS postback_log (
 		ts DateTime DEFAULT now(),
 		subid String,
@@ -68,6 +80,10 @@ func (c *CH) ensureSchema() {
 	c.modelEvents = c.ready("events", waveModel)
 	c.modelConv = c.ready("conversions", waveModel)
 	c.stepEvents = c.ready("events", waveStep)
+	if rf := c.readyFlags; rf != nil {
+		c.originEvents.Store(rf["events"][waveOrigin])
+		c.originConv.Store(rf["conversions"][waveOrigin])
+	}
 }
 
 // schemaAlter runs ADD COLUMN for one wave when that wave has columns.
@@ -174,6 +190,19 @@ func readyFromColumns(have map[string]map[string]bool) map[string]map[wave]bool 
 func (c *CH) ready(table string, w wave) bool {
 	if w == waveBase && (table == "events" || table == "conversions") {
 		return true
+	}
+	if w == waveOrigin {
+		if c == nil {
+			return false
+		}
+		switch table {
+		case "events":
+			return c.originEvents.Load()
+		case "conversions":
+			return c.originConv.Load()
+		default:
+			return false
+		}
 	}
 	if c == nil || c.readyFlags == nil {
 		return false

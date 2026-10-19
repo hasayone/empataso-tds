@@ -25,13 +25,13 @@ func TestLogicHelpers(t *testing.T) {
 	if err != nil {
 		t.Skip("node not found — skipping the helper checks")
 	}
-	m := pureRe.FindStringSubmatch(string(indexHTML))
+	m := pureRe.FindStringSubmatch(spaSource())
 	if m == nil {
 		t.Fatal("the pure helpers block is not in the SPA")
 	}
-	html := string(indexHTML)
+	html := spaSource()
 	var prelude strings.Builder
-	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText"} {
+	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "asSortMeta", "applySort", "condsQS"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -498,20 +498,29 @@ eq(shareOverflow(ovGroups([-50,120],[])), {group:'A',stream:'s1',kind:'offer'}, 
 eq(shareOverflow([]), null, 'shares: no campaigns');
 eq(shareOverflow([{id:'g9',streams:[{out:{}}]}]), null, 'shares: a stream without lists');
 
-// Names: no icon first (digits, latin, cyrillic), then icons in the same order.
+// Names: pictograph rank, then digits, latin, cyrillic inside the text key.
 const nameMix=['❄️ Яр','Яблоко','✅ Beta','Zeta','❌ Alpha','Альфа','All Offers','10 Camp','2 Camp'];
-eq(nameMix.slice().sort((a,b)=>compareNames(a,b,1)), ['2 Camp','10 Camp','All Offers','Zeta','Альфа','Яблоко','❌ Alpha','✅ Beta','❄️ Яр'], 'names ascending');
-eq(nameMix.slice().sort((a,b)=>compareNames(a,b,-1)), ['Яблоко','Альфа','Zeta','All Offers','10 Camp','2 Camp','❄️ Яр','✅ Beta','❌ Alpha'], 'names descending keep icons last');
+const nameAsc=['2 Camp','10 Camp','All Offers','Zeta','Альфа','Яблоко','✅ Beta','❄️ Яр','❌ Alpha'];
+eq(nameMix.slice().sort((a,b)=>compareNames(a,b,1)), nameAsc, 'names ascending');
+eq(nameMix.slice().sort((a,b)=>compareNames(a,b,-1)), nameAsc.slice().reverse(), 'names descending reverses ascending');
 eq(['Camp 10','Camp 2','camp 1'].sort((a,b)=>compareNames(a,b,1)), ['camp 1','Camp 2','Camp 10'], 'numbers inside a name are compared as numbers');
 eq([compareNames('a','a',1), compareNames('A','a',1), compareNames('','x',1), compareNames(null,'x',1)], [0,-1,1,1], 'equal, case tie; an empty name sorts after real ones');
+eq(compareNames('Plain','⚡️ 711',1)<0, true, 'plain sorts above lightning');
+eq(compareNames('❌ last','✅ 1Win',1)>0&&compareNames('❌ last','❄ 1Win',1)>0&&compareNames('❌ last','Plain',1)>0&&compareNames('❌ last','⛓ 1Win',1)<0, true, 'cross sits after plain, check and snow, before chain');
+eq(['✅ 1Win','❄ 1Win','⛓ 1Win'].sort((a,b)=>compareNames(a,b,1)), ['✅ 1Win','❄ 1Win','⛓ 1Win'], 'check, snow and chain groups stay ordered when the text matches');
+eq(['🔥 a','⛓ a','🔍 a','❌ a','❄ a','✅ a','⚡ a','a'].sort((a,b)=>compareNames(a,b,1)), ['a','⚡ a','✅ a','❄ a','❌ a','🔍 a','🔥 a','⛓ a'], 'full pictograph order ascending');
+const revSample=['⚡ z','Plain','✅ a','❌ x'];
+eq(revSample.slice().sort((a,b)=>compareNames(a,b,-1)), revSample.slice().sort((a,b)=>compareNames(a,b,1)).reverse(), 'descending is the exact reverse of ascending');
+eq(nameIconRank('⚡ 711'), nameIconRank('⚡️ 711'), 'lightning FE0F does not change rank');
+eq(['⚡ 711','Plain','⚡️ 711'].sort((a,b)=>compareNames(a,b,1)), ['Plain','⚡ 711','⚡️ 711'], 'lightning with and without FE0F share one group after plain names');
 
 // Signs that are text do not make an icon; emoji and symbols do.
 eq(['© Camp','Camp®','Camp™','№5 Camp','«Camp»','"Camp"',"'Camp'",'(Camp)','#1 Camp','_Camp',''].map(nameHasIcon), [false,false,false,false,false,false,false,false,false,false,false], 'text signs are not icons');
 eq(['✅ Beta','❌ Alpha','Camp 🔥','❄️ Яр'].map(nameHasIcon), [true,true,true,true], 'emoji are icons');
 eq(['©️ Camp'].map(nameHasIcon), [false], 'a copyright sign alone is text');
 const keyed=nameMix.map(n=>[n,nameKey(n)]);
-eq(keyed.slice().sort((a,b)=>compareNameKeys(a[1],b[1],1)).map(p=>p[0]), nameMix.slice().sort((a,b)=>compareNames(a,b,1)), 'sorting by ready keys gives the same order');
-eq(nameKey('  ❌ Alpha ').icon+':'+nameKey('Яблоко').script+':'+nameKey('  Zeta ').raw, '1:2:Zeta', 'a name key holds icon, script and the trimmed text');
+eq(keyed.slice().sort((a,b)=>compareNameKeys(a[1],b[1],1)).map(p=>p[0]), nameAsc, 'sorting by ready keys gives the same order');
+eq(nameKey('  ❌ Alpha ').icon+':'+nameKey('Яблоко').script+':'+nameKey('  Zeta ').raw, '4:2:Zeta', 'a name key holds icon rank, script and the trimmed text');
 
 // A saved column list that already has the model column is never swapped again.
 const colsC=[{id:'a',on:1},{id:'device_model',on:0},{id:'brand',on:1}];
@@ -624,8 +633,173 @@ eq(titleText(true, 'EmpatASO', ''), 'EmpatASO', 'name only');
 eq(titleText(true, '', 'Кампании'), 'Кампании', 'empty company name keeps page');
 eq(titleText(true, '', ''), '', 'known brand without name or page');
 
+eq(fltFieldFree('cid'), true, 'cid is free text');
+eq(fltFieldFree('site'), true, 'site is free text');
+eq(fltFieldFree('sub_id_5'), true, 'sub id is free text');
+eq(fltFieldStrict('campaign'), true, 'campaign is strict');
+eq(fltFieldStrict('city'), false, 'city is not strict');
+eq(fltFieldKind('device'), 'suggest', 'device is suggest');
+eq(fltFieldSuggest('country', false), true, 'strict country always suggests');
+eq(fltFieldSuggest('city', true), true, 'suggest dimension with dim');
+eq(fltFieldSuggest('cid', true), false, 'free text ignores dim');
+eq(dockTotal(null, 3), 3, 'dockTotal fallback');
+eq(dockTotal({count:5}, 0), 5, 'dockTotal count');
+eq(dockTotal(null, 0), 0, 'dockTotal null safe');
+const merged=fltMergeOptions([{key:'a',label:'A'}],[{key:'b',label:'B'},{key:'a',label:'dup'}]);
+eq(merged.map(x=>x.key), ['a','b'], 'fltMergeOptions dedupe');
+const cat=fltCatalogItems('offer_id',{offers:[{id:'o1',name:'One',group:'G'}]});
+eq(cat[0].key, 'o1', 'catalog offer id');
+eq(fltSanitizeValues('campaign',['x','o1'],new Set(['o1'])), ['o1'], 'sanitize strict');
+eq(fltSanitizeValues('keyword',['a','b'],new Set()), ['a','b'], 'sanitize free keeps all');
+const cr=groupCreateOption('New', ['Old'], q=>'Create '+q);
+eq(cr&&cr.key, 'New', 'group create option');
+eq(fltCommit({op:'eq',v:[]}, 'Foo, Bar'), true, 'eq keeps comma text');
+{const row={op:'eq',v:[]}; fltCommit(row,'Foo, Bar'); eq(row.v, ['Foo, Bar'], 'eq whole string');}
+eq(fltOptionLabel('offer_id', 'o1', 'Offer A'), 'Offer A · o1', 'option label with name');
+eq(fltOptionLabel('campaign', '🔥 Test', '🔥 Test'), '🔥 Test', 'emoji campaign name');
+eq(fltFilterOptions([{key:'aa',label:'Alpha'},{key:'bb',label:'Beta'}], 'be', 50).items, [{key:'bb',label:'Beta',group:''}], 'filter by label');
+eq(fltFilterOptions(Array.from({length:60}, (_,i)=>({key:'k'+i,label:'item'+i})), 'item', 50).truncated, true, 'filter limit');
+eq(fltStatusLabelKey('sale'), 'conv.sale', 'status label key');
+eq(fltOpMulti('in'), true, 'in is multi');
+eq(fltOpMulti('eq'), false, 'eq is single');
+{const row={op:'in',v:['a']}; eq(fltPickValue(row,'b',true), true, 'pick multi'); eq(row.v, ['a','b'], 'pick multi values');}
+{const row={op:'eq',v:[]}; eq(fltPickValue(row,'x',false), true, 'pick single'); eq(row.v, ['x'], 'pick single value');}
+eq(fltExcludeSelected([{key:'a'},{key:'b'}], ['a']).map(x=>x.key), ['b'], 'exclude selected');
+const gr=fltOptionGroups([{key:'1',label:'A',group:''},{key:'2',label:'B',group:'G1'}], true);
+eq(gr.length, 2, 'option groups split');
+eq(gr[0].label, '', 'ungrouped first');
+
+function condSplitListQA(s){
+  const x=String(s||''); if(!x) return []; const out=[]; let b='';
+  for(let i=0;i<x.length;i++){
+    if(x[i]==='\\'){ if(i+1<x.length){ if(x[i+1]==='\\'){ b+='\\'; i++; continue; } if(x[i+1]===','){ b+=','; i++; continue; } } b+='\\'; continue; }
+    if(x[i]===','){ out.push(b); b=''; continue; }
+    b+=x[i];
+  }
+  out.push(b); return out;
+}
+function expandCondValuesQA(op, raw){
+  const out=[]; (raw||[]).forEach(v=>{ if(op==='in'||op==='nin') condSplitListQA(v).forEach(p=>out.push(p)); else out.push(String(v)); });
+  return out;
+}
+function parseCondsFromQS(qs){
+  const grouped={}, order=[];
+  qs.getAll('f').forEach(v=>{
+    const i=v.indexOf(':'), j=v.indexOf(':', i+1); if(i<0||j<0) return;
+    const field=v.slice(0,i), op=v.slice(i+1,j), val=v.slice(j+1);
+    const k=field+'\0'+op; if(!grouped[k]){ grouped[k]=[]; order.push(k); } grouped[k].push(val);
+  });
+  return order.map(k=>{ const p=k.split('\0'); let vals=expandCondValuesQA(p[1], grouped[k]); let op=p[1];
+    if(op==='eq'&&vals.length>1) op='in'; if(op==='ne'&&vals.length>1) op='nin'; return {op, vals}; });
+}
+eq(condEscapeFilterValue('eq','C:\\tmp'), 'C:\\tmp', 'eq no escape in url');
+eq(condEscapeFilterValue('in','a,b'), 'a\\,b', 'in escape comma');
+eq(parseCondsFromQS(new URLSearchParams(condsQS([{f:'country',op:'in',v:['ru','us']}])))[0].vals, ['ru','us'], 'in qs round trip');
+{const q=condsQS([{f:'site',op:'eq',v:['a,b']},{f:'site',op:'eq',v:['c']}]); eq(parseCondsFromQS(new URLSearchParams(q.toString()))[0].vals, ['a,b','c'], 'eq merge comma');}
+{eq(parseCondsFromQS(new URLSearchParams('f='+encodeURIComponent('country:in:a\\,b,c')))[0].vals, ['a,b','c'], 'in escaped comma parse');}
+{eq(parseCondsFromQS(new URLSearchParams('f='+encodeURIComponent('country:in:x\\\\,y')))[0].vals, ['x\\','y'], 'in backslash pair');}
+{eq(parseCondsFromQS(new URLSearchParams('f='+encodeURIComponent('site:eq:C:\\tmp')))[0].vals, ['C:\\tmp'], 'eq path parse');}
+{const row={op:'eq',v:[]}; fltCommit(row,'C:\\tmp'); eq(row.v, ['C:\\tmp'], 'ui eq backslashes');}
+{const row={op:'in',v:[]}; fltCommit(row,'ru,us'); eq(row.v, ['ru','us'], 'in split typed list');}
+{const row={op:'in',v:['a']}; fltCommit(row,' b, a '); eq(row.v, ['a','b'], 'in manual trim parts');}
+
+const camp=fltCatalogItems('campaign',{groups:[{id:'42',name:'Demo'}]});
+eq(fltCatalogItems('campaign',{groups:[{id:'99',name:''}]}).length, 0, 'nameless campaign omitted');
+eq(camp[0].key, 'Demo', 'campaign key is group name');
+eq(fltCatalogItems('origin_campaign',{groups:[{id:'7',name:'Orig'}]})[0].key, 'Orig', 'origin_campaign key is name');
+eq(fltCatalogItems('campaign_id',{groups:[{id:'42',name:'Demo'}]})[0].key, '42', 'campaign_id key is id');
+eq(fltCatalogItems('origin_campaign_id',{groups:[{id:'7',name:'Orig'}]})[0].key, '7', 'origin_campaign_id key is id');
+eq(fltCatalogItems('landing_id',{landings:[{id:'L1',name:'Land'}]})[0].key, 'L1', 'landing_id key');
+eq(fltCatalogItems('network_id',{networks:[{id:'N1',name:'Net'}]})[0].key, 'N1', 'network_id key');
+eq(fltCatalogItems('source_id',{sources:[{id:'S1',name:'Src'}]})[0].key, 'S1', 'source_id key');
+eq(fltCatalogItems('country',{countries:[{code:'pl'}]})[0].key, 'pl', 'country key lower');
+
+eq(fltApplyDraft([{f:'campaign',op:'eq',v:['Away']}])[0].v, ['Away'], 'apply keeps strict without catalog');
+
+{const inp={value:'Create \\"X\\"', dataset:{}}; groupInputSet(inp,'X'); eq(groupInputValue(inp), 'X', 'group key not caption');}
+{const inp={value:'G1',dataset:{groupKey:'G1'}}; inp.value='G2'; comboClearStoredKeyOnEdit(inp,'groupKey'); eq(groupInputValue(inp), 'G2', 'group manual edit drops stale key');}
+{const inp={value:'G1',dataset:{groupKey:'G1'}}; inp.value=''; comboClearStoredKeyOnEdit(inp,'groupKey'); eq(groupInputValue(inp), '', 'group clear empty');}
+eq(comboKeyMatchesText('UTC · UTC+0', 'UTC', z=>'UTC · UTC+0'), true, 'combo label match');
+
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `
+
+func TestTzInputLogic(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found")
+	}
+	html := spaSource()
+	var b strings.Builder
+	for _, name := range []string{"comboKeyMatchesText", "comboClearStoredKeyOnEdit", "tzInputSet", "tzInputValue", "tzInputValidate"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		b.WriteString(fn)
+		b.WriteByte('\n')
+	}
+	b.WriteString(`
+function tzCanon(z){ return z; }
+function tzLabel(z){ if(!z) return ''; return z==='UTC'?'UTC · UTC+0':z+' · UTC+1'; }
+function tzOptions(){ return ['UTC','Europe/Kyiv']; }
+function tr(k){ return k; }
+let failed=0;
+const eq=(got,want,what)=>{ if(JSON.stringify(got)!==JSON.stringify(want)){ failed++; console.log('FAIL '+what+' got '+JSON.stringify(got)+' want '+JSON.stringify(want)); } };
+const inp={value:'',dataset:{}};
+tzInputSet(inp,'UTC');
+eq(tzInputValue(inp),'UTC','tz pick stores key');
+inp.value='Mars/Base';
+comboClearStoredKeyOnEdit(inp,'tzKey',tzLabel);
+eq(tzInputValue(inp),'','tz manual junk clears stale key');
+inp.value='Europe/Kyiv · UTC+1';
+eq(tzInputValue(inp),'Europe/Kyiv','tz label resolves');
+let err='';
+try{ tzInputValidate({value:'Mars/Base',dataset:{}}); }catch(e){ err=e.message; }
+eq(err,'err.spend.zone','tz validate rejects unknown');
+if(failed){ process.exit(1); }
+`)
+	f := filepath.Join(t.TempDir(), "tz-input.js")
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("tz input checks failed:\n%s", out)
+	}
+}
+
+func TestSortableHeadPostback(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found")
+	}
+	html := spaSource()
+	var b strings.Builder
+	for _, name := range []string{"asSortMeta", "ariaSortAttr", "sortableHead"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		b.WriteString(fn)
+		b.WriteByte('\n')
+	}
+	b.WriteString(`
+function tr(k){ return k; }
+function esc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;'); }
+function loadCols(){ return []; }
+const pbMeta={text:new Set(['subid','status','outcome','direction']), date:new Set(['ts']), field:(id)=>id};
+const head=sortableHead('pblog', {k:'ts',dir:-1}, [{id:'ts',label:'Time',on:1},{id:'payout',label:'off.payout',on:1}], pbMeta);
+if(!head.includes('data-sort="ts"')||!head.includes('data-sort="payout"')){ console.log('FAIL missing sort buttons', head); process.exit(1); }
+if(!head.includes('aria-sort="descending"')||!head.includes('aria-sort="none"')){ console.log('FAIL missing aria-sort', head); process.exit(1); }
+`)
+	f := filepath.Join(t.TempDir(), "sort-head.js")
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("sortableHead postback check failed:\n%s", out)
+	}
+}
 
 // TestMoneyDisplay runs the SPA currency helpers under node and checks the
 // labels: an empty currency code is USD, a zero key is not a second currency,
@@ -636,9 +810,9 @@ func TestMoneyDisplay(t *testing.T) {
 	if err != nil {
 		t.Skip("node not found — skipping money display checks")
 	}
-	html := string(indexHTML)
+	html := spaSource()
 	var b strings.Builder
-	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "csvMoney", "plainMoney", "cellRatio", "normBy", "moneyMap", "costCode", "costCodesList", "spendBasis", "profitList", "roiPct", "metricROI", "cpcCell", "moneyOf", "profitOf", "clickCostBy", "addBy", "pct", "periodSpendBy", "campaignCostOnly", "spendShare", "overlapShare", "rangeBounds", "sumClicks", "foldStatus", "packMetrics", "factsIndex", "campaignMetrics", "pointSpendBy", "pointMoney"} {
+	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "csvMoney", "plainMoney", "cellRatio", "normBy", "moneyMap", "costCode", "costCodesList", "spendBasis", "profitList", "roiPct", "metricROI", "roiCls", "cpcCell", "cpcHasSpend", "moneyOf", "profitOf", "clickCostBy", "addBy", "pct", "periodSpendBy", "campaignCostOnly", "spendShare", "overlapShare", "rangeBounds", "sumClicks", "foldStatus", "packMetrics", "factsIndex", "campaignMetrics", "pointSpendBy", "pointMoney", "nameSortKey", "nameCollator", "nameIconRank", "nameScript", "nameKey", "compareNameKeys", "asSortMeta", "applySort", "fltCommit", "logSortField"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -666,7 +840,6 @@ eq(costCode({EUR:0, GBP:100}).code, 'GBP', 'zero key is not a second currency');
 eq(costCode({EUR:0, GBP:100}).multi, false, 'one nonzero amount');
 eq(costCode({EUR:0}).code, 'EUR', 'a lone zero key keeps EUR');
 eq(costCode({}).code, '', 'no keys');
-const NA='—';
 var FACTS={ready:true,clicks:[{group_id:'g1',offer_id:'o1',network_id:'n1',stream:'s',hits:2,uniq:1,cost_cents:150,cost_cur:'USD'},{group_id:'g2',offer_id:'o1',network_id:'n1',stream:'s',hits:1,uniq:1,cost_cents:0,cost_cur:''}],status:[]};
 var SPEND=[];
 rangeBounds=function(){return {from:new Date('2020-01-01T00:00:00Z'),to:new Date('2030-01-01T00:00:00Z')}};
@@ -677,7 +850,14 @@ eq(profitOf(12.34, {EUR:100, USD:100}, true), '12.34 $ · -1.00 EUR · -1.00 $',
 eq(moneyOf(12.34, {EUR:0, GBP:100}, true, 2), '12.34 $', 'revenue is USD whatever the spend currency');
 eq(moneyMap({EUR:0, GBP:100}, 2), '0.00 EUR · 1.00 GBP', 'zero keys stay in the spend list');
 eq(moneyOf(0, {EUR:100}, false, 2), '0.00 $', 'unready revenue is zero dollars');
-eq(cpcCell({hits:0, costBy:{EUR:100}}), '—', 'zero clicks are not a price');
+eq(cpcCell({hits:0, costBy:{EUR:100}}), '0.00 EUR', 'zero clicks show zero in the spend currency');
+eq(cpcCell({hits:4, costBy:{}}), '0.00 $', 'CPC without spend is zero dollars');
+eq(pct(0,0), '0.0%', 'pct zero base');
+eq(cellRatio(0,0), '0.00%', 'cellRatio zero base');
+eq(roiCls('12.50%'), 'ok', 'roiCls positive');
+eq(roiCls('-3.00%'), 'bad', 'roiCls negative');
+eq(roiCls('0.00%'), '', 'roiCls zero');
+eq(roiCls('EUR'), '', 'roiCls currency list');
 eq(moneyText(42814.27,'USD'), '42,814.27 $', 'moneyText USD groups thousands');
 eq(moneyText(1234.5,'eur'), '1,234.50 EUR', 'moneyText other code');
 eq(moneyText(10,''), '10.00 $', 'an empty code is USD');
@@ -712,8 +892,7 @@ FACTS.clicks=keptClicks;
 SPEND=[{group_id:'g1',currency:'USD',cents:100,from:'2020-01-01',to:'2020-02-01'}];
 spendShare=function(){return 1};
 eq(campaignCostOnly('g1'), {USD:250}, 'manual window plus click price');
-eq(pct(1,0), '—', 'pct zero base');
-eq(cellRatio(0,0), '—', 'cellRatio zero base');
+eq(pct(1,0), '0.0%', 'pct zero base when numerator set');
 eq(roiPct(100,0), 0, 'roi no cost');
 eq(moneyOf(5, {}, true), '5.00 $', 'revenue without spend is dollars');
 eq(moneyOf(5, {}, false), '0.00 $', 'unready revenue is zero dollars');
@@ -773,5 +952,25 @@ eq(pointMoney({revenue:10,costBy:{}}, false, '', true), {cost:'0.00 $', profit:'
 eq(pointMoney({revenue:10}, false, '', true).cost, '0.00 $', 'a point without a spend map is a point without spend');
 eq(pointMoney({cost:2,profit:8,costBy:{USD:200}}, true, 'USD', true), {cost:'2.00 $', profit:'8.00 $', roi:null}, 'dollar spend keeps the point cost and profit');
 eq(pointMoney({}, true, 'USD', true), {cost:'0.00 $', profit:'0.00 $', roi:null}, 'dollar spend without numbers is zero');
+
+eq(fltCommit({op:'eq',v:[]}, ' a, b '), true, 'fltCommit eq');
+{const row={op:'eq',v:[]}; fltCommit(row,' a, b '); eq(row.v, ['a, b'], 'eq keeps comma pair');}
+{const row={op:'in',v:['a']}; eq(fltCommit(row,' b, a '), true, 'fltCommit in'); eq(row.v, ['a','b'], 'in dedupe');}
+eq(fltCommit({op:'in',v:[]}, '   '), false, 'fltCommit blank');
+eq(fltCommit(null,'x'), false, 'fltCommit no row');
+
+const evFields=[{name:'ts'},{name:'ip'},{name:'campaign'}];
+eq(logSortField('events','ts',evFields), 'ts', 'logSortField ts');
+eq(logSortField('events','osbrowser',evFields), '', 'logSortField osbrowser');
+eq(logSortField('events','offer_num',evFields), '', 'logSortField offer_num');
+eq(logSortField('events','missing',evFields), '', 'logSortField unknown');
+
+const d1={t:'2026-01-01T00:00:00Z', n:2, name:'⚡️ A'};
+const d2={t:'2026-06-01T00:00:00Z', n:1, name:'❌ B'};
+eq(applySort([d1,d2], {k:'t',dir:-1}, (r,k)=>r[k], {date:['t']}).map(x=>x.t), [d2.t,d1.t], 'applySort date desc');
+eq(applySort([d1,d2], {k:'n',dir:-1}, (r,k)=>r[k], {text:[]}).map(x=>x.n), [2,1], 'applySort number desc');
+const nm=applySort([{name:'⚡️ 711 Casino'},{name:'❌ SpinDog'},{name:'All Offers'}], {k:'name',dir:1}, (r,k)=>r[k], {name:['name']}).map(x=>x.name);
+eq(nm[0], 'All Offers', 'applySort name asc skips emoji rank');
+
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `

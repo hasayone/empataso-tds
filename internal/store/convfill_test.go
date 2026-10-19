@@ -59,6 +59,21 @@ func TestFillConversionInsert(t *testing.T) {
 	FillConversionInsert(&row, nil)
 }
 
+func TestFillOriginOnlyWhenEmpty(t *testing.T) {
+	rows := []PostbackRow{{CID: "a"}}
+	fillFromClicks(rows, map[string]ClickFill{
+		"a": {OriginGroupID: "entry", OriginGroupName: "Entry"},
+	})
+	if rows[0].OriginCampaignID != "entry" || rows[0].OriginCampaign != "Entry" {
+		t.Fatalf("filled %+v", rows[0])
+	}
+	rows = []PostbackRow{{CID: "b", OriginCampaign: "Keep", OriginCampaignID: "keep"}}
+	fillFromClicks(rows, map[string]ClickFill{"b": {OriginGroupID: "other", OriginGroupName: "Other"}})
+	if rows[0].OriginCampaign != "Keep" || rows[0].OriginCampaignID != "keep" {
+		t.Fatalf("overwritten %+v", rows[0])
+	}
+}
+
 func TestCidsNeedingClickFill(t *testing.T) {
 	rows := []PostbackRow{
 		{CID: "a", IP: "1.1.1.1", ClickTS: time.Now(), CampaignID: "1", Group: "n", UserAgent: "u", OS: "o", Browser: "b", Landing: "l"},

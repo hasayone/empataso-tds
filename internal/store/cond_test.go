@@ -17,6 +17,7 @@ func readyClient() *CH {
 	}}
 }
 
+
 func TestBuildWhereOps(t *testing.T) {
 	c := readyClient()
 	sql, args, skip, err := buildWhere(c, "events", []Cond{{Field: "country", Op: "eq", Values: []string{"PL"}}})
@@ -43,6 +44,20 @@ func TestBuildWhereOps(t *testing.T) {
 // TestBuildWhereConversionCampaign pins the SQL of a campaign filter on the
 // conversion journal: eq and in also match rows without a campaign through
 // the click cid, ne and nin stay plain, and events are unchanged.
+func TestBuildWhereOriginCampaignKeepsCase(t *testing.T) {
+	c := readyClient()
+	c.originEvents.Store(true)
+	c.originConv.Store(true)
+	sql, args, skip, err := buildWhere(c, "events", []Cond{{Field: "origin_campaign", Op: "eq", Values: []string{"Entry Campaign"}}})
+	if err != nil || skip || sql != " AND origin_group_name IN (?)" || len(args) != 1 || args[0] != "Entry Campaign" {
+		t.Fatalf("events: %q %#v skip=%v err=%v", sql, args, skip, err)
+	}
+	sql, args, skip, err = buildWhere(c, "conversions", []Cond{{Field: "origin_campaign", Op: "eq", Values: []string{"Entry Campaign"}}})
+	if err != nil || skip || sql != " AND origin_group_name IN (?)" || len(args) != 1 || args[0] != "Entry Campaign" {
+		t.Fatalf("conversions: %q %#v skip=%v err=%v", sql, args, skip, err)
+	}
+}
+
 func TestBuildWhereConversionCampaign(t *testing.T) {
 	c := readyClient()
 	sql, args, skip, err := buildWhere(c, "conversions", []Cond{{Field: "campaign_id", Op: "eq", Values: []string{"g1"}}})

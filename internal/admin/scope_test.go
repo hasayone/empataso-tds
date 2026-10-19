@@ -1,7 +1,13 @@
 package admin
 
 import (
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/egerkuzma/kuztds/internal/security"
 )
@@ -69,4 +75,133 @@ func TestCanSeeBranches(t *testing.T) {
 	if emptyLabel.canSee(resOffers, ref{id: "x", label: ""}) {
 		t.Fatal("empty label must not match empty labels entry")
 	}
+}
+
+func TestScopedCampaignsHideOrigin(t *testing.T) {
+	v := viewer{grants: map[string]security.Grant{resCampaigns: {Mode: security.ModeSelected}}}
+	if !scopedCampaigns(v) {
+		t.Fatal("selected campaign grant is scoped")
+	}
+	v.hidden = map[string]bool{}
+	if scopedCampaigns(v) {
+		v.hidden["origin_campaign"] = true
+		v.hidden["origin_campaign_id"] = true
+	}
+	if !v.hidden["origin_campaign"] || !v.hidden["origin_campaign_id"] {
+		t.Fatalf("origin fields hidden for scoped viewer: %v", v.hidden)
+	}
+	full := viewer{grants: map[string]security.Grant{resCampaigns: {Mode: security.ModeFull}}}
+	if scopedCampaigns(full) {
+		t.Fatal("full campaign grant is not scoped")
+	}
+}
+
+func scopeOriginServer(t *testing.T) (*httptest.Server, *http.Client) {
+	t.Helper()
+	hash, err := security.HashPassword("p@ss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	s, err := New(Config{
+		AdminUser: "admin", PasswordHash: hash,
+		UsersFile:  filepath.Join(dir, "users.json"),
+		Sessions:   security.NewMemoryStore(),
+		Stats:      richStats{},
+		Groups:     &memGroups{list: scopeCampaigns()},
+		Limiter:    allowAll{},
+		SessionTTL: time.Hour, CookieSecure: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mustUser(t, s, "sel", "secret1", security.Access{
+		Sections: userSectionsAll(),
+		Grants: map[string]security.Grant{
+			resCampaigns: {Mode: security.ModeSelected, IDs: []string{"c1"}, Labels: []string{"promo"}},
+		},
+	})
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	c := newClient(t)
+	if code, _ := login(t, c, srv.URL, "sel", "secret1"); code != http.StatusOK {
+		t.Fatalf("login %d", code)
+	}
+	return srv, c
+}
+
+func TestScopedCampaignOriginHiddenEndpoints(t *testing.T) {
+	srv, c := scopeOriginServer(t)
+	base := srv.URL
+
+	for _, ep := range []string{"/api/logs", "/api/postbacks"} {
+		resp, err := c.Get(base + ep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := ioReadAllString(resp)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s %d %s", ep, resp.StatusCode, body)
+		}
+		for _, key := range []string{"origin_campaign", "origin_campaign_id", "S_origin_campaign"} {
+			if strings.Contains(body, key) {
+				t.Fatalf("%s leaks %q: %s", ep, key, body)
+			}
+		}
+	}
+
+	for _, p := range []string{
+		"/api/logs?f=origin_campaign:eq:x",
+		"/api/postbacks?f=origin_campaign:eq:x",
+		"/api/logs?sort=origin_campaign",
+		"/api/postbacks?sort=origin_campaign",
+		"/api/log-values?table=events&field=origin_campaign",
+		"/api/log-values?table=conversions&field=origin_campaign",
+	} {
+		resp, err := c.Get(base + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ := ioReadAllString(resp)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Fatalf("%s = %d %s", p, resp.StatusCode, body)
+		}
+	}
+
+	resp, err := c.Get(base + "/api/log-fields")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := ioReadAllString(resp)
+	resp.Body.Close()
+	for _, key := range []string{`"origin_campaign"`, `"origin_campaign_id"`} {
+		if strings.Contains(body, key) {
+			t.Fatalf("log-fields lists origin: %s", body)
+		}
+	}
+
+	for _, p := range []string{"/api/logs/export", "/api/postbacks/export"} {
+		resp, err = c.Get(base + p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		body, _ = ioReadAllString(resp)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s %d", p, resp.StatusCode)
+		}
+		head := strings.Split(strings.SplitN(body, "\n", 2)[0], ",")
+		for _, col := range head {
+			if col == "origin_campaign" || col == "origin_campaign_id" {
+				t.Fatalf("%s header has %s", p, col)
+			}
+		}
+	}
+}
+
+func ioReadAllString(resp *http.Response) (string, error) {
+	b, err := io.ReadAll(resp.Body)
+	return string(b), err
 }

@@ -179,9 +179,9 @@ func sliceEventsSQL(clickCols bool, uniq, first, evSQL string) string {
 // The string is a full SELECT. It does not fail.
 func sliceConvSQL(c *CH, cvSQL string) string {
 	offer, source, extra := "''", "''", ""
-	click, ext, model := false, false, false
+	click, ext, model, origin := false, false, false, false
 	if c != nil {
-		click, ext, model = c.clickCols, c.extConv, c.modelConv
+		click, ext, model, origin = c.clickCols, c.extConv, c.modelConv, c.originConv.Load()
 		if c.clickCols {
 			offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
 		}
@@ -191,5 +191,5 @@ func sliceConvSQL(c *CH, cvSQL string) string {
 		%s
 		) WHERE ts >= ? AND ts < ?%s
 		GROUP BY group_name, stream_name, country%s`,
-		offer, source, conversionUnion(click, ext, model), cvSQL, extra)
+		offer, source, conversionUnion(click, ext, model, origin), cvSQL, extra)
 }

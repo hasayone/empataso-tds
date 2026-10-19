@@ -4,6 +4,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"errors"
@@ -33,6 +34,10 @@ const (
 	cidKeyFile = "cid.key"
 	// cidKeyBytes is the size of a generated signing key and the least size of KUZTDS_CID_KEY.
 	cidKeyBytes = 32
+	// originSigBytes is the MAC length kept in an origin token.
+	originSigBytes = 16
+	// originMACPrefix separates the origin MAC from other uses of the click id key.
+	originMACPrefix = "origin:"
 )
 
 // cidSigner issues and verifies click ids: nine random base36 characters and
@@ -215,6 +220,50 @@ func (s *cidSigner) newCID() string {
 // expiry) or twelve base36 characters whose last three are a valid signature.
 // Any other value, imported ids included, is not reusable, so a visitor cannot
 // attach a click to a foreign id.
+// signOrigin returns a signed origin token for group gid.
+//
+// gid is the first-entry campaign id. The token is gid plus a dot plus a
+// base64url MAC. An empty gid returns "".
+func (s *cidSigner) signOrigin(gid string) string {
+	gid = strings.TrimSpace(gid)
+	if gid == "" {
+		return ""
+	}
+	m := hmac.New(sha256.New, s.signKey())
+	m.Write([]byte(originMACPrefix))
+	m.Write([]byte(gid))
+	sig := base64.RawURLEncoding.EncodeToString(m.Sum(nil)[:originSigBytes])
+	return gid + "." + sig
+}
+
+// verifyOrigin checks an origin query token.
+//
+// tok is the value of ?origin=. It returns the group id and true when the
+// signature matches; a missing dot, a bad encoding or a wrong MAC yield "", false.
+func (s *cidSigner) verifyOrigin(tok string) (string, bool) {
+	tok = strings.TrimSpace(tok)
+	dot := strings.LastIndex(tok, ".")
+	if dot <= 0 || dot == len(tok)-1 {
+		return "", false
+	}
+	gid, sig := tok[:dot], tok[dot+1:]
+	if gid == "" || sig == "" {
+		return "", false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(sig)
+	if err != nil || len(raw) != originSigBytes {
+		return "", false
+	}
+	m := hmac.New(sha256.New, s.signKey())
+	m.Write([]byte(originMACPrefix))
+	m.Write([]byte(gid))
+	want := m.Sum(nil)[:originSigBytes]
+	if !hmac.Equal(raw, want) {
+		return "", false
+	}
+	return gid, true
+}
+
 func (s *cidSigner) reusedCID(c string) bool {
 	switch len(c) {
 	case legacyCIDLen:

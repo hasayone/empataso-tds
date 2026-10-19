@@ -75,7 +75,7 @@ func TestServeAssetsFlags(t *testing.T) {
 
 // TestIndexHTMLUsesEmbeddedFlags — SPA ссылается на /assets/flags/, без встроенного FLAG_SPEC.
 func TestIndexHTMLUsesEmbeddedFlags(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	if !strings.Contains(html, "/assets/flags/") {
 		t.Error("indexHTML must reference /assets/flags/")
 	}

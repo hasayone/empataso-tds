@@ -19,10 +19,12 @@ const (
 	waveModel wave = "model"
 	// waveStep adds step to events: 0 for the first step, 1 for the /offer step.
 	waveStep wave = "step"
+	// waveOrigin adds origin_group_name and origin_group_id to events and conversions.
+	waveOrigin wave = "origin"
 )
 
 // allWaves lists every wave in the order probes and the fields API use.
-var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep}
+var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep, waveOrigin}
 
 // Field is one journal column shared by filters, breakdown and the SPA.
 // Name is the API name. Events and Conv are the physical columns; an empty
@@ -96,6 +98,8 @@ func buildFields() []Field {
 		{Name: "org", Events: "org", Conv: "org", Type: lc, EventsWave: waveNet, ConvWave: waveExt, Dim: true},
 		{Name: "timezone", Events: "timezone", Type: lc, EventsWave: waveNet, Dim: true},
 		{Name: "via", Events: "via", Type: lc, EventsWave: waveNet, Dim: true},
+		{Name: "origin_campaign", Events: "origin_group_name", Conv: "origin_group_name", Type: lc, EventsWave: waveOrigin, ConvWave: waveOrigin, Dim: true, Default: "group_name"},
+		{Name: "origin_campaign_id", Events: "origin_group_id", Conv: "origin_group_id", Type: lc, EventsWave: waveOrigin, ConvWave: waveOrigin, Dim: true, Default: "group_id"},
 	}
 	for i := 1; i <= 12; i++ {
 		name := fmt.Sprintf("sub_id_%d", i)
@@ -199,6 +203,12 @@ func alterSQL(table string, w wave) string {
 // f.Conv is the alias. Numeric and time columns get a typed zero;
 // every other type gets an empty string. f.Conv must not be empty.
 func convStub(f Field) string {
+	switch f.Conv {
+	case "origin_group_name":
+		return "group_name AS origin_group_name"
+	case "origin_group_id":
+		return "'' AS origin_group_id"
+	}
 	switch f.Type {
 	case "UInt32":
 		return "toUInt32(0) AS " + f.Conv

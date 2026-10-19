@@ -26,7 +26,11 @@ type Event struct {
 	Ts        time.Time
 	GroupID   string
 	GroupName string
-	Stream    string
+	// OriginID and OriginName are the first campaign of the visit. Empty means
+	// the store falls back to GroupID and GroupName on insert.
+	OriginID   string
+	OriginName string
+	Stream     string
 	Out       string
 	Keyword   string
 	Redirect  string

@@ -21,7 +21,9 @@ type ClickFill struct {
 	LandingID  string
 	OfferID    string
 	NetworkID  string
-	SourceID   string
+	SourceID        string
+	OriginGroupID   string
+	OriginGroupName string
 }
 
 // cidsNeedingClickFill returns distinct click ids from rows that still miss
@@ -145,6 +147,12 @@ func fillPostbackFromClick(p *PostbackRow, snap ClickFill) {
 	if p.Source == "" && snap.SourceID != "" {
 		p.Source = snap.SourceID
 	}
+	if p.OriginCampaignID == "" && snap.OriginGroupID != "" {
+		p.OriginCampaignID = snap.OriginGroupID
+	}
+	if p.OriginCampaign == "" && snap.OriginGroupName != "" {
+		p.OriginCampaign = snap.OriginGroupName
+	}
 }
 
 // FillConversionInsert copies snap into row only where row fields are empty.
@@ -206,6 +214,12 @@ func FillConversionInsert(row *ConversionInsert, snap *ClickFill) {
 	}
 	if row.SourceID == "" && snap.SourceID != "" {
 		row.SourceID = snap.SourceID
+	}
+	if row.OriginGroupID == "" && snap.OriginGroupID != "" {
+		row.OriginGroupID = snap.OriginGroupID
+	}
+	if row.OriginGroupName == "" && snap.OriginGroupName != "" {
+		row.OriginGroupName = snap.OriginGroupName
 	}
 }
 

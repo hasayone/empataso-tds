@@ -452,7 +452,7 @@ func TestHiddenFieldRejectedInLegacyParams(t *testing.T) {
 	cases := []struct {
 		path   string
 		params []paramField
-	}{{"/api/logs", legacyLogParams}, {"/api/logs/export", legacyLogParams}, {"/api/postbacks", legacyPostbackParams}}
+	}{{"/api/logs", legacyLogParams}, {"/api/logs/export", legacyLogParams}, {"/api/postbacks", legacyPostbackParams}, {"/api/postbacks/export", legacyPostbackParams}}
 	for _, c := range cases {
 		for _, p := range c.params {
 			rig.hide(t, p.field)

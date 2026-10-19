@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -39,13 +41,33 @@ type CH struct {
 	// name the column, and campaign unique counts filter on it, only after
 	// ensureSchema has seen it.
 	stepEvents bool
+	// originEvents and originConv: events and conversions carry origin_group_*.
+	// Writes and reads name those columns only after ensureSchema has seen them.
+	// maybeRefreshOriginWave can set these true later without restarting the process.
+	originEvents, originConv atomic.Bool
+	originProbeMu   sync.Mutex
+	originLastProbe time.Time
+	// originColumnReader replaces readColumnSet during maybeRefreshOriginWave
+	// when set. Used by tests without ClickHouse.
+	originColumnReader func() (map[string]map[string]bool, error)
 	// readyFlags is table → wave → columns present. The bools above are
-	// derived from it.
+	// derived from it. The origin wave is tracked only in originEvents and
+	// originConv after ensureSchema.
 	readyFlags map[string]map[wave]bool
 }
 
 // OpenCH opens a connection to ClickHouse.
 func OpenCH(addr, database, username, password string) (*CH, error) {
+	c, err := openCHRaw(addr, database, username, password)
+	if err != nil {
+		return nil, err
+	}
+	c.ensureSchema()
+	return c, nil
+}
+
+// openCHRaw dials ClickHouse and pings the server without running ensureSchema.
+func openCHRaw(addr, database, username, password string) (*CH, error) {
 	conn, err := clickhouse.Open(&clickhouse.Options{
 		Addr:        []string{addr},
 		Auth:        clickhouse.Auth{Database: database, Username: username, Password: password},
@@ -61,9 +83,7 @@ func OpenCH(addr, database, username, password string) (*CH, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("clickhouse: ping: %w", err)
 	}
-	c := &CH{conn: conn}
-	c.ensureSchema()
-	return c, nil
+	return &CH{conn: conn}, nil
 }
 
 // NetworkColumns reports whether events carry asn/org/timezone/via.
@@ -458,6 +478,7 @@ func (c *CH) Values(ctx context.Context, q ValuesQuery) ([]KV, error) {
 	if q.Table != "events" && q.Table != "conversions" {
 		return nil, ErrBadCond
 	}
+	c.maybeRefreshOriginWave()
 	f, ok := fieldByName(q.Field)
 	if !ok {
 		return nil, ErrUnknownField

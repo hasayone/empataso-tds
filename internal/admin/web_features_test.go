@@ -9,7 +9,7 @@ import (
 // TestSpaKeepsUnknownRules checks that saving a stream copies the rule keys the editor
 // does not own, so a key written by another version or the API is not erased.
 func TestSpaKeepsUnknownRules(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
 	must(t, pure, "function ruleExtras(", "ruleExtras in pure block")
 	collect := spaFunctionLine(html, "collectStream")
@@ -23,7 +23,7 @@ func TestSpaKeepsUnknownRules(t *testing.T) {
 // TestSpaModelAndSubIDs checks the device model and Sub ID conditions, the model column
 // of the click and conversion logs and the filter group.
 func TestSpaModelAndSubIDs(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, html, "{k:'model',l:'Device model',g:'Device',kind:'list'", "model condition in the Device group")
 	must(t, html, "{k:'sub_ids',l:'Sub ID',g:'Source',kind:'subids'", "Sub ID condition in the Source group")
 	must(t, html, "const SUBID_MAX=12", "Sub ID limit")
@@ -46,7 +46,7 @@ func TestSpaModelAndSubIDs(t *testing.T) {
 
 // TestSpaSticky checks the campaign switch for returning visitors.
 func TestSpaSticky(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, spaFunctionLine(html, "openFlowSettings"), `id="g_sticky"`, "sticky switch in campaign settings")
 	must(t, spaFunctionLine(html, "openFlowSettings"), "tr('sticky.hint')", "sticky hint")
 	must(t, spaFunctionLine(html, "openFlowSettings"), "tr('sticky.noweight')", "sticky needs choice by weight")
@@ -58,7 +58,7 @@ func TestSpaSticky(t *testing.T) {
 // TestSpaShareCeiling checks that shares are typed by hand, summed per list, shown in red above
 // 100 and block saving, and that the server answer is translated.
 func TestSpaShareCeiling(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	mustNot(t, html, "balanceShares", "automatic share balancing is gone")
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
 	for _, fn := range []string{"shareSum", "shareInt", "sharesOver", "shareOverflow", "errKey"} {
@@ -81,7 +81,7 @@ func TestSpaShareCeiling(t *testing.T) {
 // TestKeitaroSettingsUI checks the address and token form of the Keitaro card: the key is
 // a password field that is never filled in, and the check runs with the typed values.
 func TestKeitaroSettingsUI(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	src := spaFunctionLine(html, "keitaroPanel")
 	for _, needle := range []string{
 		"/api/keitaro/settings",
@@ -107,7 +107,7 @@ func TestKeitaroSettingsUI(t *testing.T) {
 // TestNamecheapUI checks the account card, the purchase window with the confirmed price,
 // the pending row actions and the name server change.
 func TestNamecheapUI(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, spaFunctionLine(html, "integrations"), `id="int-namecheap"`, "Namecheap card on the integrations page")
 	panel := spaFunctionLine(html, "namecheapPanel")
 	for _, needle := range []string{
@@ -170,7 +170,7 @@ func TestNamecheapUI(t *testing.T) {
 // TestSpaNewKeysAreTranslated checks that every dictionary key added for these screens
 // exists in all three interface languages.
 func TestSpaNewKeysAreTranslated(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	keys := []string{
 		"fld.device_model", "cond.model.hint", "cond.sid.hint", "cond.sid.ph", "sid.empty", "sid.add", "chip.empty",
 		"sticky.label", "sticky.hint", "sticky.noweight", "share.sum", "share.over", "share.under", "share.block",
@@ -223,7 +223,7 @@ var roleKeys = []string{
 // TestSpaReportUniqTotal checks that the report shows each row's unique, totals the first-step
 // uniques, keeps uniq_first out of the columns, and does not feed report rows into PERF.
 func TestSpaReportUniqTotal(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
 	must(t, pure, "function reportTotals(", "reportTotals is in the pure block")
 	must(t, pure, "r.uniq_first!=null?r.uniq_first:r.unique", "the total takes uniq_first, then unique")
@@ -255,7 +255,7 @@ func TestSpaReportUniqTotal(t *testing.T) {
 // the model column swap and the flows migration stay in memory, and columns are saved
 // only by Apply in the columns window.
 func TestSpaNoBackgroundUISave(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	load := spaFunctionLine(html, "loadCols")
 	mustNot(t, load, "saveCols(", "loadCols does not save")
 	mustNot(t, load, "saveUI(", "loadCols does not call the server")
@@ -300,7 +300,7 @@ func TestSpaNoBackgroundUISave(t *testing.T) {
 // TestSpaErrorsTranslated checks the server texts of the registrar, landing, role and network
 // handlers against the SPA maps, and that no caller translates twice.
 func TestSpaErrorsTranslated(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	for _, text := range []string{
 		"max_price required", "domain not found", "domains required", "at most 50 domains",
 		"bad json", "bad request", "read error", "store unavailable", "internal error", "not found",
@@ -350,7 +350,7 @@ func TestSpaErrorsTranslated(t *testing.T) {
 // grantsFromRows, that the dashboard drops cards of hidden dimensions, and that the stream
 // editor warns when its output may be frozen.
 func TestSpaEditorKeepsAccess(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
 	for _, name := range []string{"grantRows", "grantsFromRows", "visibleDims", "streamOutputGuarded"} {
 		must(t, pure, "function "+name+"(", name+" is in the pure block")
@@ -372,7 +372,7 @@ func TestSpaEditorKeepsAccess(t *testing.T) {
 
 // TestSpaTrafficSourceKeys checks that the source editor lists every server-side parameter key.
 func TestSpaTrafficSourceKeys(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	src := spaBetween(html, "const SRC_KEYS=", ";")
 	for _, k := range []string{"site", "ad_campaign_id", "creative_id", "external_id"} {
 		must(t, src, "'"+k+"'", "SRC_KEYS includes "+k)
@@ -390,7 +390,7 @@ func TestSpaTrafficSourceKeys(t *testing.T) {
 // TestSpaGuardedLinks checks that the source and campaign forms lock the parameters of hidden
 // fields and that the link editors warn; the server stays the judge of what is refused.
 func TestSpaGuardedLinks(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
 	for _, name := range []string{"sourceKeyLocked", "priceParamLocked", "linksGuarded"} {
 		must(t, pure, "function "+name+"(", name+" is in the pure block")
@@ -412,7 +412,7 @@ func TestSpaGuardedLinks(t *testing.T) {
 // TestSpaRoleKeys checks that every role key exists in the three languages and that the
 // server texts of roles, hidden fields and macros reach their key through the pure block.
 func TestSpaRoleKeys(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	for _, k := range roleKeys {
 		if n := strings.Count(html, "'"+k+"':"); n != 3 {
 			t.Errorf("dictionary key %q is defined %d time(s), want one per language", k, n)
@@ -435,7 +435,7 @@ func TestSpaRoleKeys(t *testing.T) {
 // TestSpaRolesUI checks the roles editor: it shares the access editor with the user form,
 // sends no record lists, lists only hideable fields and reports an unavailable store.
 func TestSpaRolesUI(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
 	for _, name := range []string{"hiddenFields", "columnHidden", "offerPayoutHidden", "accessModes", "grantBody", "hideChoices", "userRoleField", "roleChoices", "roleNameOf"} {
 		must(t, pure, "function "+name+"(", name+" is in the pure block")
@@ -470,7 +470,7 @@ func TestSpaRolesUI(t *testing.T) {
 // TestSpaHiddenForRole checks that the pages react to the hidden list of /api/me:
 // columns, the offer payout, the recent clicks and the chart point tip.
 func TestSpaHiddenForRole(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, spaFunctionLine(html, "colShown"), "columnHidden(ME, names)", "journal columns of a hidden field are dropped")
 	offers := spaBetween(html, "const payHidden=offerPayoutHidden(ME);", "const picked=[];")
 	if offers == "" {
@@ -502,7 +502,7 @@ var ncErrKeys = []string{
 // USD and written as a dollar sign, the old no-currency helpers are gone, and CSV carries plain
 // numbers with the currency in the column title.
 func TestSpaMoneyUnified(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	for _, gone := range []string{"function bareMoney(", "function periodMoney(", "function chartAmt(", "function kpiMoney("} {
 		mustNot(t, html, gone, "the helper is replaced by moneyText")
 	}
@@ -554,7 +554,7 @@ func TestSpaMoneyUnified(t *testing.T) {
 
 // TestSpaUniqueFirst checks that a campaign counts uniq_first and the other tables count uniq.
 func TestSpaUniqueFirst(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	must(t, spaFunctionLine(html, "campaignMetrics"), "sumClicks(idx.clicks.get(id)||[], true)", "a campaign counts each visitor once")
 	mustNot(t, spaFunctionLine(html, "offerMetrics"), ", true)", "an offer counts uniq")
 	mustNot(t, spaFunctionLine(html, "networkMetrics"), ", true)", "a network counts uniq")
@@ -565,7 +565,7 @@ func TestSpaUniqueFirst(t *testing.T) {
 // TestSpaRevenueAlwaysUSD checks that revenue and payouts are written in dollars whatever the
 // currency of the spend, and that spend in another currency is listed beside revenue, not subtracted.
 func TestSpaRevenueAlwaysUSD(t *testing.T) {
-	html := string(indexHTML)
+	html := spaSource()
 	mustNot(t, spaFunctionLine(html, "moneyOf"), "costCode(", "revenue does not take the currency of the spend")
 	must(t, spaFunctionLine(html, "moneyOf"), "'USD'", "revenue is in dollars")
 	profit := spaFunctionLine(html, "profitOf")

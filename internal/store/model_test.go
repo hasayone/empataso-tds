@@ -46,7 +46,7 @@ func TestEventColumnsModelWave(t *testing.T) {
 	e := logbuf.Event{DeviceModel: "SM-S918B"}
 	for _, on := range []bool{false, true} {
 		c := &CH{modelEvents: on}
-		cols := eventColumns(c)
+		cols := eventColumns(c, false)
 		vals := eventValues(cols, e)
 		if len(cols) != len(vals) {
 			t.Fatalf("model=%v: %d columns, %d values", on, len(cols), len(vals))
@@ -69,12 +69,12 @@ func TestEventColumnsModelWave(t *testing.T) {
 func TestLogSelectMatchesDestWithModel(t *testing.T) {
 	for _, on := range []bool{false, true} {
 		c := &CH{modelEvents: on, clickCols: true}
-		sel := logSelect(c, nil)
+		sel := logSelect(c, nil, false)
 		if strings.Contains(sel, "device_model") != on {
 			t.Fatalf("model=%v: select %s", on, sel)
 		}
 		var r LogRow
-		dest, _ := logDest(c, &r, nil)
+		dest, _ := logDest(c, &r, nil, false)
 		if want := strings.Count(sel, ",") + 1; len(dest) != want {
 			t.Fatalf("model=%v: %d scan targets for %d columns", on, len(dest), want)
 		}
@@ -82,14 +82,14 @@ func TestLogSelectMatchesDestWithModel(t *testing.T) {
 }
 
 func TestConversionUnionModel(t *testing.T) {
-	with := conversionUnion(false, false, true)
+	with := conversionUnion(false, false, true, false)
 	if !strings.Contains(with, "'' AS device_model") || !strings.Contains(with, ", device_model FROM conversions") {
 		t.Fatalf("model union:\n%s", with)
 	}
-	if without := conversionUnion(true, true, false); strings.Contains(without, "device_model") {
+	if without := conversionUnion(true, true, false, false); strings.Contains(without, "device_model") {
 		t.Fatalf("model column leaked into the union without the wave:\n%s", without)
 	}
-	if conversionFrom(true, true) != conversionUnion(true, true, false) {
+	if conversionFrom(true, true) != conversionUnion(true, true, false, false) {
 		t.Fatal("conversionFrom must not add the model wave")
 	}
 }
@@ -98,8 +98,8 @@ func TestConversionInsertModel(t *testing.T) {
 	row := ConversionInsert{CID: "c", Status: "sale", DeviceModel: "iPhone"}
 	for _, model := range []bool{false, true} {
 		for _, ext := range []bool{false, true} {
-			cols, n := conversionColumnsModel(true, ext, model)
-			vals := conversionValuesModel(row, true, ext, model)
+			cols, n := conversionColumnsModel(true, ext, model, false)
+			vals := conversionValuesModel(row, true, ext, model, false)
 			if len(vals) != n || strings.Count(cols, ",")+1 != n {
 				t.Fatalf("ext=%v model=%v: n=%d values=%d cols=%q", ext, model, n, len(vals), cols)
 			}

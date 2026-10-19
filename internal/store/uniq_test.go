@@ -277,14 +277,14 @@ func TestStepFilterField(t *testing.T) {
 }
 
 func TestEventColumnsAndValuesCarryStep(t *testing.T) {
-	without := eventColumns(&CH{})
+	without := eventColumns(&CH{}, false)
 	for _, col := range without {
 		if col == "step" {
 			t.Fatal("step written before the wave is ready")
 		}
 	}
 	c := &CH{stepEvents: true}
-	cols := eventColumns(c)
+	cols := eventColumns(c, false)
 	if cols[len(cols)-1] != "step" || len(cols) != len(without)+1 {
 		t.Fatalf("columns %v", cols)
 	}
@@ -298,7 +298,7 @@ func TestEventColumnsAndValuesCarryStep(t *testing.T) {
 // Imported clicks have no steps: they are written as step 0, so they count in
 // every unique summary.
 func TestImportedEventsAreStepZero(t *testing.T) {
-	cols := eventColumns(&CH{stepEvents: true})
+	cols := eventColumns(&CH{stepEvents: true}, false)
 	vals := eventValues(cols, logbuf.Event{Ts: time.Unix(1, 0), Uniq: 1})
 	if vals[len(vals)-1] != uint8(0) {
 		t.Errorf("imported event step = %v, want 0", vals[len(vals)-1])

@@ -45,8 +45,9 @@ func parseConds(q url.Values) ([]store.Cond, error) {
 	}
 	out := make([]store.Cond, 0, len(order))
 	for _, k := range order {
-		op := k.op
-		vals := grouped[k]
+		origOp := k.op
+		vals := store.ExpandCondValues(origOp, grouped[k])
+		op := origOp
 		if op == "eq" && len(vals) > 1 {
 			op = "in"
 		}

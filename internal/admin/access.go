@@ -131,6 +131,7 @@ func addCoreRoutes(m map[string]routeRule, open func() routeRule, rule func(sect
 	m["DELETE /api/logs"] = routeRule{sec: secLogs, admin: true}
 
 	m["GET /api/postbacks"] = rule(secConversions)
+	m["GET /api/postbacks/export"] = rule(secConversions)
 	m["GET /api/postback-log"] = routeRule{sec: secConversions, admin: true}
 
 	m["GET /api/report"] = rule(secReport)

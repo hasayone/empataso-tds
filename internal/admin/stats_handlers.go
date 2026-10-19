@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/store"
 )
 
@@ -161,6 +160,10 @@ func (s *Server) logFilter(w http.ResponseWriter, r *http.Request) (store.LogFil
 		return store.LogFilter{}, false
 	}
 	from, to := parseRange(r)
+	sort, desc, ok := s.journalSort(w, r, "events")
+	if !ok {
+		return store.LogFilter{}, false
+	}
 	return store.LogFilter{
 		From: from, To: to,
 		Group: csvVals(q.Get("group")), Stream: csvVals(q.Get("stream")),
@@ -171,8 +174,42 @@ func (s *Server) logFilter(w http.ResponseWriter, r *http.Request) (store.LogFil
 		HumansOnly: q.Get("humans") == "1",
 		Limit:      clampPage(atoiDef(q.Get("limit"), defaultPageRows)),
 		Offset:     max(atoiDef(q.Get("offset"), 0), 0),
+		Sort:       sort,
+		Desc:       desc,
 		Conds:      conds,
 	}, true
+}
+
+// journalSort reads sort and dir for a journal endpoint on table.
+// A hidden, unknown or not-ready field and a bad dir answer 400 "bad sort".
+func (s *Server) journalSort(w http.ResponseWriter, r *http.Request, table string) (sort string, desc bool, ok bool) {
+	q := r.URL.Query()
+	sort = strings.TrimSpace(q.Get("sort"))
+	if sort != "" {
+		if fieldHidden(s.viewerFrom(r.Context()), sort) {
+			writeErr(w, http.StatusBadRequest, "bad sort")
+			return "", false, false
+		}
+		if s.cfg.Stats == nil {
+			writeErr(w, http.StatusBadRequest, "bad sort")
+			return "", false, false
+		}
+		if _, err := store.SortColumnFor(s.cfg.Stats.Fields(), table, sort); err != nil {
+			writeErr(w, http.StatusBadRequest, "bad sort")
+			return "", false, false
+		}
+	}
+	dir := strings.ToLower(strings.TrimSpace(q.Get("dir")))
+	switch dir {
+	case "", "desc":
+		desc = true
+	case "asc":
+		desc = false
+	default:
+		writeErr(w, http.StatusBadRequest, "bad sort")
+		return "", false, false
+	}
+	return sort, desc, true
 }
 
 const (
@@ -303,6 +340,9 @@ func (s *Server) handleLogsExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", "attachment; filename=logs.csv")
 	cw := csv.NewWriter(w)
 	_ = cw.Write(pickColumns(header, keep))
+	if len(rows) >= exportRows {
+		w.Header().Set("X-Export-Truncated", "1")
+	}
 	for _, x := range rows {
 		_ = cw.Write(pickColumns(logExportRecord(x), keep))
 	}
@@ -316,7 +356,7 @@ func logExportHeader() []string {
 	h := []string{
 		"ts", "group", "stream", "country", "city", "device", "os", "browser", "brand", "bot", "uniq", "ip", "keyword", "out",
 		"region", "lang", "operator", "redirect", "referer", "useragent", "domain", "cid", "asn", "org", "timezone",
-		"page", "os_version", "browser_ver", "se", "via", "campaign_id", "offer_id", "landing_id", "source_id", "network_id",
+		"page", "os_version", "browser_ver", "se", "via", "origin_campaign", "origin_campaign_id", "campaign_id", "offer_id", "landing_id", "source_id", "network_id",
 	}
 	for i := 1; i <= 12; i++ {
 		h = append(h, fmt.Sprintf("sub_id_%d", i))
@@ -333,7 +373,7 @@ func logExportRecord(x store.LogRow) []string {
 		x.OS, x.Browser, x.Brand, x.Bot, strconv.Itoa(int(x.Uniq)), x.IP, x.Keyword, x.Out,
 		x.Region, x.Lang, x.Operator, x.Redirect, x.Referer, x.UserAgent, x.Domain, x.CID,
 		strconv.FormatUint(uint64(x.ASN), 10), x.Org, x.Timezone,
-		x.Page, x.OSVersion, x.BrowserVer, x.SE, x.Via, x.CampaignID, x.OfferID, x.LandingID, x.SourceID, x.NetworkID,
+		x.Page, x.OSVersion, x.BrowserVer, x.SE, x.Via, x.OriginCampaign, x.OriginCampaignID, x.CampaignID, x.OfferID, x.LandingID, x.SourceID, x.NetworkID,
 	}
 	for i := 0; i < 12; i++ {
 		cell := ""
@@ -382,23 +422,6 @@ func (s *Server) handleDeleteLogs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
-}
-
-// handlePostbackLog writes the raw postback intake log.
-// r supplies from, to and limit. Missing stats yields an empty list with 200.
-// A query failure is 500.
-func (s *Server) handlePostbackLog(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeJSON(w, http.StatusOK, []store.PostbackLogRow{})
-		return
-	}
-	from, to := parseRange(r)
-	rows, err := s.cfg.Stats.PostbackLog(r.Context(), from, to, atoiDef(r.URL.Query().Get("limit"), 200))
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "postback log error")
-		return
-	}
-	writeJSON(w, http.StatusOK, rows)
 }
 
 // sliceMeter is the optional report source that also says the visit rows were cut at store.SliceLimit.
@@ -455,91 +478,6 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		rows = []store.SliceRow{}
 	}
 	s.writeStats(w, r, http.StatusOK, reportMeta{Rows: rows, Truncated: truncated})
-}
-
-// handlePostbacks writes one page of the conversion journal, the profit sum and the match count.
-// r supplies the old parameters, repeated f= and offset. Offset below zero becomes zero.
-// total is the profit. count is the number of matching rows. A bad f= is 400.
-// Missing stats is 503. A query failure is 500.
-func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.Stats == nil {
-		writeErr(w, http.StatusServiceUnavailable, "stats unavailable")
-		return
-	}
-	conds, ok := s.condsFrom(w, r, "conversions")
-	q := r.URL.Query()
-	if !ok || !s.rejectHiddenParams(w, r, q, legacyPostbackParams) {
-		return
-	}
-	from, to := parseRange(r)
-	rows, tot, err := s.cfg.Stats.QueryPostbacks(r.Context(), store.PostbackQuery{
-		From: from, To: to, Group: q.Get("group"), Status: q.Get("status"),
-		Stream: q.Get("stream"), Offer: q.Get("offer"), Landing: q.Get("landing"),
-		Source: q.Get("source"), Network: q.Get("network"), CID: q.Get("cid"),
-		Limit:  atoiDef(q.Get("limit"), 200),
-		Offset: max(atoiDef(q.Get("offset"), 0), 0),
-		Conds:  conds,
-	})
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "postbacks error")
-		return
-	}
-	if rows == nil {
-		rows = []store.PostbackRow{}
-	}
-	if err := s.fillCampaignNames(r.Context(), rows); err != nil {
-		writeErr(w, http.StatusInternalServerError, "groups error")
-		return
-	}
-	s.writeStatsExtra(w, r, http.StatusOK, map[string]any{"total": tot.Profit, "count": tot.Count, "rows": rows},
-		map[string][]string{"profit": {"total"}})
-}
-
-// fillCampaignNames sets the campaign name of journal rows that have a campaign id and no name.
-// ctx carries the viewer. rows is changed in place. The name is the stored campaign name,
-// or its id when the name is empty. A campaign the viewer may not see is left unnamed.
-// The groups list is read only when a row needs a name; a missing store changes nothing.
-// It runs before the hidden fields are stripped, so a hidden campaign still drops the name.
-// It returns an error only when the groups list cannot be read.
-func (s *Server) fillCampaignNames(ctx context.Context, rows []store.PostbackRow) error {
-	need := false
-	for _, p := range rows {
-		if p.CampaignID != "" && p.Group == "" {
-			need = true
-			break
-		}
-	}
-	if !need || s.cfg.Groups == nil {
-		return nil
-	}
-	groups, err := s.cfg.Groups.List(ctx)
-	if err != nil {
-		return err
-	}
-	v := s.viewerFrom(ctx)
-	byID := make(map[string]config.Group, len(groups))
-	for _, g := range groups {
-		if _, ok := byID[g.ID]; !ok && v.canSee(resCampaigns, campaignRef(g)) {
-			byID[g.ID] = g
-		}
-	}
-	for i := range rows {
-		if rows[i].CampaignID == "" || rows[i].Group != "" {
-			continue
-		}
-		if g, ok := byID[rows[i].CampaignID]; ok {
-			rows[i].Group = campaignName(g)
-		}
-	}
-	return nil
-}
-
-// campaignName is the display name of a campaign: its name, or its id when the name is empty.
-func campaignName(g config.Group) string {
-	if g.Name != "" {
-		return g.Name
-	}
-	return g.ID
 }
 
 // parseRange reads from/to (RFC3339) from the query; defaults to the last 24 hours.

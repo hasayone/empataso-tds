@@ -213,6 +213,40 @@ func TestNewCIDSignerWithoutPath(t *testing.T) {
 	}
 }
 
+func TestSignVerifyOrigin(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("x", cidKeyBytes), "", discardLog())
+	tok := s.signOrigin("camp-a")
+	gid, ok := s.verifyOrigin(tok)
+	if !ok || gid != "camp-a" {
+		t.Fatalf("verify %q → %q %v", tok, gid, ok)
+	}
+	if _, ok := s.verifyOrigin("camp-a.bad"); ok {
+		t.Fatal("bad sig accepted")
+	}
+}
+
+func TestSignVerifyOriginDottedID(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("y", cidKeyBytes), "", discardLog())
+	gid := "camp.v1"
+	tok := s.signOrigin(gid)
+	got, ok := s.verifyOrigin(tok)
+	if !ok || got != gid {
+		t.Fatalf("verify %q → %q %v", tok, got, ok)
+	}
+}
+
+func TestOriginTokenNotCIDAndCIDNotOrigin(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("z", cidKeyBytes), "", discardLog())
+	tok := s.signOrigin("camp.v1")
+	if s.reusedCID(tok) {
+		t.Fatal("origin token must not pass cid check")
+	}
+	cid := s.newCID()
+	if _, ok := s.verifyOrigin(cid); ok {
+		t.Fatal("cid must not verify as origin")
+	}
+}
+
 func TestOfferStepRejectsImportedCID(t *testing.T) {
 	g := config.NewGroups(&config.Group{
 		ID: "g1", Status: true, Redirect: "stop",

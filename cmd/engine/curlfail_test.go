@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,11 +20,22 @@ import (
 
 // captureIns collects the batches logbuf flushes, so a test can assert on what
 // the event log actually recorded.
-type captureIns struct{ events []logbuf.Event }
+type captureIns struct {
+	mu     sync.Mutex
+	events []logbuf.Event
+}
 
 func (c *captureIns) InsertEvents(_ context.Context, batch []logbuf.Event) error {
+	c.mu.Lock()
 	c.events = append(c.events, batch...)
+	c.mu.Unlock()
 	return nil
+}
+
+func (c *captureIns) snapshotEvents() []logbuf.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]logbuf.Event(nil), c.events...)
 }
 
 // curlEnv builds an engine with a live event buffer and the given trash mode.

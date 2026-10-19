@@ -23,14 +23,14 @@ func TestEventColumnsMatchValues(t *testing.T) {
 			costCols:  mask&4 != 0,
 			extEvents: mask&8 != 0,
 		}
-		cols := eventColumns(c)
+		cols := eventColumns(c, false)
 		vals := eventValues(cols, e)
 		if len(cols) != len(vals) {
 			t.Fatalf("mask %d: %d columns, %d values", mask, len(cols), len(vals))
 		}
 	}
 	c := &CH{netCols: true, clickCols: true, costCols: true, extEvents: true}
-	cols := eventColumns(c)
+	cols := eventColumns(c, false)
 	vals := eventValues(cols, e)
 	at := map[string]int{}
 	for i, name := range cols {
@@ -50,7 +50,7 @@ func TestEventColumnsMatchValues(t *testing.T) {
 // TestLogSelectASNStub checks the missing-net asn placeholder scans into uint32.
 // t is the test handle. It does not touch ClickHouse and does not fail the process.
 func TestLogSelectASNStub(t *testing.T) {
-	sql := logSelect(&CH{}, nil)
+	sql := logSelect(&CH{}, nil, false)
 	if !strings.Contains(sql, "toUInt32(0) AS asn") {
 		t.Fatalf("asn stub: %s", sql)
 	}

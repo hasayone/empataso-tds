@@ -32,6 +32,8 @@ type ConversionInsert struct {
 	Org, Site, AdCampaignID, CreativeID, ExternalID, XRW      string
 	// DeviceModel is written only when the model wave is present.
 	DeviceModel string
+	// OriginGroupID and OriginGroupName are written only when the origin wave is present.
+	OriginGroupID, OriginGroupName string
 }
 
 // conversionColumns returns the INSERT column list for conversions and how
@@ -102,12 +104,19 @@ func conversionValuesExt(row ConversionInsert, click, ext bool) []any {
 // conversionColumnsModel is conversionColumnsExt plus the model-wave columns.
 // click and ext are as in conversionColumnsExt. model appends device_model
 // after every other column. n counts every name. It does not touch the database.
-func conversionColumnsModel(click, ext, model bool) (cols string, n int) {
+func conversionColumnsModel(click, ext, model, origin bool) (cols string, n int) {
 	cols, n = conversionColumnsExt(click, ext)
 	if model {
 		extra := columnsOf("conversions", waveModel)
 		cols += ", " + strings.Join(extra, ", ")
 		n += len(extra)
+	}
+	if origin {
+		extra := columnsOf("conversions", waveOrigin)
+		if len(extra) > 0 {
+			cols += ", " + strings.Join(extra, ", ")
+			n += len(extra)
+		}
 	}
 	return cols, n
 }
@@ -115,14 +124,39 @@ func conversionColumnsModel(click, ext, model bool) (cols string, n int) {
 // conversionValuesModel builds one batch row in conversionColumnsModel order.
 // row supplies the fields and the flags select the same waves as
 // conversionColumnsModel. Returns the values for batch.Append.
-func conversionValuesModel(row ConversionInsert, click, ext, model bool) []any {
+func conversionValuesModel(row ConversionInsert, click, ext, model, origin bool) []any {
 	vals := conversionValuesExt(row, click, ext)
 	if model {
 		for _, col := range columnsOf("conversions", waveModel) {
 			vals = append(vals, conversionExtValue(row, col))
 		}
 	}
+	if origin {
+		for _, col := range columnsOf("conversions", waveOrigin) {
+			vals = append(vals, conversionOriginValue(row, col))
+		}
+	}
 	return vals
+}
+
+// conversionOriginValue returns one origin-wave column from row.
+// col is origin_group_id or origin_group_name. Empty origin fields fall back
+// to the serving campaign. An unknown column returns "".
+func conversionOriginValue(row ConversionInsert, col string) any {
+	switch col {
+	case "origin_group_id":
+		if row.OriginGroupID != "" {
+			return row.OriginGroupID
+		}
+		return row.GroupID
+	case "origin_group_name":
+		if row.OriginGroupName != "" {
+			return row.OriginGroupName
+		}
+		return row.GroupName
+	default:
+		return ""
+	}
 }
 
 // conversionExtValue returns one ext-wave or model-wave value from row.
@@ -205,13 +239,15 @@ func (c *CH) InsertConversions(ctx context.Context, rows []ConversionInsert) err
 	if c.conn == nil {
 		return fmt.Errorf("clickhouse: nil client")
 	}
-	cols, n := conversionColumnsModel(c.clickCols, c.extConv, c.modelConv)
+	c.maybeRefreshOriginWave()
+	originConv := c.originConv.Load()
+	cols, n := conversionColumnsModel(c.clickCols, c.extConv, c.modelConv, originConv)
 	batch, err := c.conn.PrepareBatch(ctx, "INSERT INTO conversions ("+cols+")")
 	if err != nil {
 		return fmt.Errorf("clickhouse: prepare batch: %w", err)
 	}
 	for _, row := range rows {
-		vals := conversionValuesModel(row, c.clickCols, c.extConv, c.modelConv)
+		vals := conversionValuesModel(row, c.clickCols, c.extConv, c.modelConv, originConv)
 		if len(vals) != n {
 			return fmt.Errorf("clickhouse: conversion row has %d values, want %d", len(vals), n)
 		}

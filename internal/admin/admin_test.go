@@ -53,6 +53,14 @@ func (fakeStats) Postbacks(context.Context, time.Time, time.Time, string, int) (
 func (fakeStats) QueryPostbacks(context.Context, store.PostbackQuery) ([]store.PostbackRow, store.PostbackTotals, error) {
 	return []store.PostbackRow{{Profit: 1.5}}, store.PostbackTotals{Profit: 1.5, Count: 1}, nil
 }
+func (fakeStats) EachPostback(_ context.Context, _ store.PostbackQuery, _ int, prepare func(store.PostbackTotals) error, _ func(store.PostbackRow) error) (bool, error) {
+	if prepare != nil {
+		if err := prepare(store.PostbackTotals{}); err != nil {
+			return false, err
+		}
+	}
+	return false, nil
+}
 func (fakeStats) PostbackLog(context.Context, time.Time, time.Time, int) ([]store.PostbackLogRow, error) {
 	return []store.PostbackLogRow{}, nil
 }

@@ -44,6 +44,9 @@ type StatsProvider interface {
 	Logs(ctx context.Context, f store.LogFilter) ([]store.LogRow, int64, error)
 	Postbacks(ctx context.Context, from, to time.Time, group string, limit int) ([]store.PostbackRow, float64, error)
 	QueryPostbacks(ctx context.Context, q store.PostbackQuery) ([]store.PostbackRow, store.PostbackTotals, error)
+	// EachPostback streams conversions matching q in journal order, up to max rows.
+	// prepare runs once with match totals before the first row; nil is skipped.
+	EachPostback(ctx context.Context, q store.PostbackQuery, max int, prepare func(store.PostbackTotals) error, fn func(store.PostbackRow) error) (truncated bool, err error)
 	PostbackLog(ctx context.Context, from, to time.Time, limit int) ([]store.PostbackLogRow, error)
 	Slice(ctx context.Context, from, to time.Time) ([]store.SliceRow, error)
 	// Fields lists journal fields and ready waves without a query.
@@ -391,6 +394,7 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "GET /api/logs/export", http.HandlerFunc(s.handleLogsExport))
 	s.handle(mux, "DELETE /api/logs", http.HandlerFunc(s.handleDeleteLogs))
 	s.handle(mux, "GET /api/postbacks", http.HandlerFunc(s.handlePostbacks))
+	s.handle(mux, "GET /api/postbacks/export", http.HandlerFunc(s.handlePostbacksExport))
 	s.handle(mux, "GET /api/postback-log", http.HandlerFunc(s.handlePostbackLog))
 	s.handle(mux, "GET /api/notices", http.HandlerFunc(s.handleNotices))
 	s.handle(mux, "GET /api/report", http.HandlerFunc(s.handleReport))

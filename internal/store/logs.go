@@ -22,6 +22,8 @@ type LogFilter struct {
 	IP                   string
 	BotsOnly, HumansOnly bool
 	Limit, Offset        int
+	Sort                 string
+	Desc                 bool
 	Conds                []Cond
 }
 
@@ -85,8 +87,10 @@ type LogRow struct {
 	OSVersion    string   `json:"os_version,omitempty"`
 	BrowserVer   string   `json:"browser_ver,omitempty"`
 	SE           string   `json:"se,omitempty"`
-	Via          string   `json:"via,omitempty"`
-	CampaignID   string   `json:"campaign_id,omitempty"`
+	Via                string `json:"via,omitempty"`
+	OriginCampaign     string `json:"origin_campaign,omitempty"`
+	OriginCampaignID   string `json:"origin_campaign_id,omitempty"`
+	CampaignID         string `json:"campaign_id,omitempty"`
 	OfferID      string   `json:"offer_id,omitempty"`
 	LandingID    string   `json:"landing_id,omitempty"`
 	SourceID     string   `json:"source_id,omitempty"`
@@ -106,6 +110,8 @@ type LogRow struct {
 // querying. ErrUnknownField and ErrBadCond come from the extra conditions.
 // A query error is returned as-is.
 func (c *CH) Logs(ctx context.Context, f LogFilter) ([]LogRow, int64, error) {
+	c.maybeRefreshOriginWave()
+	originEvents := c.originEvents.Load()
 	where := "ts >= ? AND ts < ?"
 	args := []any{f.From, f.To}
 	in := func(col string, vals []string) {
@@ -159,8 +165,15 @@ func (c *CH) Logs(ctx context.Context, f LogFilter) ([]LogRow, int64, error) {
 	if c.extEvents {
 		extCols = columnsOf("events", waveExt)
 	}
-	sel := logSelect(c, extCols)
-	q := "SELECT " + sel + " FROM events WHERE " + where + " ORDER BY ts DESC LIMIT ? OFFSET ?"
+	sel := logSelect(c, extCols, originEvents)
+	order, slow, err := c.journalOrderByCH("events", f.Sort, f.Desc)
+	if err != nil {
+		return nil, 0, err
+	}
+	q := "SELECT " + sel + " FROM events WHERE " + where + " ORDER BY " + order + " LIMIT ? OFFSET ?"
+	if slow {
+		q += " SETTINGS max_execution_time=20"
+	}
 	rows, err := c.conn.Query(ctx, q, append(args, limit, f.Offset)...)
 	if err != nil {
 		return nil, 0, err
@@ -169,7 +182,7 @@ func (c *CH) Logs(ctx context.Context, f LogFilter) ([]LogRow, int64, error) {
 	var out []LogRow
 	for rows.Next() {
 		var r LogRow
-		dest, subs := logDest(c, &r, extCols)
+		dest, subs := logDest(c, &r, extCols, originEvents)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, 0, err
 		}
@@ -188,7 +201,7 @@ func (c *CH) Logs(ctx context.Context, f LogFilter) ([]LogRow, int64, error) {
 // asn/org/timezone are stubbed when the net wave is missing; via is selected
 // only with that wave; device_model is selected only with the model wave.
 // It does not fail.
-func logSelect(c *CH, extCols []string) string {
+func logSelect(c *CH, extCols []string, originEvents bool) string {
 	cols := []string{
 		"ts", "group_name", "stream_name", "country", "city", "device", "os", "browser",
 		"brand", "bot", "uniq", "ip", "keyword", "out", "region", "lang", "operator",
@@ -210,6 +223,11 @@ func logSelect(c *CH, extCols []string) string {
 	if c.modelEvents {
 		cols = append(cols, "device_model")
 	}
+	if originEvents {
+		cols = append(cols, columnsOf("events", waveOrigin)...)
+	} else {
+		cols = append(cols, "'' AS origin_group_name", "'' AS origin_group_id")
+	}
 	return strings.Join(cols, ", ")
 }
 
@@ -218,7 +236,7 @@ func logSelect(c *CH, extCols []string) string {
 // extCols is the events ext list for this query, the same slice logSelect
 // used. The subs slice is nil when click columns are off; its elements are
 // the sub_id targets and stay valid until Scan returns. It does not fail.
-func logDest(c *CH, r *LogRow, extCols []string) ([]any, []string) {
+func logDest(c *CH, r *LogRow, extCols []string, originEvents bool) ([]any, []string) {
 	dest := []any{
 		&r.TS, &r.Group, &r.Stream, &r.Country, &r.City, &r.Device, &r.OS, &r.Browser,
 		&r.Brand, &r.Bot, &r.Uniq, &r.IP, &r.Keyword, &r.Out, &r.Region, &r.Lang,
@@ -243,6 +261,12 @@ func logDest(c *CH, r *LogRow, extCols []string) ([]any, []string) {
 	}
 	if c.modelEvents {
 		dest = append(dest, &r.DeviceModel)
+	}
+	if originEvents {
+		dest = append(dest, &r.OriginCampaign, &r.OriginCampaignID)
+	} else {
+		var stubName, stubID string
+		dest = append(dest, &stubName, &stubID)
 	}
 	return dest, subs
 }
@@ -280,7 +304,7 @@ var eventBaseCols = []string{
 // eventColumns is the events INSERT column list for this client.
 // c's wave flags append net, then click (subs before the ids), then cost,
 // then ext, then model, then step. A nil client returns only the base columns.
-func eventColumns(c *CH) []string {
+func eventColumns(c *CH, originEvents bool) []string {
 	cols := append([]string(nil), eventBaseCols...)
 	if c == nil {
 		return cols
@@ -302,6 +326,9 @@ func eventColumns(c *CH) []string {
 	}
 	if c.stepEvents {
 		cols = append(cols, columnsOf("events", waveStep)...)
+	}
+	if originEvents {
+		cols = append(cols, columnsOf("events", waveOrigin)...)
 	}
 	return cols
 }
@@ -430,6 +457,16 @@ func eventWaveValue(e logbuf.Event, col string) any {
 		return e.DeviceModel
 	case "step":
 		return e.Step
+	case "origin_group_id":
+		if e.OriginID != "" {
+			return e.OriginID
+		}
+		return e.GroupID
+	case "origin_group_name":
+		if e.OriginName != "" {
+			return e.OriginName
+		}
+		return e.GroupName
 	default:
 		return ""
 	}
@@ -443,7 +480,9 @@ func (c *CH) InsertEvents(ctx context.Context, events []logbuf.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
-	names := eventColumns(c)
+	c.maybeRefreshOriginWave()
+	originEvents := c.originEvents.Load()
+	names := eventColumns(c, originEvents)
 	batch, err := c.conn.PrepareBatch(ctx, "INSERT INTO events ("+strings.Join(names, ", ")+")")
 	if err != nil {
 		return fmt.Errorf("clickhouse: prepare batch: %w", err)

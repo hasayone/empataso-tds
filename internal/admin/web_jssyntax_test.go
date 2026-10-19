@@ -22,7 +22,7 @@ func TestJSSyntax(t *testing.T) {
 	if err != nil {
 		t.Skip("node not found — skipping JS syntax check")
 	}
-	blocks := scriptRe.FindAllStringSubmatch(string(indexHTML), -1)
+	blocks := scriptRe.FindAllStringSubmatch(spaSource(), -1)
 	if len(blocks) == 0 {
 		t.Fatal("no <script> blocks found in the SPA")
 	}

@@ -34,6 +34,10 @@ var ErrBadCond = errors.New("store: bad condition")
 // table yet, so a breakdown or value list cannot run.
 var ErrFieldNotReady = errors.New("store: field not ready")
 
+// ErrBadSort means the sort field is unknown, forbidden, internal, not on the
+// table, or its wave is not ready yet.
+var ErrBadSort = errors.New("store: bad sort")
+
 const (
 	maxConds   = 20
 	maxCondVal = 200

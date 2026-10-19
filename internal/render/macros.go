@@ -30,6 +30,7 @@ type MacroDeps struct {
 	Domain    string   // [DOMAIN]
 	UserAgent string   // [USERAGENT]
 	CID       string   // [CID] and {subid}
+	Origin    string   // {origin} — signed first-entry campaign token, url-encoded when expanded
 	Pars      []string // [PAR-1]..[PAR-5]
 	SubIDs    [15]string
 	Status    string // {status}
@@ -194,6 +195,8 @@ func (d MacroDeps) curlyAt(s string) (val string, n int) {
 		return url.QueryEscape(d.Payout), end + 1
 	case "offer":
 		return d.Offer, end + 1
+	case "origin":
+		return url.QueryEscape(d.Origin), end + 1
 	default:
 		if idx, ok := subIDIndex(name); ok {
 			return url.QueryEscape(d.subID(idx)), end + 1

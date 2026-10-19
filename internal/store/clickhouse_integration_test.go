@@ -1,43 +1,195 @@
 //go:build integration
 
-// Integration tests for the ClickHouse store. Require a running ClickHouse
-// (make infra-up). Run with:
-//
-//	go test -tags=integration ./internal/store/ -run CH
-//
-// Connection parameters are taken from KUZTDS_CLICKHOUSE_* (default — dev-docker).
+// Integration tests for the ClickHouse store. Each test creates its own
+// kuztds_it_* database, applies migrations/clickhouse/*.sql and drops it on
+// cleanup. Set KUZTDS_CLICKHOUSE_ADDR, KUZTDS_CLICKHOUSE_USER and
+// KUZTDS_CLICKHOUSE_PASSWORD; without them tests are skipped.
 package store
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"math/rand"
 	"os"
+	"path/filepath"
+	"runtime"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/egerkuzma/kuztds/internal/logbuf"
 )
 
-func chFromEnv(t *testing.T) *CH {
+const itDatabasePrefix = "kuztds_it_"
+
+var (
+	chMigrationAll      []string
+	chMigrationNoOrigin []string
+)
+
+func init() {
+	dir := migrationDir()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.HasSuffix(e.Name(), ".sql") {
+			chMigrationAll = append(chMigrationAll, e.Name())
+		}
+	}
+	sort.Strings(chMigrationAll)
+	for _, name := range chMigrationAll {
+		if name != "010_origin.sql" {
+			chMigrationNoOrigin = append(chMigrationNoOrigin, name)
+		}
+	}
+}
+
+func migrationDir() string {
+	_, file, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(file), "..", "..", "migrations", "clickhouse")
+}
+
+func assertITDatabaseName(t *testing.T, db string) {
 	t.Helper()
-	addr := envDef("KUZTDS_CLICKHOUSE_ADDR", "localhost:9000")
-	db := envDef("KUZTDS_CLICKHOUSE_DB", "kuztds")
-	user := envDef("KUZTDS_CLICKHOUSE_USER", "kuztds")
-	pass := envDef("KUZTDS_CLICKHOUSE_PASSWORD", "devpassword")
-	ch, err := OpenCH(addr, db, user, pass)
+	if db == "kuztds" || !strings.HasPrefix(db, itDatabasePrefix) {
+		t.Fatalf("integration tests refuse database %q (want prefix %q, not production kuztds)", db, itDatabasePrefix)
+	}
+}
+
+func chITEnv(t *testing.T) (addr, user, pass string) {
+	t.Helper()
+	addr = os.Getenv("KUZTDS_CLICKHOUSE_ADDR")
+	user = os.Getenv("KUZTDS_CLICKHOUSE_USER")
+	pass = os.Getenv("KUZTDS_CLICKHOUSE_PASSWORD")
+	if addr == "" || user == "" || pass == "" {
+		t.Skip("KUZTDS_CLICKHOUSE_ADDR, KUZTDS_CLICKHOUSE_USER and KUZTDS_CLICKHOUSE_PASSWORD must be set — skipping integration tests")
+	}
+	return addr, user, pass
+}
+
+func newITDatabaseName() string {
+	return fmt.Sprintf("%s%d_%d", itDatabasePrefix, time.Now().UnixNano(), rand.Uint64())
+}
+
+func quoteCHIdent(name string) string {
+	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
+
+func execCHMigrationScript(t *testing.T, conn driverConn, db, script string) {
+	t.Helper()
+	if err := validateMigrationScript(db, script); err != nil {
+		t.Fatal(err)
+	}
+	body := substituteMigrationDB(db, script)
+	for _, stmt := range splitCHMigration(body) {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), schemaTimeout)
+		err := conn.Exec(ctx, stmt)
+		cancel()
+		if err != nil {
+			t.Fatalf("migration on %s failed (%s): %v", db, stmtPrefix(stmt, 120), err)
+		}
+	}
+}
+
+func stmtPrefix(s string, n int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}
+
+type driverConn interface {
+	Exec(context.Context, string, ...any) error
+}
+
+func bootstrapITDatabase(t *testing.T, addr, user, pass string, migrationFiles []string) string {
+	t.Helper()
+	db := newITDatabaseName()
+	assertITDatabaseName(t, db)
+	admin, err := openCHRaw(addr, "default", user, pass)
 	if err != nil {
 		t.Skipf("ClickHouse unavailable (%s): %v — skipping integration tests", addr, err)
 	}
+	ctx, cancel := context.WithTimeout(context.Background(), schemaTimeout)
+	err = admin.conn.Exec(ctx, "CREATE DATABASE "+quoteCHIdent(db))
+	cancel()
+	if err != nil {
+		_ = admin.Close()
+		t.Fatalf("CREATE DATABASE %q failed (ClickHouse user needs CREATE DATABASE): %v", db, err)
+	}
+	t.Cleanup(func() {
+		drop, err := openCHRaw(addr, "default", user, pass)
+		if err != nil {
+			t.Logf("drop database dial: %v", err)
+			return
+		}
+		defer drop.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), schemaTimeout)
+		defer cancel()
+		if err := drop.conn.Exec(ctx, "DROP DATABASE IF EXISTS "+quoteCHIdent(db)+" SYNC"); err != nil {
+			t.Logf("DROP DATABASE %s: %v", db, err)
+		}
+	})
+	_ = admin.Close()
+	itDB, err := openCHRaw(addr, db, user, pass)
+	if err != nil {
+		t.Fatalf("open test database %q: %v", db, err)
+	}
+	migDir := migrationDir()
+	for _, name := range migrationFiles {
+		raw, err := os.ReadFile(filepath.Join(migDir, name))
+		if err != nil {
+			_ = itDB.Close()
+			t.Fatal(err)
+		}
+		execCHMigrationScript(t, itDB.conn, db, string(raw))
+	}
+	_ = itDB.Close()
+	return db
+}
+
+func applyCHMigrationFile(t *testing.T, addr, db, user, pass, file string) {
+	t.Helper()
+	assertITDatabaseName(t, db)
+	ch, err := openCHRaw(addr, db, user, pass)
+	if err != nil {
+		t.Fatalf("open %s for migration %s: %v", db, file, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(migrationDir(), file))
+	if err != nil {
+		_ = ch.Close()
+		t.Fatal(err)
+	}
+	execCHMigrationScript(t, ch.conn, db, string(raw))
+	_ = ch.Close()
+}
+
+func openITClient(t *testing.T, addr, db, user, pass string, applyOriginEnsure bool) *CH {
+	t.Helper()
+	assertITDatabaseName(t, db)
+	ch, err := openCHRaw(addr, db, user, pass)
+	if err != nil {
+		t.Fatalf("open %s: %v", db, err)
+	}
+	ch.ensureSchemaWaves(applyOriginEnsure)
 	t.Cleanup(func() { ch.Close() })
 	return ch
 }
 
-func envDef(k, def string) string {
-	if v := os.Getenv(k); v != "" {
-		return v
-	}
-	return def
+func chFromEnv(t *testing.T) *CH {
+	t.Helper()
+	addr, user, pass := chITEnv(t)
+	db := bootstrapITDatabase(t, addr, user, pass, chMigrationAll)
+	return openITClient(t, addr, db, user, pass, true)
 }
 
 // TestCHRoundTrip inserts events into a unique group, checks aggregates and
