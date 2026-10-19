@@ -290,15 +290,14 @@ func TestDashboardPerfControls(t *testing.T) {
 	mustNot(t, dash, `tr('Bots'),pct(bots,total),'warn'`, "bots KPI without warn tone")
 }
 
-// TestDashboardKPIMoney — money tiles use kpiMoney, tiles are ordered clicks→money→rates, and the grid is one row on desktop.
+// TestDashboardKPIMoney — money tiles use moneyText, tiles are ordered clicks→money→rates, and the grid is one row on desktop.
 func TestDashboardKPIMoney(t *testing.T) {
 	html := string(indexHTML)
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
-	must(t, pure, "function kpiMoney(", "kpiMoney in pure block")
-	must(t, pure, "moneyText(", "kpiMoney delegates to moneyText")
+	mustNot(t, pure, "function kpiMoney(", "the tile helper is moneyText itself")
 	dash := spaBetween(html, "async function dashboard(", "async function loadBreakdown(")
-	must(t, dash, "kpiMoney(", "dashboard tiles use kpiMoney")
-	must(t, dash, "cc.code||'USD'", "empty spend currency shows dollars on KPI tiles")
+	must(t, dash, "profitOf(rev, chart.spend.by, chart.ready)", "the profit tile is revenue less spend in USD")
+	must(t, dash, "moneyText(chart.ready?rev:0,'USD',2)", "the revenue tile is always dollars")
 	mustNot(t, dash, "tr('conv / visits')", "CR tile without conv/visits sub-label")
 	must(t, dash, "class=\"vp", "KPI percent uses vp")
 	must(t, dash, "vp-end", "bots KPI percent at tile end")
@@ -417,6 +416,9 @@ func spaFunctionLine(html, name string) string {
 	}
 	rest := html[i:]
 	end := strings.Index(rest, "\nfunction ")
+	if a := strings.Index(rest, "\nasync function "); a >= 0 && (end < 0 || a < end) {
+		end = a
+	}
 	if end < 0 {
 		end = strings.Index(rest, "\nconst ")
 	}
@@ -588,9 +590,7 @@ func TestClickCostInSpend(t *testing.T) {
 	must(t, html, "'money.nocost':'No cost recorded: set the price parameter on the campaign or add a cost entry'", "english no-cost hint")
 	must(t, html, "'money.nocost':'Расход не записан: задайте параметр цены в кампании или внесите расход'", "russian no-cost hint")
 	must(t, html, "'money.nocost':'Витрату не записано: задайте параметр ціни в кампанії або внесіть витрату'", "ukrainian no-cost hint")
-	must(t, html, "'money.nocur':'no currency'", "english no-currency label")
-	must(t, html, "'money.nocur':'без валюты'", "russian no-currency label")
-	must(t, html, "'money.nocur':'без валюти'", "ukrainian no-currency label")
+	mustNot(t, html, "'money.nocur'", "there is no no-currency label")
 	must(t, html, "'col.rej.hint':'Postbacks with status rejected'", "english rejected hint")
 	must(t, html, "'col.rej.hint':'Постбеки со статусом rejected'", "russian rejected hint")
 	must(t, html, "'col.rej.hint':'Постбеки зі статусом rejected'", "ukrainian rejected hint")
@@ -738,7 +738,12 @@ func TestSpaPureAndConvMarkers(t *testing.T) {
 	must(t, pure, "function nameSortKey(", "nameSortKey in pure block")
 	must(t, pure, "function capFirst(", "capFirst in pure block")
 	rows := spaFunctionLine(html, "campaignRows")
-	must(t, rows, "nameSortKey(campaignLabel", "name sort uses nameSortKey")
+	must(t, pure, "function compareNames(", "compareNames in pure block")
+	must(t, pure, "function compareNameKeys(", "compareNameKeys in pure block")
+	must(t, pure, "function nameKey(", "nameKey in pure block")
+	must(t, rows, "nameKey(campaignLabel(g))", "campaign name keys are computed once per row")
+	must(t, rows, "compareNameKeys(keys.get(a),keys.get(b),dir)", "campaign name sort uses the ready keys")
+	must(t, spaFunctionLine(html, "applySort"), "compareNameKeys(nameKeys.get(a),nameKeys.get(b),dir)", "table name sort uses the ready keys")
 	must(t, spaFunctionLine(html, "when"), "year:'numeric'", "when includes year")
 	conv := spaFunctionLine(html, "convCell")
 	must(t, conv, "tr('conv.lead')", "lead pill label")
@@ -1405,7 +1410,7 @@ func TestDomainsCatalogAndPager(t *testing.T) {
 	mustNot(t, html, "function domainStatus(", "old status cell helper")
 	cell := spaFunctionLine(html, "domainCell")
 	must(t, cell, `<span class="dot ${domainDot(d)}" title="${esc(domainStatusText(d))}"></span> ${esc(d.host)}`, "dot before host")
-	must(t, cell, "if(id==='status') return `<td>${esc(domainStatusText(d))}</td>`", "status text without dot")
+	must(t, cell, "if(id==='status') return `<td>${domainPending(d)?`<span class=\"pill warn\">${esc(tr('dom.pending'))}</span>`:esc(domainStatusText(d))}</td>`", "status text without dot, pending as a pill")
 	ld := spaFunctionLine(html, "linkDomains")
 	must(t, ld, "disabled", "linkDomains hides disabled")
 	must(t, html, "return {id:n.id, host:n.host, group:n.group||'', role:n.role||'both', primary:!!n.primary, disabled:!!n.disabled, created_by:n.created_by||''};", "payload has writable fields only")
@@ -1589,7 +1594,7 @@ func TestFlowFooter(t *testing.T) {
 	html := string(indexHTML)
 	must(t, html, `tr('col.revenue')`, "campaign footer labels revenue")
 	must(t, html, `campaignCostOnly`, "campaign footer reads click and manual cost")
-	mustNot(t, html, `${periodMoney(p.profit)}</b>${tr('profit')}`, "footer no longer calls revenue profit")
+	mustNot(t, html, `${moneyText(p.profit,'USD')}</b>${tr('profit')}`, "footer no longer calls revenue profit")
 }
 
 func TestSPALiterals(t *testing.T) {
