@@ -20,8 +20,14 @@ func TestMapHasNoKtPrefix(t *testing.T) {
 
 func TestManifestSecondMergeKeepsLocal(t *testing.T) {
 	res := MapAll(loadFixture(t))
-	if res.Manifest.Empty() || !res.Manifest.Has(KindGroups, "offer-es") || !res.Manifest.Has(KindOffers, "101") || !res.Manifest.Has(KindLandings, "701") {
+	if _, ok := findGroup(res.Groups, "offer-es"); !ok {
+		t.Fatal("offer-es group missing from map output")
+	}
+	if res.Manifest.Has(KindGroups, "offer-es") || res.Manifest.Empty() || !res.Manifest.Has(KindOffers, "101") || !res.Manifest.Has(KindLandings, "701") {
 		t.Fatalf("%+v", res.Manifest)
+	}
+	for _, g := range res.Groups {
+		res.Manifest.Add(KindGroups, g.ID)
 	}
 	imported := res.Manifest.Imported(KindGroups)
 	merged, losses := Merge(nil, res.Groups, imported)
@@ -109,5 +115,45 @@ func TestManifestAddMerge(t *testing.T) {
 	res = attachManifest(res)
 	if !res.Manifest.Has(KindUsers, "7") {
 		t.Fatalf("%+v", res.Manifest)
+	}
+}
+
+func TestManifestMergeCampaigns(t *testing.T) {
+	base := Manifest{Campaigns: map[string]string{"7": "old", "9": "nine"}}
+	other := Manifest{Campaigns: map[string]string{"7": "new", "10": "ten"}}
+	got := base.Merge(other)
+	if got.Campaigns["7"] != "new" || got.Campaigns["9"] != "nine" || got.Campaigns["10"] != "ten" {
+		t.Fatalf("%+v", got.Campaigns)
+	}
+	var m Manifest
+	m.AddCampaignsIfAbsent(map[string]string{"1": "a", "2": "b"})
+	m.AddCampaignsIfAbsent(map[string]string{"1": "z", "3": "c"})
+	if m.Campaigns["1"] != "a" || m.Campaigns["3"] != "c" {
+		t.Fatalf("%+v", m.Campaigns)
+	}
+	aliases := Manifest{Campaigns: map[string]string{"7": "x", "bad": "y", "0": "z"}}.LogCampaignAliases()
+	if len(aliases) != 1 || aliases[7] != "x" {
+		t.Fatalf("%+v", aliases)
+	}
+	if (Manifest{Campaigns: map[string]string{"1": "a"}}).Empty() {
+		t.Fatal("campaign map is not empty manifest")
+	}
+	got = Manifest{Campaigns: map[string]string{"7": "promo", "9": "nine"}}.Merge(Manifest{Campaigns: map[string]string{"8": "promo"}})
+	if len(got.Campaigns) != 2 || got.Campaigns["8"] != "promo" || got.Campaigns["9"] != "nine" || got.Campaigns["7"] != "" {
+		t.Fatalf("gid reuse keeps other cids %+v", got.Campaigns)
+	}
+	got = Manifest{Campaigns: map[string]string{"7": "promo"}}.Merge(Manifest{Campaigns: map[string]string{"8": "promo"}})
+	if len(got.Campaigns) != 1 || got.Campaigns["8"] != "promo" || got.Campaigns["7"] != "" {
+		t.Fatalf("gid reuse %+v", got.Campaigns)
+	}
+	var backfill Manifest
+	backfill.AddCampaignsIfAbsent(map[string]string{"7": "a"})
+	backfill.AddCampaignsIfAbsent(map[string]string{"8": "a", "9": "b"})
+	if backfill.Campaigns["8"] != "" || backfill.Campaigns["9"] != "b" {
+		t.Fatalf("gid taken %+v", backfill.Campaigns)
+	}
+	dup := Manifest{Campaigns: map[string]string{"7": "promo", "8": "promo"}}
+	if aliases := dup.LogCampaignAliases(); len(aliases) != 0 {
+		t.Fatalf("ambiguous gid aliases %+v", aliases)
 	}
 }

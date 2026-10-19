@@ -46,19 +46,32 @@ func (c *Client) Get(ctx context.Context, path string) ([]byte, error) {
 	return body, nil
 }
 
+// FetchCampaigns читает список кампаний одним GET.
+//
+// Параметры: ctx — отмена.
+// Результат: кампании трекера без потоков и справочников.
+// Ошибки: сеть, статус не 200, тело не JSON-массив.
+func (c *Client) FetchCampaigns(ctx context.Context) ([]Campaign, error) {
+	raw, err := c.Get(ctx, "/admin_api/v1/campaigns")
+	if err != nil {
+		return nil, err
+	}
+	var camps []Campaign
+	if err := json.Unmarshal(raw, &camps); err != nil {
+		return nil, fmt.Errorf("keitaro: campaigns не массив")
+	}
+	return camps, nil
+}
+
 // CountCampaigns считает кампании одним GET.
 //
 // Параметры: ctx — отмена.
 // Результат: длина массива кампаний.
 // Ошибки: сеть, статус не 200, тело не JSON-массив.
 func (c *Client) CountCampaigns(ctx context.Context) (int, error) {
-	raw, err := c.Get(ctx, "/admin_api/v1/campaigns")
+	camps, err := c.FetchCampaigns(ctx)
 	if err != nil {
 		return 0, err
-	}
-	var camps []Campaign
-	if err := json.Unmarshal(raw, &camps); err != nil {
-		return 0, fmt.Errorf("keitaro: campaigns не массив")
 	}
 	return len(camps), nil
 }
@@ -82,12 +95,10 @@ func (c *Client) FetchSnapshot(ctx context.Context) (Snapshot, error) {
 			return Snapshot{}, err
 		}
 	}
-	raw, err := c.Get(ctx, "/admin_api/v1/campaigns")
+	var err error
+	snap.Campaigns, err = c.FetchCampaigns(ctx)
 	if err != nil {
 		return Snapshot{}, err
-	}
-	if err := json.Unmarshal(raw, &snap.Campaigns); err != nil {
-		return Snapshot{}, fmt.Errorf("keitaro: campaigns не массив")
 	}
 	streams, err := c.fetchCampaignStreams(ctx, snap.Campaigns)
 	if err != nil {

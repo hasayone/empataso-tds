@@ -212,7 +212,7 @@ func TestImportGroupsReportsSharesAboveHundred(t *testing.T) {
 			Name: "kt-1", Status: true,
 			Out: ktimport.Output{Offers: []ktimport.ShareRef{{ID: "a", Share: 60}, {ID: "b", Share: 40}}},
 		}},
-	}}, ktimport.Manifest{}, "")
+	}}, ktimport.Manifest{}, "", nil, "")
 	if err != nil || n != 2 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}

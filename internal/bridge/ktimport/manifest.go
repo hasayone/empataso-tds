@@ -3,20 +3,22 @@ package ktimport
 import (
 	"sort"
 	"strconv"
+	"strings"
 )
 
 // Manifest — список записей, которые записал перенос.
 type Manifest struct {
-	Host     string   `json:"host,omitempty"`
-	Groups   []string `json:"groups,omitempty"`
-	Offers   []string `json:"offers,omitempty"`
-	Landings []string `json:"landings,omitempty"`
-	Networks []string `json:"networks,omitempty"`
-	Sources  []string `json:"sources,omitempty"`
-	Domains  []string `json:"domains,omitempty"`
-	Lists    []string `json:"lists,omitempty"`
-	Pages    []string `json:"pages,omitempty"`
-	Users    []string `json:"users,omitempty"`
+	Host      string            `json:"host,omitempty"`
+	Groups    []string          `json:"groups,omitempty"`
+	Campaigns map[string]string `json:"campaigns,omitempty"`
+	Offers    []string          `json:"offers,omitempty"`
+	Landings  []string          `json:"landings,omitempty"`
+	Networks  []string          `json:"networks,omitempty"`
+	Sources   []string          `json:"sources,omitempty"`
+	Domains   []string          `json:"domains,omitempty"`
+	Lists     []string          `json:"lists,omitempty"`
+	Pages     []string          `json:"pages,omitempty"`
+	Users     []string          `json:"users,omitempty"`
 }
 
 const (
@@ -90,7 +92,7 @@ func (m Manifest) Imported(kind string) func(id string) bool {
 // Ошибки: нет.
 func (m Manifest) Empty() bool {
 	return m.Host == "" &&
-		len(m.Groups) == 0 && len(m.Offers) == 0 && len(m.Landings) == 0 &&
+		len(m.Groups) == 0 && len(m.Campaigns) == 0 && len(m.Offers) == 0 && len(m.Landings) == 0 &&
 		len(m.Networks) == 0 && len(m.Sources) == 0 && len(m.Domains) == 0 &&
 		len(m.Lists) == 0 && len(m.Pages) == 0 && len(m.Users) == 0
 }
@@ -112,6 +114,106 @@ func (m Manifest) Merge(other Manifest) Manifest {
 	} {
 		out.Add(kind, m.list(kind)...)
 		out.Add(kind, other.list(kind)...)
+	}
+	out.Campaigns = mergeCampaignMaps(m.Campaigns, other.Campaigns)
+	return out
+}
+
+// mergeCampaignMaps объединяет две карты кампаний.
+//
+// Параметры: base — уже записанные пары; newer — пары текущего прогона.
+// Результат: копия base с наложением newer; при том же campaign_id побеждает newer.
+// Каждый id группы встречается не больше одного раза: новая пара снимает старые campaign_id с тем же gid.
+// Ошибки: нет.
+func mergeCampaignMaps(base, newer map[string]string) map[string]string {
+	if len(base) == 0 && len(newer) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	for k, v := range base {
+		if k != "" && v != "" {
+			out[k] = v
+		}
+	}
+	for cid, gid := range newer {
+		if cid == "" || gid == "" {
+			continue
+		}
+		for k, v := range out {
+			if v == gid {
+				delete(out, k)
+			}
+		}
+		out[cid] = gid
+	}
+	return out
+}
+
+// AddCampaignsIfAbsent дописывает пары campaign_id → group_id без замены существующих.
+//
+// Параметры: add — новые пары Keitaro campaign_id → id группы kuztds.
+// Результат: получатель дополнен только отсутствующими campaign_id, если gid ещё не занят другим campaign_id.
+// Ошибки: нет.
+func (m *Manifest) AddCampaignsIfAbsent(add map[string]string) {
+	if m == nil || len(add) == 0 {
+		return
+	}
+	if m.Campaigns == nil {
+		m.Campaigns = map[string]string{}
+	}
+	for cid, gid := range add {
+		if cid == "" || gid == "" {
+			continue
+		}
+		if _, ok := m.Campaigns[cid]; ok {
+			continue
+		}
+		if campaignGIDTaken(m.Campaigns, gid) {
+			continue
+		}
+		m.Campaigns[cid] = gid
+	}
+}
+
+// campaignGIDTaken сообщает, что gid уже привязан к какому-то campaign_id.
+//
+// Параметры: campaigns — карта манифеста; gid — id группы kuztds.
+// Результат: true, если другой campaign_id уже указывает на этот gid.
+// Ошибки: нет.
+func campaignGIDTaken(campaigns map[string]string, gid string) bool {
+	for _, v := range campaigns {
+		if v == gid {
+			return true
+		}
+	}
+	return false
+}
+
+// LogCampaignAliases переводит карту манифеста в id кампании → id группы.
+//
+// Параметры: m — манифест с Campaigns.
+// Результат: ключ — числовой id кампании Keitaro. Пары с нечисловым campaign_id пропускаются.
+// Если один gid указан несколькими campaign_id, такие пары не попадают в результат.
+// Ошибки: нет.
+func (m Manifest) LogCampaignAliases() map[int]string {
+	if len(m.Campaigns) == 0 {
+		return nil
+	}
+	gidUses := map[string]int{}
+	for _, gid := range m.Campaigns {
+		gid = strings.TrimSpace(gid)
+		if gid != "" {
+			gidUses[gid]++
+		}
+	}
+	out := make(map[int]string, len(m.Campaigns))
+	for cid, gid := range m.Campaigns {
+		gid = strings.TrimSpace(gid)
+		n, err := strconv.Atoi(strings.TrimSpace(cid))
+		if err != nil || n <= 0 || gid == "" || gidUses[gid] > 1 {
+			continue
+		}
+		out[n] = gid
 	}
 	return out
 }
@@ -168,9 +270,6 @@ func (m Manifest) list(kind string) []string {
 // Ошибки: нет.
 func attachManifest(res Result) Result {
 	var m Manifest
-	for _, g := range res.Groups {
-		m.Add(KindGroups, g.ID)
-	}
 	for _, item := range res.Offers {
 		m.Add(KindOffers, item.ID)
 	}

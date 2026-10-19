@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/egerkuzma/kuztds/internal/config"
@@ -60,10 +61,17 @@ func TestKeitaroGroupName(t *testing.T) {
 		t.Fatalf("conversion id=%s name=%s row=%+v", convID, convName, got)
 	}
 
+	tally := &unknownCampaignTally{}
+	placeUnknown := logPlace{names: names, aliases: place.aliases, unknown: tally}
 	missClick := ktimport.ClickRow{Campaign: "Unknown", CampaignID: 9}
-	ev = clickEvent(missClick, "tracker.example", place)
-	if ev.GroupID != "9" || ev.GroupName != "Home" {
-		t.Fatalf("id click %+v", ev)
+	ev = clickEvent(missClick, "tracker.example", placeUnknown)
+	if ev.GroupID != "9" || ev.GroupName != "Home" || tally.rows != 1 {
+		t.Fatalf("id click %+v tally %+v", ev, tally)
+	}
+	var losses []ktimport.Loss
+	noteUnknownCampaignLoss(&losses, tally)
+	if len(losses) != 1 || losses[0].Ref != "log_campaign" || !strings.Contains(losses[0].Detail, "9") {
+		t.Fatalf("losses %+v", losses)
 	}
 	missConv := ktimport.ConversionRow{Campaign: "Unknown", CampaignID: 9}
 	convID, convName = keitaroGroup(missConv.Campaign, int(missConv.CampaignID), place)
@@ -74,8 +82,8 @@ func TestKeitaroGroupName(t *testing.T) {
 
 	plain := logPlace{names: names}
 	ev = clickEvent(ktimport.ClickRow{Campaign: "Elsewhere", CampaignID: 3}, "tracker.example", plain)
-	if ev.GroupID != "3" || ev.GroupName != "Elsewhere" {
-		t.Fatalf("fallback click %+v", ev)
+	if ev.GroupID != "" || ev.GroupName != "Elsewhere" {
+		t.Fatalf("missing alias map click %+v", ev)
 	}
 
 	aliased := logPlace{names: names, aliases: map[int]string{4: "from-snapshot"}}
@@ -93,15 +101,28 @@ func TestKeitaroGroupName(t *testing.T) {
 	}
 }
 
+func TestNoteUnknownCampaignLossTruncates(t *testing.T) {
+	tally := &unknownCampaignTally{}
+	for i := 1; i <= 25; i++ {
+		tally.note(i)
+	}
+	var losses []ktimport.Loss
+	noteUnknownCampaignLoss(&losses, tally)
+	if len(losses) != 1 || losses[0].Ref != "log_campaign" || !strings.Contains(losses[0].Detail, "25 rows") || !strings.Contains(losses[0].Detail, "и ещё 5") {
+		t.Fatalf("loss %+v", losses)
+	}
+}
+
 func TestConversionInsertExtended(t *testing.T) {
 	raw := []byte(`{"campaign_id":4,"campaign":"Home","status":"Sale","original_status":"Sale","previous_status":" Lead ","tid":99,"language":"pl","os":"Android","os_version":"14","browser":"Chrome","browser_version":"120","device_model":"Pixel","referrer":"https://ex","search_engine":"Google","keyword":"shoes","isp":"Orange","ad_campaign_id":"77","external_id":55,"creative_id":"cr","ip":"8.8.8.8","region":"MZ","user_agent":"UA","click_datetime":"2026-01-02 03:04:05","postback_datetime":"2026-01-02 04:00:00"}`)
 	var row ktimport.ConversionRow
 	if err := json.Unmarshal(raw, &row); err != nil {
 		t.Fatal(err)
 	}
-	id, name := keitaroGroup(row.Campaign, int(row.CampaignID), logPlace{})
-	got := conversionInsert(row, "tracker.example", logPlace{}, nil)
-	if got.GroupID != id || got.GroupName != name || id != "4" {
+	place := logPlace{aliases: map[int]string{4: "home"}}
+	id, name := keitaroGroup(row.Campaign, int(row.CampaignID), place)
+	got := conversionInsert(row, "tracker.example", place, nil)
+	if got.GroupID != id || got.GroupName != name || id != "home" {
 		t.Fatalf("group %s %s row %+v", id, name, got)
 	}
 	if got.OriginalStatus != "Sale" || got.PrevStatus != "lead" || got.Status != "sale" {

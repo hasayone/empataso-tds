@@ -311,6 +311,9 @@ func TestMergeAssignNums(t *testing.T) {
 func TestMergeReplacesImported(t *testing.T) {
 	res := MapAll(loadFixture(t))
 	incoming := res.Groups
+	for _, g := range res.Groups {
+		res.Manifest.Add(KindGroups, g.ID)
+	}
 	imported := res.Manifest.Imported(KindGroups)
 	merged, losses := Merge(nil, incoming, imported)
 	if len(losses) != 0 {

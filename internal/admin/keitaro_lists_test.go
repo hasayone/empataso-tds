@@ -83,7 +83,7 @@ func TestImportGroupsDropsInvalidOnly(t *testing.T) {
 		{ID: "long", Name: "kt: Long", Folder: strings.Repeat("я", 65)},
 		{ID: "", Name: "kt: empty"},
 		{ID: "local", Name: "kt: Hijack"},
-	}, ktimport.Manifest{}, "")
+	}, ktimport.Manifest{}, "", nil, "")
 	if err != nil || n != 1 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
@@ -421,7 +421,7 @@ func TestImportGroupsExtractsGlobalS2S(t *testing.T) {
 	incoming, shared := globalImportGroups()
 	id := config.PostbackID(shared.Signature())
 	s, dir := importS2SServer(t, true)
-	n, _, err := s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "")
+	n, _, err := s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "", nil, "")
 	if err != nil || n != 3 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}
@@ -450,7 +450,7 @@ func TestImportGroupsExtractsGlobalS2S(t *testing.T) {
 
 	incoming, _ = globalImportGroups()
 	s, dir = importS2SServer(t, false)
-	n, _, err = s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "")
+	n, _, err = s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "", nil, "")
 	if err != nil || n != 3 {
 		t.Fatalf("nil store n=%d err=%v", n, err)
 	}

@@ -254,13 +254,14 @@ func (s *Server) handleKeitaroJob(w http.ResponseWriter, r *http.Request) {
 // fail is empty until a stage stops the run, and then it is safe to show.
 // creds is the tracker origin and key copied when the job started.
 type importState struct {
-	counts map[string]int
-	losses []ktimport.Loss
-	prev   ktimport.Manifest
-	res    ktimport.Result
-	owner  string
-	fail   string
-	creds  ktCreds
+	counts        map[string]int
+	losses        []ktimport.Loss
+	prev          ktimport.Manifest
+	res           ktimport.Result
+	owner         string
+	fail          string
+	creds         ktCreds
+	snapCampaigns []ktimport.Campaign
 }
 
 // runStage runs one save stage and publishes the job when that stage succeeds.
@@ -311,13 +312,13 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 			return
 		}
 	}
-	var aliases map[int]string
 	if req.catalog() {
 		snap, err := s.keitaroClient(creds).FetchSnapshot(ctx)
 		if err != nil {
 			st.fail = sanitize(err, creds.Key)
 			return
 		}
+		st.snapCampaigns = snap.Campaigns
 		st.prev, err = s.loadManifest()
 		if err != nil {
 			st.fail = "save error"
@@ -327,9 +328,6 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 		sel.Known = st.prev.Has
 		st.res = ktimport.Map(snap, sel)
 		st.losses = append(st.losses, st.res.Losses...)
-		if req.Campaigns {
-			aliases = campaignAliases(snap)
-		}
 		s.ktJob.setStage("catalogs")
 		if err := s.importCatalogs(ctx, req, st); err != nil {
 			st.fail = "save error"
@@ -351,7 +349,7 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 			}) && s.runStage(st, "pages", "pages", func() (int, []ktimport.Loss, error) {
 				return s.importPages(&st.res)
 			}) && s.runStage(st, "groups", "groups", func() (int, []ktimport.Loss, error) {
-				return s.importGroups(ctx, st.res.Groups, st.prev, owner)
+				return s.importGroups(ctx, st.res.Groups, st.prev, owner, &st.res.Manifest, st.creds.host())
 			})
 			if !ok {
 				return
@@ -366,12 +364,37 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 		}
 	}
 	if req.Conversions || req.Clicks {
+		if s.cfg.Warehouse == nil || creds.host() == "" {
+			li := logImport{from: from, to: to, host: creds.host(), creds: creds}
+			if err := s.importLogs(ctx, req, li, st.counts, &st.losses); err != nil {
+				st.fail = sanitize(err, creds.Key)
+			}
+			return
+		}
+		if st.prev.Empty() && !req.catalog() {
+			var err error
+			st.prev, err = s.loadManifest()
+			if err != nil {
+				st.fail = "save error"
+				return
+			}
+		}
+		manifest := st.prev.Merge(st.res.Manifest)
 		groups, err := s.listKeitaroGroups(ctx)
 		if err != nil {
 			st.fail = "groups unavailable"
 			return
 		}
-		li := logImport{from: from, to: to, host: creds.host(), creds: creds, aliases: aliases, groups: groups}
+		resolved, backfill, err := s.resolveLogCampaignMap(ctx, creds, manifest, st.snapCampaigns, groups)
+		if err != nil {
+			st.fail = sanitize(err, creds.Key)
+			return
+		}
+		if err := s.saveCampaignMapBackfill(manifest, backfill, creds.host()); err != nil {
+			st.fail = "save error"
+			return
+		}
+		li := logImport{from: from, to: to, host: creds.host(), creds: creds, aliases: resolved, groups: groups}
 		if err := s.importLogs(ctx, req, li, st.counts, &st.losses); err != nil {
 			st.fail = sanitize(err, creds.Key)
 			return

@@ -58,6 +58,25 @@ func TestRedirectMappings(t *testing.T) {
 	}
 }
 
+func TestGroupIDs(t *testing.T) {
+	camps := []Campaign{
+		{ID: 10, Alias: ""},
+		{ID: 11, Alias: "dup"},
+		{ID: 12, Alias: "dup"},
+		{ID: 5, Alias: "promo"},
+	}
+	got := GroupIDs(camps)
+	if got[10] != "missing-alias-10" || got[5] != "promo" || got[11] != "dup" || got[12] != "dup-dup-12" {
+		t.Fatalf("map %#v", got)
+	}
+	res := Map(Snapshot{Campaigns: camps}, Selection{Campaigns: true})
+	for _, g := range res.Groups {
+		if GroupIDs(camps)[g.Num] != g.ID {
+			t.Fatalf("campaign %d group %q map %q", g.Num, g.ID, GroupIDs(camps)[g.Num])
+		}
+	}
+}
+
 func TestEmptyStreamName(t *testing.T) {
 	var losses []Loss
 	s := (&mapCtx{losses: &losses}).buildStream(KStream{ID: 37520, State: "active", ActionType: "blank"}, false)

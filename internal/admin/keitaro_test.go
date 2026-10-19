@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/kuztds/internal/store"
 	"github.com/kuztds/bridge/ktimport"
 )
 
@@ -226,13 +227,19 @@ func TestKeitaroImportLogs(t *testing.T) {
 		case "/admin_api/v1/clicks/log":
 			fetchOrder = append(fetchOrder, "clicks")
 			_, _ = w.Write([]byte(`{"rows":[{"sub_id":"abc","datetime":"2026-10-03 01:02:03","campaign_id":7,"campaign":"Camp","stream":"s","country_code":"US","city":"Austin","region":"TX","language":"en","os":"iOS","os_version":"17","browser":"Safari","browser_version":"17.0","device_type":"Mobile","device_model":"iPhone","operator":"Vodacom","is_bot":true,"is_unique_campaign":true,"ip":"1.2.3.4","referrer":"https://ref.example/path","search_engine":"Google","user_agent":"ua","keyword":"shoes","offer_id":4,"landing_id":2,"affiliate_network_id":9,"ts_id":3,"cost":1.5,"sub_id_1":"z"}],"total":1}`))
+		case "/admin_api/v1/campaigns":
+			_, _ = w.Write([]byte(`[{"id":7,"alias":"camp-seven","name":"Camp","state":"active"}]`))
 		default:
 			_, _ = w.Write([]byte(`[]`))
 		}
 	}))
 	t.Cleanup(fake.Close)
 	sink := &fakeSink{}
-	admin := newKeitaroAdmin(t, fake.URL, key, nil, sink, nil)
+	groups := &memGroups{list: []config.Group{{ID: "camp-seven", Name: "Camp", Num: 7}}}
+	s, admin := newKeitaroServers(t, fake.URL, key, groups, sink, nil)
+	if err := s.cfg.Manifest.Save(ktimport.Manifest{Groups: []string{"camp-seven"}}); err != nil {
+		t.Fatal(err)
+	}
 	raw := postKeitaroImport(t, admin, map[string]any{
 		"conversions": true, "clicks": true,
 		"from": "2026-10-01", "to": "2026-10-15",
@@ -267,7 +274,7 @@ func TestKeitaroImportLogs(t *testing.T) {
 		row.OfferID != "4" || row.LandingID != "2" || row.NetworkID != "9" ||
 		row.SourceID != "3" || row.Subs[0] != "x" ||
 		row.IP != "1.2.3.4" || row.UserAgent != "ua" || row.OS != "iOS" || row.Browser != "Safari" ||
-		row.GroupID != "7" {
+		row.GroupID != "camp-seven" {
 		t.Fatalf("conversion %+v", row)
 	}
 	wantClick := time.Date(2026, 10, 3, 1, 2, 3, 0, time.UTC)
@@ -278,7 +285,7 @@ func TestKeitaroImportLogs(t *testing.T) {
 		t.Fatalf("clicks %d", len(sink.events))
 	}
 	ev := sink.events[0]
-	if ev.GroupID != "7" || ev.GroupName != "Camp" || ev.Device != "phone" || ev.Uniq != 1 || ev.Bot != "bot" ||
+	if ev.GroupID != "camp-seven" || ev.GroupName != "Camp" || ev.Device != "phone" || ev.Uniq != 1 || ev.Bot != "bot" ||
 		ev.OfferID != "4" || ev.LandingID != "2" || ev.CostCents != 150 ||
 		ev.Country != "US" || ev.Operator != "Vodacom" || ev.SE != "Google" ||
 		ev.NetworkID != "9" || ev.SourceID != "3" ||
@@ -313,6 +320,54 @@ func TestKeitaroClickUsesCampaignAlias(t *testing.T) {
 	if len(sink.events) != 1 || sink.events[0].GroupID != "promo" {
 		t.Fatalf("events %+v", sink.events)
 	}
+}
+
+func TestKeitaroImportLogsErrorKeepsUnknownLoss(t *testing.T) {
+	key := "fixture-key"
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/admin_api/v1/campaigns":
+			_, _ = w.Write([]byte(`[{"id":7,"alias":"known","name":"Known","state":"active"}]`))
+		case "/admin_api/v1/clicks/log":
+			_, _ = w.Write([]byte(`{"rows":[{"sub_id":"x","datetime":"2026-10-01 00:00:00","campaign_id":999,"campaign":"Ghost"}],"total":1}`))
+		case "/admin_api/v1/conversions/log":
+			_, _ = w.Write([]byte(`{"rows":[{"sub_id":"x","status":"Lead","postback_datetime":"2026-10-01 01:00:00","campaign_id":999}],"total":1}`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	t.Cleanup(fake.Close)
+	sink := &convFailSink{fakeSink: fakeSink{}}
+	groups := &memGroups{list: []config.Group{{ID: "known", Name: "Known"}}}
+	s, admin := newKeitaroServers(t, fake.URL, key, groups, sink, nil)
+	if err := s.cfg.Manifest.Save(ktimport.Manifest{Groups: []string{"known"}, Campaigns: map[string]string{"7": "known"}}); err != nil {
+		t.Fatal(err)
+	}
+	postKeitaroImport(t, admin, map[string]any{
+		"clicks": true, "conversions": true, "from": "2026-10-01", "to": "2026-10-01",
+	})
+	job := waitKeitaroJob(t, admin)
+	if job.Stage != "failed" || job.Error == "" {
+		t.Fatalf("job %+v", job)
+	}
+	var lossFound bool
+	for _, l := range job.Losses {
+		if l.Ref == "log_campaign" && strings.Contains(l.Detail, "999") {
+			lossFound = true
+		}
+	}
+	if !lossFound {
+		t.Fatalf("losses %+v", job.Losses)
+	}
+}
+
+type convFailSink struct {
+	fakeSink
+}
+
+func (c *convFailSink) InsertConversions(context.Context, []store.ConversionInsert) error {
+	return fmt.Errorf("warehouse down")
 }
 
 func TestKeitaroWarehouseMissing(t *testing.T) {
@@ -358,6 +413,207 @@ func TestKeitaroLogMapping(t *testing.T) {
 		got.LandingID != "2" || got.NetworkID != "4" || got.SourceID != "8" ||
 		got.OfferID != "1" || got.Status != "sale" {
 		t.Fatalf("conversion %+v", got)
+	}
+}
+
+func TestKeitaroImportLogsReusedGroupAlias(t *testing.T) {
+	key := "fixture-key"
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/admin_api/v1/campaigns":
+			_, _ = w.Write([]byte(`[{"id":8,"alias":"promo","name":"Promo","state":"active"}]`))
+		case "/admin_api/v1/campaigns/8/streams":
+			_, _ = w.Write([]byte(`[{"id":1,"type":"regular","name":"main","state":"active","action_type":"blank"}]`))
+		case "/admin_api/v1/clicks/log":
+			_, _ = w.Write([]byte(`{"rows":[{"sub_id":"old","datetime":"2026-10-01 00:00:00","campaign_id":7,"campaign":"Old"}],"total":1}`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	t.Cleanup(fake.Close)
+	sink := &fakeSink{}
+	groups := &memGroups{list: []config.Group{{ID: "promo", Name: "Promo", Num: 8}}}
+	s, admin := newKeitaroServers(t, fake.URL, key, groups, sink, nil)
+	if err := s.cfg.Manifest.Save(ktimport.Manifest{
+		Groups:    []string{"promo"},
+		Campaigns: map[string]string{"7": "promo"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	postKeitaroImport(t, admin, map[string]any{
+		"campaigns": true, "clicks": true, "from": "2026-10-01", "to": "2026-10-01",
+	})
+	job := waitKeitaroJob(t, admin)
+	if job.Stage != "done" || len(sink.events) != 1 || sink.events[0].GroupID != "7" {
+		t.Fatalf("job %+v event %+v", job, sink.events)
+	}
+	var lossFound bool
+	for _, l := range job.Losses {
+		if l.Ref == "log_campaign" && strings.Contains(l.Detail, "7") {
+			lossFound = true
+		}
+	}
+	if !lossFound {
+		t.Fatalf("losses %+v", job.Losses)
+	}
+	loaded, err := s.cfg.Manifest.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Campaigns["7"] != "" || loaded.Campaigns["8"] != "promo" {
+		t.Fatalf("manifest campaigns %+v", loaded.Campaigns)
+	}
+}
+
+func TestKeitaroImportLogsStaleManifestPair(t *testing.T) {
+	key := "fixture-key"
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/admin_api/v1/campaigns":
+			_, _ = w.Write([]byte(`[{"id":7,"alias":"camp","name":"Camp","state":"active"}]`))
+		case "/admin_api/v1/clicks/log":
+			_, _ = w.Write([]byte(`{"rows":[{"sub_id":"x","datetime":"2026-10-01 00:00:00","campaign_id":7,"campaign":"Camp"}],"total":1}`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	t.Cleanup(fake.Close)
+	sink := &fakeSink{}
+	s, admin := newKeitaroServers(t, fake.URL, key, &memGroups{}, sink, nil)
+	if err := s.cfg.Manifest.Save(ktimport.Manifest{Campaigns: map[string]string{"7": "gone"}}); err != nil {
+		t.Fatal(err)
+	}
+	postKeitaroImport(t, admin, map[string]any{"clicks": true, "from": "2026-10-01", "to": "2026-10-01"})
+	job := waitKeitaroJob(t, admin)
+	if job.Stage != "done" || len(sink.events) != 1 || sink.events[0].GroupID != "7" {
+		t.Fatalf("job %+v event %+v", job, sink.events)
+	}
+	var lossFound bool
+	for _, l := range job.Losses {
+		if l.Ref == "log_campaign" && strings.Contains(l.Detail, "7") {
+			lossFound = true
+		}
+	}
+	if !lossFound {
+		t.Fatalf("losses %+v", job.Losses)
+	}
+}
+
+func TestKeitaroImportLogsCampaignsUnavailable(t *testing.T) {
+	key := "fixture-key"
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/admin_api/v1/campaigns" {
+			http.Error(w, "no", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/admin_api/v1/clicks/log" {
+			_, _ = w.Write([]byte(`{"rows":[{"sub_id":"x","datetime":"2026-10-01 00:00:00","campaign_id":1}],"total":1}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(fake.Close)
+	sink := &fakeSink{}
+	admin := newKeitaroAdmin(t, fake.URL, key, nil, sink, nil)
+	postKeitaroImport(t, admin, map[string]any{"clicks": true, "from": "2026-10-01", "to": "2026-10-01"})
+	job := waitKeitaroJob(t, admin)
+	if job.Stage != "failed" || job.Error == "" || len(sink.events) != 0 {
+		t.Fatalf("job %+v events %d", job, len(sink.events))
+	}
+}
+
+func TestKeitaroImportLogsUnknownCampaign(t *testing.T) {
+	key := "fixture-key"
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/admin_api/v1/campaigns":
+			_, _ = w.Write([]byte(`[{"id":7,"alias":"known","name":"Known","state":"active"}]`))
+		case "/admin_api/v1/clicks/log":
+			_, _ = w.Write([]byte(`{"rows":[{"sub_id":"x","datetime":"2026-10-01 00:00:00","campaign_id":999,"campaign":"Ghost"}],"total":1}`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	t.Cleanup(fake.Close)
+	sink := &fakeSink{}
+	groups := &memGroups{list: []config.Group{{ID: "known", Name: "Known"}}}
+	s, admin := newKeitaroServers(t, fake.URL, key, groups, sink, nil)
+	if err := s.cfg.Manifest.Save(ktimport.Manifest{Groups: []string{"known"}, Campaigns: map[string]string{"7": "known"}}); err != nil {
+		t.Fatal(err)
+	}
+	postKeitaroImport(t, admin, map[string]any{"clicks": true, "from": "2026-10-01", "to": "2026-10-01"})
+	job := waitKeitaroJob(t, admin)
+	if job.Stage != "done" || len(sink.events) != 1 || sink.events[0].GroupID != "999" {
+		t.Fatalf("job %+v event %+v", job, sink.events)
+	}
+	var lossFound bool
+	for _, l := range job.Losses {
+		if l.Ref == "log_campaign" && strings.Contains(l.Detail, "999") {
+			lossFound = true
+		}
+	}
+	if !lossFound {
+		t.Fatalf("losses %+v", job.Losses)
+	}
+}
+
+func TestKeitaroLogGroupIDsMatchImport(t *testing.T) {
+	key := "fixture-key"
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/admin_api/v1/campaigns":
+			_, _ = w.Write([]byte(`[
+				{"id":10,"alias":"","name":"Empty","state":"active"},
+				{"id":11,"alias":"dup","name":"One","state":"active"},
+				{"id":12,"alias":"dup","name":"Two","state":"active"}
+			]`))
+		case "/admin_api/v1/campaigns/10/streams", "/admin_api/v1/campaigns/11/streams", "/admin_api/v1/campaigns/12/streams":
+			_, _ = w.Write([]byte(`[{"id":1,"type":"regular","name":"main","state":"active","action_type":"blank"}]`))
+		case "/admin_api/v1/clicks/log":
+			_, _ = w.Write([]byte(`{"rows":[
+				{"sub_id":"a","datetime":"2026-10-01 00:00:00","campaign_id":10,"campaign":"Empty"},
+				{"sub_id":"b","datetime":"2026-10-01 00:00:01","campaign_id":12,"campaign":"Two"}
+			],"total":2}`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	t.Cleanup(fake.Close)
+	sink := &fakeSink{}
+	groups := &memGroups{}
+	admin := newKeitaroAdmin(t, fake.URL, key, groups, sink, nil)
+	postKeitaroImport(t, admin, map[string]any{
+		"campaigns": true, "clicks": true, "from": "2026-10-01", "to": "2026-10-01",
+	})
+	job := waitKeitaroJob(t, admin)
+	if job.Stage != "done" {
+		t.Fatalf("job %+v", job)
+	}
+	byNum := map[int]string{}
+	for _, g := range groups.list {
+		byNum[g.Num] = g.ID
+	}
+	for _, ev := range sink.events {
+		var num int
+		switch ev.CID {
+		case "a":
+			num = 10
+		case "b":
+			num = 12
+		default:
+			t.Fatalf("unexpected cid %q", ev.CID)
+		}
+		if byNum[num] != ev.GroupID {
+			t.Fatalf("campaign %d store %q log %q", num, byNum[num], ev.GroupID)
+		}
+	}
+	if byNum[10] != "missing-alias-10" || byNum[12] != "dup-dup-12" {
+		t.Fatalf("groups %+v", byNum)
 	}
 }
 

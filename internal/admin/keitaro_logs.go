@@ -2,7 +2,9 @@ package admin
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -75,8 +77,8 @@ func parseKeitaroTime(raw string) time.Time {
 // logImport is the window and campaign map for one log import.
 // from and to are tracker range strings. host is the tracker hostname.
 // creds is the origin and key of the run that started this import.
-// aliases maps a campaign id to its group id and is nil when campaigns
-// were not fetched in this request. groups is the groups-store snapshot
+// aliases maps a tracker campaign id to the kuztds group id for this run.
+// groups is the groups-store snapshot
 // used to build the name index once for this import.
 type logImport struct {
 	from    string
@@ -88,11 +90,28 @@ type logImport struct {
 }
 
 // logPlace is the group identity available while mapping one log import.
-// aliases maps a campaign id to a snapshot alias. names maps a group id to
-// the group name from the groups store. Either map may be nil.
+// aliases maps a tracker campaign id to the kuztds group id. names maps a
+// group id to the group name from the groups store. unknown collects tracker
+// campaign ids that were missing from aliases when rows were mapped.
 type logPlace struct {
 	aliases map[int]string
 	names   map[string]string
+	unknown *unknownCampaignTally
+}
+
+// unknownCampaignTally counts log rows tied to campaigns absent from the tracker list.
+type unknownCampaignTally struct {
+	ids  map[int]struct{}
+	rows int
+}
+
+// note registers one row mapped with a numeric fallback for campaignID.
+func (u *unknownCampaignTally) note(campaignID int) {
+	if u.ids == nil {
+		u.ids = map[int]struct{}{}
+	}
+	u.ids[campaignID] = struct{}{}
+	u.rows++
 }
 
 // logSpan is the tracker window and mapping context for one log fetch.
@@ -111,7 +130,9 @@ type logSpan struct {
 // The name index is built once from that snapshot and shared by both logs.
 // counts and losses are updated. It returns a tracker or warehouse error.
 func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImport, counts map[string]int, losses *[]ktimport.Loss) error {
-	place := logPlace{aliases: li.aliases, names: groupNames(li.groups)}
+	tally := &unknownCampaignTally{}
+	place := logPlace{aliases: li.aliases, names: groupNames(li.groups), unknown: tally}
+	defer noteUnknownCampaignLoss(losses, tally)
 	client := s.keitaroClient(li.creds)
 	var clickIdx keitaroClickFillIndex
 	if req.Clicks {
@@ -144,6 +165,49 @@ func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImp
 		}
 	}
 	return nil
+}
+
+const maxLogCampaignIDsInLoss = 20
+
+// noteUnknownCampaignLoss records rows that kept a numeric tracker campaign id.
+// losses receives one aggregated line when tally is non-empty.
+// At most maxLogCampaignIDsInLoss ids appear in the detail text.
+func noteUnknownCampaignLoss(losses *[]ktimport.Loss, tally *unknownCampaignTally) {
+	if tally == nil || tally.rows == 0 || len(tally.ids) == 0 {
+		return
+	}
+	ids := make([]int, 0, len(tally.ids))
+	for id := range tally.ids {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+	*losses = append(*losses, ktimport.Loss{
+		Kind:   "approximated",
+		Ref:    "log_campaign",
+		Detail: fmt.Sprintf("%d rows, unknown campaign_id: %s", tally.rows, formatLogCampaignIDs(ids)),
+	})
+}
+
+// formatLogCampaignIDs formats tracker campaign ids for a loss line.
+// ids are sorted. When there are more than maxLogCampaignIDsInLoss entries,
+// the tail is replaced with «и ещё N».
+func formatLogCampaignIDs(ids []int) string {
+	if len(ids) == 0 {
+		return ""
+	}
+	limit := maxLogCampaignIDsInLoss
+	if len(ids) <= limit {
+		parts := make([]string, len(ids))
+		for i, id := range ids {
+			parts[i] = strconv.Itoa(id)
+		}
+		return strings.Join(parts, ",")
+	}
+	parts := make([]string, limit)
+	for i := 0; i < limit; i++ {
+		parts[i] = strconv.Itoa(ids[i])
+	}
+	return strings.Join(parts, ",") + fmt.Sprintf(" и ещё %d", len(ids)-limit)
 }
 
 // noteExtendedColumns records that the tracker rejected the wide log columns.
@@ -399,21 +463,27 @@ func groupNames(groups []config.Group) map[string]string {
 
 // keitaroGroup resolves the group id and name for one log row.
 // campaign is the tracker campaign name. campaignID is the tracker id.
-// place carries the snapshot aliases and the id-to-name index.
-// The id is the snapshot alias when it is present, otherwise the decimal campaign id
-// when campaignID is positive, or empty when there is no alias and campaignID is not positive.
-// The name is the stored group name for that id, otherwise the campaign name.
+// place carries the campaign map, the id-to-name index and optional unknown tally.
+// The id comes from place.aliases. A positive campaign id missing from that map
+// keeps the decimal tracker id and is noted in place.unknown when set.
+// campaignID zero yields an empty id. The name is the stored group name for the
+// resolved id, otherwise the campaign name from the log row.
 // It does not return an error.
 func keitaroGroup(campaign string, campaignID int, place logPlace) (string, string) {
 	id := ""
-	if place.aliases != nil {
-		id = strings.TrimSpace(place.aliases[campaignID])
-	}
-	if id == "" && campaignID > 0 {
-		id = strconv.Itoa(campaignID)
+	if campaignID > 0 && place.aliases != nil {
+		var ok bool
+		id, ok = place.aliases[campaignID]
+		id = strings.TrimSpace(id)
+		if !ok {
+			id = strconv.Itoa(campaignID)
+			if place.unknown != nil {
+				place.unknown.note(campaignID)
+			}
+		}
 	}
 	name := campaign
-	if place.names != nil {
+	if place.names != nil && id != "" {
 		if stored := strings.TrimSpace(place.names[id]); stored != "" {
 			name = stored
 		}
@@ -451,19 +521,4 @@ func keitaroDevice(raw string) string {
 		return "tablet"
 	}
 	return s
-}
-
-// campaignAliases maps a campaign id to its alias.
-// snap is a snapshot fetched in this request. Empty aliases are omitted.
-// It does not return an error.
-func campaignAliases(snap ktimport.Snapshot) map[int]string {
-	out := map[int]string{}
-	for _, camp := range snap.Campaigns {
-		alias := strings.TrimSpace(camp.Alias)
-		if alias == "" {
-			continue
-		}
-		out[int(camp.ID)] = alias
-	}
-	return out
 }

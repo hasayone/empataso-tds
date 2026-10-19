@@ -103,6 +103,15 @@ func campaignAction(payload string, aliases map[int]string) (string, string, str
 	return "group", aliases[n], ""
 }
 
+// GroupIDs возвращает id группы для каждой кампании так же, как mapCampaigns.
+//
+// Параметры: camps — кампании снимка или списка GET /admin_api/v1/campaigns.
+// Результат: id кампании Keitaro → id группы kuztds.
+// Ошибки: нет.
+func GroupIDs(camps []Campaign) map[int]string {
+	return campaignAliases(camps)
+}
+
 // campaignAliases повторяет id группы, который назначает mapCampaign.
 //
 // Параметры: camps — кампании снимка.
