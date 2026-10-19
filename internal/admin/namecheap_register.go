@@ -29,12 +29,15 @@ const (
 // ncRegisterReq is the body of POST /api/registrars/namecheap/register.
 // MaxPrice is the total for Years that the operator saw; the server refuses a higher price.
 // Nameservers, when set, are applied after the purchase.
+// Reconcile asks only to settle a pending row: Years and MaxPrice are then ignored and the
+// request never buys.
 type ncRegisterReq struct {
 	Domain      string   `json:"domain"`
 	Years       int      `json:"years"`
 	MaxPrice    float64  `json:"max_price"`
 	Group       string   `json:"group"`
 	Nameservers []string `json:"nameservers"`
+	Reconcile   bool     `json:"reconcile"`
 }
 
 // writeNC writes an error body with extra fields next to the message.
@@ -56,6 +59,9 @@ func writeNC(w http.ResponseWriter, code int, msg string, extra map[string]any) 
 // asks getInfo whether the account owns the name: a confirmed name is finished, a
 // refused purchase removes the pending row, and an unknown outcome keeps it pending.
 // A repeated request for a pending name only reconciles and never buys again.
+// A request with "reconcile": true only settles a pending row: it needs no years or
+// max_price, answers 404 when the domain is unknown and 409 "not pending" when the row is
+// not a pending Namecheap purchase, and never reaches the purchase path.
 //
 // The price is the exact term price read from Namecheap just before the purchase; a term
 // with no price row is refused. The pending row is disabled until the purchase is confirmed.
@@ -79,6 +85,7 @@ func (s *Server) handleNamecheapRegister(w http.ResponseWriter, r *http.Request)
 	case !validNCDomain(domain):
 		writeErr(w, http.StatusBadRequest, "invalid domain")
 		return
+	case req.Reconcile:
 	case req.Years < namecheapMinYears || req.Years > namecheapMaxYears:
 		writeErr(w, http.StatusBadRequest, "years must be 1 to 10")
 		return
@@ -120,6 +127,10 @@ func (s *Server) handleNamecheapRegister(w http.ResponseWriter, r *http.Request)
 	switch {
 	case found && existing.Registrar == namecheapRegistrar && existing.RegistrarStatus == registrarPending:
 		p.reconcile(existing)
+	case req.Reconcile && !found:
+		writeErr(w, http.StatusNotFound, "not found")
+	case req.Reconcile:
+		writeErr(w, http.StatusConflict, "not pending")
 	case found:
 		writeErr(w, http.StatusConflict, "already exists")
 	default:
