@@ -1,26 +1,25 @@
 // Package seplist keeps keyword→output separation lists in memory.
 //
-// A separation file is a "<name>.dat" of "keyword;out" lines. Matching is a
-// case-insensitive substring test of the keyword against the visitor's query,
-// so the scan stays linear — but it used to be a linear scan over a file read
-// from disk on every request that carried a keyword.
+// A separation file is a "<name>.dat" file of "keyword;out" lines. Matching is
+// a case-insensitive substring test of each keyword against the visitor's query,
+// walking the in-memory list in order until the first hit; complexity is O(n) in
+// the number of keywords.
 //
-// Measured worst case — the query matches nothing, so the whole list is walked
-// either way (BenchmarkOldSeparationOut vs BenchmarkLookup):
+// Set loads "<name>.dat" files from a directory, reloads when they change, and
+// swaps updated slices atomically. Watch runs Reload on a ticker. Lookup folds
+// the query once and avoids allocation on the hot path when lists are loaded.
 //
-//	         before                    after
-//	 1000     62 µs   71 KB   8 allocs      8 µs   0 B   0 allocs
-//	10000    514 µs  721 KB   8 allocs     87 µs   0 B   0 allocs
-//	50000   2949 µs 3769 KB   8 allocs    432 µs   0 B   0 allocs
+// Measured worst case for Lookup (BenchmarkLookup): the query matches nothing,
+// so the whole list is walked:
 //
-// At a thousand requests a second the old 50k case is three cores spent
-// re-reading one unchanged file and nearly four gigabytes of garbage a second.
+//	 1000     8 µs   0 B   0 allocs
+//	10000    87 µs   0 B   0 allocs
+//	50000   432 µs   0 B   0 allocs
 //
-// What is fixed is the reading, not the searching. The match is a substring
-// test, not equality, so a map would not help and the scan is still O(n) in the
-// number of keywords: 50k keywords at a thousand rps is still about half a core.
-// If that ever matters, the answer is a substring index (Aho-Corasick), not a
-// different cache — and it should be driven by a measurement, not by this note.
+// Because matching is substring containment, not equality, a hash map does not
+// replace the linear scan. At very large lists and high request rates, a
+// multi-pattern substring index (for example Aho–Corasick) is the scaling lever
+// and should be chosen only after measurement.
 package seplist
 
 import (
