@@ -13,7 +13,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
+
+	"github.com/egerkuzma/kuztds/internal/atomicfile"
 )
 
 const (
@@ -32,10 +33,6 @@ const (
 	cidKeyFile = "cid.key"
 	// cidKeyBytes is the size of a generated signing key and the least size of KUZTDS_CID_KEY.
 	cidKeyBytes = 32
-	// cidKeyReadTries and cidKeyReadWait bound the wait for a key file that
-	// another process has just created and is still writing.
-	cidKeyReadTries = 5
-	cidKeyReadWait  = 20 * time.Millisecond
 )
 
 // cidSigner issues and verifies click ids: nine random base36 characters and
@@ -104,8 +101,8 @@ func cidKeyPath(override, groupsFile string) string {
 //
 // env is the KUZTDS_CID_KEY value: it must be at least 32 bytes, a shorter one
 // is ignored with a warning. path is the key file (see cidKeyPath). A missing
-// file is created exclusively with mode 0600 and a fresh random key; a file that
-// appears meanwhile is read instead. Any other read error, and a file that is
+// file is published atomically with mode 0600 and a fresh random key (never visible
+// half-written); a file that appears meanwhile is read instead. Any other read error, and a file that is
 // empty or not 32 hex-encoded bytes, leaves the file alone and gives a
 // process-lifetime key with a warning: ids issued before a restart then fail
 // verification, which only makes the offer step issue a new id. log may be nil.
@@ -148,23 +145,13 @@ func loadCIDKey(path string) ([]byte, error) {
 	if _, err := rand.Read(fresh); err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-	if errors.Is(err, fs.ErrExist) {
-		return readCIDKeyWaiting(path)
-	}
+	created, err := atomicfile.CreateIfAbsent(path, []byte(hex.EncodeToString(fresh)+"\n"), 0o600)
 	if err != nil {
 		return nil, err
 	}
-	_, werr := f.WriteString(hex.EncodeToString(fresh) + "\n")
-	if werr == nil {
-		werr = f.Sync()
-	}
-	if cerr := f.Close(); werr == nil {
-		werr = cerr
-	}
-	if werr != nil {
-		_ = os.Remove(path)
-		return nil, werr
+	if !created {
+		// Another process published the file first; it is complete by construction.
+		return readCIDKey(path)
 	}
 	return fresh, nil
 }
@@ -185,20 +172,6 @@ func readCIDKey(path string) ([]byte, error) {
 		return nil, errors.New("key file does not hold 32 bytes")
 	}
 	return key, nil
-}
-
-// readCIDKeyWaiting reads a key file another process has just created, trying
-// a few times while it is still being written.
-func readCIDKeyWaiting(path string) ([]byte, error) {
-	var key []byte
-	var err error
-	for i := 0; i < cidKeyReadTries; i++ {
-		if key, err = readCIDKey(path); err == nil {
-			return key, nil
-		}
-		time.Sleep(cidKeyReadWait)
-	}
-	return nil, err
 }
 
 // signKey returns the signing key of s, or the process key when s is nil.

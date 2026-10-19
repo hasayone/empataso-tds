@@ -177,23 +177,16 @@ func (s *landingServer) serveAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 // resolveEntry picks the file name for landingID.
-// The catalog Entry wins. Otherwise index.php is used when it exists,
-// and index.html after that. ok is false when nothing can be named.
+// The choice is config.LandingEntry over the catalog Entry; ok is false when nothing
+// can be named.
 func (s *landingServer) resolveEntry(landingID string) (string, bool) {
+	entry := ""
 	if s.lookup != nil {
 		if item, ok := s.lookup(landingID); ok {
-			if name, good := safeRel(strings.TrimSpace(item.Entry)); good {
-				return name, true
-			}
+			entry = item.Entry
 		}
 	}
-	if s.fileExists(landingID, "index.php") {
-		return "index.php", true
-	}
-	if s.fileExists(landingID, "index.html") {
-		return "index.html", true
-	}
-	return "", false
+	return config.LandingEntry(entry, func(rel string) bool { return s.fileExists(landingID, rel) })
 }
 
 // fileExists reports whether rel is a regular file inside the landing.
@@ -273,45 +266,12 @@ func landingAssetPath(p string) (id, rel string, ok bool) {
 
 // safeLandingID reports whether id can be a landing directory name.
 // Empty, hidden, absolute and slash-containing ids are rejected.
-func safeLandingID(id string) bool {
-	if id == "" || len(id) > 128 || strings.HasPrefix(id, ".") {
-		return false
-	}
-	for i := 0; i < len(id); i++ {
-		c := id[i]
-		switch {
-		case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
-		case c == '_' || c == '-' || c == '.':
-		default:
-			return false
-		}
-	}
-	return true
-}
+func safeLandingID(id string) bool { return config.SafeLandingID(id) }
 
 // safeRel cleans rel and rejects escapes and hidden segments.
 // rel is a URL path inside one landing. The result is the cleaned relative
 // path. ok is false for "..", an absolute path, or a segment starting with '.'.
-func safeRel(rel string) (string, bool) {
-	if rel == "" || strings.Contains(rel, "\\") || strings.ContainsRune(rel, 0) {
-		return "", false
-	}
-	for _, seg := range strings.Split(rel, "/") {
-		if seg == "." || seg == ".." || strings.HasPrefix(seg, ".") {
-			return "", false
-		}
-	}
-	cleaned := path.Clean(rel)
-	if cleaned == "." || cleaned == ".." || path.IsAbs(cleaned) || strings.HasPrefix(cleaned, "/") || strings.Contains(cleaned, "..") {
-		return "", false
-	}
-	for _, seg := range strings.Split(cleaned, "/") {
-		if seg == "" || strings.HasPrefix(seg, ".") {
-			return "", false
-		}
-	}
-	return cleaned, true
-}
+func safeRel(rel string) (string, bool) { return config.SafeLandingRel(rel) }
 
 // phpEntry reports whether name must be executed by PHP.
 // A .php suffix and a name with no extension are both proxied.

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/store"
 )
 
@@ -52,8 +53,8 @@ func parsePostback(q url.Values) postbackIn {
 	in := postbackIn{
 		cid:      firstNonEmpty(q, "subid", "clickid", "cid"),
 		status:   strings.ToLower(rawStatus),
-		original: clipBytes(rawStatus, postbackOriginalMax),
-		tid:      clipBytes(strings.TrimSpace(q.Get("tid")), postbackTIDMax),
+		original: config.LimitBytes(rawStatus, postbackOriginalMax),
+		tid:      config.LimitBytes(strings.TrimSpace(q.Get("tid")), postbackTIDMax),
 		ok:       true,
 	}
 	for _, k := range []string{"payout", "profit", "sum"} {

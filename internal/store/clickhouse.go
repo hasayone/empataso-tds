@@ -35,6 +35,10 @@ type CH struct {
 	// Writes and the journal name the column only after ensureSchema has seen
 	// it, otherwise the whole insert or select fails.
 	modelEvents, modelConv bool
+	// stepEvents: events carry step (0 first step, 1 the /offer step). Writes
+	// name the column, and campaign unique counts filter on it, only after
+	// ensureSchema has seen it.
+	stepEvents bool
 	// readyFlags is table → wave → columns present. The bools above are
 	// derived from it.
 	readyFlags map[string]map[wave]bool
@@ -83,7 +87,7 @@ type StatsSummary struct {
 // Summary computes event aggregates over a period. The query is parameterized (no
 // concatenation) — unlike the string-built SQL in the old admin panel.
 func (c *CH) Summary(ctx context.Context, from, to time.Time) (StatsSummary, error) {
-	return c.summary(ctx, from, to, "", nil)
+	return c.summary(ctx, from, to, "", nil, nil)
 }
 
 // SummaryFiltered returns Summary when conds is empty. Otherwise it counts only
@@ -100,21 +104,15 @@ func (c *CH) SummaryFiltered(ctx context.Context, from, to time.Time, conds []Co
 	if skip {
 		return StatsSummary{}, nil
 	}
-	return c.summary(ctx, from, to, where, args)
+	return c.summary(ctx, from, to, where, args, conds)
 }
 
 // summary aggregates events in [from, to). where is empty or from buildWhere.
-func (c *CH) summary(ctx context.Context, from, to time.Time, where string, wargs []any) (StatsSummary, error) {
+// conds are the conditions where came from; they pick the unique aggregate.
+func (c *CH) summary(ctx context.Context, from, to time.Time, where string, wargs []any, conds []Cond) (StatsSummary, error) {
 	var total, uniq, bots uint64
 	qargs := append([]any{from, to}, wargs...)
-	row := c.conn.QueryRow(ctx,
-		`SELECT count() AS total,
-		        countIf(uniq = 1) AS uniques,
-		        countIf(bot != '' AND bot != '-') AS bots
-		 FROM events
-		 WHERE ts >= ? AND ts < ?`+where,
-		qargs...,
-	)
+	row := c.conn.QueryRow(ctx, summarySQL(c.uniqCount(conds), where), qargs...)
 	if err := row.Scan(&total, &uniq, &bots); err != nil {
 		return StatsSummary{}, err
 	}
@@ -159,7 +157,7 @@ func (c *CH) TimeSeriesFiltered(ctx context.Context, from, to time.Time, stepSec
 	if skip {
 		return []TSPoint{}, nil
 	}
-	return c.timeSeries(ctx, window{from: from, to: to, where: where, args: args}, stepSec)
+	return c.timeSeries(ctx, window{from: from, to: to, where: where, args: args, conds: conds}, stepSec)
 }
 
 // timeSeries aggregates clicks and confirmed conversions per bucket.
@@ -171,13 +169,7 @@ func (c *CH) timeSeries(ctx context.Context, w window, stepSec int) ([]TSPoint, 
 	stepSec = capSeriesStep(w.from, w.to, stepSec)
 	hits := map[int64]seriesHit{}
 	evArgs := append([]any{stepSec, w.from, w.to}, w.args...)
-	rows, err := c.conn.Query(ctx,
-		`SELECT toStartOfInterval(ts, INTERVAL ? second) AS t,
-		        count() AS total, countIf(uniq=1) AS uniques,
-		        countIf(bot!='' AND bot!='-') AS bots
-		 FROM events WHERE ts >= ? AND ts < ?`+w.where+`
-		 GROUP BY t ORDER BY t`,
-		evArgs...)
+	rows, err := c.conn.Query(ctx, seriesSQL(c.uniqCount(w.conds), w.where), evArgs...)
 	if err != nil {
 		return nil, err
 	}
@@ -292,7 +284,7 @@ func (c *CH) PerformanceFiltered(ctx context.Context, from, to time.Time, conds 
 	if skip {
 		return []PerfRow{}, nil
 	}
-	return c.performance(ctx, window{from: from, to: to, where: where, args: args})
+	return c.performance(ctx, window{from: from, to: to, where: where, args: args, conds: conds})
 }
 
 // performance merges event aggregates with postbacks and conversions.
@@ -301,13 +293,7 @@ func (c *CH) PerformanceFiltered(ctx context.Context, from, to time.Time, conds 
 // An error from a query is returned as-is.
 func (c *CH) performance(ctx context.Context, w window) ([]PerfRow, error) {
 	evArgs := append([]any{w.from, w.to}, w.args...)
-	rows, err := c.conn.Query(ctx,
-		`SELECT group_id, group_name, stream_name,
-		        count() AS hits, countIf(uniq = 1) AS uniques,
-		        countIf(bot != '' AND bot != '-') AS bots
-		 FROM events WHERE ts >= ? AND ts < ?`+w.where+`
-		 GROUP BY group_id, group_name, stream_name
-		 ORDER BY hits DESC LIMIT 2000`, evArgs...)
+	rows, err := c.conn.Query(ctx, performanceSQL(c.uniqCount(w.conds), w.where), evArgs...)
 	if err != nil {
 		return nil, err
 	}

@@ -9,6 +9,10 @@ import (
 // CostCents is the sum of click prices in CostCur for this bucket.
 // One combination of group, stream, offer and network can appear as several
 // rows when cost_cur differs. The caller sums Hits itself.
+// Uniq counts every row's own uniques: the landing and the offer step each have
+// theirs, and they are not summed. UniqFirst counts only the first step, so the
+// sum of UniqFirst over a campaign's rows is the campaign's uniques; without the
+// step column it equals Uniq.
 // Without cost columns both cost fields stay zero and empty.
 type ClickFact struct {
 	OfferID   string `json:"offer_id"`
@@ -18,6 +22,7 @@ type ClickFact struct {
 	Stream    string `json:"stream"`
 	Hits      int64  `json:"hits"`
 	Uniq      int64  `json:"uniq"`
+	UniqFirst int64  `json:"uniq_first"`
 	CostCents int64  `json:"cost_cents"`
 	CostCur   string `json:"cost_cur"`
 }
@@ -110,7 +115,7 @@ func (c *CH) clickFactsBundle(ctx context.Context, from, to time.Time, where str
 // each currency is its own row and CostCents is the sum for that currency.
 // It returns an error when the query or a scan fails.
 func (c *CH) clickFacts(ctx context.Context, from, to time.Time, where string, wargs []any) ([]ClickFact, error) {
-	q := clickFactsSQL(c.clickCols, c.costCols, where)
+	q := clickFactsSQL(c.clickCols, c.costCols, c.stepEvents, where)
 	qargs := append([]any{from, to}, wargs...)
 	rows, err := c.conn.Query(ctx, q, qargs...)
 	if err != nil {
@@ -132,21 +137,26 @@ func (c *CH) clickFacts(ctx context.Context, from, to time.Time, where string, w
 }
 
 // clickFactsSQL is the click breakdown for one window.
-// clickCols adds offer_id, landing_id and network_id. costCols adds cost_cur and
-// sum(cost_cents) and groups by cost_cur, so one key can return several rows.
-// where is empty or an events filter that starts with " AND ", placed after
-// "ts < ?". Placeholders are from, to, then that filter. It does not fail.
-func clickFactsSQL(clickCols, costCols bool, where string) string {
+// clickCols adds offer_id, landing_id and network_id. costCols adds the currency
+// and sum(cost_cents) and groups by the currency, so one key can return several
+// rows. The currency of a row without a price is empty: the offer step keeps the
+// currency label of the landing price at zero cents, and that label must not
+// open a currency of its own. step says events carry the step column: the third
+// count is then the uniques of the first step only (uniqExpr), else it equals
+// the second. where is empty or an events filter that starts with " AND ",
+// placed after "ts < ?". Placeholders are from, to, then that filter. It does
+// not fail.
+func clickFactsSQL(clickCols, costCols, step bool, where string) string {
 	cols := "group_id, stream_name"
 	group := "group_id, stream_name"
 	if clickCols {
 		cols += ", offer_id, landing_id, network_id"
 		group += ", offer_id, landing_id, network_id"
 	}
-	cols += ", count(), countIf(uniq = 1)"
+	cols += ", count(), countIf(uniq = 1), " + uniqExpr(step)
 	if costCols {
-		cols += ", cost_cur, sum(cost_cents)"
-		group += ", cost_cur"
+		cols += ", if(cost_cents > 0, cost_cur, '') AS fact_cur, sum(cost_cents)"
+		group += ", fact_cur"
 	}
 	return "SELECT " + cols + " FROM events WHERE ts >= ? AND ts < ?" + where + " GROUP BY " + group
 }
@@ -158,26 +168,26 @@ type factRow interface {
 
 // scanClickFact reads one clickFacts row.
 // rows is the open result. clickCols and costCols select the column set
-// from clickFactsSQL. Hits and Uniq come from the counts. Without costCols
-// the cost fields stay zero and empty. A scan error is returned.
+// from clickFactsSQL. Hits, Uniq and UniqFirst come from the counts. Without
+// costCols the cost fields stay zero and empty. A scan error is returned.
 func scanClickFact(rows factRow, clickCols, costCols bool) (ClickFact, error) {
 	var row ClickFact
-	var hits, uniq uint64
+	var hits, uniq, first uint64
 	var err error
 	switch {
 	case clickCols && costCols:
-		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.LandingID, &row.NetworkID, &hits, &uniq, &row.CostCur, &row.CostCents)
+		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.LandingID, &row.NetworkID, &hits, &uniq, &first, &row.CostCur, &row.CostCents)
 	case clickCols:
-		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.LandingID, &row.NetworkID, &hits, &uniq)
+		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.LandingID, &row.NetworkID, &hits, &uniq, &first)
 	case costCols:
-		err = rows.Scan(&row.GroupID, &row.Stream, &hits, &uniq, &row.CostCur, &row.CostCents)
+		err = rows.Scan(&row.GroupID, &row.Stream, &hits, &uniq, &first, &row.CostCur, &row.CostCents)
 	default:
-		err = rows.Scan(&row.GroupID, &row.Stream, &hits, &uniq)
+		err = rows.Scan(&row.GroupID, &row.Stream, &hits, &uniq, &first)
 	}
 	if err != nil {
 		return ClickFact{}, err
 	}
-	row.Hits, row.Uniq = int64(hits), int64(uniq)
+	row.Hits, row.Uniq, row.UniqFirst = int64(hits), int64(uniq), int64(first)
 	return row, nil
 }
 
@@ -252,14 +262,16 @@ func (c *CH) groupStatus(ctx context.Context, from, to time.Time, where string, 
 
 // bucketWhere is the filter for one manual spend window.
 // includeBots keeps rows whose bot column is filled. hasCost drops clicks
-// that already carry a price, so the window does not pay them again.
+// that already carry a price, so the window does not pay them again. A click
+// carries a price when it has cents or a currency label: the offer step keeps
+// the label of the landing price at zero cents, and it is skipped as well.
 func bucketWhere(includeBots, hasCost bool) string {
 	where := "group_id = ? AND ts >= ? AND ts < ?"
 	if !includeBots {
 		where += " AND (bot = '' OR bot = '-')"
 	}
 	if hasCost {
-		where += " AND cost_cents = 0"
+		where += " AND cost_cents = 0 AND cost_cur = ''"
 	}
 	return where
 }
@@ -274,13 +286,7 @@ func (c *CH) ClickBuckets(ctx context.Context, groupID string, from, to time.Tim
 		return nil, nil
 	}
 	where := bucketWhere(includeBots, c.costCols)
-	q := `SELECT stream_name, count(), countIf(uniq = 1) FROM events WHERE ` + where + ` GROUP BY stream_name`
-	if c.clickCols {
-		q = `SELECT stream_name, offer_id, network_id, count(), countIf(uniq = 1)
-			FROM events WHERE ` + where + `
-			GROUP BY stream_name, offer_id, network_id`
-	}
-	rows, err := c.conn.Query(ctx, q, groupID, from, to)
+	rows, err := c.conn.Query(ctx, bucketsSQL(c.clickCols, c.uniqCount(nil), where), groupID, from, to)
 	if err != nil {
 		return nil, err
 	}

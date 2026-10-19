@@ -1,8 +1,9 @@
 package config
 
 // maxSubIDValueLen is the longest value of a Sub ID rule, in bytes. The engine
-// reads at most this much of a sub id from the query.
-const maxSubIDValueLen = 255
+// reads at most this much of a sub id from the query (ApplySource), so a rule
+// value and the sub id it is compared with share one limit.
+const maxSubIDValueLen = MaxValueBytes
 
 // SubIDRulesError checks the Sub ID rules of r.
 //

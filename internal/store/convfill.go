@@ -6,6 +6,7 @@ import "time"
 type ClickFill struct {
 	TS         time.Time
 	GroupID    string
+	GroupName  string
 	IP         string
 	UserAgent  string
 	OS         string
@@ -46,6 +47,9 @@ func cidsNeedingClickFill(rows []PostbackRow) []string {
 }
 
 // postbackNeedsClickFill reports whether row is missing data that a click may supply.
+// p is the journal row. It returns true when the campaign id, click time,
+// IP, user agent, OS, browser or landing is empty. An empty campaign name alone does not
+// start a lookup: the name is taken from the answer of a lookup that the other fields start.
 func postbackNeedsClickFill(p PostbackRow) bool {
 	if clickTSEmpty(p.ClickTS) {
 		return true
@@ -84,9 +88,14 @@ func fillFromClicks(rows []PostbackRow, clicks map[string]ClickFill) {
 }
 
 // fillPostbackFromClick writes snap into p without overwriting non-empty values.
+// p is the journal row. snap is the click found by cid. The campaign id fills
+// CampaignID and the campaign name fills Group. It does not return an error.
 func fillPostbackFromClick(p *PostbackRow, snap ClickFill) {
 	if p.CampaignID == "" && snap.GroupID != "" {
 		p.CampaignID = snap.GroupID
+	}
+	if p.Group == "" && snap.GroupName != "" {
+		p.Group = snap.GroupName
 	}
 	if clickTSEmpty(p.ClickTS) && !snap.TS.IsZero() {
 		p.ClickTS = snap.TS
@@ -146,6 +155,9 @@ func FillConversionInsert(row *ConversionInsert, snap *ClickFill) {
 	}
 	if row.GroupID == "" && snap.GroupID != "" {
 		row.GroupID = snap.GroupID
+	}
+	if row.GroupName == "" && snap.GroupName != "" {
+		row.GroupName = snap.GroupName
 	}
 	if clickTSEmpty(row.ClickTS) && !snap.TS.IsZero() {
 		row.ClickTS = snap.TS

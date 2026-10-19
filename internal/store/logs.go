@@ -279,7 +279,7 @@ var eventBaseCols = []string{
 
 // eventColumns is the events INSERT column list for this client.
 // c's wave flags append net, then click (subs before the ids), then cost,
-// then ext. A nil client returns only the base columns.
+// then ext, then model, then step. A nil client returns only the base columns.
 func eventColumns(c *CH) []string {
 	cols := append([]string(nil), eventBaseCols...)
 	if c == nil {
@@ -299,6 +299,9 @@ func eventColumns(c *CH) []string {
 	}
 	if c.modelEvents {
 		cols = append(cols, columnsOf("events", waveModel)...)
+	}
+	if c.stepEvents {
+		cols = append(cols, columnsOf("events", waveStep)...)
 	}
 	return cols
 }
@@ -425,6 +428,8 @@ func eventWaveValue(e logbuf.Event, col string) any {
 		return e.XRW
 	case "device_model":
 		return e.DeviceModel
+	case "step":
+		return e.Step
 	default:
 		return ""
 	}

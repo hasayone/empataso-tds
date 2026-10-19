@@ -9,7 +9,7 @@ import (
 
 func TestProxyOrgSelectsStream(t *testing.T) {
 	proxy := config.Stream{
-		Name:  "proxies", Status: true,
+		Name: "proxies", Status: true,
 		Rules: config.Rules{Proxy: config.FlagA},
 		Out:   config.Output{Redirect: "show_text", Out: "P"},
 	}
@@ -30,7 +30,7 @@ func TestProxyOrgSelectsStream(t *testing.T) {
 
 func TestIPVersionSelectsIPv6(t *testing.T) {
 	v6 := config.Stream{
-		Name:  "v6", Status: true,
+		Name: "v6", Status: true,
 		Rules: config.Rules{IPVersion: config.FlagB},
 		Out:   config.Output{Redirect: "show_text", Out: "6"},
 	}

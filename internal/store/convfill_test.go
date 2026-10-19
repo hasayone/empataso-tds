@@ -13,25 +13,28 @@ func TestFillFromClicksPostback(t *testing.T) {
 	}}
 	fillFromClicks(rows, map[string]ClickFill{
 		"a": {
-			TS: ts, GroupID: "g1", IP: "1.2.3.4", UserAgent: "ua",
+			TS: ts, GroupID: "g1", GroupName: "Promo", IP: "1.2.3.4", UserAgent: "ua",
 			OS: "Linux", Browser: "Firefox", LandingID: "9",
 		},
 	})
 	p := rows[0]
+	if p.Group != "Promo" {
+		t.Fatalf("campaign name not filled: %+v", p)
+	}
 	if p.CampaignID != "g1" || !p.ClickTS.Equal(ts) || p.IP != "1.2.3.4" ||
 		p.UserAgent != "ua" || p.OS != "Linux" || p.Browser != "Firefox" || p.Landing != "9" {
 		t.Fatalf("filled %+v", p)
 	}
 
 	rows = []PostbackRow{{
-		CID: "b", CampaignID: "keep", IP: "9.9.9.9", ClickTS: ts,
+		CID: "b", CampaignID: "keep", Group: "Mine", IP: "9.9.9.9", ClickTS: ts,
 		OS: "iOS", Browser: "Safari", Landing: "1", UserAgent: "mine",
 	}}
 	fillFromClicks(rows, map[string]ClickFill{
-		"b": {GroupID: "other", IP: "0.0.0.0", OS: "Android", Browser: "Chrome", LandingID: "2", UserAgent: "other"},
+		"b": {GroupID: "other", GroupName: "Other", IP: "0.0.0.0", OS: "Android", Browser: "Chrome", LandingID: "2", UserAgent: "other"},
 	})
 	p = rows[0]
-	if p.CampaignID != "keep" || p.IP != "9.9.9.9" || p.OS != "iOS" ||
+	if p.CampaignID != "keep" || p.Group != "Mine" || p.IP != "9.9.9.9" || p.OS != "iOS" ||
 		p.Browser != "Safari" || p.Landing != "1" || p.UserAgent != "mine" {
 		t.Fatalf("must not overwrite %+v", p)
 	}
@@ -39,10 +42,14 @@ func TestFillFromClicksPostback(t *testing.T) {
 
 func TestFillConversionInsert(t *testing.T) {
 	row := ConversionInsert{CID: "x", Status: "lead"}
-	snap := ClickFill{IP: "8.8.8.8", GroupID: "g"}
+	snap := ClickFill{IP: "8.8.8.8", GroupID: "g", GroupName: "Promo"}
 	FillConversionInsert(&row, &snap)
-	if row.IP != "8.8.8.8" || row.GroupID != "g" {
+	if row.IP != "8.8.8.8" || row.GroupID != "g" || row.GroupName != "Promo" {
 		t.Fatalf("insert %+v", row)
+	}
+	FillConversionInsert(&row, &ClickFill{GroupName: "Other"})
+	if row.GroupName != "Promo" {
+		t.Fatal("campaign name overwritten")
 	}
 	row.IP = "1.1.1.1"
 	FillConversionInsert(&row, &ClickFill{IP: "8.8.8.8"})
@@ -54,7 +61,8 @@ func TestFillConversionInsert(t *testing.T) {
 
 func TestCidsNeedingClickFill(t *testing.T) {
 	rows := []PostbackRow{
-		{CID: "a", IP: "1.1.1.1", ClickTS: time.Now(), CampaignID: "1", UserAgent: "u", OS: "o", Browser: "b", Landing: "l"},
+		{CID: "a", IP: "1.1.1.1", ClickTS: time.Now(), CampaignID: "1", Group: "n", UserAgent: "u", OS: "o", Browser: "b", Landing: "l"},
+		{CID: "n", IP: "1.1.1.1", ClickTS: time.Now(), CampaignID: "1", UserAgent: "u", OS: "o", Browser: "b", Landing: "l"},
 		{CID: "b", IP: ""},
 		{CID: "c", IP: ""},
 		{CID: "", IP: ""},

@@ -17,7 +17,12 @@ const (
 	waveExt   wave = "ext"
 	// waveModel adds device_model to events and conversions.
 	waveModel wave = "model"
+	// waveStep adds step to events: 0 for the first step, 1 for the /offer step.
+	waveStep wave = "step"
 )
+
+// allWaves lists every wave in the order probes and the fields API use.
+var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep}
 
 // Field is one journal column shared by filters, breakdown and the SPA.
 // Name is the API name. Events and Conv are the physical columns; an empty
@@ -26,7 +31,8 @@ const (
 // column; the wave for a table the field does not have is empty.
 // Dim allows GROUP BY and /api/log-values. Lower trims and lowercases filter
 // values (status only). Expr, when set, replaces the column in breakdown and
-// filters.
+// filters. Default, when set, is the constant DEFAULT clause of ADD COLUMN;
+// a constant default is stored in the table metadata and rewrites no data.
 type Field struct {
 	Name       string
 	Events     string
@@ -37,6 +43,10 @@ type Field struct {
 	Dim        bool
 	Lower      bool
 	Expr       string
+	Default    string
+	// Internal marks a column the server reads and writes but the interface and
+	// the access roles never see: StaticFields leaves it out.
+	Internal bool
 }
 
 // lc is LowCardinality(String), the usual type of a short repeated label.
@@ -106,6 +116,7 @@ func buildFields() []Field {
 		Field{Name: "original_status", Conv: "original_status", Type: "String", ConvWave: waveExt, Dim: true},
 		Field{Name: "prev_status", Conv: "prev_status", Type: lc, ConvWave: waveExt, Dim: true},
 		Field{Name: "tid", Conv: "tid", Type: "String", ConvWave: waveExt},
+		Field{Name: "step", Events: "step", Type: "UInt8", EventsWave: waveStep, Default: "0", Internal: true},
 	)
 	return out
 }
@@ -172,7 +183,11 @@ func alterSQL(table string, w wave) string {
 		if col == "" || fw != w {
 			continue
 		}
-		parts = append(parts, "ADD COLUMN IF NOT EXISTS "+col+" "+f.Type)
+		part := "ADD COLUMN IF NOT EXISTS " + col + " " + f.Type
+		if f.Default != "" {
+			part += " DEFAULT " + f.Default
+		}
+		parts = append(parts, part)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -221,11 +236,16 @@ type FieldsInfo struct {
 }
 
 // StaticFields returns the field list without readiness.
+// Internal columns are left out: the interface and the roles do not list them,
+// while the server still accepts them in conditions.
 // It takes nothing and does not touch the database. Used by tests and fakes.
 func StaticFields() []FieldInfo {
-	out := make([]FieldInfo, len(fields))
-	for i, f := range fields {
-		out[i] = FieldInfo{
+	out := make([]FieldInfo, 0, len(fields))
+	for _, f := range fields {
+		if f.Internal {
+			continue
+		}
+		out = append(out, FieldInfo{
 			Name:       f.Name,
 			Type:       f.Type,
 			Events:     f.Events != "",
@@ -233,7 +253,7 @@ func StaticFields() []FieldInfo {
 			Dim:        f.Dim,
 			EventsWave: string(f.EventsWave),
 			ConvWave:   string(f.ConvWave),
-		}
+		})
 	}
 	return out
 }
@@ -245,7 +265,7 @@ func (c *CH) Fields() FieldsInfo {
 	info := FieldsInfo{Fields: StaticFields(), Ready: map[string]map[string]bool{}}
 	for _, table := range []string{"events", "conversions"} {
 		info.Ready[table] = map[string]bool{}
-		for _, w := range []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel} {
+		for _, w := range allWaves {
 			info.Ready[table][string(w)] = c.ready(table, w)
 		}
 	}

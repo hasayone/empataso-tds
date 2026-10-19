@@ -8,11 +8,13 @@ import (
 
 // window is one stats query range plus the events filter.
 // from and to bound the half-open interval. where is empty or a buildWhere
-// fragment that starts with " AND ". args are the placeholders in where.
+// fragment that starts with " AND ". args are the placeholders in where. conds
+// are the conditions where was built from; they choose the unique aggregate.
 type window struct {
 	from, to time.Time
 	where    string
 	args     []any
+	conds    []Cond
 }
 
 // perfKey is one performance cell: a campaign id or a display name, plus the stream.
@@ -134,11 +136,7 @@ func (c *CH) addSeriesCost(ctx context.Context, w window, stepSec int, hits map[
 // A missing cell is appended with that id. A query or scan error is returned.
 func (c *CH) addForwarded(ctx context.Context, w window, out *[]PerfRow, index *perfIndex) error {
 	args := append([]any{w.from, w.to}, w.args...)
-	rows, err := c.conn.Query(ctx,
-		`SELECT via, count() AS hits, countIf(uniq = 1) AS uniques,
-		        countIf(bot != '' AND bot != '-') AS bots
-		 FROM events WHERE ts >= ? AND ts < ? AND via != ''`+w.where+`
-		 GROUP BY via`, args...)
+	rows, err := c.conn.Query(ctx, forwardedSQL(c.uniqCount(w.conds), w.where), args...)
 	if err != nil {
 		return err
 	}

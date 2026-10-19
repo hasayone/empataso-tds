@@ -80,10 +80,11 @@ func TestOfferStepRoutesByFirstStepButLogsOwnUniq(t *testing.T) {
 			}
 			h, ins, stop := curlEnv(t, routedGroup(method), "0", opts...)
 			j := jar{}
+			offerPath := "/g1/offer?cid=" + signedCID()
 			steps := []struct{ path, stream string }{
 				{"/g1", "fresh"},
-				{"/g1/offer", "repeat"},
-				{"/g1/offer", "repeat"},
+				{offerPath, "repeat"},
+				{offerPath, "repeat"},
 			}
 			for i, s := range steps {
 				rec := j.visit(t, h, s.path)
@@ -132,7 +133,8 @@ func TestOfferStepUniqueCookieFlags(t *testing.T) {
 	if len(lc) != 1 || lc[0].Name != "ztu_g1" {
 		t.Fatalf("landing cookies %+v", lc)
 	}
-	offer := j.visit(t, h, "/g1/offer")
+	offerPath := "/g1/offer?cid=" + signedCID()
+	offer := j.visit(t, h, offerPath)
 	oc := offer.Result().Cookies()
 	if len(oc) != 1 || oc[0].Name != "ztuo_g1" {
 		t.Fatalf("offer cookies %+v", oc)
@@ -142,18 +144,22 @@ func TestOfferStepUniqueCookieFlags(t *testing.T) {
 			t.Errorf("cookie %s: path=%q samesite=%v httponly=%v maxage=%d", c.Name, c.Path, c.SameSite, c.HttpOnly, c.MaxAge)
 		}
 	}
-	if again := j.visit(t, h, "/g1/offer"); len(again.Result().Cookies()) != 0 {
+	if again := j.visit(t, h, offerPath); len(again.Result().Cookies()) != 0 {
 		t.Errorf("repeat offer must not set a cookie: %+v", again.Result().Cookies())
 	}
 }
 
+// signedCID is a click id the offer step accepts as the landing's id.
+func signedCID() string { return (*cidSigner)(nil).newCID() }
+
 // TestOfferStepDoesNotRepeatClickCost sends the landing and the offer step
-// with the same query, as offerStepURL does: the price is stored once.
+// with the same query, as offerStepURL does: the cents are stored once, and the
+// offer step keeps the currency as the mark that the click came with a price.
 func TestOfferStepDoesNotRepeatClickCost(t *testing.T) {
 	h, ins, stop := curlEnv(t, routedGroup("ip"), "0", withRedis(t))
 	j := jar{}
 	j.visit(t, h, "/g1?c=1&cur=USD")
-	j.visit(t, h, "/g1/offer?cid=0123456789&c=1&cur=USD")
+	j.visit(t, h, "/g1/offer?cid="+signedCID()+"&c=1&cur=USD")
 	stop()
 	if len(ins.events) != 2 {
 		t.Fatalf("events %d, want 2", len(ins.events))
@@ -162,8 +168,85 @@ func TestOfferStepDoesNotRepeatClickCost(t *testing.T) {
 	for _, e := range ins.events {
 		sum += e.CostCents
 	}
-	if sum != 100 || ins.events[0].CostCents != 100 || ins.events[1].CostCents != 0 || ins.events[1].CostCur != "" {
-		t.Fatalf("costs %d/%q and %d/%q, sum %d", ins.events[0].CostCents, ins.events[0].CostCur,
-			ins.events[1].CostCents, ins.events[1].CostCur, sum)
+	land, offer := ins.events[0], ins.events[1]
+	if sum != 100 || land.CostCents != 100 || land.CostCur != "USD" || offer.CostCents != 0 || offer.CostCur != "USD" {
+		t.Fatalf("costs %d/%q and %d/%q, sum %d", land.CostCents, land.CostCur, offer.CostCents, offer.CostCur, sum)
+	}
+}
+
+// TestOfferStepWithoutPriceHasNoCurrency: a query without a valid price leaves
+// no currency on either step, so no click is marked as priced by mistake.
+func TestOfferStepWithoutPriceHasNoCurrency(t *testing.T) {
+	for _, q := range []string{"", "?c=abc&cur=USD", "?c=1&cur=XXX", "?c=0&cur=USD"} {
+		h, ins, stop := curlEnv(t, routedGroup("ip"), "0", withRedis(t))
+		j := jar{}
+		j.visit(t, h, "/g1"+q)
+		sep := "?"
+		if q != "" {
+			sep = "&"
+		}
+		j.visit(t, h, "/g1/offer"+q+sep+"cid="+signedCID())
+		stop()
+		for i, e := range ins.events {
+			if e.CostCents != 0 || e.CostCur != "" {
+				t.Errorf("query %q event %d: cost %d/%q", q, i, e.CostCents, e.CostCur)
+			}
+		}
+	}
+}
+
+// TestDirectOfferIsFirstStep: a visit to /offer without a click id this engine
+// issued is a first step of its own. It shares the first step's uniqueness key,
+// has step 0 and keeps the full price.
+func TestDirectOfferIsFirstStep(t *testing.T) {
+	h, ins, stop := curlEnv(t, routedGroup("ip"), "0", withRedis(t))
+	do(t, h, "/g1/offer?c=2&cur=EUR", "8.8.8.8", map[string]string{"User-Agent": uaWinChrome})
+	do(t, h, "/g1/offer?c=2&cur=EUR", "8.8.8.8", map[string]string{"User-Agent": uaWinChrome})
+	do(t, h, "/g1", "9.9.9.9", map[string]string{"User-Agent": uaWinChrome})
+	do(t, h, "/g1/offer?cid=a1b2c3d4e5f6", "9.9.9.9", map[string]string{"User-Agent": uaWinChrome})
+	stop()
+	if len(ins.events) != 4 {
+		t.Fatalf("events %d, want 4", len(ins.events))
+	}
+	wantUniq := []uint8{1, 0, 1, 0}
+	for i, e := range ins.events {
+		if e.Step != 0 || e.Uniq != wantUniq[i] {
+			t.Errorf("event %d: step=%d uniq=%d, want step 0 uniq %d", i, e.Step, e.Uniq, wantUniq[i])
+		}
+	}
+	if e := ins.events[0]; e.CostCents != 200 || e.CostCur != "EUR" {
+		t.Errorf("direct offer price %d/%q, want 200/EUR", e.CostCents, e.CostCur)
+	}
+}
+
+// TestOfferStepWithoutStepWaveSharesFirstStepKey: while events has no step
+// column the second step logs the first step's flag and sets no offer cookie, so
+// a campaign with a landing does not count a visitor twice.
+func TestOfferStepWithoutStepWaveSharesFirstStepKey(t *testing.T) {
+	for _, method := range []string{"ip", "cookie"} {
+		t.Run(method, func(t *testing.T) {
+			opts := []func(*engineDeps){func(d *engineDeps) { d.noStepWave = true }}
+			if method == "ip" {
+				opts = append(opts, withRedis(t))
+			}
+			h, ins, stop := curlEnv(t, routedGroup(method), "0", opts...)
+			j := jar{}
+			offerPath := "/g1/offer?cid=" + signedCID()
+			j.visit(t, h, "/g1")
+			first := j.visit(t, h, offerPath)
+			j.visit(t, h, offerPath)
+			stop()
+			if _, ok := j["ztuo_g1"]; ok {
+				t.Error("the offer cookie must not be set without the step wave")
+			}
+			if got := first.Header().Get("X-Kuztds-Stream"); got != "repeat" {
+				t.Errorf("offer stream %q, want repeat", got)
+			}
+			for i, w := range []uint8{1, 0, 0} {
+				if got := ins.events[i].Uniq; got != w {
+					t.Errorf("event %d: Uniq=%d, want %d", i, got, w)
+				}
+			}
+		})
 	}
 }

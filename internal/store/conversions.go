@@ -355,7 +355,7 @@ func (c *CH) clickFillByCIDs(ctx context.Context, cids []string) (map[string]Cli
 	if len(cids) == 0 {
 		return nil, nil
 	}
-	cols := "cid, ts, group_id, ip, useragent, os, os_version, browser, browser_ver, brand, referer, lang, city, region"
+	cols := "cid, ts, group_id, group_name, ip, useragent, os, os_version, browser, browser_ver, brand, referer, lang, city, region"
 	if c.clickCols {
 		cols += ", landing_id, offer_id, network_id, source_id"
 	}
@@ -374,7 +374,7 @@ func (c *CH) clickFillByCIDs(ctx context.Context, cids []string) (map[string]Cli
 		var cid string
 		var fill ClickFill
 		dest := []any{
-			&cid, &fill.TS, &fill.GroupID, &fill.IP, &fill.UserAgent,
+			&cid, &fill.TS, &fill.GroupID, &fill.GroupName, &fill.IP, &fill.UserAgent,
 			&fill.OS, &fill.OSVersion, &fill.Browser, &fill.BrowserVer, &fill.Brand,
 			&fill.Referer, &fill.Lang, &fill.City, &fill.Region,
 		}

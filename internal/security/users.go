@@ -81,6 +81,8 @@ type User struct {
 	CreatedAt    time.Time `json:"created_at"`
 	KeitaroID    int       `json:"keitaro_id,omitempty"`
 	AccessSource string    `json:"access_source,omitempty"`
+	// RoleID names a Role in roles.json. When set, the role replaces Access for a USER.
+	RoleID string `json:"role_id,omitempty"`
 	// Source is set only in API responses ("env" for the environment admin, "file" for users.json); it is not stored in users.json.
 	Source string `json:"source,omitempty"`
 }
@@ -107,20 +109,26 @@ func (u User) Fingerprint() string {
 
 // clone returns a deep copy of u, including Access maps and slices.
 func (u User) clone() User {
-	if u.Access.Grants != nil {
-		grants := make(map[string]Grant, len(u.Access.Grants))
-		for k, g := range u.Access.Grants {
+	u.Access = u.Access.clone()
+	return u
+}
+
+// clone returns a deep copy of a; nil maps and slices stay nil.
+func (a Access) clone() Access {
+	if a.Grants != nil {
+		grants := make(map[string]Grant, len(a.Grants))
+		for k, g := range a.Grants {
 			grants[k] = g.clone()
 		}
-		u.Access.Grants = grants
+		a.Grants = grants
 	}
-	if u.Access.Sections != nil {
-		u.Access.Sections = append([]string{}, u.Access.Sections...)
+	if a.Sections != nil {
+		a.Sections = append([]string{}, a.Sections...)
 	}
-	if u.Access.Hidden != nil {
-		u.Access.Hidden = append([]string{}, u.Access.Hidden...)
+	if a.Hidden != nil {
+		a.Hidden = append([]string{}, a.Hidden...)
 	}
-	return u
+	return a
 }
 
 func (g Grant) clone() Grant {

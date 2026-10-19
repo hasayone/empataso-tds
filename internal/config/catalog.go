@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // MaxSubID is the highest named sub_id the engine stores. OpenAPI for the
@@ -195,10 +196,12 @@ func PostbackID(sig string) string {
 // ApplySource reads keyword and sub_id_1..15 from the query.
 // A nil source uses the macro name itself as the query key.
 // The keyword return is empty when the source does not map one or the query has none.
+// The keyword and every sub id are cut to MaxValueBytes bytes at a rune boundary:
+// they are visitor input and go into the click log and the Sub ID rules.
 func ApplySource(q url.Values, src *TrafficSource) (keyword string, subs [MaxSubID]string) {
 	if src != nil {
 		if key := strings.TrimSpace(src.Parameters["keyword"]); key != "" {
-			keyword = q.Get(key)
+			keyword = LimitBytes(q.Get(key), MaxValueBytes)
 		}
 	}
 	for i := 1; i <= MaxSubID; i++ {
@@ -209,7 +212,7 @@ func ApplySource(q url.Values, src *TrafficSource) (keyword string, subs [MaxSub
 				qk = mapped
 			}
 		}
-		subs[i-1] = q.Get(qk)
+		subs[i-1] = LimitBytes(q.Get(qk), MaxValueBytes)
 	}
 	return keyword, subs
 }
@@ -251,11 +254,12 @@ func IncomingCost(q url.Values, costKey, curKey string) (cents int64, cur string
 // sub_id_1 through sub_id_15. Without a mapping each name is the query key.
 var ExtraSourceParams = []string{"site", "ad_campaign_id", "creative_id", "external_id"}
 
-// extraValueMax is the longest stored value of one extra field, in bytes.
-const extraValueMax = 255
+// MaxValueBytes is the longest stored value of one visitor-supplied field, in
+// bytes: a sub id, the keyword, an extra field and the value of a Sub ID rule.
+const MaxValueBytes = 255
 
 // Extras is the site, ad campaign, creative and external id of one click.
-// Each field is trimmed and at most extraValueMax bytes. An empty field
+// Each field is trimmed and at most MaxValueBytes bytes. An empty field
 // means the query did not carry that value.
 type Extras struct {
 	Site         string
@@ -276,15 +280,19 @@ func sourceParamKey(src *TrafficSource, name string) string {
 	return name
 }
 
-// limitBytes returns s cut to at most n bytes.
+// LimitBytes returns s cut to at most n bytes without splitting a UTF-8 rune:
+// a cut that would fall inside a multi-byte character backs up to its start.
 // n <= 0 or an empty s yields an empty string. A shorter s is unchanged.
 // There is no error.
-func limitBytes(s string, n int) string {
+func LimitBytes(s string, n int) string {
 	if n <= 0 || s == "" {
 		return ""
 	}
 	if len(s) <= n {
 		return s
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
 	}
 	return s[:n]
 }
@@ -297,7 +305,7 @@ func limitBytes(s string, n int) string {
 func SourceExtras(q url.Values, src *TrafficSource) Extras {
 	var out Extras
 	for _, name := range ExtraSourceParams {
-		v := limitBytes(strings.TrimSpace(q.Get(sourceParamKey(src, name))), extraValueMax)
+		v := LimitBytes(strings.TrimSpace(q.Get(sourceParamKey(src, name))), MaxValueBytes)
 		switch name {
 		case "site":
 			out.Site = v

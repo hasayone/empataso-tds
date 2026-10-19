@@ -178,6 +178,7 @@ func main() {
 	// ClickHouse logs (phase 4): asynchronous batch writes. Optional.
 	var logs *logbuf.Buffer
 	var chConn *store.CH
+	stepMissing := false
 	if a := os.Getenv("KUZTDS_CLICKHOUSE_ADDR"); a != "" {
 		ch, err := store.OpenCH(a, getenv("KUZTDS_CLICKHOUSE_DB", "kuztds"),
 			getenv("KUZTDS_CLICKHOUSE_USER", "kuztds"), os.Getenv("KUZTDS_CLICKHOUSE_PASSWORD"))
@@ -185,6 +186,9 @@ func main() {
 			log.Warn("clickhouse not connected", "err", err)
 		} else {
 			chConn = ch
+			if stepMissing = !ch.StepReady(); stepMissing {
+				log.Warn("clickhouse: events.step is missing, the /offer step shares the first step's uniqueness; apply migrations/clickhouse/008_step.sql and restart")
+			}
 			logs = logbuf.New(ch, 10000, 1000, time.Second, log)
 			go logs.Run(ctx)
 			log.Info("clickhouse connected", "addr", a)
@@ -202,7 +206,7 @@ func main() {
 		log: log, lists: lists, sigs: sigs, seps: seps, geores: geores, counters: counters,
 		groups: groups, offers: offers, landings: landings, sources: sources, networks: networks, s2s: s2s,
 		outbound: make(chan outboundJob, 64),
-		logs:     logs, chConn: chConn, fetcher: fetcher,
+		logs:     logs, chConn: chConn, noStepWave: stepMissing, fetcher: fetcher,
 		dataDir: dataDir, keysDir: keysDir, postbackKey: postbackKey, keys: apiKeys{env: apiEnv, set: keySet},
 		trashMode: trashMode, trashURL: trashURL, curlCacheMin: curlCacheMin,
 		botPath:   botPath,
@@ -315,7 +319,7 @@ func cookieUniqueNamed(w http.ResponseWriter, r *http.Request, grp *config.Group
 	if maxAge <= 0 {
 		maxAge = 86400
 	}
-	http.SetCookie(w, &http.Cookie{
+	setEngineCookie(w, r, &http.Cookie{
 		Name: name, Value: "1", Path: "/", MaxAge: maxAge,
 		HttpOnly: true, SameSite: http.SameSiteLaxMode,
 	})
@@ -367,7 +371,7 @@ func pickOut(w http.ResponseWriter, r *http.Request, counters *store.Counters, c
 				idx = variantIndex(n+1, len(parts))
 			}
 		}
-		http.SetCookie(w, &http.Cookie{Name: name, Value: strconv.Itoa(idx), Path: "/", HttpOnly: true, MaxAge: 86400})
+		setEngineCookie(w, r, &http.Cookie{Name: name, Value: strconv.Itoa(idx), Path: "/", HttpOnly: true, MaxAge: 86400})
 		return parts[idx]
 	case "evenly":
 		if counters != nil {

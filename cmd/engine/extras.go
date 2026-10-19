@@ -1,6 +1,10 @@
 package main
 
-import "net/http"
+import (
+	"net/http"
+
+	"github.com/egerkuzma/kuztds/internal/config"
+)
 
 // xrwMaxBytes is the stored length of the X-Requested-With header.
 const xrwMaxBytes = 64
@@ -13,18 +17,5 @@ func requestXRW(r *http.Request, apiMode bool) string {
 	if apiMode || r == nil {
 		return ""
 	}
-	return clipBytes(r.Header.Get("X-Requested-With"), xrwMaxBytes)
-}
-
-// clipBytes returns s cut to at most n bytes.
-// n <= 0 or an empty s yields an empty string. A shorter s is unchanged.
-// There is no error.
-func clipBytes(s string, n int) string {
-	if n <= 0 || s == "" {
-		return ""
-	}
-	if len(s) <= n {
-		return s
-	}
-	return s[:n]
+	return config.LimitBytes(r.Header.Get("X-Requested-With"), xrwMaxBytes)
 }

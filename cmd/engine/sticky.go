@@ -145,7 +145,7 @@ func (d *engineDeps) stickyRecall(r *http.Request, grp *config.Group, ip netip.A
 func (d *engineDeps) stickyRemember(w http.ResponseWriter, r *http.Request, grp *config.Group, ip netip.Addr, stream string) {
 	token := stickyMAC(d.cids.stickyKey(), grp.ID, stream)
 	if grp.UniqMethod == "cookie" {
-		http.SetCookie(w, &http.Cookie{
+		setEngineCookie(w, r, &http.Cookie{
 			Name: stickyCookiePrefix + grp.ID, Value: token,
 			Path: "/", MaxAge: grp.UniqSeconds, HttpOnly: true, SameSite: http.SameSiteLaxMode,
 		})

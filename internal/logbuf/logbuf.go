@@ -76,6 +76,9 @@ type Event struct {
 	// DeviceModel is the phone or tablet model from the User-Agent or the
 	// Sec-CH-UA-Model header. Empty when the visitor did not reveal one.
 	DeviceModel string
+	// Step is 0 for the first step (a landing or a direct offer) and 1 for the
+	// /offer step. Unique counts of a campaign include only step 0.
+	Step uint8
 }
 
 // Inserter inserts a batch of events into storage (implemented by store.CH).

@@ -56,6 +56,11 @@ type engineDeps struct {
 	cids         *cidSigner
 	pages        *pageCache
 	landServe    *landingServer
+
+	// noStepWave is true when ClickHouse is connected but events has no step
+	// column. The /offer step then logs the first step's uniqueness, so a campaign
+	// with a landing does not count one visitor twice.
+	noStepWave bool
 }
 
 // ipListFiles collects the names of .dat lists referenced by stream ip_list
@@ -263,22 +268,34 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	}
 	tzOffset := g.UTCOffset(time.Now())
 
+	// 3.4) Click id. The offer step keeps the landing's id only when it is a
+	// signed one this engine issued; that request is the second step of a click
+	// (ownStep). A direct visit to /offer is a first step of its own: new id,
+	// the first step's uniqueness and the full price.
+	cid := d.cids.newCID()
+	ownStep := false
+	if offerStep {
+		if c := r.URL.Query().Get("cid"); d.cids.reusedCID(c) {
+			cid, ownStep = c, true
+		}
+	}
+
 	// 3.5) Uniqueness: the api client sends its own; otherwise cookie/Redis.
 	unique, loggedUnique := true, true
 	if apiMode {
 		unique = apiReq.Uniq == "yes"
 		loggedUnique = unique
 	} else {
-		unique, loggedUnique = d.visitUnique(w, r, grp, ip, offerStep)
+		unique, loggedUnique = d.visitUnique(w, r, grp, ip, ownStep)
 	}
 
 	// Input (key/lang/domain/extra params): from the api request or from HTTP.
-	key := r.URL.Query().Get("q")
+	key := config.LimitBytes(r.URL.Query().Get("q"), config.MaxValueBytes)
 	lang := langOf(r)
 	domain := domainOf(ref)
 	pars := extraParams(r)
 	if apiMode {
-		key, lang, domain, pars = apiReq.Key, apiReq.Lang, apiReq.Domain, apiReq.Pars
+		key, lang, domain, pars = config.LimitBytes(apiReq.Key, config.MaxValueBytes), apiReq.Lang, apiReq.Domain, apiReq.Pars
 	}
 
 	// 4) Stream selection (phase 3). Operator — by the label from the wap list.
@@ -447,12 +464,6 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	outRaw = d.applyPage(outRaw)
 
 	// 5) Render the output: macros, api_mac, CURL fetch, or a normal redirect.
-	cid := d.cids.newCID()
-	if offerStep {
-		if c := r.URL.Query().Get("cid"); d.cids.reusedCID(c) {
-			cid = c
-		}
-	}
 	q := v.Query
 	md := render.MacroDeps{
 		Key: v.Key, Path: r.Host, IP: ip.String(), Country: country, City: g.City,
@@ -517,10 +528,14 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 
 	// 6) Event log — asynchronous, the response does not wait for the write (phase 4).
 	costCents, costCur, costOK := config.IncomingCost(r.URL.Query(), grp.CostParam, grp.CurrencyParam)
-	// The offer step carries the landing's query, so its price is already on
-	// the landing row; the offer row stays free to keep the cost single.
-	if !costOK || offerStep {
+	// The second step carries the landing's query, so its price is already on the
+	// landing row: the step logs no cents, and keeps the currency as the mark
+	// that a price came with the click. A click without a valid price has neither.
+	switch {
+	case !costOK:
 		costCents, costCur = 0, ""
+	case ownStep:
+		costCents = 0
 	}
 	if d.logs != nil {
 		d.logs.Push(logbuf.Event{
@@ -536,7 +551,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			Subs: storedSubs(subs), CostCents: costCents, CostCur: costCur,
 			Site: extras.Site, AdCampaignID: extras.AdCampaignID, CreativeID: extras.CreativeID,
 			ExternalID: extras.ExternalID, XRW: requestXRW(r, apiMode),
-			DeviceModel: info.Model,
+			DeviceModel: info.Model, Step: b2u8(ownStep),
 		})
 	}
 
