@@ -29,13 +29,7 @@ func main() {
 	hashPw := flag.String("hash", "", "print the argon2id hash for a password and exit")
 	flag.Parse()
 	if *hashPw != "" {
-		h, err := security.HashPassword(*hashPw)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, "error:", err)
-			os.Exit(1)
-		}
-		fmt.Println(h)
-		return
+		os.Exit(printHash(*hashPw))
 	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -54,6 +48,7 @@ func main() {
 		Log:          log,
 		KeitaroBase:  strings.TrimSpace(os.Getenv("KEITARO_BASE_URL")),
 		KeitaroKey:   os.Getenv("KEITARO_API_KEY"),
+		PublicIP:     strings.TrimSpace(os.Getenv("KUZTDS_PUBLIC_IP")),
 	}
 
 	connectRedis(&cfg, log)
@@ -91,6 +86,8 @@ func main() {
 		os.Exit(1)
 	}
 
+	go app.WatchDomains(ctx, domainWatchInterval(os.Getenv("KUZTDS_DOMAIN_WATCH"), log))
+
 	srv := &http.Server{
 		Addr:              getenv("KUZTDS_ADMIN_LISTEN", ":8090"),
 		Handler:           app.Handler(),
@@ -111,6 +108,18 @@ func main() {
 	defer scancel()
 	_ = srv.Shutdown(sctx)
 	log.Info("admin api stopped")
+}
+
+// printHash writes the argon2id hash of password to stdout and returns the process exit code:
+// 0 on success, 1 when hashing fails (the error goes to stderr).
+func printHash(password string) int {
+	h, err := security.HashPassword(password)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
+		return 1
+	}
+	fmt.Println(h)
+	return 0
 }
 
 // applyDataFiles points cfg at the catalogs, counters, settings files and directories that sit
@@ -143,6 +152,7 @@ func applyDataFiles(cfg *admin.Config, groupsFile string, log *slog.Logger) {
 	cfg.NamecheapFile = getenv("KUZTDS_NAMECHEAP_FILE", filepath.Join(dir, "namecheap.json"))
 	cfg.NamecheapURL = os.Getenv("KUZTDS_NAMECHEAP_URL")
 	cfg.NamecheapSandboxURL = os.Getenv("KUZTDS_NAMECHEAP_SANDBOX_URL")
+	cfg.CloudflareFile = getenv("KUZTDS_CLOUDFLARE_FILE", filepath.Join(dir, "cloudflare.json"))
 	landingsDir := getenv("KUZTDS_LANDINGS_DIR", filepath.Join(dir, "landings"))
 	landings := admin.NewFileLandings(landingsDir)
 	cfg.LandingFiles = landings
@@ -158,6 +168,32 @@ func applyDataFiles(cfg *admin.Config, groupsFile string, log *slog.Logger) {
 	log.Info("users file", "path", cfg.UsersFile)
 	cfg.RolesFile = getenv("KUZTDS_ROLES_FILE", filepath.Join(dir, "roles.json"))
 	log.Info("roles file", "path", cfg.RolesFile)
+}
+
+// Bounds of the domain watch interval, set by KUZTDS_DOMAIN_WATCH.
+const (
+	domainWatchDefault = 5 * time.Minute
+	domainWatchMin     = time.Minute
+)
+
+// domainWatchInterval reads the interval of the domain watch.
+// raw is the value of KUZTDS_DOMAIN_WATCH, a Go duration such as 5m. An empty or invalid value
+// gives five minutes and a value under a minute gives a minute; log receives a warning for a
+// value that is invalid or raised.
+func domainWatchInterval(raw string, log *slog.Logger) time.Duration {
+	if strings.TrimSpace(raw) == "" {
+		return domainWatchDefault
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(raw))
+	switch {
+	case err != nil:
+		log.Warn("KUZTDS_DOMAIN_WATCH is not a duration, using the default", "default", domainWatchDefault)
+		return domainWatchDefault
+	case d < domainWatchMin:
+		log.Warn("KUZTDS_DOMAIN_WATCH is below the minimum, using it", "minimum", domainWatchMin)
+		return domainWatchMin
+	}
+	return d
 }
 
 // connectRedis moves sessions and the login rate limit to Redis when KUZTDS_REDIS_ADDR is set.

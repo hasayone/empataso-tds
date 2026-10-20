@@ -15,6 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -446,5 +447,221 @@ func TestDomainParallelPuts(t *testing.T) {
 		if d.Group != want {
 			t.Fatalf("id %s group %q want %q", d.ID, d.Group, want)
 		}
+	}
+}
+
+// untrustedClient is a probe client that dials ts but trusts none of its certificates.
+func untrustedClient(t *testing.T, ts *httptest.Server) *http.Client {
+	t.Helper()
+	c := probeClient(t, ts)
+	tr, ok := c.Transport.(*http.Transport)
+	if !ok {
+		t.Fatal("transport")
+	}
+	tr.TLSClientConfig = &tls.Config{NextProtos: []string{"http/1.1"}}
+	return c
+}
+
+// closedClient is a probe client whose target is gone, so every probe fails with connect.
+func closedClient(t *testing.T) *http.Client {
+	t.Helper()
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	c := probeClient(t, ts)
+	ts.Close()
+	return c
+}
+
+// probeTarget is a TLS server that answers as this tracker only while live is set.
+func probeTarget(t *testing.T, live *atomic.Bool) *http.Client {
+	t.Helper()
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if live.Load() {
+			w.Header().Set("X-Kuztds-Probe", r.URL.Query().Get("probe"))
+			w.Header().Set("X-Kuztds-Host", r.Host)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ts.Close)
+	return probeClient(t, ts)
+}
+
+func TestCheckDomainTLS(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ts.Close)
+	s := checkSrv(lookupPublic, untrustedClient(t, ts))
+	ok, reason := s.checkDomain(context.Background(), "example.com")
+	if ok || reason != "tls" {
+		t.Fatalf("ok=%v reason=%s", ok, reason)
+	}
+}
+
+func TestJudgeDomainElsewhere(t *testing.T) {
+	ctx := context.Background()
+	d := config.Domain{ID: "1", Host: "example.com"}
+	s := &Server{cfg: Config{PublicIP: "203.0.113.50", LookupIP: lookupPublic, CheckClient: closedClient(t)}}
+	ok, reason, detail := s.judgeDomain(ctx, d)
+	if ok || reason != "elsewhere" || detail != "203.0.113.10" {
+		t.Fatalf("ok=%v reason=%s detail=%q", ok, reason, detail)
+	}
+	two := func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("203.0.113.10")}, {IP: net.ParseIP("198.51.100.4")}, {IP: net.ParseIP("203.0.113.10")}}, nil
+	}
+	s.cfg.LookupIP = two
+	if _, reason, detail = s.judgeDomain(ctx, d); reason != "elsewhere" || detail != "198.51.100.4,203.0.113.10" {
+		t.Fatalf("reason=%s detail=%q", reason, detail)
+	}
+	s.cfg.PublicIP = "198.51.100.4"
+	if _, reason, detail = s.judgeDomain(ctx, d); reason != "connect" || detail != "" {
+		t.Fatalf("an address that is ours: reason=%s detail=%q", reason, detail)
+	}
+	s.cfg.PublicIP = ""
+	s.cfg.LookupIP = lookupPublic
+	if _, reason, detail = s.judgeDomain(ctx, d); reason != "connect" || detail != "" {
+		t.Fatalf("without a public ip: reason=%s detail=%q", reason, detail)
+	}
+	s.cfg.PublicIP = "203.0.113.50"
+	s.cfg.LookupIP = func(context.Context, string) ([]net.IPAddr, error) { return nil, errors.New("no such host") }
+	if _, reason, detail = s.judgeDomain(ctx, d); reason != "dns" || detail != "" {
+		t.Fatalf("no answer: reason=%s detail=%q", reason, detail)
+	}
+}
+
+func TestJudgeDomainCloudflarePending(t *testing.T) {
+	ctx := context.Background()
+	s := &Server{cfg: Config{PublicIP: "203.0.113.50", LookupIP: lookupPublic, CheckClient: closedClient(t)}}
+	d := config.Domain{ID: "1", Host: "example.com", CfZoneID: "z", CfStatus: "pending", CfNS: []string{"a.ns.example", "b.ns.example"}}
+	ok, reason, detail := s.judgeDomain(ctx, d)
+	if ok || reason != "cf_pending" || detail != "a.ns.example,b.ns.example" {
+		t.Fatalf("ok=%v reason=%s detail=%q", ok, reason, detail)
+	}
+	s.cfg.LookupIP = func(context.Context, string) ([]net.IPAddr, error) { return nil, errors.New("no such host") }
+	if _, reason, _ = s.judgeDomain(ctx, d); reason != "cf_pending" {
+		t.Fatalf("a pending zone that does not resolve yet: reason=%s", reason)
+	}
+	s.cfg.LookupIP = lookupPublic
+	d.CfStatus = "active"
+	if _, reason, detail = s.judgeDomain(ctx, d); reason != "connect" || detail != "" {
+		t.Fatalf("an active zone keeps the probe reason: reason=%s detail=%q", reason, detail)
+	}
+}
+
+func TestJudgeDomainSuccessClearsReasons(t *testing.T) {
+	var live atomic.Bool
+	live.Store(true)
+	s := &Server{cfg: Config{PublicIP: "203.0.113.50", LookupIP: lookupPublic, CheckClient: probeTarget(t, &live)}}
+	ok, reason, detail := s.judgeDomain(context.Background(), config.Domain{ID: "1", Host: "example.com", Reason: "elsewhere", ReasonDetail: "x"})
+	if !ok || reason != "" || detail != "" {
+		t.Fatalf("ok=%v reason=%s detail=%q", ok, reason, detail)
+	}
+}
+
+// recheckServer builds a server over a domain file for recheckDomain tests.
+// The clock reads now; PublicIP is empty.
+func recheckServer(t *testing.T, domains []config.Domain, client *http.Client, now *atomic.Int64) *Server {
+	t.Helper()
+	hash, err := security.HashPassword("p@ss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := NewJSONStore[config.Domain](filepath.Join(t.TempDir(), "domains.json"))
+	if err := store.Save(context.Background(), domains); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{
+		AdminUser: "admin", PasswordHash: hash, Sessions: security.NewMemoryStore(), Limiter: allowAll{},
+		Domains: store, LookupIP: lookupPublic, CheckClient: client,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ncNow = func() time.Time { return time.Unix(now.Load(), 0) }
+	return s
+}
+
+func TestRecheckDomainSetsConnectedAtOnce(t *testing.T) {
+	var live atomic.Bool
+	var now atomic.Int64
+	now.Store(time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC).Unix())
+	s := recheckServer(t, []config.Domain{{ID: "1", Host: "example.com", Role: "links", WatchSince: "2026-10-20T11:00:00Z"}}, probeTarget(t, &live), &now)
+	ctx := context.Background()
+
+	got, err := s.recheckDomain(ctx, "1")
+	if err != nil || got.OK || got.Reason != "foreign" || got.ConnectedAt != "" || got.Checked != "2026-10-20T12:00:00Z" {
+		t.Fatalf("failed check %+v %v", got, err)
+	}
+	live.Store(true)
+	now.Add(60)
+	got, err = s.recheckDomain(ctx, "1")
+	if err != nil || !got.OK || got.Reason != "" || got.ConnectedAt != "2026-10-20T12:01:00Z" || got.ConnectSeen {
+		t.Fatalf("first success %+v %v", got, err)
+	}
+	live.Store(false)
+	now.Add(60)
+	got, _ = s.recheckDomain(ctx, "1")
+	if got.OK || got.ConnectedAt != "2026-10-20T12:01:00Z" {
+		t.Fatalf("flap %+v", got)
+	}
+	live.Store(true)
+	now.Add(60)
+	got, _ = s.recheckDomain(ctx, "1")
+	if !got.OK || got.ConnectedAt != "2026-10-20T12:01:00Z" || got.Checked != "2026-10-20T12:03:00Z" {
+		t.Fatalf("second success %+v", got)
+	}
+}
+
+func TestRecheckDomainWithoutWatchIsSeenAtOnce(t *testing.T) {
+	var live atomic.Bool
+	live.Store(true)
+	var now atomic.Int64
+	now.Store(time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC).Unix())
+	s := recheckServer(t, []config.Domain{{ID: "1", Host: "example.com", Role: "both"}}, probeTarget(t, &live), &now)
+	got, err := s.recheckDomain(context.Background(), "1")
+	if err != nil || got.ConnectedAt == "" || !got.ConnectSeen {
+		t.Fatalf("imported domain %+v %v", got, err)
+	}
+}
+
+func TestRecheckDomainCloudflareZone(t *testing.T) {
+	var live atomic.Bool
+	var now atomic.Int64
+	now.Store(time.Date(2026, 10, 20, 12, 0, 0, 0, time.UTC).Unix())
+	pending := config.Domain{ID: "1", Host: "example.com", Role: "links", CfZoneID: "z", CfStatus: "pending", CfNS: []string{"a.ns.example", "b.ns.example"}, WatchSince: "2026-10-20T11:00:00Z"}
+	s := recheckServer(t, []config.Domain{pending}, probeTarget(t, &live), &now)
+	got, err := s.recheckDomain(context.Background(), "1")
+	if err != nil || got.OK || got.Reason != "cf_pending" || got.ReasonDetail != "a.ns.example,b.ns.example" || got.ConnectedAt != "" || got.CfStatus != "pending" {
+		t.Fatalf("pending zone %+v %v", got, err)
+	}
+	live.Store(true)
+	got, err = s.recheckDomain(context.Background(), "1")
+	if err != nil || !got.OK || got.CfStatus != "active" || got.ConnectedAt == "" || got.Reason != "" || got.ReasonDetail != "" {
+		t.Fatalf("answering zone %+v %v", got, err)
+	}
+}
+
+func TestRecheckDomainErrors(t *testing.T) {
+	var now atomic.Int64
+	s := recheckServer(t, nil, closedClient(t), &now)
+	if _, err := s.recheckDomain(context.Background(), "9"); !errors.Is(err, errDomainNotFound) {
+		t.Fatalf("unknown id: %v", err)
+	}
+	if _, err := (&Server{}).recheckDomain(context.Background(), "1"); !errors.Is(err, errDomainStore) {
+		t.Fatalf("no store: %v", err)
+	}
+}
+
+func TestDomainCheckAnswerCarriesReasonDetail(t *testing.T) {
+	e := newCFEnv(t, func(c *Config) {
+		c.LookupIP = lookupPublic
+		c.CheckClient = closedClient(t)
+	})
+	e.seed(t, config.Domain{ID: "1", Host: "example.com", Role: "links"})
+	code, raw := e.do(t, http.MethodPost, "/api/domains/1/check", nil)
+	if code != http.StatusOK || !strings.Contains(raw, `"reason":"elsewhere"`) || !strings.Contains(raw, `"reason_detail":"203.0.113.10"`) {
+		t.Fatalf("check %d %s", code, raw)
+	}
+	if got := e.row(t, "1"); got.Reason != "elsewhere" || got.ReasonDetail != "203.0.113.10" || got.Checked == "" {
+		t.Fatalf("stored %+v", got)
 	}
 }

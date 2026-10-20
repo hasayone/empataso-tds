@@ -56,8 +56,8 @@ func validDomain(d config.Domain) string {
 }
 
 // prepDomain normalizes host, role and group on d before validation.
-// d is the decoded request body. OK, Reason, Checked and the registrar fields are
-// server-owned and are cleared here.
+// d is the decoded request body. OK, Reason, ReasonDetail, Checked, the registrar fields and the
+// Cloudflare, connection and watch fields are server-owned and are cleared here.
 func prepDomain(d *config.Domain) {
 	d.Host = strings.ToLower(strings.TrimSpace(d.Host))
 	if d.Role == "" {
@@ -65,24 +65,40 @@ func prepDomain(d *config.Domain) {
 	}
 	d.Group = trimGroupLabel(d.Group)
 	d.OK = false
-	d.Reason = ""
+	d.Reason, d.ReasonDetail = "", ""
 	d.Checked = ""
 	d.Registrar, d.RegistrarAccount, d.RegistrarStatus, d.RegistrarCharged, d.RegistrarExpected = "", "", "", 0, 0
 	d.RegistrarPendingSince = ""
+	copyCloudflare(d, config.Domain{})
+}
+
+// copyCloudflare sets the Cloudflare, connection and watch fields of dst to those of src:
+// zone, status, name servers, connected time and mark, and the watch start.
+// dst is the row to change and src the source row; a zero src clears them.
+func copyCloudflare(dst *config.Domain, src config.Domain) {
+	dst.CfZoneID, dst.CfStatus = src.CfZoneID, src.CfStatus
+	dst.CfNS = append([]string(nil), src.CfNS...)
+	if len(dst.CfNS) == 0 {
+		dst.CfNS = nil
+	}
+	dst.ConnectedAt, dst.ConnectSeen, dst.WatchSince = src.ConnectedAt, src.ConnectSeen, src.WatchSince
 }
 
 // prepRegistered is prepDomain for a row created by domain registration.
-// d carries the registrar fields set by the server; they are kept through the normalization.
+// d carries the registrar fields and the Cloudflare status set by the server; they are kept
+// through the normalization. The purchase writes cf_status connect_pending on the pending row
+// when the operator asked for Cloudflare, so a settled purchase is still connected later.
 func prepRegistered(d *config.Domain) {
 	registrar, account, status, charged, expected := d.Registrar, d.RegistrarAccount, d.RegistrarStatus, d.RegistrarCharged, d.RegistrarExpected
-	since := d.RegistrarPendingSince
+	since, cfStatus := d.RegistrarPendingSince, d.CfStatus
 	prepDomain(d)
 	d.Registrar, d.RegistrarAccount, d.RegistrarStatus, d.RegistrarCharged, d.RegistrarExpected = registrar, account, status, charged, expected
 	d.RegistrarPendingSince = since
+	d.CfStatus = cfStatus
 }
 
-// keepDomainCheck carries OK, Reason, Checked and the registrar fields from old into item
-// when the host is unchanged.
+// keepDomainCheck carries OK, Reason, ReasonDetail, Checked, the registrar fields and the
+// Cloudflare, connection and watch fields from old into item when the host is unchanged.
 // item is the prepared replacement; old is the stored record. A different host leaves the
 // cleared fields, because the previous probe and the registration belong to another name.
 // It returns nothing.
@@ -90,10 +106,11 @@ func keepDomainCheck(item *config.Domain, old config.Domain) {
 	if item.Host != old.Host {
 		return
 	}
-	item.OK, item.Reason, item.Checked = old.OK, old.Reason, old.Checked
+	item.OK, item.Reason, item.ReasonDetail, item.Checked = old.OK, old.Reason, old.ReasonDetail, old.Checked
 	item.Registrar, item.RegistrarAccount = old.Registrar, old.RegistrarAccount
 	item.RegistrarStatus, item.RegistrarCharged, item.RegistrarExpected = old.RegistrarStatus, old.RegistrarCharged, old.RegistrarExpected
 	item.RegistrarPendingSince = old.RegistrarPendingSince
+	copyCloudflare(item, old)
 }
 
 // purchaseCatalog is the domain catalog used by registration to write the pending row.

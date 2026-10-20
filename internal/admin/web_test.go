@@ -269,7 +269,7 @@ func TestDashboardPerfControls(t *testing.T) {
 	must(t, html, `.legend{display:flex;flex-wrap:nowrap;justify-content:flex-end`, "legend stays one row on the right")
 	must(t, html, `.legend .lg:hover .lg-name,.legend .lg:active .lg-name`, "mobile legend name shows on hover and press")
 	must(t, html, `.legend .lg{position:relative;width:32px;height:32px`, "mobile legend is an icon button")
-	must(t, html, `@media(min-width:1181px){.bars .k{width:auto;flex:1 1 auto;min-width:0} .bars .tr{flex:0 0 140px;max-width:140px}}`, "wide breakdown bar is 140px")
+	must(t, html, `@media(min-width:1181px){.bars .k{width:auto;flex:1 1 auto;min-width:68px} .bars .tr{flex:1 1 140px;max-width:140px;min-width:16px}}`, "wide breakdown bar is up to 140px and the label keeps 68px")
 	sorted := spaFunctionLine(html, "perfSorted")
 	must(t, sorted, "perfCmp(", "perfSorted uses perfCmp")
 	render := spaFunctionLine(html, "renderPerf")
@@ -867,6 +867,39 @@ func TestKeitaroPage(t *testing.T) {
 			t.Errorf("dictionary missing kt.c.pages next to %s", anchor)
 		}
 	}
+}
+
+// TestBreakdownLabelsAndKeitaroDock checks that wide breakdown cards keep their labels
+// and that the Keitaro progress window polls on every page with a stored position.
+func TestBreakdownLabelsAndKeitaroDock(t *testing.T) {
+	html := spaSource()
+	wide := spaBetween(html, "@media(min-width:1181px){.bars .k{", "}}")
+	if wide == "" {
+		t.Fatal("wide .bars rule missing")
+	}
+	mustNot(t, wide, "min-width:0}", "wide .bars .k must keep a label width")
+	must(t, wide, "min-width:68px", "wide .bars .k lower bound")
+	must(t, wide, ".bars .tr{flex:1 1 140px", "wide bar shrinks instead of the label")
+
+	must(t, html, `class="ktdock"`, "dock element")
+	must(t, html, "const KT_DOCK_KEY='kuztds-ktdock'", "dock position storage key")
+	must(t, html, "const KT_DOCK_COUNTED=['streams','clicks','conversions']", "percent stages")
+	tick := spaFunctionLine(html, "ktDockTick")
+	must(t, tick, "get('/api/keitaro/job'", "dock polls the job")
+	mustNot(t, spaFunctionLine(html, "keitaroPanel"), "async function ktDockTick", "dock poll lives outside keitaroPanel")
+	pct := spaFunctionLine(html, "ktDockPercent")
+	must(t, pct, "KT_DOCK_COUNTED.includes", "percent only for counted stages")
+	must(t, pct, "total<=0", "percent needs a total")
+	must(t, spaFunctionLine(html, "ktDockSaved"), "localStorage.getItem(KT_DOCK_KEY)", "dock restores its position")
+	must(t, spaFunctionLine(html, "ktDockDrag"), "localStorage.setItem(KT_DOCK_KEY", "dock stores its position")
+	must(t, spaFunctionLine(html, "ktDockDrag"), "setPointerCapture", "dock drags with pointer capture")
+	must(t, spaFunctionLine(html, "ktDockStart"), "pageAllowed(me,'integrations')", "dock gated like the integrations menu")
+	must(t, spaFunctionLine(html, "app"), "ktDockStart(ME)", "dock starts after login")
+	must(t, spaFunctionLine(html, "loginView"), "ktDockStop()", "dock stops on logout")
+	paint := spaFunctionLine(html, "ktDockPaint")
+	must(t, paint, "tr('kt.stage.'+stage)", "dock stage name")
+	must(t, paint, "esc(msg)", "dock escapes the server error")
+	must(t, paint, "KT_DOCK.seen", "dock hides runs finished before load")
 }
 
 // TestStreamThen checks the Then mode tabs, share rows and shared S2S templates.
@@ -1524,7 +1557,8 @@ func TestDomainsCatalogAndPager(t *testing.T) {
 	mustNot(t, html, "function domainStatus(", "old status cell helper")
 	cell := spaFunctionLine(html, "domainCell")
 	must(t, cell, `<span class="dot ${domainDot(d)}" title="${esc(domainStatusText(d))}"></span> ${esc(d.host)}`, "dot before host")
-	must(t, cell, "if(id==='status') return `<td>${domainPending(d)?`<span class=\"pill warn\">${esc(tr('dom.pending'))}</span>`:esc(domainStatusText(d))}</td>`", "status text without dot, pending as a pill")
+	must(t, cell, "if(id==='status') return `<td>${domainStateChip(d)}${domainPending(d)?'':`<span class=\"dom-verdict\">${esc(domainStatusText(d))}</span>`}</td>`", "state chip first, then the check verdict; a pending purchase has no verdict")
+	must(t, spaFunctionLine(html, "domainStateChip"), "tr('dom.state.pending')", "pending purchase chip")
 	ld := spaFunctionLine(html, "linkDomains")
 	must(t, ld, "disabled", "linkDomains hides disabled")
 	must(t, html, "return {id:n.id, host:n.host, group:n.group||'', role:n.role||'both', primary:!!n.primary, disabled:!!n.disabled, created_by:n.created_by||''};", "payload has writable fields only")

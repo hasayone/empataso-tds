@@ -1,6 +1,6 @@
 # Регистрация доменов через Namecheap
 
-Серверная часть: проверка доступности и цены, покупка домена, смена NS. Домен после покупки попадает в `domains.json` тем же путём, что `POST /api/domains`, с ролью «Ссылки кампаний». DNS, прокси и сертификат настраиваются снаружи; в API Cloudflare админка не ходит. Список доменов не закрывает приём кликов.
+Серверная часть: проверка доступности и цены, покупка домена, смена NS, подключение через Cloudflare и проверка направления. Домен после покупки попадает в `domains.json` тем же путём, что `POST /api/domains`, с ролью «Ссылки кампаний». Список доменов не закрывает приём кликов.
 
 ## Аккаунт
 
@@ -22,7 +22,7 @@
 - `#/domains`, кнопка «Зарегистрировать домен» (только администратор): «Проверить цену» вызывает `check`, цена за год умножается на число лет, покупка недоступна, пока не отмечено подтверждение суммы; в `max_price` уходит эта сумма за весь срок. Ответ 409 `price changed` показывает новую цену и снимает отметку: нужно подтвердить заново. Премиум-имя не покупается. `pending` (409, 502 и 500 `registered but not saved`) закрывает окно, строка остаётся в списке, `too early` показывает ожидание в минутах из `retry_after`.
 - Строка со статусом `pending` помечена в столбце статуса. В её меню «Сверить с Namecheap» повторяет `register` (сервер сверяет и не покупает второй раз) и «Удалить принудительно» (`DELETE ?force=1`; ответ `registered at namecheap` означает, что покупка подтверждена, строка не удалена).
 - «Сменить NS» есть в меню только у доменов с `registrar: namecheap`: список из 2–12 имён и отметка подтверждения, в запрос уходит `confirm: true`.
-- DNS, Cloudflare и сертификаты в интерфейсе не настраиваются.
+- Регистрация и список доменов учитывают Cloudflare: см. раздел ниже.
 
 | Маршрут | Назначение |
 | --- | --- |
@@ -30,7 +30,7 @@
 | `PUT /api/registrars/namecheap` | Сохранить аккаунт. Пустой `api_key` или маска оставляют ключ, `contacts: null` оставляет контакты. Ответ как у GET |
 | `POST /api/registrars/namecheap/test` | Тело `{api_user, username, client_ip, api_key, sandbox, detect}`, пустое берётся из сохранённого. Ответ `{ok, detected_ip, error}`, отказ Namecheap — тоже 200 с `ok:false` |
 | `POST /api/registrars/namecheap/check` | `{domains: [..]}`, 1–50 имён. Ответ `{results: [{domain, available, premium, price, currency, error}]}`, `price` — год в USD, `null` без цены |
-| `POST /api/registrars/namecheap/register` | `{domain, years 1–10, max_price, group, nameservers}`. `max_price` — сумма за все годы, которую видел оператор. Поле `reconcile: true` включает режим только сверки: годы и цена не проверяются, покупка недостижима. Без строки `pending` для этого домена ответ 404 `not found`, при другом состоянии строки — 409 `not pending`; вызов Namecheap `create` в этом режиме не происходит никогда. Ответ 201: `{domain, charged, expected, namecheap_status, over_max_price, ns_error}` |
+| `POST /api/registrars/namecheap/register` | `{domain, years 1–10, max_price, group, nameservers}` или `cloudflare: true` (вместе с `nameservers` нельзя). `max_price` — сумма за все годы, которую видел оператор. Поле `reconcile: true` включает режим только сверки: годы и цена не проверяются, покупка недостижима. Без строки `pending` для этого домена ответ 404 `not found`, при другом состоянии строки — 409 `not pending`; вызов Namecheap `create` в этом режиме не происходит никогда. Ответ 201: `{domain, charged, expected, namecheap_status, over_max_price, ns_error, hosts_error, cloudflare, cloudflare_error}` |
 | `POST /api/domains/{id}/ns` | `{nameservers: [2–12], confirm: true}` → `{status:"ok", nameservers}` |
 
 Коды `PUT`: 400 поле, 409 идёт покупка, 503 нет файла, 500 не записалось. Коды `check`: 400 список, 503 не настроено, 502 ответ Namecheap с ошибкой. Коды `register`: 201 `{domain, charged, ns_error}`; 400 вход; 404 `not found` и 409 `not pending` (только при `reconcile: true`); 409 `already exists`, `registration in progress`, `not available`, `price unknown`, `price changed` (с `price`), `pending`, `too early` (с `retry_after` в секундах), `not registered` (строка `pending` снята, домена в аккаунте нет); 422 премиум; 503 не настроено; 502 ошибка Namecheap (с `pending:true`, если исход неизвестен). Коды `ns`: 400, 403 не наш домен, 404, 409 `pending`, 503, 502.
@@ -60,6 +60,36 @@
 ## Смена NS
 
 Только для доменов с `registrar: namecheap` и `registrar_account`, равным имени сохранённого аккаунта. Дополнительно `getInfo` должен подтвердить владение. Без `confirm: true` — 400. Переименование аккаунта отрезает уже купленные домены от смены NS.
+
+## Cloudflare
+
+### Интеграция
+
+`#/integrations`, карточка Cloudflare: API-токен (права на аккаунт: Zone:Edit, DNS:Edit, Zone Settings:Edit), Account ID. «Проверить» показывает число зон. Токен и Account ID хранятся в `cloudflare.json` на томе (режим `0600`), в ответах API не отдаются (`has_token`). Публичный IP сервера берётся из `KUZTDS_PUBLIC_IP` в `/etc/kuztds/server.env`; без него подключение доменов недоступно (в GET видно `public_ip`).
+
+| Маршрут | Назначение |
+| --- | --- |
+| `GET /api/cloudflare` | `{configured, account_id, has_token, public_ip, error}` |
+| `PUT /api/cloudflare` | Сохранить токен и Account ID; пустой токен или маска оставляет прежний |
+| `POST /api/cloudflare/test` | Проверка токена; ответ `{ok, zones, error}` |
+
+### Покупка и подключение
+
+Если Cloudflare настроен и известен публичный IP, в окне регистрации поле NS скрыто, стоит галочка «Подключить через Cloudflare» (`cloudflare: true` в `register`). Перед оплатой — окно подтверждения с доменом, сроком, ценой и режимом DNS (Cloudflare или свои NS). После покупки с Cloudflare: зона в аккаунте, A `@` на публичный IP с проксированием, SSL Full, Always Use HTTPS, NS у Namecheap меняются на NS Cloudflare. Без Cloudflare и без своих NS после покупки ставится A `@` на публичный IP через Namecheap (только для только что купленного домена). Если подключение после оплаты не удалось, строка остаётся «Подключение к Cloudflare…» (`cf_status: connect_pending`); фоновая проверка повторит попытку, повторной покупки нет.
+
+Для уже существующего домена: меню строки → «Подключить через Cloudflare» (`POST /api/domains/{id}/cloudflare`, `confirm: true`); операцию можно безопасно повторять. Для доменов не из нашего аккаунта Namecheap в ответе могут быть NS для ручной смены (`ns_manual`).
+
+### Статус и проверка
+
+В списке доменов отдельно состояние (Включён / Выключен / Ожидает оплаты) и вердикт проверки. Причины не-OK: DNS-запись не найдена; приватный адрес; сервер не отвечает по HTTPS; чужой ответ движка; сертификат сервера отклонён; не направлен (A указывает на другие IP, нужен публичный IP); ждём Cloudflare (NS ещё не сменились, показаны NS). ОК ставится только своим ответом движка с тем же Host на `https://домен/healthz`.
+
+Фоновая проверка в admin (`WatchDomains`, интервал `KUZTDS_DOMAIN_WATCH`, по умолчанию 5 минут): только домены с Cloudflare и покупки Namecheap последних 7 дней; до 50 за проход, после 48 часов без успеха — не чаще раза в час. Импортированные из Keitaro домены (без `WatchSince` и без Cloudflare) не опрашиваются.
+
+Когда домен впервые стал OK, на любой странице один раз появляется окно «Домен подключён» с кнопками «Понятно» и «Перейти к доменам»; отметка `connect_seen` общая для всех пользователей (`POST /api/domains/connected/ack`).
+
+### Сервер и nginx
+
+Nginx отдаёт любые домены на 443 движку (`deploy/nginx/kuztds-engine.conf`, `default_server`); админка — только по IP. IP посетителя для запросов от Cloudflare берётся из `CF-Connecting-IP` (диапазоны в `deploy/nginx/cloudflare-ips.txt`). Применение: `bash deploy/apply-edge.sh` (бэкап конфигов, `nginx -t`, откат при ошибке); nginx на сервере вручную не править.
 
 ## Тесты
 

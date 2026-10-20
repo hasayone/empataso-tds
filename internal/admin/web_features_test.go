@@ -162,7 +162,7 @@ func TestNamecheapUI(t *testing.T) {
 	must(t, html, "registrar_status==='pending'", "pending status from the domain row")
 	must(t, spaFunctionLine(html, "call"), "e.body=j", "the error body reaches the caller")
 
-	for _, forbidden := range []string{"api.cloudflare.com", "cloudflare", "certificate", "setHosts"} {
+	for _, forbidden := range []string{"api.cloudflare.com", "certificate", "setHosts"} {
 		mustNot(t, strings.ToLower(reg+panel+ns), strings.ToLower(forbidden), "DNS and certificates stay outside the registrar window")
 	}
 }
@@ -187,7 +187,14 @@ func TestSpaNewKeysAreTranslated(t *testing.T) {
 		"err.sid.unknown", "sid.block", "spend.from", "spend.to", "spend.byuniq", "spend.empty", "stream.share",
 		"s2s.title", "s2s.hint", "s2s.url", "s2s.method", "s2s.status", "s2s.add", "s2s.lead", "s2s.sale",
 		"s2s.rejected", "adv.summary", "cols.title", "cols.restore", "dom.groups", "dom.count", "dom.nogroup",
-		"dom.group.clear",
+		"dom.group.clear", "err.network", "kt.stage.landing_files", "kt.stage.lists", "kt.stage.pages", "kt.stage.users",
+		"cf.intro", "cf.token", "cf.account", "cf.ip", "cf.ip.empty", "cf.test", "cf.test.ok", "cf.test.fail",
+		"cf.file.err", "cf.err.load", "cf.reg.use", "cf.reg.err", "cf.reg.hosterr", "cf.reg.manual", "cf.buy.title",
+		"cf.buy.sum", "cf.dns.cf", "cf.dns.ns", "cf.dns.a", "cf.dns.none", "dom.state.on", "dom.state.off",
+		"dom.state.pending", "dom.elsewhere", "dom.elsewhere.short", "dom.cfpending", "dom.cfpending.short",
+		"dom.tls", "cf.connecting", "cf.connect", "cf.connect.title", "cf.connect.ask", "cf.connect.ask.nc",
+		"cf.connect.done", "cf.connect.set", "cf.ns.title", "cf.ns.hint", "cf.ns.copy", "cf.ns.copied",
+		"cf.ns.select", "dom.conn.title", "dom.conn.title.many", "dom.conn.text", "dom.conn.ok", "dom.conn.go",
 	}
 	for _, k := range keys {
 		if n := strings.Count(html, "'"+k+"':"); n < 3 {
@@ -584,4 +591,118 @@ func TestSpaRevenueAlwaysUSD(t *testing.T) {
 	must(t, exp, "curSign('USD')", "revenue title is in dollars")
 	must(t, html, "<span>${tr('col.revenue')}</span></div></div>", "flow cards label revenue as revenue")
 	mustNot(t, html, "moneyText(p.profit||0,'USD')}</b><span>${tr('flows.profit')}", "flow cards do not call revenue profit")
+}
+
+// TestCloudflareCardUI checks the Cloudflare card on the integrations page: its routes, the
+// token field that is never filled in, the public IP hint and the check result.
+func TestCloudflareCardUI(t *testing.T) {
+	html := spaSource()
+	must(t, spaFunctionLine(html, "integrations"), `id="int-cloudflare"`, "Cloudflare card on the integrations page")
+	must(t, spaFunctionLine(html, "integrations"), "cloudflarePanel(", "the card is painted with the others")
+	panel := spaFunctionLine(html, "cloudflarePanel")
+	for _, needle := range []string{
+		"get('/api/cloudflare'", "call('PUT','/api/cloudflare'", "call('POST','/api/cloudflare/test'",
+		`id="cf-token"`, `type="password"`, `autocomplete="new-password"`, "cur.has_token", `id="cf-account"`,
+		`id="cf-ip"`, " readonly", "cur.public_ip", "tr('cf.ip.empty')", `id="cf-save"`, `id="cf-test"`,
+		"trFill('cf.test.ok',{n:r.zones})", "r.zones", "r.error",
+	} {
+		must(t, panel, needle, "Cloudflare card")
+	}
+	mustNot(t, panel, "cur.token", "the token is never read back into the page")
+}
+
+// TestCloudflarePurchaseAndRow checks the purchase window (Cloudflare box, confirmation before the
+// request, follow-up check) and the row action that connects a domain.
+func TestCloudflarePurchaseAndRow(t *testing.T) {
+	html := spaSource()
+	reg := spaFunctionLine(html, "registerDomainModal")
+	for _, needle := range []string{
+		"cfInfo(true)", "cf.configured&&cf.public_ip", `id="nr-cf"`, `id="nr-ns-box"`, "body.cloudflare=true",
+		"cf.reg.use", "res.cloudflare_error", "res.hosts_error", `id="nr-confirm"`, "checkDomain(fresh",
+	} {
+		must(t, reg, needle, "purchase window")
+	}
+	askAt := strings.Index(reg, "await ask(")
+	postAt := strings.Index(reg, "call('POST','/api/registrars/namecheap/register',body)")
+	if askAt < 0 || postAt < 0 || askAt > postAt {
+		t.Errorf("the purchase must be confirmed with ask( before the request (ask at %d, request at %d)", askAt, postAt)
+	}
+	must(t, reg, "return 'keep'", "a declined confirmation keeps the window open")
+	must(t, spaFunctionLine(html, "formModal"), "res==='keep'", "formModal leaves the window open on keep")
+	must(t, html, "const m=formModal(tr('nc.reg.title')", "purchase window is a form modal")
+	if strings.Contains(reg, "body.nameservers=ns") && !strings.Contains(reg, "else if(ns.length) body.nameservers=ns") {
+		t.Error("nameservers must not be sent together with cloudflare")
+	}
+
+	conn := spaFunctionLine(html, "connectCloudflare")
+	must(t, conn, "'/api/domains/'+encodeURIComponent(d.id)+'/cloudflare'", "row action route")
+	must(t, conn, "{confirm:true}", "the connection is confirmed")
+	askAt = strings.Index(conn, "await ask(")
+	postAt = strings.Index(conn, "call('POST'")
+	if askAt < 0 || postAt < 0 || askAt > postAt {
+		t.Error("the row action must ask before it posts")
+	}
+	must(t, conn, "res.ns_manual", "manual name servers are shown")
+	must(t, conn, "nsListModal(", "manual name server list")
+	dom := spaFunctionLine(html, "domains")
+	must(t, dom, "connectCloudflare(d,paintTable)", "row menu action")
+	must(t, dom, "d.cf_status==='active'&&d.ok", "the action is hidden for a connected domain")
+	must(t, dom, "cfInfo()", "public IP is read once per page")
+}
+
+// TestDomainStatusTexts checks the state chip and the check verdict phrases for the new reasons.
+func TestDomainStatusTexts(t *testing.T) {
+	html := spaSource()
+	text := spaFunctionLine(html, "domainStatusText")
+	for _, needle := range []string{
+		"d.reason==='tls'", "d.reason==='cf_pending'", "d.reason==='elsewhere'", "d.cf_status==='connect_pending'",
+		"tr('cf.connecting')", "tr('dom.tls')", "dom.cfpending", "dom.elsewhere", "CF_INFO.public_ip", "d.reason_detail",
+	} {
+		must(t, text, needle, "domain verdict")
+	}
+	chip := spaFunctionLine(html, "domainStateChip")
+	for _, key := range []string{"dom.state.on", "dom.state.off", "dom.state.pending"} {
+		must(t, chip, "tr('"+key+"')", "state chip")
+	}
+	must(t, spaFunctionLine(html, "checkDomain"), "applyDomainRow(d, res)", "a check applies the whole row")
+	must(t, spaFunctionLine(html, "applyDomainRow"), "t.reason_detail=''", "an omitted detail does not keep the old value")
+	must(t, html, `'dom.elsewhere':'Не направлен: A указывает на {ips}, нужен {ip}'`, "ru elsewhere text")
+	must(t, html, `'dom.cfpending':'Ждём Cloudflare: NS {ns}'`, "ru Cloudflare wait text")
+	must(t, html, `'dom.tls':'Сертификат сервера отклонён'`, "ru certificate text")
+}
+
+// TestConnectedPopup checks the popup that reports newly connected domains: one timer per tab,
+// the acknowledge routes and the stop on logout.
+func TestConnectedPopup(t *testing.T) {
+	html := spaSource()
+	must(t, html, "const CONN_EVERY=5*60*1000", "five minutes between reads")
+	must(t, spaFunctionLine(html, "connRead"), "'/api/domains/connected'", "list route")
+	must(t, spaFunctionLine(html, "connRead"), "catch(e){return}", "errors, 403 included, are ignored")
+	must(t, spaFunctionLine(html, "connShow"), "'/api/domains/connected/ack'", "acknowledge route")
+	must(t, spaFunctionLine(html, "connShow"), "go('domains')", "second button opens the domains page")
+	must(t, spaFunctionLine(html, "connShow"), "if(CONN.box) return", "one window at a time")
+	must(t, spaFunctionLine(html, "connStart"), "pageAllowed(me,'domains')", "only for users who see the domains page")
+	must(t, spaFunctionLine(html, "connTick"), "gen!==CONN.gen", "a stale tick does nothing")
+	must(t, spaFunctionLine(html, "connStop"), "CONN.gen++", "stopping bumps the generation")
+	must(t, spaFunctionLine(html, "app"), "connStart(ME)", "the poll starts after login")
+	must(t, spaFunctionLine(html, "loginView"), "connStop()", "the poll stops on logout")
+	if n := strings.Count(html, "setTimeout(()=>connTick("); n != 1 {
+		t.Errorf("the connected poll has %d timers, want one", n)
+	}
+}
+
+// TestNetworkErrorMapping checks that a failed fetch becomes the translated no-connection error
+// for both request helpers, with status 0, and that writes are not retried.
+func TestNetworkErrorMapping(t *testing.T) {
+	html := spaSource()
+	net := spaFunctionLine(html, "fetchOrNetErr")
+	must(t, net, "instanceof TypeError", "only a fetch TypeError is mapped")
+	must(t, net, "tr('err.network')", "translated text")
+	must(t, net, "e.status=0", "status 0")
+	mustNot(t, net, "retry", "no automatic retry")
+	must(t, spaFunctionLine(html, "call"), "await fetchOrNetErr(path,o)", "call maps the failure")
+	must(t, spaFunctionLine(html, "callRaw"), "await fetchOrNetErr(path,o)", "callRaw maps the failure")
+	mustNot(t, spaFunctionLine(html, "call"), "await fetch(", "call does not bypass the mapping")
+	mustNot(t, spaFunctionLine(html, "callRaw"), "await fetch(", "callRaw does not bypass the mapping")
+	must(t, html, `'err.network':'Нет связи с сервером. Проверьте соединение и повторите.'`, "ru text")
 }

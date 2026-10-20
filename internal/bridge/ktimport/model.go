@@ -1,6 +1,9 @@
 package ktimport
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // Snapshot — снимок конфигурации, который понимает маппер.
 // Поля совпадают с фикстурой и с ответами GET Admin API.
@@ -129,13 +132,53 @@ type KNetwork struct {
 // KDomain — домен Keitaro. Name — это хост.
 // DefaultCampaignID — кампания, на которую домен отдает корень. Ноль значит, что корень не назначен.
 type KDomain struct {
-	ID                FlexInt `json:"id"`
-	Name              string  `json:"name"`
-	State             string  `json:"state"`
-	DefaultCampaignID FlexInt `json:"default_campaign_id"`
+	ID                FlexInt           `json:"id"`
+	Name              string            `json:"name"`
+	State             string            `json:"state"`
+	DefaultCampaignID FlexInt           `json:"default_campaign_id"`
+	GroupID           FlexInt           `json:"group_id"`
+	Group             domainInlineGroup `json:"group"`
 }
 
-// KGroup — группа сущностей Keitaro: кампании, офферы или лендинги.
+// domainInlineGroup — имя группы домена из поля group ответа Keitaro.
+type domainInlineGroup string
+
+// UnmarshalJSON читает имя группы из строки, null или объекта с полем name.
+//
+// Параметры: data — JSON-значение поля group.
+// Результат: имя группы или пустая строка для null и неизвестной формы.
+// Ошибки: нет; разбор не прерывает unmarshaling домена.
+func (g *domainInlineGroup) UnmarshalJSON(data []byte) error {
+	data = bytes.TrimSpace(data)
+	if len(data) == 0 || string(data) == "null" {
+		*g = ""
+		return nil
+	}
+	if data[0] == '"' {
+		var s string
+		if err := json.Unmarshal(data, &s); err != nil {
+			*g = ""
+			return nil
+		}
+		*g = domainInlineGroup(s)
+		return nil
+	}
+	if data[0] == '{' {
+		var obj struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(data, &obj); err != nil {
+			*g = ""
+			return nil
+		}
+		*g = domainInlineGroup(obj.Name)
+		return nil
+	}
+	*g = ""
+	return nil
+}
+
+// KGroup — группа сущностей Keitaro: кампании, офферы, лендинги или домены.
 type KGroup struct {
 	ID   FlexInt `json:"id"`
 	Name string  `json:"name"`

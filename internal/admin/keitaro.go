@@ -190,10 +190,7 @@ func (s *Server) importCatalogs(ctx context.Context, req keitaroImportReq, st *i
 		st.counts["sources"] = n
 	}
 	if req.Domains {
-		n, extra, err := mergeCatalog(ctx, st.res.Domains, catalogMerge[config.Domain]{
-			store: s.cfg.Domains, idOf: func(v config.Domain) string { return v.ID },
-			valid: validDomain, imported: st.prev.Imported(ktimport.KindDomains), owner: st.owner,
-		})
+		n, extra, err := s.mergeDomains(ctx, st)
 		st.losses = append(st.losses, extra...)
 		if err != nil {
 			return err
@@ -226,6 +223,19 @@ func (s *Server) importCatalogs(ctx context.Context, req keitaroImportReq, st *i
 		st.counts["offers"] = n
 	}
 	return nil
+}
+
+// mergeDomains merges the imported domains into domains.json under domainMu, so a check, a
+// Cloudflare connection or an edit running at the same time cannot be overwritten.
+// The lock covers only the read, the merge and the save. st holds the mapper result.
+// It returns the count of accepted rows, the losses and an error from the store.
+func (s *Server) mergeDomains(ctx context.Context, st *importState) (int, []ktimport.Loss, error) {
+	s.domainMu.Lock()
+	defer s.domainMu.Unlock()
+	return mergeCatalog(ctx, st.res.Domains, catalogMerge[config.Domain]{
+		store: s.cfg.Domains, idOf: func(v config.Domain) string { return v.ID },
+		valid: validDomain, imported: st.prev.Imported(ktimport.KindDomains), owner: st.owner,
+	})
 }
 
 // preserveCatalogGroups copies Group from existing rows when the incoming row left it empty.
@@ -270,7 +280,7 @@ func createdByOf[T any](item T) string {
 
 // keepLocalFields returns next with Group taken from old when empty on next, then restores
 // CreatedBy from old when next left it empty. For domains the operator mark, the last
-// probe result and the registrar fields stay. It supports catalog types with group and owner.
+// probe result, the registrar fields and the Cloudflare, connection and watch fields stay. It supports catalog types with group and owner.
 func keepLocalFields[T any](old, next T) T {
 	switch o := any(old).(type) {
 	case config.Offer:
@@ -304,11 +314,12 @@ func keepLocalFields[T any](old, next T) T {
 		}
 		n.Disabled = o.Disabled
 		n.OK = o.OK
-		n.Reason = o.Reason
+		n.Reason, n.ReasonDetail = o.Reason, o.ReasonDetail
 		n.Checked = o.Checked
 		n.Registrar, n.RegistrarAccount = o.Registrar, o.RegistrarAccount
 		n.RegistrarStatus, n.RegistrarCharged, n.RegistrarExpected = o.RegistrarStatus, o.RegistrarCharged, o.RegistrarExpected
 		n.RegistrarPendingSince = o.RegistrarPendingSince
+		copyCloudflare(&n, o)
 		return withOwner(any(n).(T), createdByOf(old))
 	default:
 		return withOwner(next, createdByOf(old))

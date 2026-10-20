@@ -60,6 +60,7 @@ func TestFetchSnapshotUsersDenied(t *testing.T) {
 }
 
 func TestFetchSnapshotGroups(t *testing.T) {
+	var groupTypes []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/admin_api/v1/campaigns":
@@ -67,13 +68,17 @@ func TestFetchSnapshotGroups(t *testing.T) {
 		case "/admin_api/v1/campaigns/1/streams":
 			_, _ = io.WriteString(w, `[]`)
 		case "/admin_api/v1/groups":
-			switch r.URL.Query().Get("type") {
+			kind := r.URL.Query().Get("type")
+			groupTypes = append(groupTypes, kind)
+			switch kind {
 			case "campaigns":
 				_, _ = io.WriteString(w, `[{"id":1,"name":"C","type":"campaigns"}]`)
 			case "offers":
 				_, _ = io.WriteString(w, `[{"id":2,"name":"O","type":"offers"}]`)
 			case "landings":
 				http.Error(w, "no", http.StatusInternalServerError)
+			case "domains":
+				_, _ = io.WriteString(w, `[{"id":3,"name":"D"}]`)
 			default:
 				http.Error(w, "Param type is required", http.StatusBadRequest)
 			}
@@ -87,8 +92,14 @@ func TestFetchSnapshotGroups(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snap.Groups) != 2 || snap.Groups[0].Name != "C" || snap.Groups[1].Name != "O" {
+	if fmt.Sprint(groupTypes) != "[campaigns offers landings domains]" {
+		t.Fatalf("group types %v", groupTypes)
+	}
+	if len(snap.Groups) != 3 || snap.Groups[0].Name != "C" || snap.Groups[1].Name != "O" || snap.Groups[2].Name != "D" {
 		t.Fatalf("groups %+v", snap.Groups)
+	}
+	if snap.Groups[2].Type != "domains" {
+		t.Fatalf("domain group type %q", snap.Groups[2].Type)
 	}
 }
 

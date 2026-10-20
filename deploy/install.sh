@@ -14,6 +14,11 @@ INFRA_OVERRIDE="$STATE_DIR/compose.infra.yml"
 APP_OVERRIDE="$STATE_DIR/compose.app.yml"
 UP_SCRIPT="$STATE_DIR/up.sh"
 OUR_DEPLOY_DIR="${TDS_DIR}/deploy"
+export KUZTDS_SERVER_ENV="$SERVER_ENV"
+if [[ -f "${OUR_DEPLOY_DIR}/apply-edge.sh" ]]; then
+	# shellcheck source=apply-edge.sh
+	source "${OUR_DEPLOY_DIR}/apply-edge.sh"
+fi
 APP_CONTAINERS=(kuztds-engine kuztds-admin kuztds-cron kuztds-php)
 INFRA_COMPOSE=(docker compose -p deploy --env-file "$TDS_DIR/.env" --env-file "$SERVER_ENV" -f "$TDS_DIR/deploy/docker-compose.yml" -f "$INFRA_OVERRIDE")
 APP_COMPOSE=(docker compose --env-file "$TDS_DIR/.env" --env-file "$SERVER_ENV" -f "$TDS_DIR/deploy/docker-compose.app.yml" -f "$APP_OVERRIDE")
@@ -97,16 +102,39 @@ app_mem_limit() {
 	fi
 }
 
+# Назначение: определить публичный IPv4 для server.env и TLS.
+# Параметры: нет (KUZTDS_PUBLIC_IP или HTTP-запрос).
+# Результат: адрес на stdout.
+# Ошибки: не удалось определить, код 1.
+detect_public_ipv4() {
+	local ip
+	if [[ -n "${KUZTDS_PUBLIC_IP:-}" ]]; then
+		ip=$KUZTDS_PUBLIC_IP
+	elif command -v curl >/dev/null 2>&1; then
+		ip=$(curl -fsS --max-time 15 -4 https://ifconfig.me/ip 2>/dev/null || true)
+	else
+		ip=
+	fi
+	if [[ -z "$ip" ]] || ! valid_ipv4 "$ip"; then
+		msg "задайте KUZTDS_PUBLIC_IP (IPv4) в окружении перед установкой" >&2
+		return 1
+	fi
+	printf '%s' "$ip"
+}
+
 # Назначение: сгенерировать server.env с привязкой портов к loopback.
-# Параметры: нет.
+# Параметры: $1 — публичный IPv4.
 # Результат: содержимое файла на stdout.
 # Ошибки: нет.
 render_server_env() {
-	cat <<'EOF'
+	local public_ip=$1
+	cat <<EOF
 KUZTDS_CH_HTTP_PUBLISH=127.0.0.1:8123:8123
 KUZTDS_CH_NATIVE_PUBLISH=127.0.0.1:9000:9000
 KUZTDS_REDIS_PUBLISH=127.0.0.1:6379:6379
 KUZTDS_ADMIN_PUBLISH=127.0.0.1:8090:8090
+KUZTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080
+KUZTDS_PUBLIC_IP=${public_ip}
 EOF
 }
 
@@ -421,7 +449,7 @@ check_foreign_resources() {
 	fi
 
 	if (( our_count == 0 )); then
-		for p in 8123 9000 6379 8080 8090; do
+		for p in 8123 9000 6379 18080 8090; do
 			out=$(ss -ltnH "sport = :${p}" 2>/dev/null || true)
 			if [[ -n "$out" ]]; then
 				msg "порт ${p} уже занят на хосте" >&2
@@ -516,7 +544,7 @@ verify_running_stack() {
 		diagnose
 		exit 1
 	fi
-	if ! curl -fsS http://127.0.0.1:8080/healthz >/dev/null; then
+	if ! curl -fsS http://127.0.0.1:18080/healthz >/dev/null; then
 		msg "healthz движка недоступен" >&2
 		diagnose
 		exit 1
@@ -544,9 +572,9 @@ verify_running_stack() {
 # Результат: server.env, overrides и up.sh созданы.
 # Ошибки: запись файлов, код 1.
 write_state_files() {
-	local mem=$1
+	local mem=$1 public_ip=$2
 	install -d -m 0755 "$STATE_DIR"
-	render_server_env | write_atomic "$SERVER_ENV" 0644
+	render_server_env "$public_ip" | write_atomic "$SERVER_ENV" 0644
 	render_infra_override "$mem" | write_atomic "$INFRA_OVERRIDE" 0644
 	render_app_override "$mem" | write_atomic "$APP_OVERRIDE" 0644
 	render_up_sh | write_atomic "$UP_SCRIPT" 0755
@@ -613,8 +641,25 @@ run_self_test() {
 		exit 1
 	fi
 
-	env_out=$(render_server_env)
-	assert_eq "$(echo "$env_out" | wc -l | tr -d ' ')" 4 server_env_lines
+	env_out=$(render_server_env 203.0.113.1)
+	assert_eq "$(echo "$env_out" | wc -l | tr -d ' ')" 6 server_env_lines
+	if [[ "$env_out" != *'KUZTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080'* ]]; then
+		printf 'self-test FAIL: server.env без порта движка 18080\n'
+		exit 1
+	fi
+	if [[ "$env_out" != *'KUZTDS_PUBLIC_IP=203.0.113.1'* ]]; then
+		printf 'self-test FAIL: server.env без KUZTDS_PUBLIC_IP\n'
+		exit 1
+	fi
+	if ! declare -F valid_ipv4 >/dev/null; then
+		printf 'self-test FAIL: valid_ipv4 не загружен из apply-edge.sh\n'
+		exit 1
+	fi
+	valid_ipv4 203.0.113.1 || { printf 'self-test FAIL: valid_ipv4\n'; exit 1; }
+	valid_ipv4 999.1.1.1 && { printf 'self-test FAIL: valid_ipv4 reject\n'; exit 1; }
+	local detected
+	detected=$(KUZTDS_PUBLIC_IP=198.51.100.7 detect_public_ipv4)
+	assert_eq "$detected" 198.51.100.7 detect_env_ip
 
 	local f
 	f="$SELFTEST_TMP/missing.env"
@@ -729,7 +774,10 @@ run_install() {
 
 	check_foreign_resources
 
-	write_state_files "$mem"
+	local public_ip
+	public_ip=$(detect_public_ipv4) || exit 1
+
+	write_state_files "$mem" "$public_ip"
 
 	cd "$TDS_DIR"
 	if ! timeout 1800 "${APP_COMPOSE[@]}" build engine; then
@@ -742,6 +790,13 @@ run_install() {
 		diagnose
 		exit 1
 	fi
+	if ! declare -F ensure_server_env_keys >/dev/null; then
+		msg "не найден apply-edge.sh (ensure_server_env_keys)" >&2
+		exit 1
+	fi
+	if ! ensure_server_env_keys "$public_ip"; then
+		exit 1
+	fi
 	wait_clickhouse_schema
 	wait_redis_ping
 
@@ -752,6 +807,17 @@ run_install() {
 
 	verify_running_stack
 
+	if command -v nginx >/dev/null 2>&1; then
+		if [[ -f "${OUR_DEPLOY_DIR}/apply-edge.sh" ]]; then
+			if ! bash "${OUR_DEPLOY_DIR}/apply-edge.sh" "$public_ip"; then
+				msg "не удалось применить конфигурацию nginx (apply-edge.sh)" >&2
+				exit 1
+			fi
+		fi
+	else
+		msg "nginx не установлен; пропуск apply-edge.sh (стек установлен без edge)"
+	fi
+
 	date -Iseconds | write_atomic "$MARKER" 0644
 
 	if can_self_delete "$SELF"; then
@@ -761,7 +827,7 @@ run_install() {
 		msg "файл установщика не удалён (ожидался deploy/install.sh); повторный запуск заблокирован маркером ${MARKER}"
 	fi
 
-	msg "готово: движок :8080, админка 127.0.0.1:8090"
+	msg "готово: движок 127.0.0.1:18080, админка 127.0.0.1:8090"
 	msg "вход: ssh -L 8090:127.0.0.1:8090 user@host"
 	msg "повторный старт: ${UP_SCRIPT}"
 }

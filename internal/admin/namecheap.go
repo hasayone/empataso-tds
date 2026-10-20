@@ -128,6 +128,9 @@ type ncXMLInfo struct {
 	Status     string `xml:"Status,attr"`
 	DomainName string `xml:"DomainName,attr"`
 	IsOwner    string `xml:"IsOwner,attr"`
+	DNS        struct {
+		Nameservers []string `xml:"Nameserver"`
+	} `xml:"DnsDetails"`
 }
 
 type ncXMLPricing struct {
@@ -372,15 +375,43 @@ func (c *ncClient) setCustom(ctx context.Context, domain string, servers []strin
 	return err
 }
 
+// ncHost is one host record of domains.dns.setHosts. Name is the host label, @ for the apex.
+type ncHost struct {
+	Name    string
+	Type    string
+	Address string
+	TTL     int
+}
+
+// setHosts replaces the host records of a domain that uses the registrar DNS.
+// domain is the full name and hosts the records; each is sent as HostNameN, RecordTypeN,
+// AddressN and TTLN. It returns an error when the domain is invalid or the call fails.
+func (c *ncClient) setHosts(ctx context.Context, domain string, hosts []ncHost) error {
+	sld, tld, err := splitNCDomain(domain)
+	if err != nil {
+		return c.fail("domains.dns.setHosts", "", err.Error(), false, false)
+	}
+	params := map[string]string{"SLD": sld, "TLD": tld}
+	for i, h := range hosts {
+		n := strconv.Itoa(i + 1)
+		params["HostName"+n], params["RecordType"+n], params["Address"+n], params["TTL"+n] = h.Name, h.Type, h.Address, strconv.Itoa(h.TTL)
+	}
+	_, err = c.call(ctx, "namecheap.domains.dns.setHosts", params)
+	return err
+}
+
 // ncDomainInfo is the answer of domains.getInfo. Owned is true when the answer names the
 // asked domain and says the account is its owner. Status is the registry status text
 // (Ok, Locked, Expired) and does not decide ownership. Foreign is true only when the answer
 // names the asked domain and says IsOwner is false; an empty or different name, or a missing
 // flag, leaves both Owned and Foreign false because the answer is then ambiguous.
+// Nameservers are the name servers in use, lower case without a trailing dot; empty when the
+// answer lists none.
 type ncDomainInfo struct {
-	Owned   bool
-	Foreign bool
-	Status  string
+	Owned       bool
+	Foreign     bool
+	Status      string
+	Nameservers []string
 }
 
 // info asks whether the account owns domain.
@@ -394,10 +425,22 @@ func (c *ncClient) info(ctx context.Context, domain string) (ncDomainInfo, error
 	r := env.CommandResponse.Info
 	named := strings.EqualFold(strings.TrimSpace(r.DomainName), domain)
 	return ncDomainInfo{
-		Owned:   named && strings.EqualFold(strings.TrimSpace(r.IsOwner), "true"),
-		Foreign: named && strings.EqualFold(strings.TrimSpace(r.IsOwner), "false"),
-		Status:  strings.TrimSpace(r.Status),
+		Owned:       named && strings.EqualFold(strings.TrimSpace(r.IsOwner), "true"),
+		Foreign:     named && strings.EqualFold(strings.TrimSpace(r.IsOwner), "false"),
+		Status:      strings.TrimSpace(r.Status),
+		Nameservers: lowerHosts(r.DNS.Nameservers),
 	}, nil
+}
+
+// lowerHosts trims, lower-cases and drops the trailing dot of each host name, and skips empty ones.
+func lowerHosts(in []string) []string {
+	var out []string
+	for _, h := range in {
+		if h = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(h)), "."); h != "" {
+			out = append(out, h)
+		}
+	}
+	return out
 }
 
 // splitNCDomain splits a domain into its first label and the rest.

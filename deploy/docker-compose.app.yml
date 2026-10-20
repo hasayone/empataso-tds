@@ -13,7 +13,7 @@ services:
     container_name: kuztds-engine
     command: ["engine"]
     ports:
-      - "8080:8080"
+      - "${KUZTDS_ENGINE_PUBLISH:-8080:8080}"
     stop_grace_period: 30s
     restart: unless-stopped
     environment:
@@ -34,6 +34,7 @@ services:
       KUZTDS_CLICKHOUSE_DB: kuztds
       KUZTDS_CLICKHOUSE_USER: kuztds
       KUZTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      KUZTDS_TRUSTED_PROXIES: ${KUZTDS_TRUSTED_PROXIES:-}
     volumes:
       - kuztds_state:/var/lib/kuztds
     networks:
@@ -87,6 +88,7 @@ services:
       KUZTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       KEITARO_BASE_URL: ${KEITARO_BASE_URL:-}
       KEITARO_API_KEY: ${KEITARO_API_KEY:-}
+      KUZTDS_PUBLIC_IP: ${KUZTDS_PUBLIC_IP:-}
     volumes:
       - kuztds_state:/var/lib/kuztds
     networks:

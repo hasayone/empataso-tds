@@ -3,13 +3,17 @@ package admin
 import (
 	"context"
 	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -22,14 +26,24 @@ import (
 // errPrivateAddr is the dial refusal for an address that is not a public IP.
 var errPrivateAddr = errors.New("private address")
 
+// Reason codes a domain check adds to dns, private, connect and foreign.
+const (
+	// reasonTLS means the server certificate of the host was refused.
+	reasonTLS = "tls"
+	// reasonElsewhere means the host resolves to addresses that are not Config.PublicIP.
+	reasonElsewhere = "elsewhere"
+	// reasonCFPending means the Cloudflare zone of the host is not active yet.
+	reasonCFPending = "cf_pending"
+)
+
 var (
 	defaultCheckOnce sync.Once
 	defaultCheck     *http.Client
 )
 
-// handleDomainCheck rechecks one parked domain and stores OK, Reason and Checked.
-// The id comes from the request path. The network check runs before domainMu,
-// then List, modify and Save run under that lock.
+// handleDomainCheck rechecks one parked domain and stores OK, Reason, ReasonDetail and Checked.
+// The id comes from the request path. The row is read once to apply the access rules, then
+// recheckDomain runs the network check outside domainMu and writes the result under it.
 // It writes the updated domain. A missing store is 503, a missing id is 404,
 // a read or save failure is 500, and 409 when the host was edited during the probe.
 func (s *Server) handleDomainCheck(w http.ResponseWriter, r *http.Request) {
@@ -38,25 +52,17 @@ func (s *Server) handleDomainCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := r.PathValue("id")
-	list, err := s.cfg.Domains.List(r.Context())
+	row, found, err := s.domainRowByID(r.Context(), id)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "read error")
 		return
 	}
-	var domainRow config.Domain
-	host, found := domainHost(list, id)
 	if !found {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
-	for i := range list {
-		if list[i].ID == id {
-			domainRow = list[i]
-			break
-		}
-	}
 	v := s.viewerFrom(r.Context())
-	dref := ref{id: domainRow.ID, label: domainRow.Group, owner: domainRow.CreatedBy}
+	dref := domainRef(row)
 	if !v.canSee(resDomains, dref) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
@@ -65,90 +71,165 @@ func (s *Server) handleDomainCheck(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return
 	}
-	ok, reason := s.checkDomain(r.Context(), host)
-	checked := time.Now().UTC().Format(time.RFC3339)
-
-	s.domainMu.Lock()
-	defer s.domainMu.Unlock()
-	list, err = s.cfg.Domains.List(r.Context())
+	updated, err := s.recheckDomain(r.Context(), id)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "read error")
+		code, msg := domainErrStatus(err)
+		writeErr(w, code, msg)
 		return
 	}
-	idx := -1
-	for i := range list {
-		if list[i].ID == id {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
-		writeErr(w, http.StatusNotFound, "not found")
-		return
-	}
-	if list[idx].Host != host {
-		writeErr(w, http.StatusConflict, "host changed")
-		return
-	}
-	list[idx].OK = ok
-	list[idx].Reason = reason
-	list[idx].Checked = checked
-	if err := s.cfg.Domains.Save(r.Context(), list); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	writeJSON(w, http.StatusOK, list[idx])
+	writeJSON(w, http.StatusOK, updated)
 }
 
-// domainHost returns the host stored for id.
-// list is the current domain file. found is false when id is absent.
-func domainHost(list []config.Domain, id string) (host string, found bool) {
-	for i := range list {
-		if list[i].ID == id {
-			return list[i].Host, true
-		}
-	}
-	return "", false
+// probeResult is the outcome of probing one host. IPs are the public addresses the host
+// resolved to; they are empty when resolution failed or found only non-public addresses.
+type probeResult struct {
+	ok     bool
+	reason string
+	ips    []net.IP
 }
 
 // checkDomain reports whether host answers as this tracker over HTTPS.
 // host is the parked host. A port stays in the request URL and the Host header.
 // ok is true only when name resolution and the probe both succeed.
-// reason is dns, private, connect or foreign when ok is false, and empty when ok is true.
-// connect means the HTTPS call did not complete. foreign means some server answered, but it was not this tracker.
+// reason is dns, private, connect, tls or foreign when ok is false, and empty when ok is true.
+// connect means the HTTPS call did not complete. tls means the certificate was refused.
+// foreign means some server answered, but it was not this tracker.
 // A resolver failure is dns. checkDomain does not return an error.
 func (s *Server) checkDomain(ctx context.Context, host string) (ok bool, reason string) {
-	if reason = s.resolvePhase(ctx, host); reason != "" {
-		return false, reason
+	r := s.probeHost(ctx, host)
+	return r.ok, r.reason
+}
+
+// probeHost resolves host and probes it over HTTPS.
+// host is the parked host, with a port when one is stored. It returns the check outcome with
+// the resolved public addresses; a failed resolution skips the probe.
+func (s *Server) probeHost(ctx context.Context, host string) probeResult {
+	reason, ips := s.resolvePhase(ctx, host)
+	if reason != "" {
+		return probeResult{reason: reason, ips: ips}
 	}
-	return s.probePhase(ctx, host)
+	ok, reason := s.probePhase(ctx, host)
+	return probeResult{ok: ok, reason: reason, ips: ips}
+}
+
+// judgeDomain probes d.Host and names the cause when the probe fails.
+// d is the stored row. A successful probe returns true with no reason. After a failure a row
+// with a Cloudflare zone that is not active gets cf_pending with its name servers as the
+// detail. A row without a zone whose resolved addresses lack Config.PublicIP gets elsewhere
+// with the resolved addresses as the detail. Any other failure keeps the probe reason.
+func (s *Server) judgeDomain(ctx context.Context, d config.Domain) (ok bool, reason, detail string) {
+	r := s.probeHost(ctx, d.Host)
+	switch {
+	case r.ok:
+		return true, "", ""
+	case d.CfZoneID != "":
+		if d.CfStatus != cfStatusActive {
+			return false, reasonCFPending, strings.Join(d.CfNS, ",")
+		}
+	case s.cfg.PublicIP != "" && len(r.ips) > 0 && !containsIP(r.ips, s.cfg.PublicIP):
+		return false, reasonElsewhere, joinIPs(r.ips)
+	}
+	return false, r.reason, ""
+}
+
+// containsIP reports whether ips holds the address text. text is an IPv4 or IPv6 address;
+// an unparsable text is never contained.
+func containsIP(ips []net.IP, text string) bool {
+	want := net.ParseIP(text)
+	for _, ip := range ips {
+		if want != nil && ip.Equal(want) {
+			return true
+		}
+	}
+	return false
+}
+
+// joinIPs returns the distinct addresses as sorted text joined by commas.
+func joinIPs(ips []net.IP) string {
+	seen := make(map[string]struct{}, len(ips))
+	out := make([]string, 0, len(ips))
+	for _, ip := range ips {
+		t := ip.String()
+		if _, dup := seen[t]; !dup {
+			seen[t] = struct{}{}
+			out = append(out, t)
+		}
+	}
+	sort.Strings(out)
+	return strings.Join(out, ",")
+}
+
+// recheckDomain probes one stored domain and saves the verdict.
+// ctx bounds the network check and id selects the row. The row is read under domainMu, the
+// network runs outside it and the result is written under it again. The write sets OK, Reason,
+// ReasonDetail and Checked. A passing probe on a row with a Cloudflare zone also marks the zone
+// active. ConnectedAt is set once, at the first passing probe of a row that has no zone or
+// whose zone is active, and is never overwritten; a row outside the watch gets ConnectSeen at
+// once, because nobody waits for its notice.
+// It returns the saved row. Errors are errDomainStore, errDomainNotFound, errDomainRead,
+// errDomainSave, and errDomainHostChanged when the host was edited during the probe.
+func (s *Server) recheckDomain(ctx context.Context, id string) (config.Domain, error) {
+	if s.cfg.Domains == nil {
+		return config.Domain{}, errDomainStore
+	}
+	s.domainMu.Lock()
+	d, found, err := s.domainRowByID(ctx, id)
+	s.domainMu.Unlock()
+	if err != nil {
+		return config.Domain{}, fmt.Errorf("%w: %v", errDomainRead, err)
+	}
+	if !found {
+		return config.Domain{}, errDomainNotFound
+	}
+	ok, reason, detail := s.judgeDomain(ctx, d)
+	checked := s.nowUTC().Format(time.RFC3339)
+	return s.editDomain(ctx, id, func(cur *config.Domain) error {
+		if cur.Host != d.Host {
+			return errDomainHostChanged
+		}
+		cur.OK, cur.Reason, cur.ReasonDetail, cur.Checked = ok, reason, detail, checked
+		if ok && cur.CfZoneID != "" {
+			cur.CfStatus = cfStatusActive
+		}
+		if ok && cur.ConnectedAt == "" {
+			cur.ConnectedAt = checked
+			cur.ConnectSeen = cur.WatchSince == ""
+		}
+		return nil
+	})
 }
 
 // resolvePhase decides whether host may be probed.
 // host may include a port. The port is removed only for DNS and for ParseIP.
 // It returns dns or private when the probe must not run, and an empty string when it may.
-// A resolver error or an empty answer is dns. resolvePhase does not return a Go error.
-func (s *Server) resolvePhase(ctx context.Context, host string) string {
+// A resolver error or an empty answer is dns. The second value is the public addresses the host
+// resolved to, or the host itself when it is an IP literal; it is nil after a dns answer.
+// resolvePhase does not return a Go error.
+func (s *Server) resolvePhase(ctx context.Context, host string) (string, []net.IP) {
 	h := host
 	if name, _, err := net.SplitHostPort(host); err == nil {
 		h = name
 	}
 	if ip := net.ParseIP(h); ip != nil {
 		if !publicIP(ip) {
-			return "private"
+			return "private", nil
 		}
-		return ""
+		return "", []net.IP{ip}
 	}
 	addrs, err := s.lookupIP(ctx, h)
 	if err != nil || len(addrs) == 0 {
-		return "dns"
+		return "dns", nil
 	}
+	var public []net.IP
 	for _, a := range addrs {
 		if publicIP(a.IP) {
-			return ""
+			public = append(public, a.IP)
 		}
 	}
-	return "private"
+	if len(public) == 0 {
+		return "private", nil
+	}
+	return "", public
 }
 
 // lookupIP resolves host for a domain check.
@@ -187,7 +268,8 @@ func publicIP(ip net.IP) bool {
 // probePhase requests https://host/healthz and checks the probe headers.
 // host is the full parked host, including a port when one is stored.
 // It returns ok when the status is 200 and X-Kuztds-Probe and X-Kuztds-Host match.
-// reason is connect when client.Do fails (network, TLS, timeout, or guardDial).
+// reason is tls when the server certificate was refused, and connect when client.Do fails
+// for another cause (network, TLS handshake, timeout, or guardDial).
 // Any HTTP response whose status is not 200, or whose probe headers do not match, is foreign.
 // The body is discarded. Only HTTPS is requested.
 func (s *Server) probePhase(ctx context.Context, host string) (bool, string) {
@@ -208,6 +290,9 @@ func (s *Server) probePhase(ctx context.Context, host string) (bool, string) {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		if isCertError(err) {
+			return false, reasonTLS
+		}
 		return false, "connect"
 	}
 	defer resp.Body.Close()
@@ -219,6 +304,19 @@ func (s *Server) probePhase(ctx context.Context, host string) (bool, string) {
 		return false, "foreign"
 	}
 	return true, ""
+}
+
+// isCertError reports whether err is a refused server certificate: an unknown authority, a
+// name that does not match, an expired or otherwise invalid certificate.
+// err is the error of an HTTPS request; wrapped errors are unwrapped.
+func isCertError(err error) bool {
+	var (
+		verify  *tls.CertificateVerificationError
+		unknown x509.UnknownAuthorityError
+		name    x509.HostnameError
+		invalid x509.CertificateInvalidError
+	)
+	return errors.As(err, &verify) || errors.As(err, &unknown) || errors.As(err, &name) || errors.As(err, &invalid)
 }
 
 // newProbe returns sixteen hex characters drawn from crypto/rand.

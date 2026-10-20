@@ -50,6 +50,9 @@ type fakeNC struct {
 	// IsOwner=false answers with an empty or a different domain name.
 	infoMode string
 
+	// ns holds the name servers of each domain; setCustom writes it and getInfo reports it.
+	ns map[string][]string
+
 	createMode  string // ok, refuse, hang, hang-registers
 	createDelay time.Duration
 	leakKey     bool
@@ -57,7 +60,7 @@ type fakeNC struct {
 
 func newFakeNC(t *testing.T) *fakeNC {
 	t.Helper()
-	f := &fakeNC{unavailable: map[string]bool{}, premium: map[string]bool{}, owned: map[string]bool{}, notOwner: map[string]bool{}, price: "10.98", charged: "10.16", createMode: "ok"}
+	f := &fakeNC{unavailable: map[string]bool{}, premium: map[string]bool{}, owned: map[string]bool{}, notOwner: map[string]bool{}, ns: map[string][]string{}, price: "10.98", charged: "10.16", createMode: "ok"}
 	f.srv = httptest.NewServer(http.HandlerFunc(f.handle))
 	t.Cleanup(f.srv.Close)
 	return f
@@ -115,6 +118,10 @@ func (f *fakeNC) handle(w http.ResponseWriter, r *http.Request) {
 	case "namecheap.domains.getInfo":
 		f.mu.Lock()
 		owned, foreign, status, mode := f.owned[domain], f.notOwner[domain], f.infoStatus, f.infoMode
+		var nsXML strings.Builder
+		for _, n := range f.ns[domain] {
+			fmt.Fprintf(&nsXML, "<Nameserver>%s</Nameserver>", n)
+		}
 		f.mu.Unlock()
 		switch mode {
 		case "http500":
@@ -135,8 +142,13 @@ func (f *fakeNC) handle(w http.ResponseWriter, r *http.Request) {
 		if status == "" {
 			status = "Ok"
 		}
-		fmt.Fprintf(w, `<ApiResponse Status="OK"><CommandResponse><DomainGetInfoResult Status="%s" ID="1" DomainName="%s" OwnerName="u" IsOwner="%t"/></CommandResponse></ApiResponse>`, status, domain, !foreign)
+		fmt.Fprintf(w, `<ApiResponse Status="OK"><CommandResponse><DomainGetInfoResult Status="%s" ID="1" DomainName="%s" OwnerName="u" IsOwner="%t"><DnsDetails ProviderType="CUSTOM">%s</DnsDetails></DomainGetInfoResult></CommandResponse></ApiResponse>`, status, domain, !foreign, nsXML.String())
+	case "namecheap.domains.dns.setHosts":
+		fmt.Fprint(w, `<ApiResponse Status="OK"><CommandResponse><DomainDNSSetHostsResult Domain="x" IsSuccess="true"/></CommandResponse></ApiResponse>`)
 	case "namecheap.domains.dns.setCustom":
+		f.mu.Lock()
+		f.ns[form["SLD"]+"."+form["TLD"]] = strings.Split(form["Nameservers"], ",")
+		f.mu.Unlock()
 		fmt.Fprint(w, `<ApiResponse Status="OK"><CommandResponse><DomainDNSSetCustomResult Domain="x" Update="true"/></CommandResponse></ApiResponse>`)
 	default:
 		fmt.Fprint(w, ncFail("1", "unknown command"))

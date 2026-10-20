@@ -143,10 +143,10 @@ func canonParam(key string) (string, bool) {
 
 // mapDomains строит домены с ролью links.
 //
-// Параметры: rows — домены Keitaro. Name используется как хост.
+// Параметры: rows — домены Keitaro; groups — имена групп доменов.
 // Результат: каталог и строки отчёта о пустом или негодном хосте.
 // Ошибки: нет.
-func mapDomains(rows []KDomain) ([]CatDomain, []Loss) {
+func mapDomains(rows []KDomain, groups map[int][]KGroup) ([]CatDomain, []Loss) {
 	sorted := append([]KDomain(nil), rows...)
 	sort.Slice(sorted, func(i, j int) bool { return int(sorted[i].ID) < int(sorted[j].ID) })
 	var out []CatDomain
@@ -161,7 +161,16 @@ func mapDomains(rows []KDomain) ([]CatDomain, []Loss) {
 			losses = append(losses, Loss{Kind: "skipped", Ref: entityRef("domain", n), Detail: "хост не годится"})
 			continue
 		}
-		out = append(out, CatDomain{ID: numID(n), Host: host, Role: "links"})
+		ref := entityRef("domain", n)
+		name := groupName(groups, int(row.GroupID), "domain")
+		if name == "" {
+			name = strings.TrimSpace(string(row.Group))
+		}
+		grp, trimmed := trimFolder(name)
+		if trimmed {
+			losses = append(losses, Loss{Kind: "approximated", Ref: ref, Detail: "имя группы обрезано до 64 символов"})
+		}
+		out = append(out, CatDomain{ID: numID(n), Host: host, Role: "links", Group: grp})
 	}
 	return out, losses
 }

@@ -101,6 +101,11 @@ var cookieOnlyRoutes = map[string]bool{
 	"POST /api/registrars/namecheap/test":     true,
 	"POST /api/registrars/namecheap/register": true,
 	"POST /api/domains/{id}/ns":               true,
+	"GET /api/cloudflare":                     true,
+	"PUT /api/cloudflare":                     true,
+	"POST /api/cloudflare/test":               true,
+	"POST /api/domains/{id}/cloudflare":       true,
+	"POST /api/domains/connected/ack":         true,
 }
 
 var expect401Routes = map[string]bool{

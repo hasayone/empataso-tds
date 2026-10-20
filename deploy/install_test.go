@@ -98,7 +98,37 @@ func TestInstallComposePortDefaults(t *testing.T) {
 	if !strings.Contains(as, "${KUZTDS_ADMIN_PUBLISH:-8090:8090}") {
 		t.Fatal("docker-compose.app.yml: нет KUZTDS_ADMIN_PUBLISH")
 	}
-	if !strings.Contains(as, `"8080:8080"`) {
-		t.Fatal("docker-compose.app.yml: порт engine 8080:8080 должен остаться литералом")
+	if !strings.Contains(as, "${KUZTDS_ENGINE_PUBLISH:-8080:8080}") {
+		t.Fatal("docker-compose.app.yml: порт engine должен публиковаться через KUZTDS_ENGINE_PUBLISH с умолчанием 8080:8080")
+	}
+	if !strings.Contains(as, "KUZTDS_TRUSTED_PROXIES: ${KUZTDS_TRUSTED_PROXIES:-}") {
+		t.Fatal("docker-compose.app.yml: нет KUZTDS_TRUSTED_PROXIES у engine")
+	}
+	if !strings.Contains(as, "KUZTDS_PUBLIC_IP: ${KUZTDS_PUBLIC_IP:-}") {
+		t.Fatal("docker-compose.app.yml: нет KUZTDS_PUBLIC_IP у admin")
+	}
+}
+
+// TestInstallApplyEdgeHook проверяет source apply-edge, ensure_server_env_keys и пропуск без nginx.
+func TestInstallApplyEdgeHook(t *testing.T) {
+	data, err := os.ReadFile("install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	if !strings.Contains(s, `source "${OUR_DEPLOY_DIR}/apply-edge.sh"`) {
+		t.Fatal("install.sh: ожидали source apply-edge.sh")
+	}
+	if !strings.Contains(s, "ensure_server_env_keys") {
+		t.Fatal("install.sh: ожидали ensure_server_env_keys")
+	}
+	if !strings.Contains(s, "command -v nginx") {
+		t.Fatal("install.sh: ожидали проверку nginx перед apply-edge")
+	}
+	if strings.Contains(s, "trusted_proxies_cidr") {
+		t.Fatal("install.sh: не должно быть дубликата trusted_proxies_cidr")
+	}
+	if regexp.MustCompile(`(?m)^valid_ipv4\(\)`).Match(data) {
+		t.Fatal("install.sh: valid_ipv4 должен быть только в apply-edge.sh")
 	}
 }

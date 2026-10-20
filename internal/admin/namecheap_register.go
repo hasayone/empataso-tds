@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"strings"
@@ -24,11 +25,16 @@ const (
 	namecheapMaxNS         = 12
 	namecheapPriceSlack    = 0.005
 	namecheapRegisterBody  = 1 << 16
+	// namecheapHostTTL is the TTL in seconds of the apex record written after a purchase.
+	namecheapHostTTL = 1800
+	// cloudflarePurchaseTimeout bounds the Cloudflare connection that follows a purchase.
+	cloudflarePurchaseTimeout = 60 * time.Second
 )
 
 // ncRegisterReq is the body of POST /api/registrars/namecheap/register.
 // MaxPrice is the total for Years that the operator saw; the server refuses a higher price.
 // Nameservers, when set, are applied after the purchase.
+// Cloudflare asks to put the domain behind Cloudflare after the purchase; it excludes Nameservers.
 // Reconcile asks only to settle a pending row: Years and MaxPrice are then ignored and the
 // request never buys.
 type ncRegisterReq struct {
@@ -37,6 +43,7 @@ type ncRegisterReq struct {
 	MaxPrice    float64  `json:"max_price"`
 	Group       string   `json:"group"`
 	Nameservers []string `json:"nameservers"`
+	Cloudflare  bool     `json:"cloudflare"`
 	Reconcile   bool     `json:"reconcile"`
 }
 
@@ -67,8 +74,10 @@ func writeNC(w http.ResponseWriter, code int, msg string, extra map[string]any) 
 // with no price row is refused. The pending row is disabled until the purchase is confirmed.
 //
 // Answers: 201 with {"domain": row, "charged": amount or 0 when unknown, "expected": price,
-// "namecheap_status": text, "over_max_price": true, "ns_error": text};
-// 400 bad input; 409 already exists, registration in progress, not available, price unknown,
+// "namecheap_status": text, "over_max_price": true, "ns_error": text, "hosts_error": text,
+// "cloudflare": {ns, ns_set, ns_manual}, "cloudflare_error": text};
+// 400 bad input, including both cloudflare and nameservers; 409 already exists, cloudflare asked
+// while Cloudflare or the public address is not set up, registration in progress, not available, price unknown,
 // price changed (with "price"), pending, too early (with "retry_after" seconds), or not
 // registered (a pending row whose domain is clearly not in the account and still available,
 // older than 15 minutes; the row is removed); 422 premium domain;
@@ -97,6 +106,16 @@ func (s *Server) handleNamecheapRegister(w http.ResponseWriter, r *http.Request)
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	if !req.Reconcile && req.Cloudflare {
+		if len(servers) > 0 {
+			writeErr(w, http.StatusBadRequest, "choose cloudflare or nameservers")
+			return
+		}
+		if err := s.cloudflareReady(); err != nil {
+			writeErr(w, http.StatusConflict, err.Error())
+			return
+		}
 	}
 	// The lock comes before the account is read: a settings PUT waits for it or is refused,
 	// so the account read below stays the one the whole purchase uses.
@@ -149,6 +168,8 @@ type ncPurchase struct {
 	servers []string
 	// maxPrice is the total the operator accepted for the whole term.
 	maxPrice float64
+	// fresh is true for a purchase made by this request, never for a reconciled row.
+	fresh bool
 }
 
 // isPriceUnknown reports whether err says the price list has no row for the asked term.
@@ -164,6 +185,7 @@ func isPriceUnknown(err error) bool {
 // The pending row is disabled, so it is not offered for campaign links before the
 // purchase is confirmed.
 func (p ncPurchase) buy(req ncRegisterReq, uid string) {
+	p.fresh = true
 	rows, err := p.client.check(p.ctx, []string{p.domain})
 	if err != nil {
 		writeErr(p.w, http.StatusBadGateway, err.Error())
@@ -200,6 +222,9 @@ func (p ncPurchase) buy(req ncRegisterReq, uid string) {
 		Host: p.domain, Role: "links", Group: req.Group, Disabled: true,
 		Registrar: namecheapRegistrar, RegistrarAccount: p.acct.Name, RegistrarStatus: registrarPending,
 		RegistrarExpected: total, RegistrarPendingSince: p.s.nowUTC().Format(time.RFC3339),
+	}
+	if req.Cloudflare {
+		pending.CfStatus = cfStatusConnectPending
 	}
 	stored, code, msg := p.s.purchaseCatalog().insert(p.ctx, pending, uid)
 	if code != http.StatusCreated {
@@ -278,7 +303,11 @@ func (p ncPurchase) available() bool {
 // carries "charged" (0 when unknown) and "expected", the price taken before the purchase.
 // A reported amount above max_price is logged and marked with "over_max_price".
 // A failed name-server call does not undo the registration; its text is returned as
-// ns_error. A failed save answers 500 and the row stays pending, so a repeated request
+// ns_error. A row marked connect_pending is connected to Cloudflare now with a deadline of a
+// minute: success adds "cloudflare" and the updated "domain", a failure keeps connect_pending
+// for the domain watch and adds "cloudflare_error". A fresh purchase without name servers and
+// without Cloudflare gets an apex address record at the registrar when Config.PublicIP is set;
+// a failure is returned as hosts_error. A failed save answers 500 and the row stays pending, so a repeated request
 // reconciles it.
 func (p ncPurchase) finish(row config.Domain, charged float64, status string) {
 	updated, err := p.s.updateDomainRow(p.ctx, row.ID, func(d *config.Domain) {
@@ -286,6 +315,7 @@ func (p ncPurchase) finish(row config.Domain, charged float64, status string) {
 		if charged > 0 {
 			d.RegistrarCharged = charged
 		}
+		d.WatchSince = p.s.nowUTC().Format(time.RFC3339)
 	})
 	if err != nil {
 		writeNC(p.w, http.StatusInternalServerError, "registered but not saved", map[string]any{"pending": true})
@@ -299,12 +329,48 @@ func (p ncPurchase) finish(row config.Domain, charged float64, status string) {
 		p.s.logWarn("namecheap charged more than max_price", "domain", p.domain, "charged", charged, "max_price", p.maxPrice)
 		out["over_max_price"] = true
 	}
-	if len(p.servers) > 0 {
+	switch {
+	case len(p.servers) > 0:
 		if err := p.client.setCustom(p.ctx, p.domain, p.servers); err != nil {
 			out["ns_error"] = err.Error()
 		}
+	case updated.CfStatus == cfStatusConnectPending:
+		p.connectAfterBuy(updated.ID, out)
+	case p.fresh && p.s.cfg.PublicIP != "":
+		host := ncHost{Name: "@", Type: addressRecordType(p.s.cfg.PublicIP), Address: p.s.cfg.PublicIP, TTL: namecheapHostTTL}
+		if err := p.client.setHosts(p.ctx, p.domain, []ncHost{host}); err != nil {
+			out["hosts_error"] = err.Error()
+		}
 	}
 	writeJSON(p.w, http.StatusCreated, out)
+}
+
+// connectAfterBuy connects a purchased domain to Cloudflare and records the outcome in out.
+// id is the stored row. The call has its own deadline, so the time the purchase used up does
+// not cut it. On success out gets "cloudflare" and the updated "domain"; on failure out gets
+// "cloudflare_error" and the row stays connect_pending, which the domain watch retries.
+func (p ncPurchase) connectAfterBuy(id string, out map[string]any) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(p.ctx), cloudflarePurchaseTimeout)
+	defer cancel()
+	row, res, err := p.s.connectCloudflare(ctx, id)
+	if err != nil {
+		out["cloudflare_error"] = err.Error()
+		return
+	}
+	out["domain"], out["cloudflare"] = row, res
+}
+
+// cloudflareReady reports why a domain cannot be connected to Cloudflare now: Cloudflare is
+// not configured (errCFNotConfigured) or the public address is not set (errNoPublicIP).
+// It returns nil when both are set.
+func (s *Server) cloudflareReady() error {
+	switch {
+	case !s.cloudflareAccount().ready():
+		return errCFNotConfigured
+	case s.cfg.PublicIP == "":
+		return errNoPublicIP
+	}
+	return nil
 }
 
 // availabilityOf finds the row for domain in a check answer.
@@ -347,29 +413,70 @@ func (s *Server) domainByHost(ctx context.Context, host string) (config.Domain, 
 	return found, ok, nil
 }
 
+// Failures of a domain row write. They are fixed texts: a handler maps them to a status with
+// domainErrStatus and never sends the wrapped cause to a client.
+var (
+	errDomainStore       = errors.New("store unavailable")
+	errDomainNotFound    = errors.New("not found")
+	errDomainRead        = errors.New("read error")
+	errDomainSave        = errors.New("save error")
+	errDomainHostChanged = errors.New("host changed")
+)
+
+// domainErrStatus maps an error of editDomain or recheckDomain to an HTTP status and a client
+// message: 503, 404, 409 for a changed host, and 500 for a read or save failure or any other error.
+func domainErrStatus(err error) (int, string) {
+	switch {
+	case errors.Is(err, errDomainStore):
+		return http.StatusServiceUnavailable, errDomainStore.Error()
+	case errors.Is(err, errDomainNotFound):
+		return http.StatusNotFound, errDomainNotFound.Error()
+	case errors.Is(err, errDomainHostChanged):
+		return http.StatusConflict, errDomainHostChanged.Error()
+	case errors.Is(err, errDomainSave):
+		return http.StatusInternalServerError, errDomainSave.Error()
+	}
+	return http.StatusInternalServerError, errDomainRead.Error()
+}
+
 // updateDomainRow changes one stored domain under domainMu.
 // id selects the row and mutate edits it. It returns the saved row.
 // An error means the row is gone or the store failed.
 func (s *Server) updateDomainRow(ctx context.Context, id string, mutate func(*config.Domain)) (config.Domain, error) {
+	return s.editDomain(ctx, id, func(d *config.Domain) error {
+		mutate(d)
+		return nil
+	})
+}
+
+// editDomain changes one stored domain under domainMu.
+// id selects the row and mutate edits it; a non-nil error from mutate leaves the file untouched
+// and is returned as it is. It returns the saved row.
+// Other errors are errDomainStore, errDomainNotFound, errDomainRead and errDomainSave.
+func (s *Server) editDomain(ctx context.Context, id string, mutate func(*config.Domain) error) (config.Domain, error) {
+	if s.cfg.Domains == nil {
+		return config.Domain{}, errDomainStore
+	}
 	s.domainMu.Lock()
 	defer s.domainMu.Unlock()
 	list, err := s.cfg.Domains.List(ctx)
 	if err != nil {
-		return config.Domain{}, err
+		return config.Domain{}, fmt.Errorf("%w: %v", errDomainRead, err)
 	}
 	for i := range list {
 		if list[i].ID != id {
 			continue
 		}
-		mutate(&list[i])
-		if err := s.cfg.Domains.Save(ctx, list); err != nil {
+		if err := mutate(&list[i]); err != nil {
 			return config.Domain{}, err
+		}
+		if err := s.cfg.Domains.Save(ctx, list); err != nil {
+			return config.Domain{}, fmt.Errorf("%w: %v", errDomainSave, err)
 		}
 		return list[i], nil
 	}
-	return config.Domain{}, errors.New("domain not found")
+	return config.Domain{}, errDomainNotFound
 }
-
 // removeDomainRow deletes one stored domain under domainMu.
 // id selects the row. A missing row is not an error. An error comes from the store.
 func (s *Server) removeDomainRow(ctx context.Context, id string) error {

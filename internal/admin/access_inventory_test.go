@@ -133,6 +133,7 @@ var macroInert = map[string]struct {
 	"Domain": {reflect.TypeOf(config.Domain{}), "a host name, a role, check results: never expanded", []string{
 		"Domain.ID", "Domain.Host", "Domain.Group", "Domain.Role", "Domain.Reason", "Domain.Checked", "Domain.CreatedBy",
 		"Domain.Registrar", "Domain.RegistrarAccount", "Domain.RegistrarStatus", "Domain.RegistrarPendingSince",
+		"Domain.ReasonDetail", "Domain.CfZoneID", "Domain.CfStatus", "Domain.CfNS[]", "Domain.ConnectedAt", "Domain.WatchSince",
 	}},
 	"TrafficSource": {reflect.TypeOf(config.TrafficSource{}), "ids, labels and query parameter names: the engine reads the names as keys, never as templates; rebinding is guarded by sourceCheck", []string{
 		"TrafficSource.ID", "TrafficSource.Name", "TrafficSource.Parameters{}", "TrafficSource.Group", "TrafficSource.CreatedBy",
@@ -237,6 +238,7 @@ var writeRouteGuard = map[string]string{
 	"PUT /api/domains/{id}":                     "host names, never expanded",
 	"DELETE /api/domains/{id}":                  "removes a record",
 	"POST /api/domains/{id}/check":              "reads DNS, stores a result",
+	"POST /api/domains/connected/ack":           "ids of domains, sets a flag",
 	"POST /api/landings/{id}/archive":           "archiveMacroUse: every file and the resulting entry",
 	"PUT /api/landings/{id}/files/{path...}":    "fileOpMacro: the file and the resulting entry",
 	"DELETE /api/landings/{id}/files/{path...}": "fileOpMacro: the resulting entry",

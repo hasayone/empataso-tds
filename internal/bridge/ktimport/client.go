@@ -79,7 +79,7 @@ func (c *Client) CountCampaigns(ctx context.Context) (int, error) {
 // FetchSnapshot читает кампании, потоки, офферы, лендинги и справочники.
 //
 // Параметры: ctx — отмена. Progress, если задан, получает этапы snapshot и streams.
-// Результат: снимок для маппера. Группы — склейка type=campaigns, offers и landings.
+// Результат: снимок для маппера. Группы — склейка type=campaigns, offers, landings и domains.
 // Ошибки: сеть, статус не 200 у кампаний, потоков, офферов или лендингов, тело не JSON.
 // Не-200 у сетей, источников, доменов и групп снимок не прерывает. Первая ошибка потоков отменяет остальные.
 func (c *Client) FetchSnapshot(ctx context.Context) (Snapshot, error) {
@@ -120,10 +120,15 @@ func (c *Client) FetchSnapshot(ctx context.Context) (Snapshot, error) {
 	if err := c.getOptionalArray(ctx, "/admin_api/v1/domains", &snap.Domains); err != nil {
 		return Snapshot{}, err
 	}
-	for _, kind := range []string{"campaigns", "offers", "landings"} {
+	for _, kind := range []string{"campaigns", "offers", "landings", "domains"} {
 		var part []KGroup
 		if err := c.getOptionalArray(ctx, "/admin_api/v1/groups?type="+kind, &part); err != nil {
 			return Snapshot{}, err
+		}
+		for i := range part {
+			if strings.TrimSpace(part[i].Type) == "" {
+				part[i].Type = kind
+			}
 		}
 		snap.Groups = append(snap.Groups, part...)
 	}

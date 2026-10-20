@@ -49,7 +49,7 @@ func Map(src Snapshot, sel Selection) Result {
 		losses = append(losses, extra...)
 	}
 	if sel.Domains {
-		doms, extra := mapDomains(src.Domains)
+		doms, extra := mapDomains(src.Domains, groups)
 		res.Domains = doms
 		losses = append(losses, extra...)
 	}
@@ -158,7 +158,7 @@ func indexGroups(rows []KGroup) map[int][]KGroup {
 
 // groupName возвращает имя группы Keitaro нужного вида.
 //
-// Параметры: idx — индекс; id — group_id; kind — campaign, offer или landing.
+// Параметры: idx — индекс; id — group_id; kind — campaign, offer, landing или domain.
 // Результат: имя или пустая строка, если группы нет.
 // Ошибки: нет.
 func groupName(idx map[int][]KGroup, id int, kind string) string {

@@ -155,6 +155,12 @@ func addCatalogRoutes(m map[string]routeRule, rule func(section) routeRule, addC
 
 	m["POST /api/domains/{id}/check"] = rule(secDomains)
 	m["POST /api/domains/{id}/ns"] = routeRule{sec: secDomains, admin: true}
+	m["POST /api/domains/{id}/cloudflare"] = routeRule{sec: secDomains, admin: true}
+	m["GET /api/domains/connected"] = rule(secDomains)
+	m["POST /api/domains/connected/ack"] = rule(secDomains)
+	m["GET /api/cloudflare"] = rule(secIntegrations)
+	m["PUT /api/cloudflare"] = rule(secIntegrations)
+	m["POST /api/cloudflare/test"] = rule(secIntegrations)
 	m["GET /api/registrars/namecheap"] = rule(secIntegrations)
 	m["PUT /api/registrars/namecheap"] = rule(secIntegrations)
 	m["POST /api/registrars/namecheap/test"] = rule(secIntegrations)

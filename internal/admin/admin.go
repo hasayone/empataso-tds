@@ -177,6 +177,16 @@ type Config struct {
 	NamecheapURL        string
 	NamecheapSandboxURL string
 	NamecheapHTTP       *http.Client
+
+	// PublicIP is the address this tracker answers on. Cloudflare records and the domain check
+	// ("elsewhere") use it; empty disables both. It must be an IPv4 or IPv6 address.
+	PublicIP string
+	// CloudflareFile is cloudflare.json, the Cloudflare token and account; empty disables saving it.
+	// CloudflareURL replaces the Cloudflare API address; empty keeps the public one.
+	// CloudflareHTTP replaces the HTTP client; nil keeps the default.
+	CloudflareFile string
+	CloudflareURL  string
+	CloudflareHTTP *http.Client
 }
 
 // slogLogger — minimal logger interface (to avoid pulling in a hard dependency).
@@ -260,8 +270,21 @@ type Server struct {
 	ncErr    string
 	ncBuy    ncBuyState
 	ncPrices ncPriceCache
-	// ncNow is the clock of the purchase flow; nil means the system clock. Tests set it.
+	// ncNow is the clock of the purchase flow, the domain checks and the domain watch; nil
+	// means the system clock. Tests set it.
 	ncNow func() time.Time
+
+	// cfMu guards cfAcct and cfErr. Readers take a copy through cloudflareAccount.
+	// cfErr is why cloudflare.json was not used at start; it is empty otherwise.
+	// cfBusy holds the ids of the domains being connected to Cloudflare right now.
+	cfMu   sync.RWMutex
+	cfAcct cfAccount
+	cfErr  string
+	cfBusy ncBuyState
+	// watchBusy is set while a domain watch tick runs, so ticks never overlap.
+	watchBusy atomic.Bool
+	// watchFirst is the wait before the first watch tick; zero means thirty seconds. Tests set it.
+	watchFirst time.Duration
 
 	// routes lists mux patterns registered via handle during Handler().
 	// Handler runs once at startup; no mutex is required.
@@ -287,6 +310,13 @@ func New(cfg Config) (*Server, error) {
 	// SHA-256, which is exactly what it exists to avoid, and nothing would look
 	// any different.
 	rand.Read(key)
+	if cfg.PublicIP != "" {
+		ip := net.ParseIP(strings.TrimSpace(cfg.PublicIP))
+		if ip == nil {
+			return nil, errors.New("admin: public ip is not an IP address")
+		}
+		cfg.PublicIP = ip.String()
+	}
 	s := &Server{cfg: cfg, hashes: newHashGate(0), loginFPKey: key, ktJob: newKeitaroJob()}
 	hash, err := initialHash(cfg)
 	if err != nil {
@@ -299,6 +329,7 @@ func New(cfg Config) (*Server, error) {
 		return nil, err
 	}
 	s.loadNamecheap()
+	s.loadCloudflare()
 	if cfg.UsersFile != "" {
 		us, err := security.LoadUserSet(cfg.UsersFile)
 		if err != nil {
@@ -412,6 +443,7 @@ func (s *Server) Handler() http.Handler {
 	registerDomains(s, mux)
 	s.handle(mux, "POST /api/domains/{id}/check", http.HandlerFunc(s.handleDomainCheck))
 	registerNamecheap(s, mux)
+	registerCloudflare(s, mux)
 	s.handle(mux, "GET /api/spend", http.HandlerFunc(s.handleSpendList))
 	s.handle(mux, "POST /api/spend", http.HandlerFunc(s.handleSpendCreate))
 	s.handle(mux, "DELETE /api/spend/{id}", http.HandlerFunc(s.handleSpendDelete))

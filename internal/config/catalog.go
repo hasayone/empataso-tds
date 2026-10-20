@@ -51,8 +51,9 @@ type Offer struct {
 // Role is admin, links or both. Primary marks the default base for campaign links.
 // Disabled is a catalog mark only.
 // OK is set only after a check received this tracker's own answer on that host.
-// Reason is the code of the last failed check (dns, private, connect, foreign).
-// It is empty when OK is true.
+// Reason is the code of the last failed check (dns, private, connect, tls, foreign,
+// elsewhere, cf_pending). ReasonDetail explains it: the resolved addresses for elsewhere,
+// the Cloudflare name servers for cf_pending. Both are empty when OK is true.
 type Domain struct {
 	ID      string `json:"id"`
 	Host    string `json:"host"`
@@ -83,6 +84,24 @@ type Domain struct {
 	RegistrarExpected float64 `json:"registrar_expected,omitempty"`
 	// RegistrarPendingSince is documented above.
 	RegistrarPendingSince string `json:"registrar_pending_since,omitempty"`
+	// ReasonDetail is the text that goes with Reason, set by the admin check.
+	ReasonDetail string `json:"reason_detail,omitempty"`
+	// CfZoneID is the Cloudflare zone of the host. CfStatus is connect_pending while the
+	// panel still has to create the zone and records, pending while Cloudflare waits for the
+	// name servers, and active once the zone is live. CfNS lists the zone name servers.
+	CfZoneID string   `json:"cf_zone_id,omitempty"`
+	CfStatus string   `json:"cf_status,omitempty"`
+	CfNS     []string `json:"cf_ns,omitempty"`
+	// ConnectedAt is the UTC time in RFC 3339 of the first check that found the host
+	// answering as this tracker, and stays after later failures. ConnectSeen is set once the
+	// operator has seen the notice about it.
+	ConnectedAt string `json:"connected_at,omitempty"`
+	ConnectSeen bool   `json:"connect_seen,omitempty"`
+	// WatchSince is the UTC time in RFC 3339 at which the host entered the background
+	// watch: the confirmed purchase or the first Cloudflare connection. It sets the watch
+	// window and the point where checks slow down.
+	// The admin API owns all of these fields and the engine does not read them.
+	WatchSince string `json:"watch_since,omitempty"`
 }
 
 // AffiliateNetwork is a partner that sends the inbound postback.

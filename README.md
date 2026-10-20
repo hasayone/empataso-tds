@@ -435,8 +435,9 @@ The installer:
   `deploy/docker-compose.app.yml`;
 - picks memory limits from the host RAM and writes them to
   `/etc/kuztds/compose.infra.yml` and `/etc/kuztds/compose.app.yml`;
-- binds ClickHouse, Redis, and the admin panel to `127.0.0.1` only (via
-  `/etc/kuztds/server.env`); the engine listens on `:8080`;
+- binds ClickHouse, Redis, the admin panel, and the engine to `127.0.0.1`
+  only (via `/etc/kuztds/server.env`). On the host the engine is
+  `127.0.0.1:18080`; inside the container it still listens on `:8080`;
 - treats the install as successful only after the engine and admin logs show
   `clickhouse connected` and `redis connected`, and `/healthz` and
   `/api/health` respond.
@@ -472,6 +473,9 @@ limits and with ports on all interfaces, and Redis would lose in-memory data.
   `ssh -L 8090:127.0.0.1:8090 user@server`, then open http://localhost:8090. Do
   not expose port 8090 to the internet: admin cookies use HTTP in this setup,
   and ufw rules do not block Docker-published ports.
+- On the server the engine is at `127.0.0.1:18080`. Host port `8080` stays free
+  for other programs. An external Nginx can proxy to `127.0.0.1:18080`; the
+  address inside the container does not change.
 - The admin password from `.env` applies only on a fresh volume. After you
   change the password in the UI, the volume's `admin.hash` takes over.
 - The ClickHouse schema from `migrations/clickhouse` is applied only on an
