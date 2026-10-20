@@ -41,6 +41,7 @@ func TestMapDomainsGroups(t *testing.T) {
 		{ID: 12, Name: "c.example.com", GroupID: 11},
 		{ID: 13, Name: "d.example.com", GroupID: 0},
 		{ID: 14, Name: "e.example.com", GroupID: 99, Group: "Inline"},
+		{ID: 15, Name: "f.example.com", GroupID: 0, Group: "No group"},
 	}
 	doms, losses := mapDomains(rows, groups)
 	if len(losses) != 0 {
@@ -61,5 +62,8 @@ func TestMapDomainsGroups(t *testing.T) {
 	}
 	if byID["14"].Group != "Inline" {
 		t.Fatalf("inline group %q", byID["14"].Group)
+	}
+	if byID["15"].Group != "" {
+		t.Fatalf("id 15 group %q want empty (ignore No group at group_id 0)", byID["15"].Group)
 	}
 }

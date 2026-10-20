@@ -163,7 +163,7 @@ func mapDomains(rows []KDomain, groups map[int][]KGroup) ([]CatDomain, []Loss) {
 		}
 		ref := entityRef("domain", n)
 		name := groupName(groups, int(row.GroupID), "domain")
-		if name == "" {
+		if name == "" && int(row.GroupID) > 0 {
 			name = strings.TrimSpace(string(row.Group))
 		}
 		grp, trimmed := trimFolder(name)
