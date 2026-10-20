@@ -60,7 +60,7 @@ services:
     container_name: kuztds-admin
     command: ["admin"]
     ports:
-      - "8090:8090"
+      - "${KUZTDS_ADMIN_PUBLISH:-8090:8090}"
     stop_grace_period: 15s
     restart: unless-stopped
     environment:

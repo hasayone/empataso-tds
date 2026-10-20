@@ -32,6 +32,7 @@ KuzTDS принимает входящего посетителя, **по пра
 - [Производительность](#производительность)
 - [Сравнение с zTDS](#сравнение-с-ztds)
 - [Быстрый старт](#быстрый-старт)
+- [Установка на Ubuntu](#установка-на-ubuntu)
 - [Конфигурация](#конфигурация)
 - [Основные понятия](#основные-понятия)
 - [Фильтры и семантика флагов](#фильтры-и-семантика-флагов)
@@ -403,6 +404,90 @@ curl -i 'http://localhost:8080/promo?q=hello' \
 
 > Есть `Makefile`: `make build`, `make test`, `make bench`, `make infra-up`,
 > `make infra-down`.
+
+---
+
+## Установка на Ubuntu
+
+Скрипт `deploy/install.sh` один раз ставит KuzTDS на чистую Ubuntu 22.04 или 24.04:
+Docker (если его нет), ClickHouse, Redis, движок, админку, cron и php. Локальный
+путь из раздела [Быстрый старт](#быстрый-старт) для разработки остаётся прежним.
+
+| | Минимум, установщик откажет ниже | Для долгой работы |
+|---|----------------------------------|-------------------|
+| RAM | 8 ГБ | 16 ГБ |
+| CPU | 2 ядра | 4 ядра |
+| Свободно на диске (`/var/lib/docker` или `/var`) | 40 ГБ | 80 ГБ, лучше 200 ГБ NVMe |
+
+Между минимумом и рекомендацией установщик предупреждает и продолжает; клики и
+конверсии хранятся год, поэтому диск считают от числа кликов в сутки.
+
+В `.env` пароль ClickHouse (`CLICKHOUSE_PASSWORD`) не может быть пустым, пароль
+админки (`KUZTDS_ADMIN_PASSWORD`) не может быть пустым или `admin`. Запускайте
+скрипт файлом через `bash`, не через `curl | bash`.
+
+```bash
+git clone https://github.com/egerkuzma/kuztds.git
+cd kuztds
+cp .env.example .env
+nano .env        # CLICKHOUSE_PASSWORD и KUZTDS_ADMIN_PASSWORD
+sudo bash deploy/install.sh
+```
+
+Установщик:
+
+- проверяет Ubuntu, root, память, ядра и диск;
+- ставит Docker из download.docker.com, только если `docker compose` ещё нет, и
+  уже работающий Docker не меняет;
+- собирает образ `kuztds:local`;
+- поднимает ClickHouse и Redis проектом `deploy`, затем
+  `deploy/docker-compose.app.yml`;
+- выбирает лимиты памяти по RAM машины и пишет их в
+  `/etc/kuztds/compose.infra.yml` и `/etc/kuztds/compose.app.yml`;
+- публикует ClickHouse, Redis и админку только на `127.0.0.1` (файл
+  `/etc/kuztds/server.env`), движок слушает `:8080`;
+- считает установку успешной, только когда движок и админка написали в лог
+  `clickhouse connected` и `redis connected`, а `/healthz` и `/api/health`
+  отвечают.
+
+После успеха установщик пишет маркер `/etc/kuztds/installed` и удаляет сам
+`deploy/install.sh`. Повторный запуск при наличии маркера ничего не делает.
+`git checkout` вернёт файл скрипта, но маркер повторный запуск не пропустит.
+Если установка упала, маркера нет и скрипт остаётся: исправьте причину из
+сообщения и запустите снова. Контейнеры при ошибке не останавливаются.
+
+### Повторный старт и обновление
+
+```bash
+sudo /etc/kuztds/up.sh
+```
+
+Команда поднимает тот же стек с теми же лимитами после перезагрузки или ручной
+остановки. Обновление кода (из каталога репозитория):
+
+```bash
+git pull
+sudo docker compose --env-file .env --env-file /etc/kuztds/server.env -f deploy/docker-compose.app.yml -f /etc/kuztds/compose.app.yml build engine
+sudo docker compose --env-file .env --env-file /etc/kuztds/server.env -f deploy/docker-compose.app.yml -f /etc/kuztds/compose.app.yml up -d --force-recreate --no-deps engine admin
+```
+
+На сервере не запускайте `make infra-up` и `docker compose` без файлов из
+`/etc/kuztds`: так ClickHouse и Redis пересоздадутся без лимитов и с портами на
+всех интерфейсах, а Redis потеряет данные в памяти.
+
+### Что важно знать
+
+- Админка открыта только на сервере. Вход:
+  `ssh -L 8090:127.0.0.1:8090 user@сервер`, затем http://localhost:8090. Не
+  публикуйте 8090 в интернет: cookie админки в этой установке идёт по HTTP, а
+  правила ufw не закрывают порты Docker.
+- Пароль админки из `.env` применяется только на новом томе. После смены пароля
+  в интерфейсе действует `admin.hash` в томе состояния.
+- Схема ClickHouse из `migrations/clickhouse` применяется только на пустом томе.
+  На старом томе установщик ничего не накатывает и остановится, если в `events`
+  нет колонки `step`.
+- Прокси, домены и HTTPS настраиваются снаружи, установщик их не трогает.
+- Не используйте на сервере `docker compose down` и `make infra-down`.
 
 ---
 

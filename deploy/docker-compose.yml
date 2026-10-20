@@ -4,8 +4,8 @@ services:
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
     ports:
-      - "8123:8123"   # HTTP
-      - "9000:9000"   # native
+      - "${KUZTDS_CH_HTTP_PUBLISH:-8123:8123}"   # HTTP
+      - "${KUZTDS_CH_NATIVE_PUBLISH:-9000:9000}"   # native
     environment:
       CLICKHOUSE_DB: kuztds
       CLICKHOUSE_USER: kuztds
@@ -20,7 +20,7 @@ services:
     image: redis:7-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      - "6379:6379"
+      - "${KUZTDS_REDIS_PUBLISH:-6379:6379}"
 
 volumes:
   ch_data:

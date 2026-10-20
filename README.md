@@ -32,6 +32,7 @@ sessions go to **Redis**, and the response never waits for a log write.
 - [Performance](#performance)
 - [Benchmark vs zTDS](#benchmark-vs-ztds)
 - [Quick start](#quick-start)
+- [Install on Ubuntu](#install-on-ubuntu)
 - [Configuration](#configuration)
 - [Core concepts](#core-concepts)
 - [Filters and flag semantics](#filters-and-flag-semantics)
@@ -392,6 +393,93 @@ Diagnostic response headers show the decision: `X-Kuztds-Stream`, `X-Kuztds-Bot`
 
 > A `Makefile` is provided: `make build`, `make test`, `make bench`,
 > `make infra-up`, `make infra-down`.
+
+---
+
+## Install on Ubuntu
+
+The `deploy/install.sh` script performs a one-time install of KuzTDS on a clean
+Ubuntu 22.04 or 24.04 host: Docker (if missing), ClickHouse, Redis, the engine,
+the admin panel, cron, and php. The local [Quick start](#quick-start) path for
+development stays the same.
+
+| | Minimum — the installer exits below this | For long-term use |
+|---|------------------------------------------|-------------------|
+| RAM | 8 GB | 16 GB |
+| CPU | 2 cores | 4 cores |
+| Free disk (`/var/lib/docker` or `/var`) | 40 GB | 80 GB, 200 GB NVMe preferred |
+
+Between the minimum and the recommendation the installer warns and continues;
+clicks and conversions are kept for a year, so disk sizing follows your daily
+click volume.
+
+In `.env`, the ClickHouse password (`CLICKHOUSE_PASSWORD`) must not be empty,
+and the admin password (`KUZTDS_ADMIN_PASSWORD`) must not be empty or `admin`.
+Run the script as a file with `bash`, not as `curl | bash`.
+
+```bash
+git clone https://github.com/egerkuzma/kuztds.git
+cd kuztds
+cp .env.example .env
+nano .env        # CLICKHOUSE_PASSWORD and KUZTDS_ADMIN_PASSWORD
+sudo bash deploy/install.sh
+```
+
+The installer:
+
+- checks Ubuntu, root, memory, CPU cores, and disk space;
+- installs Docker from download.docker.com only when `docker compose` is not
+  available yet, and does not change an already working Docker setup;
+- builds the `kuztds:local` image;
+- starts ClickHouse and Redis with the `deploy` compose project, then
+  `deploy/docker-compose.app.yml`;
+- picks memory limits from the host RAM and writes them to
+  `/etc/kuztds/compose.infra.yml` and `/etc/kuztds/compose.app.yml`;
+- binds ClickHouse, Redis, and the admin panel to `127.0.0.1` only (via
+  `/etc/kuztds/server.env`); the engine listens on `:8080`;
+- treats the install as successful only after the engine and admin logs show
+  `clickhouse connected` and `redis connected`, and `/healthz` and
+  `/api/health` respond.
+
+On success it writes the marker `/etc/kuztds/installed` and deletes
+`deploy/install.sh`. A second run while the marker exists does nothing.
+`git checkout` can restore the script file, but the marker blocks another run.
+If the install failed, there is no marker and the script remains: fix the error
+from the message and run again. Containers are not stopped on failure.
+
+### Restart and upgrades
+
+```bash
+sudo /etc/kuztds/up.sh
+```
+
+This brings the same stack back with the same limits after a reboot or a manual
+stop. To upgrade the code (from the repository directory):
+
+```bash
+git pull
+sudo docker compose --env-file .env --env-file /etc/kuztds/server.env -f deploy/docker-compose.app.yml -f /etc/kuztds/compose.app.yml build engine
+sudo docker compose --env-file .env --env-file /etc/kuztds/server.env -f deploy/docker-compose.app.yml -f /etc/kuztds/compose.app.yml up -d --force-recreate --no-deps engine admin
+```
+
+Do not run `make infra-up` or bare `docker compose` on the server without the
+files under `/etc/kuztds`: ClickHouse and Redis would be recreated without memory
+limits and with ports on all interfaces, and Redis would lose in-memory data.
+
+### Good to know
+
+- The admin panel is reachable on the server only. Log in with
+  `ssh -L 8090:127.0.0.1:8090 user@server`, then open http://localhost:8090. Do
+  not expose port 8090 to the internet: admin cookies use HTTP in this setup,
+  and ufw rules do not block Docker-published ports.
+- The admin password from `.env` applies only on a fresh volume. After you
+  change the password in the UI, the volume's `admin.hash` takes over.
+- The ClickHouse schema from `migrations/clickhouse` is applied only on an
+  empty volume. On an existing volume the installer does not migrate and stops if
+  the `events` table lacks a `step` column.
+- Proxy, domains, and HTTPS are configured outside the installer; it does not
+  touch them.
+- Do not use `docker compose down` or `make infra-down` on the server.
 
 ---
 
