@@ -3,6 +3,7 @@ package main
 import (
 	"io"
 	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -25,5 +26,18 @@ func TestDomainWatchInterval(t *testing.T) {
 		if got := domainWatchInterval(raw, log); got != want {
 			t.Errorf("%q: got %v, want %v", raw, got, want)
 		}
+	}
+}
+
+func TestKeitaroSyncFileDefaultPath(t *testing.T) {
+	dir := t.TempDir()
+	groups := filepath.Join(dir, "groups.json")
+	want := filepath.Join(dir, "keitaro-sync.json")
+	if got := keitaroSyncFileForGroups(groups); got != want {
+		t.Fatalf("got %q want %q", got, want)
+	}
+	t.Setenv("KUZTDS_KEITARO_SYNC_FILE", filepath.Join(dir, "custom-sync.json"))
+	if got := keitaroSyncFileForGroups(groups); got != filepath.Join(dir, "custom-sync.json") {
+		t.Fatalf("env override: %q", got)
 	}
 }

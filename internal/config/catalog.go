@@ -102,6 +102,12 @@ type Domain struct {
 	// window and the point where checks slow down.
 	// The admin API owns all of these fields and the engine does not read them.
 	WatchSince string `json:"watch_since,omitempty"`
+	// AdminOK is set after a check received this admin API on admin.<host>.
+	AdminOK bool `json:"admin_ok,omitempty"`
+	// AdminReason is the code of the last failed admin check: dns, tls, connect or foreign.
+	AdminReason string `json:"admin_reason,omitempty"`
+	// AdminDNS is ok when the Cloudflare record admin.<host> exists, or the error text otherwise.
+	AdminDNS string `json:"admin_dns,omitempty"`
 }
 
 // AffiliateNetwork is a partner that sends the inbound postback.

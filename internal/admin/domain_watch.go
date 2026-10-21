@@ -124,7 +124,8 @@ func pickWatched(list []config.Domain, now time.Time) []config.Domain {
 	for _, d := range list {
 		since, hasSince := parseRFC3339(d.WatchSince)
 		inWindow := d.Registrar == namecheapRegistrar && hasSince && now.Sub(since) < domainWatchWindow
-		if d.Disabled || d.OK || (d.CfStatus == "" && !inWindow) {
+		adminProbe := config.IsAdminDomain(d) && !d.AdminOK && d.CfZoneID != ""
+		if d.Disabled || (d.OK && !adminProbe) || (d.CfStatus == "" && !inWindow && !adminProbe) {
 			continue
 		}
 		if checked, ok := parseRFC3339(d.Checked); ok && (!hasSince || now.Sub(since) > domainWatchFast) && now.Sub(checked) < domainWatchSlow {
@@ -198,13 +199,16 @@ func (s *Server) refreshZone(ctx context.Context, d config.Domain) {
 		status = cfStatusActive
 	}
 	if status != d.CfStatus || !sameHosts(d.CfNS, ns) {
-		_, _ = s.editDomain(ctx, d.ID, func(cur *config.Domain) error {
+		saved, _ := s.editDomain(ctx, d.ID, func(cur *config.Domain) error {
 			if cur.CfZoneID != d.CfZoneID {
 				return errDomainHostChanged
 			}
 			applyZone(cur, zone, ns)
 			return nil
 		})
+		if status == cfStatusActive {
+			s.maybeScheduleAdminDNS(saved)
+		}
 	}
 	if status != cfStatusActive {
 		_ = client.activationCheck(ctx, zone.ID)

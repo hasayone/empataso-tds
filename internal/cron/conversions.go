@@ -33,7 +33,8 @@ func (r *Runner) runConversions(ctx context.Context, cfg Config) (string, error)
 		r.state(func(st *Status) { st.ConvSince = to })
 		return "watching for new conversions", nil
 	}
-	rows, _, err := r.pb.Postbacks(ctx, from, to, "", 1000)
+	exclude := r.keitaroExcludeHost()
+	rows, _, err := r.pb.PostbacksExcluding(ctx, from, to, "", 1000, exclude)
 	if err != nil {
 		return "", err
 	}
@@ -43,12 +44,15 @@ func (r *Runner) runConversions(ctx context.Context, cfg Config) (string, error)
 	}
 	// rows come newest first; announce in the order they happened.
 	sent := 0
+	var lastOK time.Time
 	for i := len(rows) - 1; i >= 0 && sent < maxAnnounce; i-- {
-		if err := r.notify(ctx, cfg.Telegram, conversionText(tpl, rows[i])); err != nil {
-			// Do not advance: the next run retries from the same point.
+		row := rows[i]
+		if err := r.notify(ctx, cfg.Telegram, conversionText(tpl, row)); err != nil {
+			r.advanceConvSince(lastOK)
 			return fmt.Sprintf("%d of %d announced", sent, len(rows)), err
 		}
 		sent++
+		lastOK = row.TS
 	}
 	if rest := len(rows) - sent; rest > 0 {
 		sum := 0.0
@@ -56,11 +60,22 @@ func (r *Runner) runConversions(ctx context.Context, cfg Config) (string, error)
 			sum += p.Profit
 		}
 		if err := r.notify(ctx, cfg.Telegram, fmt.Sprintf("… and %d more conversions, %.2f in total.", rest, sum)); err != nil {
+			r.advanceConvSince(lastOK)
 			return fmt.Sprintf("%d of %d announced", sent, len(rows)), err
 		}
 	}
 	r.state(func(st *Status) { st.ConvSince = to })
 	return fmt.Sprintf("%d new conversion(s)", len(rows)), nil
+}
+
+// advanceConvSince moves the conversion window past rows already announced.
+// lastOK is the timestamp of the last successful message; zero leaves ConvSince.
+func (r *Runner) advanceConvSince(lastOK time.Time) {
+	if lastOK.IsZero() {
+		return
+	}
+	next := lastOK.Add(time.Second).Truncate(time.Second)
+	r.state(func(st *Status) { st.ConvSince = next })
 }
 
 func conversionText(tpl string, p store.PostbackRow) string {

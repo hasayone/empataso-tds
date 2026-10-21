@@ -80,6 +80,11 @@ func (fakeStats) ClickBuckets(context.Context, string, time.Time, time.Time, boo
 func (fakeStats) Fields() store.FieldsInfo {
 	return store.FieldsInfo{Fields: store.StaticFields(), Ready: map[string]map[string]bool{}}
 }
+
+type allowAll struct{}
+
+func (allowAll) Allow(context.Context, string) (bool, error) { return true, nil }
+
 func (fakeStats) Values(_ context.Context, q store.ValuesQuery) ([]store.KV, error) {
 	if q.Table != "events" && q.Table != "conversions" {
 		return nil, store.ErrBadCond
@@ -112,10 +117,6 @@ func (f *fakeGroups) List(context.Context) ([]config.Group, error) {
 	return []config.Group{{ID: "g1", Name: "demo"}}, nil
 }
 func (f *fakeGroups) Save(_ context.Context, g []config.Group) error { f.saved = g; return nil }
-
-type allowAll struct{}
-
-func (allowAll) Allow(context.Context, string) (bool, error) { return true, nil }
 
 func newTestServer(t *testing.T) *httptest.Server {
 	t.Helper()

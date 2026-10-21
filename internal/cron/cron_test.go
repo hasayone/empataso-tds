@@ -603,15 +603,46 @@ type fakePB struct {
 	err      error
 }
 
-func (f *fakePB) Postbacks(_ context.Context, from, to time.Time, _ string, _ int) ([]store.PostbackRow, float64, error) {
+func (f *fakePB) PostbacksExcluding(_ context.Context, from, to time.Time, _ string, _ int, excludeDomain string) ([]store.PostbackRow, float64, error) {
 	f.from, f.to = from, to
 	var out []store.PostbackRow
 	for _, r := range f.rows {
+		if excludeDomain != "" && r.Domain == excludeDomain {
+			continue
+		}
 		if !r.TS.Before(from) && r.TS.Before(to) {
 			out = append(out, r)
 		}
 	}
 	return out, 0, f.err
+}
+
+func TestConversionsSkipsKeitaroImportDomain(t *testing.T) {
+	e := newEnv(t)
+	pb := &fakePB{}
+	e.r.pb = pb
+	groups := filepath.Join(e.dir, "groups.json")
+	if err := os.WriteFile(groups, []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	e.r.paths.Groups = groups
+	if err := os.WriteFile(filepath.Join(e.dir, "keitaro-import.json"), []byte(`{"host":"import.host"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	e.r.now = func() time.Time { return clock }
+	cfg := Default()
+	cfg.Telegram = tg
+	_, _ = e.r.runConversions(context.Background(), cfg)
+	t1 := clock.Add(10 * time.Second)
+	pb.rows = []store.PostbackRow{
+		{TS: t1, Domain: "import.host", Profit: 99},
+		{TS: t1, Domain: "own", Profit: 1},
+	}
+	clock = clock.Add(time.Minute)
+	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || msg != "1 new conversion(s)" {
+		t.Fatalf("%q %v", msg, err)
+	}
 }
 
 func TestConversions(t *testing.T) {
@@ -653,6 +684,67 @@ func TestConversions(t *testing.T) {
 	clock = clock.Add(time.Minute)
 	if msg, _ := e.r.runConversions(context.Background(), cfg); msg != "0 new conversion(s)" || !pb.from.Equal(prevTo) {
 		t.Errorf("%q; from %v, want %v", msg, pb.from, prevTo)
+	}
+}
+
+func TestConversionsTelegramPartialAdvance(t *testing.T) {
+	e := newEnv(t)
+	pb := &fakePB{}
+	e.r.pb = pb
+	calls := 0
+	failOn := 0
+	e.srv.Close()
+	e.mux = http.NewServeMux()
+	e.mux.HandleFunc("/botTOKEN/sendMessage", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if failOn > 0 && calls == failOn {
+			http.Error(w, "telegram down", http.StatusInternalServerError)
+			return
+		}
+		_ = r.ParseForm()
+		e.mu.Lock()
+		e.sent = append(e.sent, r.Form.Get("text"))
+		e.mu.Unlock()
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	})
+	e.srv = httptest.NewServer(e.mux)
+	t.Cleanup(e.srv.Close)
+	e.r.telegramBase = e.srv.URL
+
+	clock := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	e.r.now = func() time.Time { return clock }
+	cfg := Default()
+	cfg.Telegram = tg
+	_, _ = e.r.runConversions(context.Background(), cfg)
+
+	t1 := clock.Add(10 * time.Second).Truncate(time.Second)
+	t2 := clock.Add(20 * time.Second).Truncate(time.Second)
+	t3 := clock.Add(30 * time.Second).Truncate(time.Second)
+	pb.rows = []store.PostbackRow{
+		{TS: t3, Profit: 3, CID: "c3"},
+		{TS: t2, Profit: 2, CID: "c2"},
+		{TS: t1, Profit: 1, CID: "c1"},
+	}
+	clock = clock.Add(time.Minute)
+	failOn, calls = 2, 0
+	if _, err := e.r.runConversions(context.Background(), cfg); err == nil {
+		t.Fatal("second telegram must fail")
+	}
+	var since time.Time
+	e.r.state(func(st *Status) { since = st.ConvSince })
+	if !since.Equal(t1.Add(time.Second)) {
+		t.Fatalf("ConvSince = %v want %v", since, t1.Add(time.Second))
+	}
+	clock = clock.Add(time.Minute)
+	failOn, calls = 0, 0
+	e.mu.Lock()
+	e.sent = nil
+	e.mu.Unlock()
+	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || msg != "2 new conversion(s)" {
+		t.Fatalf("%q %v", msg, err)
+	}
+	if len(e.messages()) != 2 {
+		t.Fatalf("messages = %d", len(e.messages()))
 	}
 }
 

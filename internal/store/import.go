@@ -307,9 +307,107 @@ func (c *CH) CountByDomain(ctx context.Context, domain string) (events, conversi
 		return 0, 0, fmt.Errorf("clickhouse: count events: %w", err)
 	}
 	events = int64(n)
-	if err = c.conn.QueryRow(ctx, "SELECT count() FROM conversions WHERE domain = ?", domain).Scan(&n); err != nil {
+	if err = c.conn.QueryRow(ctx, "SELECT count() FROM conversions FINAL WHERE domain = ?", domain).Scan(&n); err != nil {
 		return events, 0, fmt.Errorf("clickhouse: count conversions: %w", err)
 	}
 	conversions = int64(n)
 	return events, conversions, nil
+}
+
+// InitialWatermark returns the latest event and conversion timestamps for one
+// tracker host within the last eight days.
+// ctx bounds the queries. domain is matched against the domain column; blank
+// domain skips both queries and returns zero times with nil error.
+// A nil client or missing connection returns an error. When a table has no
+// matching rows, that side stays zero.
+func (c *CH) InitialWatermark(ctx context.Context, domain string) (clicks, conversions time.Time, err error) {
+	domain = strings.TrimSpace(domain)
+	if domain == "" {
+		return time.Time{}, time.Time{}, nil
+	}
+	if c == nil || c.conn == nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("clickhouse: nil client")
+	}
+	const window = "ts >= now() - INTERVAL 8 DAY"
+	if err = c.conn.QueryRow(ctx,
+		"SELECT maxOrNull(ts) FROM events WHERE domain = ? AND "+window, domain,
+	).Scan(&clicks); err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("clickhouse: watermark events: %w", err)
+	}
+	if err = c.conn.QueryRow(ctx,
+		"SELECT maxOrNull(ts) FROM conversions WHERE domain = ? AND "+window, domain,
+	).Scan(&conversions); err != nil {
+		return time.Time{}, time.Time{}, fmt.Errorf("clickhouse: watermark conversions: %w", err)
+	}
+	return normalizeCHDateTime(clicks), normalizeCHDateTime(conversions), nil
+}
+
+// normalizeCHDateTime maps ClickHouse zero/epoch timestamps to time.Time{}.
+func normalizeCHDateTime(t time.Time) time.Time {
+	if t.Unix() <= 0 {
+		return time.Time{}
+	}
+	return t
+}
+
+const existingCIDsBatch = 1000
+
+// ExistingCIDs returns click ids already stored for one host in a time window.
+// ctx bounds the query. domain and cids must be non-empty; otherwise an empty
+// map is returned without querying. from and to bound ts inclusively on both
+// ends. A nil client returns an error. More than 1000 ids are queried in batches.
+func (c *CH) ExistingCIDs(ctx context.Context, domain string, from, to time.Time, cids []string) (map[string]struct{}, error) {
+	domain = strings.TrimSpace(domain)
+	if domain == "" || len(cids) == 0 {
+		return map[string]struct{}{}, nil
+	}
+	if c == nil || c.conn == nil {
+		return nil, fmt.Errorf("clickhouse: nil client")
+	}
+	out := make(map[string]struct{}, len(cids))
+	for i := 0; i < len(cids); i += existingCIDsBatch {
+		end := i + existingCIDsBatch
+		if end > len(cids) {
+			end = len(cids)
+		}
+		part, err := c.existingCIDsBatch(ctx, domain, from, to, cids[i:end])
+		if err != nil {
+			return nil, err
+		}
+		for id := range part {
+			out[id] = struct{}{}
+		}
+	}
+	return out, nil
+}
+
+func (c *CH) existingCIDsBatch(ctx context.Context, domain string, from, to time.Time, cids []string) (map[string]struct{}, error) {
+	q := "SELECT cid FROM events WHERE domain = ? AND ts >= ? AND ts <= ? AND cid IN (" + placeholders(len(cids)) + ")"
+	args := make([]any, 0, 3+len(cids))
+	args = append(args, domain, from, to)
+	for _, id := range cids {
+		args = append(args, id)
+	}
+	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
+		"max_execution_time": 30,
+	}))
+	rows, err := c.conn.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("clickhouse: existing cids: %w", err)
+	}
+	defer rows.Close()
+	out := make(map[string]struct{}, len(cids))
+	for rows.Next() {
+		var cid string
+		if err := rows.Scan(&cid); err != nil {
+			return nil, fmt.Errorf("clickhouse: scan cid: %w", err)
+		}
+		if cid != "" {
+			out[cid] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("clickhouse: existing cids rows: %w", err)
+	}
+	return out, nil
 }

@@ -186,6 +186,7 @@ type ncSettingsPut struct {
 type ncBuyState struct {
 	mu       sync.Mutex
 	inflight map[string]struct{}
+	retry    map[string]string
 }
 
 // acquire marks host as being registered. It returns false when it already is.
@@ -207,6 +208,26 @@ func (b *ncBuyState) release(host string) {
 	b.mu.Lock()
 	delete(b.inflight, host)
 	b.mu.Unlock()
+}
+
+// noteRetry remembers id to run again after release(host) when acquire(host) failed.
+func (b *ncBuyState) noteRetry(host, id string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.retry == nil {
+		b.retry = map[string]string{}
+	}
+	b.retry[host] = id
+}
+
+// releaseAndRetry clears the inflight mark and returns a queued id for one follow-up run.
+func (b *ncBuyState) releaseAndRetry(host string) string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.inflight, host)
+	id := b.retry[host]
+	delete(b.retry, host)
+	return id
 }
 
 // has reports whether host is being registered right now.

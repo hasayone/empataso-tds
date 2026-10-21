@@ -192,7 +192,6 @@ func (f *fakeCF) setStatus(name, status string) {
 	}
 }
 
-// recordsOf returns a copy of the records of the zone named name.
 func (f *fakeCF) recordsOf(name string) []cfRecord {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -416,7 +415,20 @@ func TestCloudflareClientSendsBearerOnly(t *testing.T) {
 	}
 }
 
-func TestCloudflareClientUpsertApex(t *testing.T) {
+// cfRecordsNamed returns DNS records of name in zoneID from the fake API state.
+func cfRecordsNamed(f *fakeCF, zoneID, name string) []cfRecord {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := []cfRecord{}
+	for _, rec := range f.records[zoneID] {
+		if strings.EqualFold(rec.Name, name) {
+			out = append(out, rec)
+		}
+	}
+	return out
+}
+
+func TestCloudflareClientUpsertProxiedA(t *testing.T) {
 	ctx := context.Background()
 	f := newFakeCF(t)
 	c := newCFClient(f.srv.URL, cfAccount{Token: cfTestToken, AccountID: cfTestAccount}, nil)
@@ -428,45 +440,59 @@ func TestCloudflareClientUpsertApex(t *testing.T) {
 	if err != nil || again.ID != z.ID || f.count("POST /zones") != 1 {
 		t.Fatalf("ensure created a second zone: %+v %v", again, err)
 	}
-	if err := c.upsertApexA(ctx, z.ID, "a.com", cfTestIP); err != nil {
+	if err := c.upsertProxiedA(ctx, z.ID, "a.com", cfTestIP); err != nil {
 		t.Fatal(err)
 	}
 	if recs := f.recordsOf("a.com"); len(recs) != 1 || recs[0].Type != "A" || recs[0].Content != cfTestIP || !recs[0].Proxied {
 		t.Fatalf("records %+v", recs)
 	}
 	before := f.writes()
-	if err := c.upsertApexA(ctx, z.ID, "a.com", cfTestIP); err != nil || f.writes() != before {
+	if err := c.upsertProxiedA(ctx, z.ID, "a.com", cfTestIP); err != nil || f.writes() != before {
 		t.Fatalf("same record was written again: %v", err)
 	}
-	if err := c.upsertApexA(ctx, z.ID, "a.com", "198.51.100.9"); err != nil {
+	if err := c.upsertProxiedA(ctx, z.ID, "a.com", "198.51.100.9"); err != nil {
 		t.Fatal(err)
 	}
 	if recs := f.recordsOf("a.com"); len(recs) != 1 || recs[0].Content != "198.51.100.9" || !recs[0].Proxied {
 		t.Fatalf("records after change %+v", recs)
 	}
-	if err := c.upsertApexA(ctx, z.ID, "a.com", "2001:db8::7"); err != nil {
+	if err := c.upsertProxiedA(ctx, z.ID, "a.com", "2001:db8::7"); err != nil {
 		t.Fatal(err)
 	}
 	if recs := f.recordsOf("a.com"); len(recs) != 2 || recs[1].Type != "AAAA" {
 		t.Fatalf("ipv6 records %+v", recs)
 	}
+	if err := c.upsertProxiedA(ctx, z.ID, "admin.a.com", cfTestIP); err != nil {
+		t.Fatal(err)
+	}
+	if recs := cfRecordsNamed(f, z.ID, "admin.a.com"); len(recs) != 1 || !recs[0].Proxied {
+		t.Fatalf("admin records %+v", recs)
+	}
 }
 
-func TestCloudflareClientRefusesApexCNAMEAndMany(t *testing.T) {
+func TestCloudflareClientRefusesProxiedCNAMEAndMany(t *testing.T) {
 	ctx := context.Background()
 	f := newFakeCF(t)
 	c := newCFClient(f.srv.URL, cfAccount{Token: cfTestToken, AccountID: cfTestAccount}, nil)
 	z, _ := c.ensureZone(ctx, "c.com")
 	f.records[z.ID] = []cfRecord{{ID: "r1", Type: "CNAME", Name: "c.com", Content: "x.example"}}
-	if err := c.upsertApexA(ctx, z.ID, "c.com", cfTestIP); err != errCFApexCNAME {
+	if err := c.upsertProxiedA(ctx, z.ID, "c.com", cfTestIP); err != errCFRecordCNAME {
 		t.Fatalf("cname: %v", err)
 	}
 	f.records[z.ID] = []cfRecord{{ID: "r1", Type: "A", Name: "c.com", Content: "198.51.100.1"}, {ID: "r2", Type: "A", Name: "c.com", Content: "198.51.100.2"}}
-	if err := c.upsertApexA(ctx, z.ID, "c.com", cfTestIP); err != errCFApexMany {
+	if err := c.upsertProxiedA(ctx, z.ID, "c.com", cfTestIP); err != errCFRecordMany {
 		t.Fatalf("many: %v", err)
 	}
+	f.records[z.ID] = append(f.records[z.ID], cfRecord{ID: "r3", Type: "CNAME", Name: "admin.c.com", Content: "x.example"})
+	if err := c.upsertProxiedA(ctx, z.ID, "admin.c.com", cfTestIP); err != errCFRecordCNAME {
+		t.Fatalf("admin cname: %v", err)
+	}
+	f.records[z.ID] = []cfRecord{{ID: "r4", Type: "A", Name: "admin.d.com", Content: "198.51.100.9", Proxied: true}}
+	if err := c.upsertProxiedA(ctx, z.ID, "admin.d.com", cfTestIP); err != errCFRecordForeign {
+		t.Fatalf("admin foreign a: %v", err)
+	}
 	if f.writes() != 1 {
-		t.Fatalf("a refused apex was changed: %v", f.calls)
+		t.Fatalf("a refused name was changed: %v", f.calls)
 	}
 }
 

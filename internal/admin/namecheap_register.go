@@ -477,6 +477,19 @@ func (s *Server) editDomain(ctx context.Context, id string, mutate func(*config.
 	}
 	return config.Domain{}, errDomainNotFound
 }
+
+// editDomainSnap changes one stored domain under domainMu when Host and CfZoneID still match snap.
+// id selects the row, snap is the row read before an external call, and mutate edits the record.
+// It returns errDomainHostChanged when the row changed during the call.
+func (s *Server) editDomainSnap(ctx context.Context, id string, snap config.Domain, mutate func(*config.Domain) error) (config.Domain, error) {
+	return s.editDomain(ctx, id, func(cur *config.Domain) error {
+		if cur.Host != snap.Host || cur.CfZoneID != snap.CfZoneID {
+			return errDomainHostChanged
+		}
+		return mutate(cur)
+	})
+}
+
 // removeDomainRow deletes one stored domain under domainMu.
 // id selects the row. A missing row is not an error. An error comes from the store.
 func (s *Server) removeDomainRow(ctx context.Context, id string) error {

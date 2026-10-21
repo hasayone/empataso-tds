@@ -37,6 +37,8 @@ type fakeSink struct {
 	purged  []string
 	eventsN int64
 	convN   int64
+	wmClick time.Time
+	wmConv  time.Time
 }
 
 func (f *fakeSink) InsertEvents(_ context.Context, rows []logbuf.Event) error {
@@ -58,6 +60,31 @@ func (f *fakeSink) CountByDomain(context.Context, string) (int64, int64, error) 
 	return f.eventsN, f.convN, nil
 }
 
+func (f *fakeSink) InitialWatermark(context.Context, string) (time.Time, time.Time, error) {
+	return f.wmClick, f.wmConv, nil
+}
+
+func (f *fakeSink) ExistingCIDs(_ context.Context, domain string, from, to time.Time, cids []string) (map[string]struct{}, error) {
+	want := map[string]struct{}{}
+	for _, cid := range cids {
+		want[cid] = struct{}{}
+	}
+	out := map[string]struct{}{}
+	for _, ev := range f.events {
+		if ev.Domain != domain || ev.CID == "" {
+			continue
+		}
+		if _, ok := want[ev.CID]; !ok {
+			continue
+		}
+		if ev.Ts.Before(from) || ev.Ts.After(to) {
+			continue
+		}
+		out[ev.CID] = struct{}{}
+	}
+	return out, nil
+}
+
 type keitaroFiles struct {
 	dir    string
 	offers *JSONStore[config.Offer]
@@ -65,12 +92,13 @@ type keitaroFiles struct {
 }
 
 type keitaroJobBody struct {
-	Running bool           `json:"running"`
-	Stage   string         `json:"stage"`
-	Done    int            `json:"done"`
-	Total   int            `json:"total"`
-	Counts  map[string]int `json:"counts"`
-	Losses  []struct {
+	Running     bool           `json:"running"`
+	SyncRunning bool           `json:"sync_running"`
+	Stage       string         `json:"stage"`
+	Done        int            `json:"done"`
+	Total       int            `json:"total"`
+	Counts      map[string]int `json:"counts"`
+	Losses      []struct {
 		Kind   string `json:"kind"`
 		Ref    string `json:"ref"`
 		Detail string `json:"detail"`

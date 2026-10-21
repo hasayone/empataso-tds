@@ -143,6 +143,7 @@ func registerCloudflare(s *Server, mux *http.ServeMux) {
 	s.handle(mux, "PUT /api/cloudflare", cookieOnly(http.HandlerFunc(s.handleCloudflarePut)))
 	s.handle(mux, "POST /api/cloudflare/test", cookieOnly(http.HandlerFunc(s.handleCloudflareTest)))
 	s.handle(mux, "POST /api/domains/{id}/cloudflare", cookieOnly(http.HandlerFunc(s.handleDomainCloudflare)))
+	s.handle(mux, "POST /api/domains/{id}/admin-dns", cookieOnly(http.HandlerFunc(s.handleDomainAdminDNS)))
 	s.handle(mux, "GET /api/domains/connected", http.HandlerFunc(s.handleDomainsConnected))
 	s.handle(mux, "POST /api/domains/connected/ack", cookieOnly(http.HandlerFunc(s.handleDomainsConnectedAck)))
 }

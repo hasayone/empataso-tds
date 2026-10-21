@@ -2,9 +2,11 @@
 
 # STATUS — где мы и как продолжить
 
-Снимок на 2026-09-30. Для деталей: `docs/USAGE.md`, `TODO.md`.
+Снимок на 2026-10-21. Для деталей: `docs/USAGE.md`, `TODO.md`.
 
 ## Готово (в `main`, тесты зелёные)
+- **Admin на admin.<домен>**: основной или роль admin/both → `https://admin.<домен>/`, A `admin` в Cloudflare, nginx только через Cloudflare, `KUZTDS_ADMIN_TRUSTED_PROXIES`, `/healthz` с `X-Kuztds-Service: admin`, вход на admin.* без Redis — 503. Вики: `docs/wiki/namecheap.md`, `admin-api.md`.
+- **Актуализация Keitaro**: задача `keitaro_sync` в admin (`keitaro-sync.json`, дедуп кликов, блокировка с импортом/purge, cron «Конверсии» без Telegram-шума по домену трекера). Вики: `docs/wiki/keitaro.md`.
 - **Фазы 1–7**: ipindex (+hot-reload), realip, geo (mmdb/Nop) + detect
   (устройство/OS/браузер/бренд + боты), router (выбор потока по правилам),
   store/logbuf (ClickHouse + Redis), admin API + встроенный SPA, рендер +

@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ const keitaroJobTimeout = 2 * time.Hour
 type keitaroJob struct {
 	mu         sync.Mutex
 	running    bool
+	syncing    bool
 	stage      string
 	done       int
 	total      int
@@ -31,15 +33,16 @@ type keitaroJob struct {
 // keitaroJobView is the JSON body of GET /api/keitaro/job.
 // Times are RFC3339, or empty when unset. The key is not a field.
 type keitaroJobView struct {
-	Running    bool            `json:"running"`
-	Stage      string          `json:"stage"`
-	Done       int             `json:"done"`
-	Total      int             `json:"total"`
-	Counts     map[string]int  `json:"counts"`
-	Losses     []ktimport.Loss `json:"losses"`
-	Error      string          `json:"error"`
-	StartedAt  string          `json:"started_at"`
-	FinishedAt string          `json:"finished_at"`
+	Running     bool            `json:"running"`
+	SyncRunning bool            `json:"sync_running"`
+	Stage       string          `json:"stage"`
+	Done        int             `json:"done"`
+	Total       int             `json:"total"`
+	Counts      map[string]int  `json:"counts"`
+	Losses      []ktimport.Loss `json:"losses"`
+	Error       string          `json:"error"`
+	StartedAt   string          `json:"started_at"`
+	FinishedAt  string          `json:"finished_at"`
 }
 
 // newKeitaroJob returns an idle job.
@@ -53,6 +56,8 @@ func newKeitaroJob() *keitaroJob {
 	}
 }
 
+const keitaroSyncBusyMsg = "идёт актуализация"
+
 // beginImport marks an import running when nothing else holds the job.
 // It clears the previous error, counts and losses, and sets started_at.
 // It returns "import already running" or "purge already running",
@@ -61,6 +66,9 @@ func newKeitaroJob() *keitaroJob {
 func (j *keitaroJob) beginImport() string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.syncing {
+		return keitaroSyncBusyMsg
+	}
 	if j.running {
 		return "import already running"
 	}
@@ -86,6 +94,9 @@ func (j *keitaroJob) beginImport() string {
 func (j *keitaroJob) beginPurge() string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.syncing {
+		return keitaroSyncBusyMsg
+	}
 	if j.running {
 		return "import already running"
 	}
@@ -94,6 +105,38 @@ func (j *keitaroJob) beginPurge() string {
 	}
 	j.busy = true
 	return ""
+}
+
+// beginSync marks log catch-up running when manual import and purge are idle.
+// It returns keitaroSyncBusyMsg when catch-up already runs, or the import or purge message.
+func (j *keitaroJob) beginSync() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.syncing {
+		return keitaroSyncBusyMsg
+	}
+	if j.running {
+		return "import already running"
+	}
+	if j.busy {
+		return "purge already running"
+	}
+	j.syncing = true
+	return ""
+}
+
+// finishSync clears the catch-up flag taken by beginSync.
+func (j *keitaroJob) finishSync() {
+	j.mu.Lock()
+	j.syncing = false
+	j.mu.Unlock()
+}
+
+// syncActive reports whether log catch-up holds the job lock.
+func (j *keitaroJob) syncActive() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.syncing
 }
 
 // endPurge releases the purge lock taken by beginPurge.
@@ -176,15 +219,16 @@ func (j *keitaroJob) snapshot() keitaroJobView {
 		losses = []ktimport.Loss{}
 	}
 	return keitaroJobView{
-		Running:    j.running,
-		Stage:      j.stage,
-		Done:       j.done,
-		Total:      j.total,
-		Counts:     copyCounts(j.counts),
-		Losses:     losses,
-		Error:      j.errText,
-		StartedAt:  j.startedAt,
-		FinishedAt: j.finishedAt,
+		Running:     j.running,
+		SyncRunning: j.syncing,
+		Stage:       j.stage,
+		Done:        j.done,
+		Total:       j.total,
+		Counts:      copyCounts(j.counts),
+		Losses:      losses,
+		Error:       j.errText,
+		StartedAt:   j.startedAt,
+		FinishedAt:  j.finishedAt,
 	}
 }
 
@@ -364,40 +408,83 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 		}
 	}
 	if req.Conversions || req.Clicks {
-		if s.cfg.Warehouse == nil || creds.host() == "" {
-			li := logImport{from: from, to: to, host: creds.host(), creds: creds}
-			if err := s.importLogs(ctx, req, li, st.counts, &st.losses); err != nil {
-				st.fail = sanitize(err, creds.Key)
-			}
-			return
+		counts, extra, _, err := s.importLogWindow(ctx, creds, from, to, logImportOpts{
+			clicks: req.Clicks, conversions: req.Conversions,
+			manifest: st.prev, res: st.res.Manifest, snapCampaigns: st.snapCampaigns,
+		})
+		for k, v := range counts {
+			st.counts[k] = v
 		}
-		if st.prev.Empty() && !req.catalog() {
-			var err error
-			st.prev, err = s.loadManifest()
-			if err != nil {
-				st.fail = "save error"
-				return
-			}
-		}
-		manifest := st.prev.Merge(st.res.Manifest)
-		groups, err := s.listKeitaroGroups(ctx)
-		if err != nil {
-			st.fail = "groups unavailable"
-			return
-		}
-		resolved, backfill, err := s.resolveLogCampaignMap(ctx, creds, manifest, st.snapCampaigns, groups)
+		st.losses = append(st.losses, extra...)
 		if err != nil {
 			st.fail = sanitize(err, creds.Key)
-			return
-		}
-		if err := s.saveCampaignMapBackfill(manifest, backfill, creds.host()); err != nil {
-			st.fail = "save error"
-			return
-		}
-		li := logImport{from: from, to: to, host: creds.host(), creds: creds, aliases: resolved, groups: groups}
-		if err := s.importLogs(ctx, req, li, st.counts, &st.losses); err != nil {
-			st.fail = sanitize(err, creds.Key)
-			return
 		}
 	}
+}
+
+// logImportOpts selects which logs to import and supplies manifest context.
+type logImportOpts struct {
+	clicks        bool
+	conversions   bool
+	syncMode      bool
+	manifest      ktimport.Manifest
+	res           ktimport.Manifest
+	snapCampaigns []ktimport.Campaign
+	skip          *logSkipTally
+}
+
+// logFetchStats holds the latest row timestamps seen in one log fetch.
+type logFetchStats struct {
+	maxClick time.Time
+	maxConv  time.Time
+}
+
+// importLogWindow imports clicks and/or conversions for one tracker time range.
+// from and to are tracker strings "2006-01-02 15:04:05". opts selects the streams.
+// It returns per-stream counts, losses, fetch stats and a tracker or warehouse error.
+func (s *Server) importLogWindow(ctx context.Context, creds ktCreds, from, to string, opts logImportOpts) (map[string]int, []ktimport.Loss, logFetchStats, error) {
+	counts := map[string]int{}
+	var losses []ktimport.Loss
+	var stats logFetchStats
+	req := keitaroImportReq{Clicks: opts.clicks, Conversions: opts.conversions}
+	if s.cfg.Warehouse == nil || creds.host() == "" {
+		if opts.syncMode {
+			return counts, losses, stats, errors.New("clickhouse unavailable")
+		}
+		if req.Clicks {
+			counts["clicks"] = 0
+			losses = append(losses, ktimport.Loss{Kind: "skipped", Ref: "clicks", Detail: "clickhouse unavailable"})
+		}
+		if req.Conversions {
+			counts["conversions"] = 0
+			losses = append(losses, ktimport.Loss{Kind: "skipped", Ref: "conversions", Detail: "clickhouse unavailable"})
+		}
+		return counts, losses, stats, nil
+	}
+	manifest := opts.manifest
+	if manifest.Empty() {
+		var err error
+		manifest, err = s.loadManifest()
+		if err != nil {
+			return counts, losses, stats, err
+		}
+	}
+	manifest = manifest.Merge(opts.res)
+	groups, err := s.listKeitaroGroups(ctx)
+	if err != nil {
+		return counts, losses, stats, err
+	}
+	resolved, backfill, err := s.resolveLogCampaignMap(ctx, creds, manifest, opts.snapCampaigns, groups)
+	if err != nil {
+		return counts, losses, stats, err
+	}
+	if err := s.saveCampaignMapBackfill(manifest, backfill, creds.host()); err != nil {
+		return counts, losses, stats, err
+	}
+	li := logImport{from: from, to: to, host: creds.host(), creds: creds, aliases: resolved, groups: groups}
+	stats, err = s.importLogs(ctx, req, li, counts, &losses, opts)
+	if err != nil {
+		return counts, losses, stats, err
+	}
+	return counts, losses, stats, nil
 }

@@ -1561,7 +1561,7 @@ func TestDomainsCatalogAndPager(t *testing.T) {
 	must(t, spaFunctionLine(html, "domainStateChip"), "tr('dom.state.pending')", "pending purchase chip")
 	ld := spaFunctionLine(html, "linkDomains")
 	must(t, ld, "disabled", "linkDomains hides disabled")
-	must(t, html, "return {id:n.id, host:n.host, group:n.group||'', role:n.role||'both', primary:!!n.primary, disabled:!!n.disabled, created_by:n.created_by||''};", "payload has writable fields only")
+	must(t, html, "return {id:n.id, host:n.host, group:n.group||'', role:n.role||'links', primary:!!n.primary, disabled:!!n.disabled, created_by:n.created_by||''};", "payload has writable fields only")
 	must(t, html, `'dom.edit':'Править домен'`, "ru edit domain")
 	must(t, html, `'dom.off.hint':'Выключенный домен`, "ru disabled hint")
 }

@@ -24,6 +24,10 @@ func (s *Server) domainCatalog(prep func(*config.Domain)) crudCatalog[config.Dom
 		valid: validDomain,
 		hooks: &catalogHooks[config.Domain]{
 			seq: s.cfg.SeqDomains, floor: s.domainFloor, prep: prep, tidy: tidyDomains, view: s.domainRows,
+			afterWrite: func(item config.Domain, old *config.Domain) { s.afterDomainWrite(item, old) },
+			formatOne: func(ctx context.Context, srv *Server, d config.Domain) (any, error) {
+				return srv.domainView(ctx, d)
+			},
 			mu:           &s.domainMu,
 			keep:         keepDomainCheck,
 			guard:        s.guardDomainPut,
@@ -47,6 +51,9 @@ func validDomain(d config.Domain) string {
 	if host == "" || strings.Contains(host, "://") || strings.ContainsAny(host, " /\\") {
 		return "host required"
 	}
+	if strings.HasPrefix(config.NormalizeHTTPHost(host), "admin.") {
+		return "host must not start with admin."
+	}
 	switch d.Role {
 	case "admin", "links", "both":
 	default:
@@ -61,7 +68,7 @@ func validDomain(d config.Domain) string {
 func prepDomain(d *config.Domain) {
 	d.Host = strings.ToLower(strings.TrimSpace(d.Host))
 	if d.Role == "" {
-		d.Role = "both"
+		d.Role = "links"
 	}
 	d.Group = trimGroupLabel(d.Group)
 	d.OK = false
@@ -69,6 +76,7 @@ func prepDomain(d *config.Domain) {
 	d.Checked = ""
 	d.Registrar, d.RegistrarAccount, d.RegistrarStatus, d.RegistrarCharged, d.RegistrarExpected = "", "", "", 0, 0
 	d.RegistrarPendingSince = ""
+	d.AdminOK, d.AdminReason, d.AdminDNS = false, "", ""
 	copyCloudflare(d, config.Domain{})
 }
 
@@ -111,6 +119,7 @@ func keepDomainCheck(item *config.Domain, old config.Domain) {
 	item.RegistrarStatus, item.RegistrarCharged, item.RegistrarExpected = old.RegistrarStatus, old.RegistrarCharged, old.RegistrarExpected
 	item.RegistrarPendingSince = old.RegistrarPendingSince
 	copyCloudflare(item, old)
+	item.AdminOK, item.AdminReason, item.AdminDNS = old.AdminOK, old.AdminReason, old.AdminDNS
 }
 
 // purchaseCatalog is the domain catalog used by registration to write the pending row.
@@ -234,29 +243,57 @@ func tidyDomains(list []config.Domain, id string) []config.Domain {
 // domainRow is one parked domain and the number of campaigns that use it.
 type domainRow struct {
 	config.Domain
-	Campaigns int `json:"campaigns"`
+	Campaigns int    `json:"campaigns"`
+	AdminHost string `json:"admin_host,omitempty"`
 }
 
-// domainRows attaches a campaign count to each domain for GET /api/domains.
-// list is the stored domains. A nil Groups store counts every domain as zero.
-// It returns a non-nil slice, empty when list is empty, so the JSON body is an array.
-// An error comes from Groups.List.
-func (s *Server) domainRows(ctx context.Context, list []config.Domain) (any, error) {
+// domainCampaignCounts returns how many campaigns use each domain id.
+// ctx bounds Groups.List. When Groups is nil, the map is empty and every id counts as zero.
+// The error is from Groups.List.
+func (s *Server) domainCampaignCounts(ctx context.Context) (map[string]int, error) {
 	counts := map[string]int{}
-	if s.cfg.Groups != nil {
-		groups, err := s.cfg.Groups.List(ctx)
-		if err != nil {
-			return nil, err
+	if s.cfg.Groups == nil {
+		return counts, nil
+	}
+	groups, err := s.cfg.Groups.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, g := range groups {
+		if g.DomainID != "" {
+			counts[g.DomainID]++
 		}
-		for _, g := range groups {
-			if g.DomainID != "" {
-				counts[g.DomainID]++
-			}
-		}
+	}
+	return counts, nil
+}
+
+// domainView builds the API representation of one domain row with admin_host and campaigns.
+func (s *Server) domainView(ctx context.Context, d config.Domain) (domainRow, error) {
+	counts, err := s.domainCampaignCounts(ctx)
+	if err != nil {
+		return domainRow{}, err
+	}
+	return domainAPIView(d, counts[d.ID]), nil
+}
+
+// writeDomainRow writes one domain in the API representation.
+func (s *Server) writeDomainRow(w http.ResponseWriter, ctx context.Context, code int, d config.Domain) {
+	row, err := s.domainView(ctx, d)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "read error")
+		return
+	}
+	writeJSON(w, code, row)
+}
+
+func (s *Server) domainRows(ctx context.Context, list []config.Domain) (any, error) {
+	counts, err := s.domainCampaignCounts(ctx)
+	if err != nil {
+		return nil, err
 	}
 	rows := make([]domainRow, 0, len(list))
 	for _, d := range list {
-		rows = append(rows, domainRow{Domain: d, Campaigns: counts[d.ID]})
+		rows = append(rows, domainAPIView(d, counts[d.ID]))
 	}
 	return rows, nil
 }

@@ -155,7 +155,7 @@ func TestPerformanceConvSQLGroupID(t *testing.T) {
 	}
 	for _, s := range []string{
 		"SELECT '' AS group_id, group_name, stream_name, profit, ts FROM postbacks",
-		"SELECT group_id, group_name, stream_name, profit, ts FROM conversions",
+		"SELECT group_id, group_name, stream_name, profit, ts FROM conversions FINAL",
 		"SELECT group_id, group_name, stream_name, count() AS conv, sum(profit) AS profit",
 		"GROUP BY group_id, group_name, stream_name",
 	} {
@@ -174,7 +174,7 @@ func TestPerformanceConvSQLGroupID(t *testing.T) {
 	if !strings.Contains(filt, "'' AS group_id, group_name, stream_name, profit, ts, cid FROM postbacks") {
 		t.Fatalf("filtered postbacks: %s", filt)
 	}
-	if !strings.Contains(filt, "SELECT group_id, group_name, stream_name, profit, ts, cid FROM conversions") {
+	if !strings.Contains(filt, "SELECT group_id, group_name, stream_name, profit, ts, cid FROM conversions FINAL") {
 		t.Fatalf("filtered conversions: %s", filt)
 	}
 	if len(args) != 3 || args[2] != "z" {

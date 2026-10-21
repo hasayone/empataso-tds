@@ -111,7 +111,7 @@ func known(job string) bool {
 
 // PostbackSource is the part of the statistics store the conversions job uses.
 type PostbackSource interface {
-	Postbacks(ctx context.Context, from, to time.Time, group string, limit int) ([]store.PostbackRow, float64, error)
+	PostbacksExcluding(ctx context.Context, from, to time.Time, group string, limit int, excludeDomain string) ([]store.PostbackRow, float64, error)
 }
 
 // Runner executes the jobs on schedule.
@@ -130,11 +130,15 @@ type Runner struct {
 
 	cfgErr string // the config problem last reported (Tick runs on one goroutine)
 
-	mu      sync.Mutex
-	saveMu  sync.Mutex // orders writes of the status file, see save
-	st      Status
-	running map[string]bool
-	wg      sync.WaitGroup
+	mu              sync.Mutex
+	saveMu          sync.Mutex // orders writes of the status file, see save
+	st              Status
+	running         map[string]bool
+	wg              sync.WaitGroup
+	scheduleRepair  bool      // first Tick after a corrupt status file (under mu)
+	manifestMod     time.Time // cached keitaro-import.json mod time
+	manifestHost    string    // host from manifest at manifestMod
+	manifestWarnMod time.Time // last mod time a manifest read warning referred to
 }
 
 // New builds a runner. pb may be nil.
@@ -142,10 +146,7 @@ func New(paths Paths, pb PostbackSource, log *slog.Logger) *Runner {
 	if log == nil {
 		log = slog.Default()
 	}
-	st, err := ReadStatus(StatusPath(paths.Config))
-	if err != nil {
-		log.Warn("cron: status file unreadable, starting clean", "err", err)
-	}
+	st, scheduleRepair := loadStatus(StatusPath(paths.Config), log)
 	// A job cannot have survived the process that was running it.
 	for k, j := range st.Jobs {
 		j.Running = false
@@ -153,15 +154,50 @@ func New(paths Paths, pb PostbackSource, log *slog.Logger) *Runner {
 	}
 	return &Runner{
 		paths: paths, log: log, pb: pb,
-		http:         &http.Client{Timeout: 5 * time.Minute},
-		telegramBase: "https://api.telegram.org",
-		vtBase:       "https://www.virustotal.com",
-		vtPause:      16 * time.Second, // the public API allows 4 requests a minute
-		now:          time.Now,
-		disk:         diskFree,
-		st:           st,
-		running:      map[string]bool{},
+		http:           &http.Client{Timeout: 5 * time.Minute},
+		telegramBase:   "https://api.telegram.org",
+		vtBase:         "https://www.virustotal.com",
+		vtPause:        16 * time.Second, // the public API allows 4 requests a minute
+		now:            time.Now,
+		disk:           diskFree,
+		st:             st,
+		running:        map[string]bool{},
+		scheduleRepair: scheduleRepair,
 	}
+}
+
+// loadStatus reads the status file. A missing file yields an empty status.
+// Invalid JSON is archived to path.bad (overwritten) and scheduleRepair is set
+// so the first Tick staggers zero next_run times. Other read errors log a
+// warning and start clean without archiving.
+func loadStatus(path string, log *slog.Logger) (Status, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return Status{Jobs: map[string]JobStatus{}}, false
+		}
+		log.Warn("cron: status file unreadable, starting clean", "err", err)
+		return Status{Jobs: map[string]JobStatus{}}, false
+	}
+	var st Status
+	if err := json.Unmarshal(b, &st); err != nil {
+		if isJSONCorrupt(err) {
+			bad := path + ".bad"
+			_ = os.Remove(bad)
+			if renameErr := os.Rename(path, bad); renameErr != nil {
+				_ = os.WriteFile(bad, b, 0o644)
+				_ = os.Remove(path)
+			}
+			log.Warn("cron: status file corrupt, archived and reset", "err", err, "archived", bad)
+			return Status{Jobs: map[string]JobStatus{}}, true
+		}
+		log.Warn("cron: status file unreadable, starting clean", "err", err)
+		return Status{Jobs: map[string]JobStatus{}}, false
+	}
+	if st.Jobs == nil {
+		st.Jobs = map[string]JobStatus{}
+	}
+	return st, false
 }
 
 // Run ticks until ctx is done, then waits for the jobs in flight.
@@ -202,6 +238,28 @@ func (r *Runner) Tick(ctx context.Context) {
 	}
 	r.cfgErr = ""
 	now := r.now()
+	r.mu.Lock()
+	repair := r.scheduleRepair
+	if repair {
+		r.scheduleRepair = false
+	}
+	r.mu.Unlock()
+	if repair {
+		cap10 := 10 * time.Minute
+		for _, job := range Jobs {
+			js := r.st.Jobs[job]
+			if !js.NextRun.IsZero() {
+				continue
+			}
+			d := cfg.Interval(job)
+			if d > cap10 {
+				d = cap10
+			}
+			js.NextRun = now.Add(d)
+			r.st.Jobs[job] = js
+		}
+		r.save()
+	}
 	requested := r.takeRequests()
 	for _, job := range Jobs {
 		r.mu.Lock()

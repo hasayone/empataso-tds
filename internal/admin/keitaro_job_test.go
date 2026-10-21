@@ -153,6 +153,18 @@ func TestRunStageStepErrorKeepsLosses(t *testing.T) {
 // t is the test handle. The second step must see the result written by the first.
 // The helper returns true, sets both counts, and publishes masked losses.
 // It expects no failure of the test itself.
+func TestKeitaroJobSyncRunningField(t *testing.T) {
+	s, admin := newKeitaroServers(t, "http://tracker.example", "key", nil, nil, nil)
+	if msg := s.ktJob.beginSync(); msg != "" {
+		t.Fatal(msg)
+	}
+	defer s.ktJob.finishSync()
+	job := readKeitaroJob(t, admin)
+	if !job.SyncRunning || job.Running {
+		t.Fatalf("job %+v", job)
+	}
+}
+
 func TestRunStageSuccessPublishesCount(t *testing.T) {
 	s := &Server{ktJob: newKeitaroJob()}
 	if msg := s.ktJob.beginImport(); msg != "" {

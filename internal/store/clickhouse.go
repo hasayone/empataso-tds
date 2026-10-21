@@ -45,8 +45,8 @@ type CH struct {
 	// Writes and reads name those columns only after ensureSchema has seen them.
 	// maybeRefreshOriginWave can set these true later without restarting the process.
 	originEvents, originConv atomic.Bool
-	originProbeMu   sync.Mutex
-	originLastProbe time.Time
+	originProbeMu            sync.Mutex
+	originLastProbe          time.Time
 	// originColumnReader replaces readColumnSet during maybeRefreshOriginWave
 	// when set. Used by tests without ClickHouse.
 	originColumnReader func() (map[string]map[string]bool, error)
@@ -385,7 +385,7 @@ func performanceConvSQL(from, to time.Time, where string, wargs []any, haveGroup
 		 FROM (
 		   SELECT '' AS group_id, group_name, stream_name, ` + tail + ` FROM postbacks
 		   UNION ALL
-		   SELECT ` + convID + `, group_name, stream_name, ` + tail + ` FROM conversions
+		   SELECT ` + convID + `, group_name, stream_name, ` + tail + ` FROM conversions FINAL
 		 ) WHERE ts >= ? AND ts < ?`
 	if where != "" {
 		sql += eventsCidInSQL(where)

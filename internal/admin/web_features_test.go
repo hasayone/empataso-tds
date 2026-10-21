@@ -671,6 +671,97 @@ func TestDomainStatusTexts(t *testing.T) {
 	must(t, html, `'dom.tls':'Сертификат сервера отклонён'`, "ru certificate text")
 }
 
+// TestSpaAdminHost checks the admin.<domain> badge, DNS action, form hints and the links default role.
+func TestSpaAdminHost(t *testing.T) {
+	html := spaSource()
+	for _, key := range []string{
+		"dom.adminhost.label", "dom.adminhost.hint", "dom.adminhost.create", "dom.adminhost.created",
+		"dom.adminhost.unchecked", "dom.adminhost.why.dns", "dom.adminhost.why.foreign",
+		"dom.adminhost.why.tls", "dom.adminhost.why.connect",
+		"dom.adminhost.dns.nozone", "dom.adminhost.dns.noroot", "dom.adminhost.dns.cname",
+		"dom.adminhost.dns.many", "dom.adminhost.dns.foreign",
+	} {
+		for _, lang := range []string{"en", "ru", "uk"} {
+			if !trKeyDefined(html, lang, key) {
+				t.Errorf("missing %s in %s", key, lang)
+			}
+		}
+	}
+	badge := spaFunctionLine(html, "domainAdminHostHTML")
+	for _, needle := range []string{
+		"d.admin_host", "d.admin_ok", "adminHostDnsText(d)", "adminHostStatusText(", "adminHostPillClass(",
+		"trFill('dom.adminhost.label'", "https://${esc(host)}/", "esc(note)",
+	} {
+		must(t, badge, needle, "admin host badge")
+	}
+	must(t, html, "'admin record points to another server':'dom.adminhost.dns.foreign'", "foreign admin_dns maps to tr key")
+	status := spaFunctionLine(html, "adminHostStatusText")
+	for _, needle := range []string{
+		"adminHostDnsText(d)", "d.admin_ok", "d.admin_reason||''", "r==='dns'", "r==='foreign'", "r==='tls'", "r==='connect'",
+		"dom.adminhost.why.dns", "dom.adminhost.why.foreign", "dom.adminhost.why.tls", "dom.adminhost.why.connect",
+		"dom.adminhost.unchecked", "tr('dom.ok')",
+	} {
+		must(t, status, needle, "admin host status")
+	}
+	pill := spaFunctionLine(html, "adminHostPillClass")
+	must(t, pill, "d.admin_reason", "pill reads admin_reason")
+	must(t, pill, "['dns','connect','foreign','tls'].includes(d.admin_reason)", "pill marks probe failures bad")
+	dns := spaFunctionLine(html, "ensureAdminDNS")
+	must(t, dns, "'/api/domains/'+encodeURIComponent(d.id)+'/admin-dns'", "admin DNS route")
+	must(t, dns, "applyDomainRow(d, res)", "admin DNS refreshes the row")
+	must(t, dns, "toast(", "admin DNS errors use toast")
+	must(t, dns, "await ensureDomains()", "admin DNS failure reloads catalog")
+	apply := spaFunctionLine(html, "applyDomainRow")
+	must(t, apply, "DOMAIN_ROW_KEEP", "computed row fields are kept when omitted")
+	must(t, html, "DOMAIN_ROW_KEEP=['admin_host','campaigns']", "admin_host and campaigns are kept")
+	mustNot(t, apply, "t.admin_host=''", "admin_host is not cleared before merge")
+	must(t, spaFunctionLine(html, "saveDomain"), "domainPatchNeedsCatalog(p)", "primary or role reloads the catalog")
+	must(t, spaFunctionLine(html, "saveDomain"), "await ensureDomains()", "catalog reload after primary or role")
+	must(t, spaFunctionLine(html, "saveDomain"), "scheduleDomainCatalogRefresh()", "delayed catalog refresh after primary or role")
+	must(t, spaFunctionLine(html, "scheduleDomainCatalogRefresh"), "4000", "delayed refresh waits for DNS task")
+	must(t, spaFunctionLine(html, "adminHostDnsText"), "ADMIN_DNS_ERR", "admin_dns translation map")
+	must(t, spaFunctionLine(html, "domainAdminHostHTML"), "if(!host) return `<span class=\"dom-verdict\">${esc(note)}</span>`", "zone root note without admin_host")
+	dom := spaFunctionLine(html, "domains")
+	must(t, dom, "window.__domCatalogPaint=paintTable", "catalog repaint hook for delayed refresh")
+	must(t, dom, "ensureAdminDNS(d,paintTable)", "row menu admin DNS action")
+	must(t, dom, "d.admin_host&&(d.admin_dns!=='ok'||!d.admin_ok)", "admin DNS action when record missing or probe failed")
+	must(t, dom, "syncDomAdminHints(", "domain form admin hints")
+	must(t, dom, "opt('links',tr('dom.role.links'),'links')", "add form default role links")
+	must(t, dom, "d.role||'links'", "edit form default role links")
+	must(t, spaFunctionLine(html, "domainPayload"), "role:n.role||'links'", "save payload default role links")
+	must(t, spaFunctionLine(html, "domainCell"), "domainAdminHostHTML(d)", "host cell shows admin badge")
+}
+
+// TestSpaKeitaroCron checks the Keitaro catch-up card on automation and import dock behaviour.
+func TestSpaKeitaroCron(t *testing.T) {
+	html := spaSource()
+	for _, key := range []string{
+		"cron.ktsync.title", "cron.ktsync.hint", "cron.ktsync.off", "cron.ktsync.needkt",
+		"cron.ktsync.needimport", "cron.ktsync.noconv", "cron.ktsync.cursor.clicks", "cron.ktsync.cursor.convs",
+		"cron.ktsync.lag", "cron.ktsync.last", "kt.sync.requested", "kt.sync.busy",
+	} {
+		for _, lang := range []string{"en", "ru", "uk"} {
+			if !trKeyDefined(html, lang, key) {
+				t.Errorf("missing %s in %s", key, lang)
+			}
+		}
+	}
+	must(t, html, "keitaro_sync:['cron.ktsync.title','cron.ktsync.hint']", "JOBINFO keitaro_sync")
+	must(t, spaFunctionLine(html, "cronJobDisabled"), "job==='keitaro_sync'", "keitaro toggle guard")
+	must(t, spaFunctionLine(html, "cronJobDisabled"), "job==='conversions'", "conversions toggle guard")
+	must(t, spaFunctionLine(html, "cronFloor"), "CRONST.floors", "interval floor from API")
+	must(t, spaFunctionLine(html, "cronApplyInterval"), "cronFloor(job)", "clamp interval to floor")
+	must(t, spaFunctionLine(html, "paintAutomation"), "cronJobDisabled(job, CRONST)", "automation disables jobs")
+	must(t, spaFunctionLine(html, "paintAutomation"), "cronApplyInterval(j)", "all jobs clamped on paint")
+	must(t, spaFunctionLine(html, "jobBody"), "case 'keitaro_sync'", "keitaro_sync card body")
+	must(t, spaFunctionLine(html, "jobBody"), "keitaroSyncNeedImport(CRONST)", "full import banner")
+	must(t, spaFunctionLine(html, "jobBody"), "cron.ktsync.noconv", "conversions hint without telegram")
+	must(t, spaFunctionLine(html, "cronRunToastText"), "errInfo", "run-now errors translated")
+	must(t, html, "'идёт актуализация':'kt.sync.busy'", "sync busy server text")
+	must(t, spaFunctionLine(html, "ktDockTick"), "!job.sync_running", "import dock ignores sync_running")
+	must(t, spaFunctionLine(html, "ktDockPaint"), "!j.sync_running", "import progress ignores sync_running")
+}
+
 // TestConnectedPopup checks the popup that reports newly connected domains: one timer per tab,
 // the acknowledge routes and the stop on logout.
 func TestConnectedPopup(t *testing.T) {

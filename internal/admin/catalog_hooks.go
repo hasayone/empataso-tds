@@ -48,6 +48,11 @@ type catalogHooks[T any] struct {
 	// maskOut removes the values the caller may not see from item before list, get,
 	// create and replace send it. Nil sends item as stored.
 	maskOut func(v viewer, item *T)
+	// afterWrite runs after a successful create or replace save; it must not block the response.
+	// old is nil on create and the previous row on replace.
+	afterWrite func(item T, old *T)
+	// formatOne shapes a single-item JSON response; nil sends the stored record.
+	formatOne func(ctx context.Context, s *Server, item T) (any, error)
 	// keepIn runs on a non-admin write: it puts the stored value back into item for
 	// every field the caller may not see, or the zero value when old is nil. Nil keeps the body.
 	keepIn func(v viewer, item *T, old *T)

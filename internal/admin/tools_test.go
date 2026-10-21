@@ -226,8 +226,12 @@ func TestCronEndpoints(t *testing.T) {
 	if code := call(t, c, "GET", base+"/api/cron", csrf, nil, &st); code != 200 {
 		t.Fatalf("status %d", code)
 	}
-	if !st.Available || st.Alive || st.Config.Disk.Enabled || len(st.Jobs) != len(cron.Jobs) || !st.GeoPaths.City || st.GeoPaths.ASN {
+	wantJobs := len(cron.Jobs) + len(cron.AdminJobs)
+	if !st.Available || st.Alive || st.Config.Disk.Enabled || len(st.Jobs) != wantJobs || !st.GeoPaths.City || st.GeoPaths.ASN {
 		t.Errorf("fresh state = %+v", st)
+	}
+	if st.Floors[cron.JobKeitaroSync] != 5 {
+		t.Errorf("floors = %+v", st.Floors)
 	}
 
 	// Save with secrets.
@@ -393,6 +397,116 @@ func TestCronGetPanelFields(t *testing.T) {
 	disk := st.Status.Jobs["disk"]
 	if disk.Error != "disk full" || disk.Message != "partial" || !strings.Contains(raw, `"error":"disk full"`) {
 		t.Errorf("job error: %+v body has error field: %v", disk, strings.Contains(raw, `"error":"disk full"`))
+	}
+}
+
+func TestCronKeitaroSyncPanel(t *testing.T) {
+	dir := t.TempDir()
+	cronFile := filepath.Join(dir, "cron.json")
+	syncFile := filepath.Join(dir, "keitaro-sync.json")
+	hash, _ := security.HashPassword("p@ss")
+	s, err := New(Config{
+		AdminUser: "admin", PasswordHash: hash, Sessions: security.NewMemoryStore(),
+		Limiter: allowAll{}, SessionTTL: time.Hour,
+		CronFile: cronFile, KeitaroSyncFile: syncFile,
+		KeitaroBase: "http://tracker.example", KeitaroKey: "secret-key",
+		Warehouse: &fakeSink{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+
+	st, _ := getCron(t, c, srv.URL)
+	if !st.KeitaroConfigured || st.Jobs[len(st.Jobs)-1] != cron.JobKeitaroSync {
+		t.Fatalf("panel %+v jobs=%v", st, st.Jobs)
+	}
+
+	now := time.Now().UTC()
+	if err := s.saveKeitaroSync(keitaroSyncFile{Host: "tracker.example", LastRun: now, OK: true, Message: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ = getCron(t, c, srv.URL)
+	if st.Status.Jobs[cron.JobKeitaroSync].Message != "ok" {
+		t.Fatalf("status %+v", st.Status.Jobs[cron.JobKeitaroSync])
+	}
+
+	if err := cron.Save(cronFile, cron.Default()); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := cron.Load(cronFile)
+	stored.KeitaroSync.Enabled = true
+	stored.KeitaroSync.EveryMinutes = 20
+	if err := cron.Save(cronFile, stored); err != nil {
+		t.Fatal(err)
+	}
+	if code := call(t, c, "PUT", srv.URL+"/api/cron", csrf, `{"disk":{"enabled":true,"every_minutes":5}}`, nil); code != 200 {
+		t.Fatalf("save %d", code)
+	}
+	again, _ := cron.Load(cronFile)
+	if !again.KeitaroSync.Enabled || again.KeitaroSync.EveryMinutes != 20 {
+		t.Fatalf("keitaro_sync not preserved: %+v", again.KeitaroSync)
+	}
+
+	if code := call(t, c, "POST", srv.URL+"/api/cron/run", csrf, map[string]string{"job": cron.JobKeitaroSync}, nil); code != 202 {
+		t.Fatalf("run now %d", code)
+	}
+}
+
+func TestCronSaveKeitaroSyncNullPreserves(t *testing.T) {
+	dir := t.TempDir()
+	cronFile := filepath.Join(dir, "cron.json")
+	if err := cron.Save(cronFile, cron.Default()); err != nil {
+		t.Fatal(err)
+	}
+	stored, _ := cron.Load(cronFile)
+	stored.KeitaroSync.Enabled = true
+	stored.KeitaroSync.EveryMinutes = 25
+	if err := cron.Save(cronFile, stored); err != nil {
+		t.Fatal(err)
+	}
+	hash, _ := security.HashPassword("p@ss")
+	s, err := New(Config{
+		AdminUser: "admin", PasswordHash: hash, Sessions: security.NewMemoryStore(),
+		Limiter: allowAll{}, SessionTTL: time.Hour, CronFile: cronFile,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+	body := `{"disk":{"enabled":true,"every_minutes":5},"keitaro_sync":null}`
+	if code := call(t, c, "PUT", srv.URL+"/api/cron", csrf, body, nil); code != 200 {
+		t.Fatalf("save %d", code)
+	}
+	again, err := cron.Load(cronFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.KeitaroSync.Enabled || again.KeitaroSync.EveryMinutes != 25 {
+		t.Fatalf("keitaro_sync not preserved: %+v", again.KeitaroSync)
+	}
+}
+
+func TestCronSaveCheckIntervals(t *testing.T) {
+	base, c, csrf, dir := toolsServer(t)
+	cronFile := filepath.Join(dir, "cron.json")
+	if err := cron.Save(cronFile, cron.Default()); err != nil {
+		t.Fatal(err)
+	}
+	cfg := cron.Default()
+	cfg.KeitaroSync.Enabled = true
+	cfg.KeitaroSync.EveryMinutes = 1
+	var e struct{ Error string }
+	if code := call(t, c, "PUT", base+"/api/cron", csrf, cfg, &e); code != 400 || !strings.Contains(e.Error, "keitaro_sync") {
+		t.Fatalf("save %d %q", code, e.Error)
 	}
 }
 

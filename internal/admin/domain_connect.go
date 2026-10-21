@@ -43,7 +43,7 @@ type cfConnectResult struct {
 // cfConnectView is the body of a successful POST /api/domains/{id}/cloudflare: the domain
 // row with the connection result next to it.
 type cfConnectView struct {
-	config.Domain
+	domainRow
 	cfConnectResult
 }
 
@@ -97,7 +97,7 @@ func (s *Server) connectCloudflare(ctx context.Context, id string) (config.Domai
 	if err != nil {
 		return config.Domain{}, cfConnectResult{}, err
 	}
-	if err := client.upsertApexA(ctx, zone.ID, host, s.cfg.PublicIP); err != nil {
+	if err := client.upsertProxiedA(ctx, zone.ID, host, s.cfg.PublicIP); err != nil {
 		return config.Domain{}, cfConnectResult{}, err
 	}
 	for _, st := range cfZoneSettings {
@@ -125,6 +125,7 @@ func (s *Server) connectCloudflare(ctx context.Context, id string) (config.Domai
 	if err != nil {
 		return config.Domain{}, cfConnectResult{}, err
 	}
+	s.maybeScheduleAdminDNS(updated)
 	return updated, res, nil
 }
 
@@ -153,7 +154,11 @@ func applyZone(row *config.Domain, zone *cfZone, ns []string) {
 	if len(ns) == 0 {
 		ns = zone.NameServers
 	}
+	prevZone := row.CfZoneID
 	row.CfZoneID = zone.ID
+	if prevZone != "" && prevZone != row.CfZoneID {
+		row.AdminDNS = ""
+	}
 	row.CfNS = slices.Clone(ns)
 	if zone.Status == cfStatusActive {
 		row.CfStatus = cfStatusActive
@@ -254,7 +259,12 @@ func (s *Server) handleDomainCloudflare(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	s.logInfo("cloudflare connected", "domain", row.Host, "status", row.CfStatus)
-	writeJSON(w, http.StatusOK, cfConnectView{Domain: row, cfConnectResult: res})
+	view, err := s.domainView(r.Context(), row)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "read error")
+		return
+	}
+	writeJSON(w, http.StatusOK, cfConnectView{domainRow: view, cfConnectResult: res})
 }
 
 // domainRef returns the access reference of a stored domain.

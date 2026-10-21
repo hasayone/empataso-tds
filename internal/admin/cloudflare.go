@@ -39,11 +39,14 @@ const (
 	cfStatusActive = "active"
 )
 
-// errCFApexCNAME is the refusal to change an apex that is a CNAME record.
-var errCFApexCNAME = errors.New("apex has a CNAME record, not changing it")
+// errCFRecordCNAME is the refusal to change a name that is a CNAME record.
+var errCFRecordCNAME = errors.New("name has a CNAME record, not changing it")
 
-// errCFApexMany is the refusal to choose between several address records of the apex.
-var errCFApexMany = errors.New("apex has more than one address record, not changing them")
+// errCFRecordMany is the refusal to choose between several address records of the name.
+var errCFRecordMany = errors.New("name has more than one address record, not changing them")
+
+// errCFRecordForeign is the refusal to repoint an admin.* address record at another server.
+var errCFRecordForeign = errors.New("admin record points to another server")
 
 // cloudflareHTTP is the HTTP client for every Cloudflare call. It never follows a redirect.
 var cloudflareHTTP = &http.Client{
@@ -337,16 +340,21 @@ func addressRecordType(ip string) string {
 	return "A"
 }
 
-// upsertApexA makes the host resolve to ip through a proxied address record.
-// zoneID is the zone, host the apex name and ip an IPv4 address, or IPv6 for an AAAA record.
-// A CNAME on the host is refused with errCFApexCNAME and more than one record of the address
-// type with errCFApexMany; neither is changed. A record with the same address that is already
+// cfAdminRecordName reports whether name is an admin.<zone> DNS record name.
+func cfAdminRecordName(name string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(name)), "admin.")
+}
+
+// upsertProxiedA makes name resolve to ip through a proxied address record.
+// zoneID is the zone, name the record name and ip an IPv4 address, or IPv6 for an AAAA record.
+// A CNAME on the name is refused with errCFRecordCNAME and more than one record of the address
+// type with errCFRecordMany; neither is changed. A record with the same address that is already
 // proxied is left alone. An existing record is changed to ip with proxying on and the automatic
 // TTL, and a missing one is created. An error is a refusal or a failed call.
-func (c *cfClient) upsertApexA(ctx context.Context, zoneID, host, ip string) error {
+func (c *cfClient) upsertProxiedA(ctx context.Context, zoneID, name, ip string) error {
 	kind := addressRecordType(ip)
 	base := "/zones/" + url.PathEscape(zoneID) + "/dns_records"
-	env, err := c.do(ctx, http.MethodGet, base, url.Values{"name": {host}, "per_page": {"100"}}, nil)
+	env, err := c.do(ctx, http.MethodGet, base, url.Values{"name": {name}, "per_page": {"100"}}, nil)
 	if err != nil {
 		return err
 	}
@@ -356,17 +364,17 @@ func (c *cfClient) upsertApexA(ctx context.Context, zoneID, host, ip string) err
 	}
 	var same []cfRecord
 	for _, r := range records {
-		if !strings.EqualFold(r.Name, host) {
+		if !strings.EqualFold(r.Name, name) {
 			continue
 		}
 		switch strings.ToUpper(r.Type) {
 		case "CNAME":
-			return errCFApexCNAME
+			return errCFRecordCNAME
 		case kind:
 			same = append(same, r)
 		}
 	}
-	want := cfRecordWrite{Type: kind, Name: host, Content: ip, Proxied: true, TTL: 1}
+	want := cfRecordWrite{Type: kind, Name: name, Content: ip, Proxied: true, TTL: 1}
 	switch len(same) {
 	case 0:
 		_, err = c.do(ctx, http.MethodPost, base, nil, want)
@@ -374,9 +382,12 @@ func (c *cfClient) upsertApexA(ctx context.Context, zoneID, host, ip string) err
 		if same[0].Proxied && net.ParseIP(same[0].Content).Equal(net.ParseIP(ip)) {
 			return nil
 		}
+		if cfAdminRecordName(name) && !net.ParseIP(same[0].Content).Equal(net.ParseIP(ip)) {
+			return errCFRecordForeign
+		}
 		_, err = c.do(ctx, http.MethodPatch, base+"/"+url.PathEscape(same[0].ID), nil, want)
 	default:
-		return errCFApexMany
+		return errCFRecordMany
 	}
 	return err
 }

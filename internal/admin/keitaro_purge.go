@@ -40,6 +40,7 @@ func (s *Server) handleKeitaroPurge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.ktJob.endPurge()
+	removeKeitaroSyncFile(s.cfg.KeitaroSyncFile)
 	creds := s.keitaroCreds()
 	manifest, err := s.loadManifest()
 	if err != nil {
@@ -50,7 +51,8 @@ func (s *Server) handleKeitaroPurge(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"removed": keitaroRemoved{}})
 		return
 	}
-	ctx := r.Context()
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), keitaroSyncMaxTimeout)
+	defer cancel()
 	removed, err := s.purgeStores(ctx, manifest)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "save error")

@@ -45,9 +45,15 @@ func (c crudCatalog[T]) insert(ctx context.Context, item T, uid string) (T, int,
 	if c.hooks != nil && c.hooks.setOwner != nil {
 		c.hooks.setOwner(&item, uid)
 	}
+	var unlockMu func()
 	if c.hooks != nil && c.hooks.mu != nil {
 		c.hooks.mu.Lock()
-		defer c.hooks.mu.Unlock()
+		unlockMu = c.hooks.mu.Unlock
+		defer func() {
+			if unlockMu != nil {
+				unlockMu()
+			}
+		}()
 	}
 	list, err := c.store.List(ctx)
 	if err != nil {
@@ -69,6 +75,13 @@ func (c crudCatalog[T]) insert(ctx context.Context, item T, uid string) (T, int,
 	}
 	if err := c.store.Save(ctx, list); err != nil {
 		return zero, http.StatusInternalServerError, "save error"
+	}
+	if unlockMu != nil {
+		unlockMu()
+		unlockMu = nil
+	}
+	if c.hooks != nil && c.hooks.afterWrite != nil {
+		c.hooks.afterWrite(item, nil)
 	}
 	return item, http.StatusCreated, ""
 }

@@ -11,6 +11,7 @@ EDGE_SERVER_ENV="${KUZTDS_SERVER_ENV:-/etc/kuztds/server.env}"
 EDGE_NGINX_SRC="${EDGE_TDS_DIR}/deploy/nginx"
 EDGE_CF_IPS="${EDGE_NGINX_SRC}/cloudflare-ips.txt"
 EDGE_TEMPLATE_ADMIN="${EDGE_NGINX_SRC}/kuztds.conf"
+EDGE_TEMPLATE_ADMIN_HOST="${EDGE_NGINX_SRC}/kuztds-admin-host.conf"
 EDGE_TEMPLATE_ENGINE="${EDGE_NGINX_SRC}/kuztds-engine.conf"
 EDGE_NGINX_KUZTDS_DIR=/etc/nginx/kuztds
 EDGE_CONF_D=/etc/nginx/conf.d
@@ -72,6 +73,22 @@ trusted_proxies_from_docker() {
 	printf '%s/32' "$gw"
 }
 
+# CIDR for KUZTDS_*_TRUSTED_PROXIES: file values, then docker gateway /32.
+resolve_trusted_proxies_cidr() {
+	local file=$1 tp admin_tp
+	tp=$(env_value "$file" KUZTDS_TRUSTED_PROXIES)
+	if [[ -n "$tp" ]]; then
+		printf '%s' "$tp"
+		return 0
+	fi
+	admin_tp=$(env_value "$file" KUZTDS_ADMIN_TRUSTED_PROXIES)
+	if [[ -n "$admin_tp" ]]; then
+		printf '%s' "$admin_tp"
+		return 0
+	fi
+	trusted_proxies_from_docker
+}
+
 # Append KEY=value to file if key is missing; preserve file mode.
 append_env_if_missing() {
 	local file=$1 key=$2 val=$3 mode line
@@ -85,6 +102,26 @@ append_env_if_missing() {
 	mode=$(stat -c '%a' "$file" 2>/dev/null || printf '644')
 	line="${key}=${val}"
 	printf '%s\n' "$line" >>"$file"
+	chmod "$mode" "$file"
+}
+
+# Write KEY=value when key is missing or value empty; leave non-empty values unchanged.
+ensure_env_key_nonempty() {
+	local file=$1 key=$2 val=$3 mode current
+	if [[ ! -f "$file" ]]; then
+		edge_msg "файл ${file} не найден" >&2
+		return 1
+	fi
+	current=$(env_value "$file" "$key")
+	if [[ -n "$current" ]]; then
+		return 0
+	fi
+	mode=$(stat -c '%a' "$file" 2>/dev/null || printf '644')
+	if grep -qE "^${key}=" "$file" 2>/dev/null; then
+		sed -i "s|^${key}=.*|${key}=${val}|" "$file"
+	else
+		printf '%s\n' "${key}=${val}" >>"$file"
+	fi
 	chmod "$mode" "$file"
 }
 
@@ -116,14 +153,13 @@ ensure_server_env_keys() {
 		return 1
 	fi
 
+	tp=$(resolve_trusted_proxies_cidr "$EDGE_SERVER_ENV") || {
+		edge_msg "не удалось получить gateway deploy_default для KUZTDS_TRUSTED_PROXIES" >&2
+		return 1
+	}
+	ensure_env_key_nonempty "$EDGE_SERVER_ENV" KUZTDS_TRUSTED_PROXIES "$tp"
 	tp=$(env_value "$EDGE_SERVER_ENV" KUZTDS_TRUSTED_PROXIES)
-	if [[ -z "$tp" ]]; then
-		tp=$(trusted_proxies_from_docker) || {
-			edge_msg "не удалось получить gateway deploy_default для KUZTDS_TRUSTED_PROXIES" >&2
-			return 1
-		}
-		append_env_if_missing "$EDGE_SERVER_ENV" KUZTDS_TRUSTED_PROXIES "$tp"
-	fi
+	ensure_env_key_nonempty "$EDGE_SERVER_ENV" KUZTDS_ADMIN_TRUSTED_PROXIES "$tp"
 }
 
 # Parse host:port from KUZTDS_ENGINE_PUBLISH (e.g. 127.0.0.1:18080:8080).
@@ -163,6 +199,7 @@ render_cloudflare_snippets() {
 render_nginx_configs() {
 	local dest=$1 public_ip=$2 upstream=$3
 	sed "s/__PUBLIC_IP__/${public_ip}/g" "$EDGE_TEMPLATE_ADMIN" >"${dest}/kuztds.conf"
+	cp "$EDGE_TEMPLATE_ADMIN_HOST" "${dest}/kuztds-admin-host.conf"
 	sed "s/__ENGINE_UPSTREAM__/${upstream}/g" "$EDGE_TEMPLATE_ENGINE" >"${dest}/kuztds-engine.conf"
 }
 
@@ -206,6 +243,7 @@ install_rendered() {
 	install -m 0644 "${src}/cloudflare-realip.conf" "${EDGE_NGINX_KUZTDS_DIR}/cloudflare-realip.conf"
 	install -m 0644 "${src}/cloudflare-geo.conf" "${EDGE_NGINX_KUZTDS_DIR}/cloudflare-geo.conf"
 	install -m 0644 "${src}/kuztds.conf" "${EDGE_CONF_D}/kuztds.conf"
+	install -m 0644 "${src}/kuztds-admin-host.conf" "${EDGE_CONF_D}/kuztds-admin-host.conf"
 	install -m 0644 "${src}/kuztds-engine.conf" "${EDGE_CONF_D}/kuztds-engine.conf"
 }
 
@@ -241,7 +279,7 @@ restore_from_backup() {
 
 # --check: render to temp and dump to stdout.
 run_check() {
-	local tmp public_ip tp
+	local tmp public_ip tp admin_tp
 	tmp=$(mktemp -d)
 	if ! ensure_server_env_keys "${1:-}"; then
 		rm -rf "$tmp"
@@ -250,8 +288,9 @@ run_check() {
 	render_all "$tmp"
 	public_ip=$(env_value "$EDGE_SERVER_ENV" KUZTDS_PUBLIC_IP)
 	tp=$(env_value "$EDGE_SERVER_ENV" KUZTDS_TRUSTED_PROXIES)
-	edge_msg "check mode: public_ip=${public_ip} trusted_proxies=${tp}"
-	for f in cloudflare-realip.conf cloudflare-geo.conf kuztds.conf kuztds-engine.conf; do
+	admin_tp=$(env_value "$EDGE_SERVER_ENV" KUZTDS_ADMIN_TRUSTED_PROXIES)
+	edge_msg "check mode: public_ip=${public_ip} trusted_proxies=${tp} admin_trusted_proxies=${admin_tp}"
+	for f in cloudflare-realip.conf cloudflare-geo.conf kuztds.conf kuztds-admin-host.conf kuztds-engine.conf; do
 		printf '===== %s =====\n' "$f"
 		cat "${tmp}/${f}"
 	done
@@ -260,12 +299,12 @@ run_check() {
 
 # Full install with nginx -t and reload.
 run_apply() {
-	local tmp backup_dir public_ip tp
+	local tmp backup_dir public_ip tp admin_tp
 	if [[ $(id -u) -ne 0 ]]; then
 		edge_msg "нужны права root" >&2
 		return 1
 	fi
-	for f in "$EDGE_CF_IPS" "$EDGE_TEMPLATE_ADMIN" "$EDGE_TEMPLATE_ENGINE"; do
+	for f in "$EDGE_CF_IPS" "$EDGE_TEMPLATE_ADMIN" "$EDGE_TEMPLATE_ADMIN_HOST" "$EDGE_TEMPLATE_ENGINE"; do
 		if [[ ! -f "$f" ]]; then
 			edge_msg "не найден шаблон: ${f}" >&2
 			return 1
@@ -291,7 +330,8 @@ run_apply() {
 	rm -rf "$tmp"
 	public_ip=$(env_value "$EDGE_SERVER_ENV" KUZTDS_PUBLIC_IP)
 	tp=$(env_value "$EDGE_SERVER_ENV" KUZTDS_TRUSTED_PROXIES)
-	edge_msg "ok: public_ip=${public_ip} trusted_proxies=${tp} backup=${backup_dir}"
+	admin_tp=$(env_value "$EDGE_SERVER_ENV" KUZTDS_ADMIN_TRUSTED_PROXIES)
+	edge_msg "ok: public_ip=${public_ip} trusted_proxies=${tp} admin_trusted_proxies=${admin_tp} backup=${backup_dir}"
 }
 
 main() {

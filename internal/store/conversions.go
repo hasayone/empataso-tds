@@ -72,7 +72,7 @@ type clickSnap struct {
 	subs                                        [12]string
 	site, adCampaign, creative, externalID, xrw string
 	deviceModel                                 string
-	originGid, originGname                       string
+	originGid, originGname                      string
 }
 
 // readClick loads the newest event with cid.
@@ -147,7 +147,8 @@ func clickExtPtr(s *clickSnap, col string) any {
 
 // prevStatus returns the latest conversion status for cid.
 // ctx bounds the query. No row returns "" and a nil error.
-// Any other scan error is returned.
+// Any other scan error is returned. This point lookup omits FINAL so the
+// newest physical row is seen before ReplacingMergeTree merges parts.
 func (c *CH) prevStatus(ctx context.Context, cid string) (string, error) {
 	var status string
 	err := c.conn.QueryRow(ctx, `SELECT status FROM conversions WHERE cid = ? ORDER BY ts DESC LIMIT 1`, cid).Scan(&status)
@@ -257,31 +258,31 @@ type PostbackRow struct {
 	Network string    `json:"network_id,omitempty"`
 	Subs    []string  `json:"subs,omitempty"`
 
-	CampaignID     string    `json:"campaign_id,omitempty"`
-	ClickTS        time.Time `json:"click_ts,omitzero"`
-	OriginalStatus string    `json:"original_status,omitempty"`
-	PrevStatus     string    `json:"prev_status,omitempty"`
-	TID            string    `json:"tid,omitempty"`
-	IP             string    `json:"ip,omitempty"`
-	Region         string    `json:"region,omitempty"`
-	Lang           string    `json:"lang,omitempty"`
-	OS             string    `json:"os,omitempty"`
-	OSVersion      string    `json:"os_version,omitempty"`
-	Browser        string    `json:"browser,omitempty"`
-	BrowserVer     string    `json:"browser_ver,omitempty"`
-	Brand          string    `json:"brand,omitempty"`
-	UserAgent      string    `json:"useragent,omitempty"`
-	Referer        string    `json:"referer,omitempty"`
-	SE             string    `json:"se,omitempty"`
-	Keyword        string    `json:"keyword,omitempty"`
-	ASN            uint32    `json:"asn,omitempty"`
-	Org            string    `json:"org,omitempty"`
-	Site           string    `json:"site,omitempty"`
-	AdCampaignID   string    `json:"ad_campaign_id,omitempty"`
-	CreativeID     string    `json:"creative_id,omitempty"`
-	ExternalID     string    `json:"external_id,omitempty"`
-	XRW            string    `json:"xrw,omitempty"`
-	DeviceModel      string `json:"device_model,omitempty"`
-	OriginCampaign   string `json:"origin_campaign,omitempty"`
-	OriginCampaignID string `json:"origin_campaign_id,omitempty"`
+	CampaignID       string    `json:"campaign_id,omitempty"`
+	ClickTS          time.Time `json:"click_ts,omitzero"`
+	OriginalStatus   string    `json:"original_status,omitempty"`
+	PrevStatus       string    `json:"prev_status,omitempty"`
+	TID              string    `json:"tid,omitempty"`
+	IP               string    `json:"ip,omitempty"`
+	Region           string    `json:"region,omitempty"`
+	Lang             string    `json:"lang,omitempty"`
+	OS               string    `json:"os,omitempty"`
+	OSVersion        string    `json:"os_version,omitempty"`
+	Browser          string    `json:"browser,omitempty"`
+	BrowserVer       string    `json:"browser_ver,omitempty"`
+	Brand            string    `json:"brand,omitempty"`
+	UserAgent        string    `json:"useragent,omitempty"`
+	Referer          string    `json:"referer,omitempty"`
+	SE               string    `json:"se,omitempty"`
+	Keyword          string    `json:"keyword,omitempty"`
+	ASN              uint32    `json:"asn,omitempty"`
+	Org              string    `json:"org,omitempty"`
+	Site             string    `json:"site,omitempty"`
+	AdCampaignID     string    `json:"ad_campaign_id,omitempty"`
+	CreativeID       string    `json:"creative_id,omitempty"`
+	ExternalID       string    `json:"external_id,omitempty"`
+	XRW              string    `json:"xrw,omitempty"`
+	DeviceModel      string    `json:"device_model,omitempty"`
+	OriginCampaign   string    `json:"origin_campaign,omitempty"`
+	OriginCampaignID string    `json:"origin_campaign_id,omitempty"`
 }

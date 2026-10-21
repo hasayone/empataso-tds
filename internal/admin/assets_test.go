@@ -21,8 +21,8 @@ func TestServeAssets(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "javascript") {
 		t.Errorf("Content-Type = %q, expected javascript", ct)
 	}
-	if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "max-age") {
-		t.Errorf("Cache-Control = %q, expected max-age", cc)
+	if cc := resp.Header.Get("Cache-Control"); cc != "private, max-age=86400" {
+		t.Errorf("Cache-Control = %q, expected private, max-age=86400", cc)
 	}
 
 	resp404, err := http.Get(srv.URL + "/assets/nope.js")
@@ -59,8 +59,8 @@ func TestServeAssetsFlags(t *testing.T) {
 	if ct := resp.Header.Get("Content-Type"); !strings.Contains(ct, "svg") {
 		t.Errorf("Content-Type = %q, expected svg", ct)
 	}
-	if cc := resp.Header.Get("Cache-Control"); !strings.Contains(cc, "max-age") {
-		t.Errorf("Cache-Control = %q, expected max-age", cc)
+	if cc := resp.Header.Get("Cache-Control"); cc != "private, max-age=86400" {
+		t.Errorf("Cache-Control = %q, expected private, max-age=86400", cc)
 	}
 
 	resp404, err := http.Get(srv.URL + "/assets/flags/zz.svg")

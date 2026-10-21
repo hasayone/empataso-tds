@@ -15,6 +15,37 @@ import (
 	"github.com/kuztds/bridge/ktimport"
 )
 
+// logSkipTally counts log rows skipped for empty sub_id or zero time.
+type logSkipTally struct {
+	clicksEmpty int
+	clicksZero  int
+	convZero    int
+}
+
+// total returns the sum of all skip counters, or 0 when t is nil.
+func (t *logSkipTally) total() int {
+	if t == nil {
+		return 0
+	}
+	return t.clicksEmpty + t.clicksZero + t.convZero
+}
+
+// noteLogSkipLosses appends ktimport.Loss rows for non-zero skip tallies on manual import.
+func noteLogSkipLosses(losses *[]ktimport.Loss, t *logSkipTally) {
+	if t == nil {
+		return
+	}
+	if t.clicksEmpty > 0 {
+		*losses = append(*losses, ktimport.Loss{Kind: "skipped", Ref: "clicks", Detail: fmt.Sprintf("%d rows, empty sub_id", t.clicksEmpty)})
+	}
+	if t.clicksZero > 0 {
+		*losses = append(*losses, ktimport.Loss{Kind: "skipped", Ref: "clicks", Detail: fmt.Sprintf("%d rows, zero time", t.clicksZero)})
+	}
+	if t.convZero > 0 {
+		*losses = append(*losses, ktimport.Loss{Kind: "skipped", Ref: "conversions", Detail: fmt.Sprintf("%d rows, zero time", t.convZero)})
+	}
+}
+
 const (
 	keitaroBatch           = 1000
 	keitaroTimeLayout      = "2006-01-02 15:04:05"
@@ -129,10 +160,16 @@ type logSpan struct {
 // li carries the tracker range, the host, the campaign aliases and the groups snapshot.
 // The name index is built once from that snapshot and shared by both logs.
 // counts and losses are updated. It returns a tracker or warehouse error.
-func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImport, counts map[string]int, losses *[]ktimport.Loss) error {
+func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImport, counts map[string]int, losses *[]ktimport.Loss, opts logImportOpts) (logFetchStats, error) {
+	var stats logFetchStats
 	tally := &unknownCampaignTally{}
+	skip := opts.skip
+	if skip == nil {
+		skip = &logSkipTally{}
+	}
 	place := logPlace{aliases: li.aliases, names: groupNames(li.groups), unknown: tally}
 	defer noteUnknownCampaignLoss(losses, tally)
+	defer noteLogSkipLosses(losses, skip)
 	client := s.keitaroClient(li.creds)
 	var clickIdx keitaroClickFillIndex
 	if req.Clicks {
@@ -141,12 +178,22 @@ func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImp
 			*losses = append(*losses, ktimport.Loss{Kind: "skipped", Ref: "clicks", Detail: "clickhouse unavailable"})
 		} else {
 			span := logSpan{from: li.from, to: li.to, host: li.host, place: place}
-			n, idx, err := s.importClicks(ctx, client, span)
+			read, inserted, dups, maxTS, idx, err := s.importClicks(ctx, client, span, opts.syncMode, skip)
 			if err != nil {
-				return err
+				return stats, err
 			}
-			counts["clicks"] = n
-			clickIdx = idx
+			if opts.syncMode {
+				counts["clicks"] = inserted
+			} else {
+				counts["clicks"] = read
+				if dups > 0 {
+					counts["clicks_duplicates"] = dups
+				}
+			}
+			stats.maxClick = maxTS
+			if !opts.syncMode {
+				clickIdx = idx
+			}
 			noteExtendedColumns(losses, client, "clicks")
 		}
 	}
@@ -156,15 +203,16 @@ func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImp
 			*losses = append(*losses, ktimport.Loss{Kind: "skipped", Ref: "conversions", Detail: "clickhouse unavailable"})
 		} else {
 			span := logSpan{from: li.from, to: li.to, host: li.host, place: place}
-			n, err := s.importConversions(ctx, client, span, clickIdx)
+			n, maxTS, err := s.importConversions(ctx, client, span, clickIdx, opts.syncMode, skip)
 			if err != nil {
-				return err
+				return stats, err
 			}
 			counts["conversions"] = n
+			stats.maxConv = maxTS
 			noteExtendedColumns(losses, client, "conversions")
 		}
 	}
-	return nil
+	return stats, nil
 }
 
 const maxLogCampaignIDsInLoss = 20
@@ -236,8 +284,9 @@ func (s *Server) listKeitaroGroups(ctx context.Context) ([]config.Group, error) 
 // clickIdx maps sub_id to click metadata from an earlier importClicks in the same run;
 // it may be nil when conversions import alone.
 // It returns how many rows were read. An error comes from the tracker or the warehouse.
-func (s *Server) importConversions(ctx context.Context, client *ktimport.Client, span logSpan, clickIdx keitaroClickFillIndex) (int, error) {
+func (s *Server) importConversions(ctx context.Context, client *ktimport.Client, span logSpan, clickIdx keitaroClickFillIndex, syncMode bool, skip *logSkipTally) (int, time.Time, error) {
 	var batch []store.ConversionInsert
+	var maxTS time.Time
 	n, err := client.FetchConversions(ctx, span.from, span.to, func(row ktimport.ConversionRow) error {
 		var snap *store.ClickFill
 		if clickIdx != nil {
@@ -246,7 +295,17 @@ func (s *Server) importConversions(ctx context.Context, client *ktimport.Client,
 				snap = &cp
 			}
 		}
-		batch = append(batch, conversionInsert(row, span.host, span.place, snap))
+		ins := conversionInsert(row, span.host, span.place, snap)
+		if !ins.TS.IsZero() && ins.TS.After(maxTS) {
+			maxTS = ins.TS
+		}
+		if syncMode && ins.TS.IsZero() {
+			if skip != nil {
+				skip.convZero++
+			}
+			return nil
+		}
+		batch = append(batch, ins)
 		if len(batch) < keitaroBatch {
 			return nil
 		}
@@ -255,48 +314,127 @@ func (s *Server) importConversions(ctx context.Context, client *ktimport.Client,
 		return s.cfg.Warehouse.InsertConversions(ctx, cp)
 	})
 	if err != nil {
-		return n, err
+		return n, maxTS, err
 	}
 	if len(batch) == 0 {
-		return n, nil
+		return n, maxTS, nil
 	}
 	cp := append([]store.ConversionInsert(nil), batch...)
 	if err := s.cfg.Warehouse.InsertConversions(ctx, cp); err != nil {
-		return n, err
+		return n, maxTS, err
 	}
-	return n, nil
+	return n, maxTS, nil
 }
 
 // importClicks reads the click log and writes batches of 1000.
-// client is the tracker reader, so a column fallback stays visible to the caller.
-// span carries the tracker range, domain host and group mapping for each row.
-// It returns how many rows were read, the sub_id index for conversion backfill,
-// and an error from the tracker or the warehouse.
-func (s *Server) importClicks(ctx context.Context, client *ktimport.Client, span logSpan) (int, keitaroClickFillIndex, error) {
-	idx := make(keitaroClickFillIndex)
+// It returns rows read, rows inserted, duplicate skips, the latest timestamp,
+// the sub_id index for conversion backfill, and an error from the tracker or warehouse.
+func (s *Server) importClicks(ctx context.Context, client *ktimport.Client, span logSpan, syncMode bool, skip *logSkipTally) (read, inserted, duplicates int, maxTS time.Time, idx keitaroClickFillIndex, err error) {
+	idx = make(keitaroClickFillIndex)
+	overflowSeen := map[string]struct{}{}
 	var batch []logbuf.Event
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		from, to := eventBatchWindow(batch)
+		cids := eventBatchCIDs(batch)
+		existing, err := s.cfg.Warehouse.ExistingCIDs(ctx, span.host, from, to, cids)
+		if err != nil {
+			return err
+		}
+		out := make([]logbuf.Event, 0, len(batch))
+		for _, ev := range batch {
+			if ev.CID == "" {
+				continue
+			}
+			if _, ok := existing[ev.CID]; ok {
+				duplicates++
+				continue
+			}
+			out = append(out, ev)
+		}
+		batch = batch[:0]
+		if len(out) == 0 {
+			return nil
+		}
+		inserted += len(out)
+		return s.cfg.Warehouse.InsertEvents(ctx, out)
+	}
 	n, err := client.FetchClicks(ctx, span.from, span.to, func(row ktimport.ClickRow) error {
+		if strings.TrimSpace(row.SubID) == "" {
+			if skip != nil {
+				skip.clicksEmpty++
+			}
+			return nil
+		}
 		ev := clickEvent(row, span.host, span.place)
-		idx.put(row.SubID, clickFillFromEvent(ev))
+		if ev.Ts.IsZero() {
+			if skip != nil {
+				skip.clicksZero++
+			}
+			return nil
+		}
+		if ev.Ts.After(maxTS) {
+			maxTS = ev.Ts
+		}
+		if !syncMode {
+			if _, ok := idx[row.SubID]; ok {
+				duplicates++
+				return nil
+			}
+			if _, ok := overflowSeen[row.SubID]; ok {
+				duplicates++
+				return nil
+			}
+			before := len(idx)
+			idx.put(row.SubID, clickFillFromEvent(ev))
+			if len(idx) == before && before >= maxKeitaroClickFillIdx {
+				overflowSeen[row.SubID] = struct{}{}
+			}
+		} else if _, ok := overflowSeen[row.SubID]; ok {
+			duplicates++
+			return nil
+		} else {
+			overflowSeen[row.SubID] = struct{}{}
+		}
 		batch = append(batch, ev)
 		if len(batch) < keitaroBatch {
 			return nil
 		}
-		cp := append([]logbuf.Event(nil), batch...)
-		batch = batch[:0]
-		return s.cfg.Warehouse.InsertEvents(ctx, cp)
+		return flush()
 	})
 	if err != nil {
-		return n, idx, err
+		return n, inserted, duplicates, maxTS, idx, err
 	}
-	if len(batch) == 0 {
-		return n, idx, nil
+	if err := flush(); err != nil {
+		return n, inserted, duplicates, maxTS, idx, err
 	}
-	cp := append([]logbuf.Event(nil), batch...)
-	if err := s.cfg.Warehouse.InsertEvents(ctx, cp); err != nil {
-		return n, idx, err
+	return n, inserted, duplicates, maxTS, idx, nil
+}
+
+// eventBatchWindow returns the earliest and latest click times in batch.
+func eventBatchWindow(batch []logbuf.Event) (from, to time.Time) {
+	for i, ev := range batch {
+		if i == 0 || ev.Ts.Before(from) {
+			from = ev.Ts
+		}
+		if i == 0 || ev.Ts.After(to) {
+			to = ev.Ts
+		}
 	}
-	return n, idx, nil
+	return from, to
+}
+
+// eventBatchCIDs collects non-empty click ids from batch.
+func eventBatchCIDs(batch []logbuf.Event) []string {
+	out := make([]string, 0, len(batch))
+	for _, ev := range batch {
+		if ev.CID != "" {
+			out = append(out, ev.CID)
+		}
+	}
+	return out
 }
 
 // clickFillFromEvent maps one imported click event onto a ClickFill snapshot.
@@ -347,45 +485,45 @@ func conversionInsert(row ktimport.ConversionRow, host string, place logPlace, c
 		original = row.Status
 	}
 	out := store.ConversionInsert{
-		TS:             ts,
-		Domain:         host,
-		Device:         keitaroDevice(row.DeviceType),
-		Operator:       row.Operator,
-		Country:        row.CountryCode,
-		City:           row.City,
-		Profit:         float64(row.Revenue),
-		GroupName:      groupName,
-		StreamName:     row.Stream,
-		CID:            row.SubID,
-		Status:         strings.ToLower(strings.TrimSpace(row.Status)),
-		OfferID:        catalogNum(int(row.OfferID)),
-		LandingID:      catalogNum(int(row.LandingID)),
-		SourceID:       catalogNum(int(row.SourceID)),
-		NetworkID:      catalogNum(int(row.NetworkID)),
-		Subs:           row.Subs,
+		TS:              ts,
+		Domain:          host,
+		Device:          keitaroDevice(row.DeviceType),
+		Operator:        row.Operator,
+		Country:         row.CountryCode,
+		City:            row.City,
+		Profit:          float64(row.Revenue),
+		GroupName:       groupName,
+		StreamName:      row.Stream,
+		CID:             row.SubID,
+		Status:          strings.ToLower(strings.TrimSpace(row.Status)),
+		OfferID:         catalogNum(int(row.OfferID)),
+		LandingID:       catalogNum(int(row.LandingID)),
+		SourceID:        catalogNum(int(row.SourceID)),
+		NetworkID:       catalogNum(int(row.NetworkID)),
+		Subs:            row.Subs,
 		GroupID:         groupID,
 		OriginGroupID:   groupID,
 		OriginGroupName: groupName,
 		ClickTS:         parseKeitaroTime(row.ClickDatetime),
-		OriginalStatus: original,
-		PrevStatus:     strings.ToLower(strings.TrimSpace(row.PreviousStatus)),
-		TID:            string(row.TID),
-		IP:             row.IP,
-		Region:         row.Region,
-		Lang:           row.Language,
-		OS:             row.OS,
-		OSVersion:      row.OSVersion,
-		Browser:        row.Browser,
-		BrowserV:       row.BrowserVersion,
-		DeviceModel:    row.DeviceModel,
-		UserAgent:      row.UserAgent,
-		Referer:        row.Referrer,
-		SE:             row.SearchEngine,
-		Keyword:        row.Keyword,
-		Org:            row.ISP,
-		AdCampaignID:   string(row.AdCampaignID),
-		CreativeID:     string(row.CreativeID),
-		ExternalID:     string(row.ExternalID),
+		OriginalStatus:  original,
+		PrevStatus:      strings.ToLower(strings.TrimSpace(row.PreviousStatus)),
+		TID:             string(row.TID),
+		IP:              row.IP,
+		Region:          row.Region,
+		Lang:            row.Language,
+		OS:              row.OS,
+		OSVersion:       row.OSVersion,
+		Browser:         row.Browser,
+		BrowserV:        row.BrowserVersion,
+		DeviceModel:     row.DeviceModel,
+		UserAgent:       row.UserAgent,
+		Referer:         row.Referrer,
+		SE:              row.SearchEngine,
+		Keyword:         row.Keyword,
+		Org:             row.ISP,
+		AdCampaignID:    string(row.AdCampaignID),
+		CreativeID:      string(row.CreativeID),
+		ExternalID:      string(row.ExternalID),
 	}
 	store.FillConversionInsert(&out, clickSnap)
 	return out
@@ -409,10 +547,10 @@ func clickEvent(row ktimport.ClickRow, host string, place logPlace) logbuf.Event
 	}
 	groupID, groupName := keitaroGroup(row.Campaign, int(row.CampaignID), place)
 	return logbuf.Event{
-		Ts:           parseKeitaroTime(row.Datetime),
+		Ts:      parseKeitaroTime(row.Datetime),
 		GroupID: groupID, GroupName: groupName,
 		OriginID: groupID, OriginName: groupName,
-		Stream: row.Stream,
+		Stream:       row.Stream,
 		Keyword:      row.Keyword,
 		Device:       keitaroDevice(row.DeviceType),
 		Operator:     row.Operator,

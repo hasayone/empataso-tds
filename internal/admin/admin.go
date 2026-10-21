@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -98,6 +99,9 @@ type LoginLimiter interface {
 // InsertConversions writes a conversion batch. An empty batch returns nil.
 // PurgeImported deletes events and conversions whose domain equals domain.
 // CountByDomain returns the events count and the conversions count.
+// InitialWatermark returns the latest stored click and conversion times for domain
+// within the last eight days. ExistingCIDs returns ids already stored in that window.
+// A blank domain skips InitialWatermark and ExistingCIDs without a query.
 // A blank domain is an error from PurgeImported and CountByDomain.
 // Errors come from the warehouse.
 type ImportSink interface {
@@ -105,6 +109,8 @@ type ImportSink interface {
 	InsertConversions(ctx context.Context, rows []store.ConversionInsert) error
 	PurgeImported(ctx context.Context, domain string) error
 	CountByDomain(ctx context.Context, domain string) (int64, int64, error)
+	InitialWatermark(ctx context.Context, domain string) (clicks, conversions time.Time, err error)
+	ExistingCIDs(ctx context.Context, domain string, from, to time.Time, cids []string) (map[string]struct{}, error)
 }
 
 // Config — dependencies and settings of the admin server.
@@ -134,9 +140,11 @@ type Config struct {
 	Manifest     ManifestStore
 	Keys         KeysReader
 	Limiter      LoginLimiter
-	SessionTTL   time.Duration
-	CookieSecure bool
-	EngineURL    string // address the admin process uses to call the engine
+	// LoginRateLimitShared is true when login attempts are counted in a shared store such as Redis.
+	LoginRateLimitShared bool
+	SessionTTL           time.Duration
+	CookieSecure         bool
+	EngineURL            string // address the admin process uses to call the engine
 	// LookupIP resolves a host for a domain check.
 	// host is the name without a port. Nil uses net.DefaultResolver.LookupIPAddr.
 	// It returns the addresses or the resolver error.
@@ -160,6 +168,8 @@ type Config struct {
 	GeoCityPath string  // whether the cron service has a target for each geo database
 	GeoASNPath  string
 	CronFile    string // cron service config
+	// KeitaroSyncFile is keitaro-sync.json, the log catch-up cursor; empty disables the watcher.
+	KeitaroSyncFile string
 
 	// KeitaroBase is the tracker origin. KeitaroKey is the Admin API key.
 	// Both are start values used when KeitaroFile does not exist.
@@ -187,6 +197,10 @@ type Config struct {
 	CloudflareFile string
 	CloudflareURL  string
 	CloudflareHTTP *http.Client
+
+	// AdminTrustedProxies lists CIDRs that may set X-Forwarded-For and X-Forwarded-Proto.
+	// An empty slice uses localhost only. Invalid CIDRs fail server construction.
+	AdminTrustedProxies []string
 }
 
 // slogLogger — minimal logger interface (to avoid pulling in a hard dependency).
@@ -277,18 +291,38 @@ type Server struct {
 	// cfMu guards cfAcct and cfErr. Readers take a copy through cloudflareAccount.
 	// cfErr is why cloudflare.json was not used at start; it is empty otherwise.
 	// cfBusy holds the ids of the domains being connected to Cloudflare right now.
-	cfMu   sync.RWMutex
-	cfAcct cfAccount
-	cfErr  string
-	cfBusy ncBuyState
+	cfMu         sync.RWMutex
+	cfAcct       cfAccount
+	cfErr        string
+	cfBusy       ncBuyState
+	adminDNSBusy ncBuyState
 	// watchBusy is set while a domain watch tick runs, so ticks never overlap.
 	watchBusy atomic.Bool
 	// watchFirst is the wait before the first watch tick; zero means thirty seconds. Tests set it.
 	watchFirst time.Duration
 
+	// syncBusy is set while a Keitaro log catch-up run is in progress.
+	syncBusy atomic.Bool
+	// syncKick asks the watcher to run catch-up on the next tick.
+	syncKick atomic.Bool
+	// syncFailStreak counts consecutive failed catch-up runs for backoff.
+	syncFailStreak int
+	// syncPassCount counts started catch-up passes (tests only).
+	syncPassCount atomic.Int32
+	// syncNow is the clock for catch-up scheduling; nil uses time.Now().UTC. Tests set it.
+	syncNow func() time.Time
+
 	// routes lists mux patterns registered via handle during Handler().
 	// Handler runs once at startup; no mutex is required.
 	routes []string
+
+	// trustedProxies lists CIDRs that may set X-Forwarded-For and X-Forwarded-Proto.
+	trustedProxies []netip.Prefix
+
+	// adminDNSWG counts background ensureAdminDNS jobs; tests may Wait on it.
+	adminDNSWG sync.WaitGroup
+	// adminDNSSync runs ensureAdminDNS in the caller goroutine instead of a background job.
+	adminDNSSync bool
 }
 
 const cookieName = "kuztds_admin"
@@ -317,7 +351,11 @@ func New(cfg Config) (*Server, error) {
 		}
 		cfg.PublicIP = ip.String()
 	}
-	s := &Server{cfg: cfg, hashes: newHashGate(0), loginFPKey: key, ktJob: newKeitaroJob()}
+	prefixes, err := parseAdminTrustedProxies(cfg.AdminTrustedProxies)
+	if err != nil {
+		return nil, fmt.Errorf("admin: trusted proxies: %w", err)
+	}
+	s := &Server{cfg: cfg, hashes: newHashGate(0), loginFPKey: key, ktJob: newKeitaroJob(), trustedProxies: prefixes}
 	hash, err := initialHash(cfg)
 	if err != nil {
 		return nil, err
@@ -406,6 +444,7 @@ func (s *Server) Handler() http.Handler {
 	s.routes = nil
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	s.handle(mux, "POST /api/logout", cookieOnly(http.HandlerFunc(s.handleLogout)))
 	s.handle(mux, "GET /api/me", cookieOnly(http.HandlerFunc(s.handleMe)))
@@ -484,7 +523,7 @@ func (s *Server) Handler() http.Handler {
 	// Embedded web interface (SPA).
 	mux.Handle("GET /assets/", serveAssets())
 	mux.HandleFunc("GET /{$}", serveUI)
-	return gzipMiddleware(securityHeaders(mux))
+	return gzipMiddleware(securityHeaders(originMiddleware(s.adminHostMiddleware(mux))))
 }
 
 func (s *Server) handleNotices(w http.ResponseWriter, r *http.Request) {
@@ -601,6 +640,18 @@ func securityHeaders(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy", "frame-ancestors 'none'")
+		h.Set("X-Robots-Tag", "noindex")
+		path := r.URL.Path
+		switch {
+		case strings.HasPrefix(path, "/api/"):
+			h.Set("Cache-Control", "private, no-store")
+		case path == "/":
+			h.Set("Cache-Control", "no-cache")
+		case strings.HasPrefix(path, "/assets/"):
+			h.Set("Cache-Control", "private, max-age=86400")
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -619,13 +670,6 @@ func (s *Server) logInfo(msg string, args ...any) {
 
 func isSafeMethod(m string) bool {
 	return m == http.MethodGet || m == http.MethodHead || m == http.MethodOptions
-}
-
-func clientIP(r *http.Request) string {
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil {
-		return host
-	}
-	return r.RemoteAddr
 }
 
 func atoiDef(s string, def int) int {

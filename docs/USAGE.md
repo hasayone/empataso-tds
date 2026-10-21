@@ -99,6 +99,9 @@ go run ./cmd/cron
 | `KUZTDS_REDIS_ADDR` / `KUZTDS_CLICKHOUSE_*` | stores (sessions, statistics) |
 | `KUZTDS_GEO_DB` / `KUZTDS_ASN_DB` | same paths as the engine — used by Tools (IP lookup) and "Test a visitor" |
 | `KUZTDS_CRON_FILE` | the cron service's config file; without it the Automation page is read-only |
+| `KUZTDS_ADMIN_TRUSTED_PROXIES` | trusted proxy CIDRs for admin (X-Forwarded-For / Secure cookie); invalid CIDR prevents admin from starting; on production set by `apply-edge.sh` |
+| `KUZTDS_KEITARO_SYNC_FILE` | Keitaro catch-up cursor (`keitaro-sync.json`); default next to the import manifest |
+| `KUZTDS_PUBLIC_IP` | public IP for Cloudflare A records (`@` and `admin.<domain>`) |
 
 ### cron
 | Variable | Purpose |
@@ -244,11 +247,15 @@ settings, interval, the last result with its time, and **Run now**.
 | VirusTotal | Asks for every domain in stream outputs (and any listed by hand). Newly flagged domains are reported once; optionally the streams sending to them are switched off |
 | Disk space | Alerts when free space drops below the threshold, and once more when it recovers |
 | Keyword cleanup | Deletes keyword files older than N days |
-| Conversion alerts | Sends each new postback to Telegram by a template (`[PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [CID]`) |
+| Conversion alerts | Sends each new postback to Telegram by a template (`[PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [CID]`). Skips rows whose `domain` equals the Keitaro import manifest host |
+| Keitaro data catch-up | Pulls clicks and conversions from a cursor (`keitaro_sync` in `cron.json`); runs in **admin**, not the cron service. Requires Keitaro and ClickHouse; see [wiki/keitaro.md](wiki/keitaro.md) |
 
 Telegram (bot token + chat ID) is the notification channel, with a **Send a
 test** button. Secrets are never sent back to the browser: a stored token or
 key is shown as `********`, and saving it unchanged keeps the stored value.
+The Conversions job cannot be enabled until Telegram is configured.
+
+On a production domain, open the panel at **`https://admin.<domain>/`** when the domain is primary or has an admin role (DNS and nginx — [wiki/namecheap.md](wiki/namecheap.md)). Login by server IP remains available.
 
 ## Groups config (JSON)
 

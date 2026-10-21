@@ -17,12 +17,11 @@ var vendorFS embed.FS
 // serveUI serves the embedded SPA at the root.
 func serveUI(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
 	_, _ = w.Write(indexHTML)
 }
 
 // serveAssets возвращает обработчик статики из web/vendor по префиксу /assets/.
-// Заголовок Cache-Control: public, max-age=86400. Каталоги и пути с завершающим / — 404.
+// Cache-Control задаёт securityHeaders (private, no-cache). Каталоги и пути с завершающим / — 404.
 // Параметры: нет.
 // Возврат: http.Handler.
 // Ошибки: если fs.Sub не может открыть web/vendor, возвращается http.NotFoundHandler (404 на любой путь).
@@ -48,7 +47,6 @@ func serveAssets() http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "public, max-age=86400")
 		files.ServeHTTP(w, r)
 	})
 }

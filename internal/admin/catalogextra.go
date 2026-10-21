@@ -77,7 +77,7 @@ func (s *Server) handleDomainCheck(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, code, msg)
 		return
 	}
-	writeJSON(w, http.StatusOK, updated)
+	s.writeDomainRow(w, r.Context(), http.StatusOK, updated)
 }
 
 // probeResult is the outcome of probing one host. IPs are the public addresses the host
@@ -108,7 +108,7 @@ func (s *Server) probeHost(ctx context.Context, host string) probeResult {
 	if reason != "" {
 		return probeResult{reason: reason, ips: ips}
 	}
-	ok, reason := s.probePhase(ctx, host)
+	ok, reason := s.probePhase(ctx, host, "engine")
 	return probeResult{ok: ok, reason: reason, ips: ips}
 }
 
@@ -182,12 +182,22 @@ func (s *Server) recheckDomain(ctx context.Context, id string) (config.Domain, e
 		return config.Domain{}, errDomainNotFound
 	}
 	ok, reason, detail := s.judgeDomain(ctx, d)
+	var adminOK bool
+	var adminReason string
+	if config.IsAdminDomain(d) {
+		adminOK, adminReason = s.checkAdminHost(ctx, d)
+	}
 	checked := s.nowUTC().Format(time.RFC3339)
-	return s.editDomain(ctx, id, func(cur *config.Domain) error {
+	saved, err := s.editDomain(ctx, id, func(cur *config.Domain) error {
 		if cur.Host != d.Host {
 			return errDomainHostChanged
 		}
 		cur.OK, cur.Reason, cur.ReasonDetail, cur.Checked = ok, reason, detail, checked
+		if config.IsAdminDomain(*cur) {
+			cur.AdminOK, cur.AdminReason = adminOK, adminReason
+		} else {
+			cur.AdminOK, cur.AdminReason = false, ""
+		}
 		if ok && cur.CfZoneID != "" {
 			cur.CfStatus = cfStatusActive
 		}
@@ -197,6 +207,11 @@ func (s *Server) recheckDomain(ctx context.Context, id string) (config.Domain, e
 		}
 		return nil
 	})
+	if err != nil {
+		return config.Domain{}, err
+	}
+	s.maybeScheduleAdminDNS(saved)
+	return saved, nil
 }
 
 // resolvePhase decides whether host may be probed.
@@ -265,14 +280,24 @@ func publicIP(ip net.IP) bool {
 	return true
 }
 
+// checkAdminHost probes https://admin.<host>/healthz and expects the admin service header.
+func (s *Server) checkAdminHost(ctx context.Context, d config.Domain) (bool, string) {
+	adminHost := config.AdminHostOf(d)
+	if reason, _ := s.resolvePhase(ctx, adminHost); reason != "" {
+		return false, reason
+	}
+	return s.probePhase(ctx, adminHost, "admin")
+}
+
 // probePhase requests https://host/healthz and checks the probe headers.
 // host is the full parked host, including a port when one is stored.
+// service is the expected X-Kuztds-Service value: engine allows a missing header, admin requires it.
 // It returns ok when the status is 200 and X-Kuztds-Probe and X-Kuztds-Host match.
 // reason is tls when the server certificate was refused, and connect when client.Do fails
 // for another cause (network, TLS handshake, timeout, or guardDial).
 // Any HTTP response whose status is not 200, or whose probe headers do not match, is foreign.
 // The body is discarded. Only HTTPS is requested.
-func (s *Server) probePhase(ctx context.Context, host string) (bool, string) {
+func (s *Server) probePhase(ctx context.Context, host, service string) (bool, string) {
 	probe, err := newProbe()
 	if err != nil {
 		return false, "connect"
@@ -303,7 +328,25 @@ func (s *Server) probePhase(ctx context.Context, host string) (bool, string) {
 	if resp.Header.Get("X-Kuztds-Probe") != probe || !strings.EqualFold(resp.Header.Get("X-Kuztds-Host"), host) {
 		return false, "foreign"
 	}
+	if !healthzServiceOK(resp.Header, service) {
+		return false, "foreign"
+	}
 	return true, ""
+}
+
+// healthzServiceOK reports whether the healthz service header matches the expectation.
+// expect engine treats a missing header as this tracker for backward compatibility.
+func healthzServiceOK(h http.Header, expect string) bool {
+	got := strings.TrimSpace(h.Get("X-Kuztds-Service"))
+	switch expect {
+	case "engine":
+		if got == "" {
+			return true
+		}
+		return strings.EqualFold(got, "engine")
+	default:
+		return strings.EqualFold(got, expect)
+	}
 }
 
 // isCertError reports whether err is a refused server certificate: an unknown authority, a

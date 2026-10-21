@@ -22,6 +22,9 @@ func TestHealthzProbeHeaders(t *testing.T) {
 	if rec.Header().Get("X-Kuztds-Host") != "park.example" {
 		t.Fatalf("host = %q", rec.Header().Get("X-Kuztds-Host"))
 	}
+	if rec.Header().Get("X-Kuztds-Service") != "engine" {
+		t.Fatalf("service = %q", rec.Header().Get("X-Kuztds-Service"))
+	}
 	if _, ok := rec.Header()["X-Kuztds-Probe"]; ok {
 		t.Fatal("probe header set without a probe")
 	}

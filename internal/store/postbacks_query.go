@@ -20,11 +20,13 @@ type PostbackQuery struct {
 	Sort                                                        string
 	Desc                                                        bool
 	Conds                                                       []Cond
+	// ExcludeDomain drops rows whose domain equals this host (Keitaro import filter).
+	ExcludeDomain string
 }
 
 const (
 	// PostbackExportMax is the row cap for CSV export of conversions.
-	PostbackExportMax = 50000
+	PostbackExportMax  = 50000
 	postbackFetchBatch = 1000
 )
 
@@ -57,7 +59,16 @@ type postbackPage struct {
 // It is QueryPostbacks with only the period, the group and the limit set.
 // The profit is PostbackTotals.Profit. Count is not returned.
 func (c *CH) Postbacks(ctx context.Context, from, to time.Time, group string, limit int) ([]PostbackRow, float64, error) {
-	rows, tot, err := c.QueryPostbacks(ctx, PostbackQuery{From: from, To: to, Group: group, Limit: limit})
+	return c.PostbacksExcluding(ctx, from, to, group, limit, "")
+}
+
+// PostbacksExcluding is Postbacks but drops rows whose domain equals excludeDomain.
+// ctx bounds the query. An empty excludeDomain applies no domain filter.
+// Returns matching rows, total profit over the match, and a query or scan error.
+func (c *CH) PostbacksExcluding(ctx context.Context, from, to time.Time, group string, limit int, excludeDomain string) ([]PostbackRow, float64, error) {
+	rows, tot, err := c.QueryPostbacks(ctx, PostbackQuery{
+		From: from, To: to, Group: group, Limit: limit, ExcludeDomain: excludeDomain,
+	})
 	return rows, tot.Profit, err
 }
 
@@ -386,6 +397,10 @@ func postbackWhere(q PostbackQuery, click bool) (string, []any) {
 	add("status", q.Status)
 	add("stream_name", q.Stream)
 	add("cid", q.CID)
+	if d := strings.TrimSpace(q.ExcludeDomain); d != "" {
+		where += " AND domain != ?"
+		args = append(args, d)
+	}
 	if click {
 		add("offer_id", q.Offer)
 		add("landing_id", q.Landing)
@@ -452,7 +467,7 @@ func conversionUnion(click, ext, model, origin bool) string {
 	}
 	return post + ` FROM postbacks
 		UNION ALL
-		` + conv + ` FROM conversions`
+		` + conv + ` FROM conversions FINAL`
 }
 
 // convExtra lists stand-ins and real names for the click, ext and model waves.

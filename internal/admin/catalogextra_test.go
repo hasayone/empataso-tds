@@ -478,6 +478,7 @@ func probeTarget(t *testing.T, live *atomic.Bool) *http.Client {
 		if live.Load() {
 			w.Header().Set("X-Kuztds-Probe", r.URL.Query().Get("probe"))
 			w.Header().Set("X-Kuztds-Host", r.Host)
+			w.Header().Set("X-Kuztds-Service", "engine")
 		}
 		w.WriteHeader(http.StatusOK)
 	}))

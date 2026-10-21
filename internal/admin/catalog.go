@@ -419,7 +419,7 @@ func (c crudCatalog[T]) crudCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, code, msg)
 		return
 	}
-	writeJSON(w, http.StatusCreated, maskedItem(v, c.hooks, stored))
+	c.respondOne(w, r, v, stored, http.StatusCreated)
 }
 
 // crudGet handles GET by id and hides invisible rows as 404.
@@ -434,7 +434,21 @@ func (c crudCatalog[T]) crudGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, maskedItem(v, c.hooks, item))
+	c.respondOne(w, r, v, item, http.StatusOK)
+}
+
+// respondOne writes one catalog item, using formatOne when the catalog defines it.
+func (c crudCatalog[T]) respondOne(w http.ResponseWriter, r *http.Request, v viewer, item T, code int) {
+	if c.hooks != nil && c.hooks.formatOne != nil {
+		out, err := c.hooks.formatOne(r.Context(), c.s, item)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "read error")
+			return
+		}
+		writeJSON(w, code, out)
+		return
+	}
+	writeJSON(w, code, maskedItem(v, c.hooks, item))
 }
 
 // crudPut handles PUT with write grants, userLimit and CreatedBy preservation.
@@ -446,9 +460,15 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 	}
 	pathID := r.PathValue("id")
 	c.setID(&item, pathID)
+	var unlockMu func()
 	if c.hooks != nil && c.hooks.mu != nil {
 		c.hooks.mu.Lock()
-		defer c.hooks.mu.Unlock()
+		unlockMu = c.hooks.mu.Unlock
+		defer func() {
+			if unlockMu != nil {
+				unlockMu()
+			}
+		}()
 	}
 	list, err := c.store.List(r.Context())
 	if err != nil {
@@ -519,7 +539,14 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
 	}
-	writeJSON(w, http.StatusOK, maskedItem(v, c.hooks, item))
+	if unlockMu != nil {
+		unlockMu()
+		unlockMu = nil
+	}
+	if c.hooks != nil && c.hooks.afterWrite != nil {
+		c.hooks.afterWrite(item, &old)
+	}
+	c.respondOne(w, r, v, item, http.StatusOK)
 }
 
 // crudDelete handles DELETE with see/write grant checks.

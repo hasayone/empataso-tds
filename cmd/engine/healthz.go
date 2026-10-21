@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
+	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/logbuf"
 )
 
@@ -23,25 +24,11 @@ func healthzHandler(logs *logbuf.Buffer) http.HandlerFunc {
 			w.Header().Set("X-Events-Lost-Detail", fmt.Sprintf("full=%d queue=%d insert=%d late=%d", l.Full, l.Queue, l.Insert, l.Late))
 		}
 		w.Header().Set("X-Kuztds-Host", r.Host)
-		if probe := r.URL.Query().Get("probe"); validProbe(probe) {
+		w.Header().Set("X-Kuztds-Service", "engine")
+		if probe := r.URL.Query().Get("probe"); config.ValidHealthzProbe(probe) {
 			w.Header().Set("X-Kuztds-Probe", probe)
 		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	}
-}
-
-// validProbe reports whether probe matches ^[0-9a-f]{1,64}$.
-// probe is the raw query value. It returns false when probe is empty, longer than 64, or not lowercase hex.
-func validProbe(probe string) bool {
-	if len(probe) == 0 || len(probe) > 64 {
-		return false
-	}
-	for i := 0; i < len(probe); i++ {
-		c := probe[i]
-		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
-			return false
-		}
-	}
-	return true
 }

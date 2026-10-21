@@ -134,6 +134,7 @@ var macroInert = map[string]struct {
 		"Domain.ID", "Domain.Host", "Domain.Group", "Domain.Role", "Domain.Reason", "Domain.Checked", "Domain.CreatedBy",
 		"Domain.Registrar", "Domain.RegistrarAccount", "Domain.RegistrarStatus", "Domain.RegistrarPendingSince",
 		"Domain.ReasonDetail", "Domain.CfZoneID", "Domain.CfStatus", "Domain.CfNS[]", "Domain.ConnectedAt", "Domain.WatchSince",
+		"Domain.AdminReason", "Domain.AdminDNS",
 	}},
 	"TrafficSource": {reflect.TypeOf(config.TrafficSource{}), "ids, labels and query parameter names: the engine reads the names as keys, never as templates; rebinding is guarded by sourceCheck", []string{
 		"TrafficSource.ID", "TrafficSource.Name", "TrafficSource.Parameters{}", "TrafficSource.Group", "TrafficSource.CreatedBy",

@@ -10,11 +10,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/security"
 )
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	ip := clientIP(r)
+	if strings.HasPrefix(config.NormalizeHTTPHost(r.Host), "admin.") && !s.cfg.LoginRateLimitShared {
+		writeErr(w, http.StatusServiceUnavailable, "login unavailable")
+		return
+	}
+	ip := s.clientIP(r)
 
 	// The limiter goes first, and its failure answers 500 before any password
 	// is looked at. That ordering is the whole point.
@@ -142,7 +147,7 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, uid string
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: cookieName, Value: token, Path: "/",
-		HttpOnly: true, Secure: s.cfg.CookieSecure, SameSite: http.SameSiteStrictMode,
+		HttpOnly: true, Secure: s.cookieSecure(r), SameSite: http.SameSiteStrictMode,
 		Expires: time.Now().Add(s.cfg.SessionTTL),
 	})
 	return csrf, nil
@@ -152,7 +157,10 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(cookieName); err == nil {
 		_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
 	}
-	http.SetCookie(w, &http.Cookie{Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true})
+	http.SetCookie(w, &http.Cookie{
+		Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
+		Secure: s.cookieSecure(r), SameSite: http.SameSiteStrictMode,
+	})
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 

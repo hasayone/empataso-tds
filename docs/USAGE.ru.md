@@ -100,6 +100,9 @@ go run ./cmd/cron
 | `KUZTDS_REDIS_ADDR` / `KUZTDS_CLICKHOUSE_*` | хранилища (сессии, статистика) |
 | `KUZTDS_GEO_DB` / `KUZTDS_ASN_DB` | те же пути, что у движка — для Tools (проверка IP) и «Test a visitor» |
 | `KUZTDS_CRON_FILE` | файл конфига cron-сервиса; без него страница Automation только для чтения |
+| `KUZTDS_ADMIN_TRUSTED_PROXIES` | CIDR доверенных прокси для admin (X-Forwarded-For / Secure cookie); неверный CIDR — admin не стартует; на проде задаёт `apply-edge.sh` |
+| `KUZTDS_KEITARO_SYNC_FILE` | курсор досинка Keitaro (`keitaro-sync.json`); по умолчанию рядом с манифестом импорта |
+| `KUZTDS_PUBLIC_IP` | публичный IP для A-записей Cloudflare (`@` и `admin.<домен>`) |
 
 ### cron
 | Переменная | Назначение |
@@ -249,12 +252,15 @@ heartbeat раз в несколько секунд). Карточка на ка
 | VirusTotal | Спрашивает о каждом домене из выводов потоков (и о перечисленных вручную). О новых помеченных доменах сообщает один раз; по желанию потоки, ведущие на них, выключаются |
 | Disk space | Предупреждает, когда свободное место падает ниже порога, и ещё раз — когда оно восстанавливается |
 | Keyword cleanup | Удаляет файлы ключевых слов старше N дней |
-| Conversion alerts | Отправляет каждый новый постбэк в Telegram по шаблону (`[PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [CID]`) |
+| Conversion alerts | Отправляет каждый новый постбэк в Telegram по шаблону (`[PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [CID]`). Строки с `domain`, равным хосту импорта Keitaro из манифеста, не анонсирует |
+| Актуализация данных Keitaro | Дотягивает клики и конверсии по курсору (`keitaro_sync` в `cron.json`); исполняет **admin**, не cron-сервис. Нужны Keitaro и ClickHouse; подробно — [wiki/keitaro.md](wiki/keitaro.md) |
 
 Telegram (токен бота + ID чата) — канал уведомлений, с кнопкой **Send a
 test**. Секреты никогда не отправляются обратно в браузер: сохранённый токен
 или ключ показывается как `********`, и сохранение без изменения оставляет
-хранимое значение.
+хранимое значение. Задачу «Конверсии» нельзя включить, пока Telegram не настроен.
+
+Админку на боевом домене открывают по **`https://admin.<домен>/`**, если домен основной или с ролью админки (запись DNS и nginx — [wiki/namecheap.md](wiki/namecheap.md)). Запасной вход по IP сохраняется.
 
 ## Конфиг групп (JSON)
 

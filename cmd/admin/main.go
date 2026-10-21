@@ -44,7 +44,7 @@ func main() {
 		PasswordFile: os.Getenv("KUZTDS_ADMIN_PASSWORD_FILE"),
 		APIKeysFile:  os.Getenv("KUZTDS_API_KEYS_FILE"),
 		Sessions:     security.NewMemoryStore(), // overridden by Redis below
-		Limiter:      allowAll{},
+		Limiter:      nil,
 		Log:          log,
 		KeitaroBase:  strings.TrimSpace(os.Getenv("KEITARO_BASE_URL")),
 		KeitaroKey:   os.Getenv("KEITARO_API_KEY"),
@@ -80,6 +80,9 @@ func main() {
 	// A hash we cannot use is a reason not to start. Booting anyway means every
 	// login answers "invalid credentials" and the operator hunts a password
 	// that is not the problem.
+	if v := strings.TrimSpace(os.Getenv("KUZTDS_ADMIN_TRUSTED_PROXIES")); v != "" {
+		cfg.AdminTrustedProxies = strings.Split(v, ",")
+	}
 	app, err := admin.New(cfg)
 	if err != nil {
 		log.Error("admin api not started", "err", err)
@@ -87,6 +90,7 @@ func main() {
 	}
 
 	go app.WatchDomains(ctx, domainWatchInterval(os.Getenv("KUZTDS_DOMAIN_WATCH"), log))
+	go app.WatchKeitaroSync(ctx)
 
 	srv := &http.Server{
 		Addr:              getenv("KUZTDS_ADMIN_LISTEN", ":8090"),
@@ -148,6 +152,7 @@ func applyDataFiles(cfg *admin.Config, groupsFile string, log *slog.Logger) {
 	cfg.Pages = admin.NewFilePages(pagesDir)
 	log.Info("pages dir", "path", pagesDir)
 	cfg.Manifest = admin.NewFileManifest(filepath.Join(dir, "keitaro-import.json"))
+	cfg.KeitaroSyncFile = keitaroSyncFileForGroups(f)
 	cfg.KeitaroFile = getenv("KUZTDS_KEITARO_FILE", filepath.Join(dir, "keitaro.json"))
 	cfg.NamecheapFile = getenv("KUZTDS_NAMECHEAP_FILE", filepath.Join(dir, "namecheap.json"))
 	cfg.NamecheapURL = os.Getenv("KUZTDS_NAMECHEAP_URL")
@@ -210,6 +215,7 @@ func connectRedis(cfg *admin.Config, log *slog.Logger) {
 	}
 	cfg.Sessions = store.NewRedisSessions(rdb)
 	cfg.Limiter = limiterAdapter{c: store.NewCounters(rdb)}
+	cfg.LoginRateLimitShared = true
 	log.Info("redis connected", "addr", a)
 }
 
@@ -254,16 +260,14 @@ func (a limiterAdapter) Allow(ctx context.Context, key string) (bool, error) {
 	return a.c.LoginAllow(ctx, key, 10, time.Minute)
 }
 
-// allowAll is the limiter used when Redis is not configured. It never fails,
-// so the handler's refuse-on-error branch cannot fire in a deployment that has
-// no counters at all.
-type allowAll struct{}
-
-func (allowAll) Allow(context.Context, string) (bool, error) { return true, nil }
-
 func getenv(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
 	}
 	return def
+}
+
+// keitaroSyncFileForGroups returns the catch-up cursor path for a groups file directory.
+func keitaroSyncFileForGroups(groupsFile string) string {
+	return getenv("KUZTDS_KEITARO_SYNC_FILE", filepath.Join(filepath.Dir(groupsFile), "keitaro-sync.json"))
 }

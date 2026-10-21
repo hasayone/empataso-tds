@@ -141,6 +141,27 @@ curl -H "Content-Type: application/json" -H "X-CSRF-Token: ..." -b "сессия
 
 Тот же набор с заголовком `Api-Key` эти адреса не открывает. Полный текст с примерами режима `?api=` лежит на `#/settings/docs`.
 
+## Домены (`/api/domains`)
+
+Список и запись — в [офферах и лендингах](offers-landings.md) и [namecheap](namecheap.md). Дополнительно к полям `domains.json` в ответах API:
+
+| Поле | Смысл |
+| --- | --- |
+| `admin_host` | Вычисляемый адрес `admin.<host>` или пусто, если домен не для админки |
+| `admin_dns` | `ok`, если запись `admin.<host>` создана в Cloudflare, иначе текст ошибки без секретов |
+| `admin_ok` | После проверки HTTPS: ответ admin на `admin.<host>` совпал с ожиданием |
+| `admin_reason` | При сбое проверки админки: `dns`, `tls`, `connect`, `foreign` |
+
+Домен для админки: не `disabled`, хост без префикса `admin.`, и **основной** или роль `admin` / `both`.
+
+| Метод | Путь | Успех | Ошибки |
+| --- | --- | --- | --- |
+| `POST` | `/api/domains/{id}/admin-dns` | `200`, обновлённая строка с `admin_host`, `admin_dns`, `admin_ok`, `admin_reason` | `404` нет id; `403` нет записи; `409` не admin-домен, нет Cloudflare/IP/зоны, хост не корень зоны, параллельное обновление; `502` отказ Cloudflare (в т.ч. чужая A-запись); `503` нет хранилища |
+
+Создание или смена основного/роли admin/both при активной зоне Cloudflare ставит обновление DNS admin в очередь; ответ сохранения DNS не ждёт.
+
+`GET /healthz` на admin (в том числе `https://admin.<домен>/healthz`) — без сессии и без `Api-Key`: тело `ok`, заголовки `X-Kuztds-Host`, `X-Kuztds-Service: admin`, при `probe` — `X-Kuztds-Probe`. На движке тот же путь отдаёт `X-Kuztds-Service: engine`.
+
 ## Статика `/assets/`
 
 `GET /assets/{путь}` — без сессии и без `Api-Key`. Файлы встроены в бинарник админки из `internal/admin/web/vendor` (`//go:embed`). Ответ с `Cache-Control: public, max-age=86400`. Пустой путь, путь с завершающим `/`, каталог и неизвестный файл — `404`; листинг каталогов не отдаётся.

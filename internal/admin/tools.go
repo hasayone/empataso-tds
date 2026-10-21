@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/netip"
 	"net/url"
@@ -36,6 +37,7 @@ type dirLists struct {
 	cache map[string]*ipindex.Index
 }
 
+// Lookup returns the list label for ip in name.dat, loading the index once per name.
 func (d *dirLists) Lookup(name string, ip netip.Addr) (string, bool) {
 	if d.dir == "" || !safeSeg.MatchString(name) {
 		return "", false
@@ -88,6 +90,7 @@ type visitorInfo struct {
 	Brand    string `json:"brand,omitempty"`
 }
 
+// resolve fills geo and visitor panel fields for ip using Geo and dirLists.
 func (s *Server) resolve(ip netip.Addr, lists *dirLists) (geo.Geo, visitorInfo) {
 	g := geo.None()
 	if s.cfg.Geo != nil {
@@ -398,11 +401,12 @@ func (s *Server) simCatalogs(ctx context.Context, req simRequest, v viewer) rout
 
 // cronState is what the panel shows on the Automation page.
 type cronState struct {
-	Available bool        `json:"available"` // the admin knows where the cron config is
-	Alive     bool        `json:"alive"`     // the service wrote a heartbeat recently
-	Config    cron.Config `json:"config"`    // secrets masked
-	Status    cron.Status `json:"status"`
-	Jobs      []string    `json:"jobs"`
+	Available bool           `json:"available"` // the admin knows where the cron config is
+	Alive     bool           `json:"alive"`     // the service wrote a heartbeat recently
+	Config    cron.Config    `json:"config"`    // secrets masked
+	Status    cron.Status    `json:"status"`
+	Jobs      []string       `json:"jobs"`
+	Floors    map[string]int `json:"floors"`
 	GeoPaths  struct {
 		City     bool `json:"city"`
 		ASN      bool `json:"asn"`
@@ -410,6 +414,7 @@ type cronState struct {
 		ASNFile  bool `json:"asn_file"`  // asn database file exists and is not empty
 	} `json:"geo_paths"`
 	TelegramConfigured bool   `json:"telegram_configured"`    // stored token and chat id are both set
+	KeitaroConfigured  bool   `json:"keitaro_configured"`     // tracker origin and key are both set
 	ConfigError        string `json:"config_error,omitempty"` // Validate failure; never includes a secret
 }
 
@@ -417,9 +422,14 @@ type cronState struct {
 // than this means it is not running.
 const cronAliveWindow = 30 * time.Second
 
+// handleCronGet returns cron config, status, job list and panel flags for the Automation page.
 func (s *Server) handleCronGet(w http.ResponseWriter, r *http.Request) {
 	cfg := cron.Default()
-	st := cronState{Jobs: cron.Jobs, Config: cfg.Redacted(), Status: cron.Status{Jobs: map[string]cron.JobStatus{}}}
+	st := cronState{
+		Jobs:   append(append([]string{}, cron.Jobs...), cron.AdminJobs...),
+		Floors: cron.Floors(),
+		Config: cfg.Redacted(), Status: cron.Status{Jobs: map[string]cron.JobStatus{}},
+	}
 	if s.cfg.CronFile != "" {
 		st.Available = true
 		loaded, err := cron.Load(s.cfg.CronFile)
@@ -434,6 +444,12 @@ func (s *Server) handleCronGet(w http.ResponseWriter, r *http.Request) {
 			st.Alive = time.Since(status.Heartbeat) < cronAliveWindow
 		}
 	}
+	if st.Status.Jobs == nil {
+		st.Status.Jobs = map[string]cron.JobStatus{}
+	}
+	if syncSt, ok, err := s.loadKeitaroSync(); err == nil && ok {
+		st.Status.Jobs[cron.JobKeitaroSync] = s.keitaroSyncJobStatus(syncSt)
+	}
 	s.fillCronPanel(&st, cfg)
 	writeJSON(w, http.StatusOK, st)
 }
@@ -445,6 +461,7 @@ func (s *Server) handleCronGet(w http.ResponseWriter, r *http.Request) {
 // replaced with "config is invalid".
 func (s *Server) fillCronPanel(st *cronState, cfg cron.Config) {
 	st.TelegramConfigured = cfg.Telegram.Configured()
+	st.KeitaroConfigured = s.keitaroCreds().configured() && s.cfg.Warehouse != nil
 	st.ConfigError = configErrorText(cfg)
 	st.GeoPaths.City = s.cfg.GeoCityPath != ""
 	st.GeoPaths.ASN = s.cfg.GeoASNPath != ""
@@ -473,6 +490,15 @@ func configErrorText(cfg cron.Config) string {
 	return msg
 }
 
+// keitaroSyncSectionAbsent is true when PUT body omits keitaro_sync or sends JSON null.
+func keitaroSyncSectionAbsent(raw map[string]json.RawMessage) bool {
+	v, ok := raw["keitaro_sync"]
+	if !ok {
+		return true
+	}
+	return string(v) == "null"
+}
+
 // nonEmptyFile reports whether path is an existing file whose size is greater
 // than zero. A missing path, a directory, an empty file and any Stat error
 // return false.
@@ -484,13 +510,24 @@ func nonEmptyFile(path string) bool {
 	return fi.Size() > 0
 }
 
+// handleCronSave validates and writes cron.json; absent keitaro_sync keeps the stored section.
 func (s *Server) handleCronSave(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.CronFile == "" {
 		writeErr(w, http.StatusServiceUnavailable, "cron is not configured (KUZTDS_CRON_FILE)")
 		return
 	}
+	rawBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
 	var cfg cron.Config
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&cfg); err != nil {
+	if err := json.Unmarshal(rawBody, &cfg); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(rawBody, &raw); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad json")
 		return
 	}
@@ -500,7 +537,14 @@ func (s *Server) handleCronSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cfg = cfg.KeepSecrets(stored)
+	if keitaroSyncSectionAbsent(raw) {
+		cfg.KeitaroSync = stored.KeitaroSync
+	}
 	if err := cfg.Validate(); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := cron.CheckIntervals(cfg); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -511,6 +555,7 @@ func (s *Server) handleCronSave(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
 }
 
+// handleCronRun triggers a cron job or admin keitaro_sync catch-up (202) via run file or kick.
 func (s *Server) handleCronRun(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.CronFile == "" {
 		writeErr(w, http.StatusServiceUnavailable, "cron is not configured (KUZTDS_CRON_FILE)")
@@ -521,6 +566,19 @@ func (s *Server) handleCronRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if body.Job == cron.JobKeitaroSync {
+		if err := s.runKeitaroSyncNow(); err != nil {
+			msg := err.Error()
+			if msg == "keitaro not configured" || msg == keitaroSyncBusyMsg {
+				writeErr(w, http.StatusConflict, msg)
+				return
+			}
+			writeErr(w, http.StatusBadRequest, msg)
+			return
+		}
+		writeJSON(w, http.StatusAccepted, map[string]string{"status": "requested"})
 		return
 	}
 	if err := cron.RequestRun(s.cfg.CronFile, body.Job); err != nil {

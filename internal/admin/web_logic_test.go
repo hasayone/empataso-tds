@@ -485,6 +485,8 @@ eq(serviceBadge('ip_lists', {status:{jobs:{ip_lists:{last_run:'2020-01-02T00:00:
 eq(serviceBadge('disk', {status:{jobs:{disk:{last_run:'2020-01-02T00:00:00Z', ok:false, error:'full'}}}}).key, 'failed', 'ran without next');
 eq(serviceBadge('disk', {config_error:'x', telegram_configured:false, status:{jobs:{disk:{last_run:'2020-01-02T00:00:00Z', next_run:'2020-01-03T00:00:00Z'}}}}).key, 'cron.cfgerr', 'config before next');
 eq(serviceBadge('conversions', {status:{jobs:{conversions:{last_run:'0001-01-01T00:00:00Z'}}}}).key, 'cron.first', 'zero time is the first run');
+eq(serviceBadge('keitaro_sync', {keitaro_configured:false}), {key:'cron.ktsync.off', title:''}, 'keitaro sync off without integration');
+eq(serviceBadge('keitaro_sync', {keitaro_configured:true, status:{jobs:{keitaro_sync:{last_run:'2020-01-02T00:00:00Z', next_run:'2020-01-03T00:00:00Z', ok:true}}}}).key, 'cron.next', 'keitaro sync next run');
 
 eq(shareSum([60,'40',-5,'x',12.6]), 113, 'shares: rounded, a bad or negative value counts as 0');
 eq(shareSum([]), 0, 'shares: empty list');

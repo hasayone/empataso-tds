@@ -2,9 +2,11 @@
 
 # STATUS — where we are and how to continue
 
-Snapshot as of 2026-09-30. For details: `docs/USAGE.md`, `TODO.md`.
+Snapshot as of 2026-10-21. For details: `docs/USAGE.md`, `TODO.md`.
 
 ## Done (in `main`, tests green)
+- **Admin on admin.<domain>**: primary or admin/both role → `https://admin.<domain>/`, proxied `admin` A in Cloudflare, nginx accepts admin.* only from Cloudflare, `KUZTDS_ADMIN_TRUSTED_PROXIES`, `/healthz` with `X-Kuztds-Service: admin`, login on admin.* without Redis — 503. Docs: `docs/wiki/namecheap.md`, `admin-api.md`.
+- **Keitaro catch-up**: `keitaro_sync` job in admin (`keitaro-sync.json`, click dedup, locks with import/purge, cron Conversions skips the tracker import domain). Docs: `docs/wiki/keitaro.md`.
 - **Phases 1–7**: ipindex (+hot-reload), realip, geo (mmdb/Nop) + detect
   (device/OS/browser/brand + bots), router (rule-based stream selection),
   store/logbuf (ClickHouse + Redis), admin API + embedded SPA, render +

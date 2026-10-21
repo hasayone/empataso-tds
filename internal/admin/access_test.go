@@ -105,6 +105,7 @@ var cookieOnlyRoutes = map[string]bool{
 	"PUT /api/cloudflare":                     true,
 	"POST /api/cloudflare/test":               true,
 	"POST /api/domains/{id}/cloudflare":       true,
+	"POST /api/domains/{id}/admin-dns":        true,
 	"POST /api/domains/connected/ack":         true,
 }
 

@@ -89,6 +89,7 @@ services:
       KEITARO_BASE_URL: ${KEITARO_BASE_URL:-}
       KEITARO_API_KEY: ${KEITARO_API_KEY:-}
       KUZTDS_PUBLIC_IP: ${KUZTDS_PUBLIC_IP:-}
+      KUZTDS_ADMIN_TRUSTED_PROXIES: ${KUZTDS_ADMIN_TRUSTED_PROXIES:-}
     volumes:
       - kuztds_state:/var/lib/kuztds
     networks:

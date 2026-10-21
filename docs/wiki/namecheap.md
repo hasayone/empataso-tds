@@ -87,9 +87,21 @@
 
 Когда домен впервые стал OK, на любой странице один раз появляется окно «Домен подключён» с кнопками «Понятно» и «Перейти к доменам»; отметка `connect_seen` общая для всех пользователей (`POST /api/domains/connected/ack`).
 
+### Адрес админки (admin.<домен>)
+
+Если домен **основной** (`primary`) или роль **«Админка»** / **«Админка и ссылки»** (`admin` / `both`) и строка **не выключена**, панель открывается по `https://admin.<домен>/`. Сам `<домен>` целиком остаётся у движка: клики, лендинги, постбеки и `GET https://<домен>/healthz` с заголовком `X-Kuztds-Service: engine` не меняются. Хост в каталоге не может начинаться с `admin.` — поддомен вычисляется сервером (`admin_host` в API).
+
+После подключения Cloudflare, сохранения домена с ролью админки или активации зоны админка в фоне создаёт **проксируемую A-запись** `admin.<домен>` на `KUZTDS_PUBLIC_IP` (тот же механизм, что A `@`). Запись с **чужим IP** не перезаписывается (`admin record points to another server`); **CNAME** на этом имени тоже не трогают. Повтор — кнопка «Создать запись admin» или `POST /api/domains/{id}/admin-dns` (доступ как у подключения Cloudflare). В строке домена: `admin_dns` (`ok` или текст ошибки), после проверки — `admin_ok` и `admin_reason` (`dns`, `tls`, `connect`, `foreign`). Сертификаты на сервере не выпускают: у посетителя Universal SSL Cloudflare, до origin — режим **Full** с самоподписанным сертификатом.
+
+`GET https://admin.<домен>/healthz` без входа отвечает `ok`, `X-Kuztds-Host` и **`X-Kuztds-Service: admin`**. Запрос на `admin.*`, не привязанный к включённому основному/админ-домену, — **404**. **Вход по паролю** на `admin.*` без Redis (лимит входа не в общем хранилище) — **503** `login unavailable`; с Redis лимит считает IP посетителя по **X-Forwarded-For** (крайний справа недоверенный адрес), **`CF-Connecting-IP` не читается**.
+
+Запасной вход по **IP сервера** (как раньше) сохраняется. На edge nginx vhost `admin.*` (`deploy/nginx/kuztds-admin-host.conf`) пропускает только трафик с адресов Cloudflare; иначе **444**. Ключ **`KUZTDS_ADMIN_TRUSTED_PROXIES`** (CIDR через запятую) задаёт доверенные прокси для admin; **неверный CIDR — процесс admin не стартует**. `apply-edge.sh` дописывает ключ в `/etc/kuztds/server.env` рядом с `KUZTDS_TRUSTED_PROXIES`; в compose он пробрасывается в контейнер admin.
+
+Подробнее про поля API — [admin-api](admin-api.md). Регистрация и Cloudflare — разделы выше.
+
 ### Сервер и nginx
 
-Nginx отдаёт любые домены на 443 движку (`deploy/nginx/kuztds-engine.conf`, `default_server`); админка — только по IP. IP посетителя для запросов от Cloudflare берётся из `CF-Connecting-IP` (диапазоны в `deploy/nginx/cloudflare-ips.txt`). Применение: `bash deploy/apply-edge.sh` (бэкап конфигов, `nginx -t`, откат при ошибке); nginx на сервере вручную не править.
+Nginx отдаёт любые **не-admin** домены на 443 движку (`deploy/nginx/kuztds-engine.conf`, `default_server`); **`admin.*`** — на admin (`127.0.0.1:8090`). IP посетителя для запросов от Cloudflare берётся из `CF-Connecting-IP` (диапазоны в `deploy/nginx/cloudflare-ips.txt`). Применение: `bash deploy/apply-edge.sh` (бэкап конфигов, `nginx -t`, откат при ошибке); nginx на сервере вручную не править.
 
 ## Тесты
 

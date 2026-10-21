@@ -33,6 +33,7 @@ const (
 	JobDisk        = "disk"
 	JobCleanup     = "cleanup"
 	JobConversions = "conversions"
+	JobKeitaroSync = "keitaro_sync"
 	// JobTelegramTest is not scheduled: it exists so the admin panel can ask
 	// for a test message.
 	JobTelegramTest = "telegram_test"
@@ -40,6 +41,13 @@ const (
 
 // Jobs lists the scheduled jobs in display order.
 var Jobs = []string{JobIPLists, JobGeoDB, JobVirusTotal, JobDisk, JobCleanup, JobConversions}
+
+// AdminJobs lists tasks configured in cron.json but executed only by the admin
+// process (not by this cron runner).
+var AdminJobs = []string{JobKeitaroSync}
+
+// MaxKeitaroSyncInterval is the longest allowed keitaro_sync period, in minutes (7 days).
+const MaxKeitaroSyncInterval = 10080
 
 // Config is the whole cron configuration (one JSON file).
 type Config struct {
@@ -50,6 +58,13 @@ type Config struct {
 	Disk        Disk        `json:"disk"`
 	Cleanup     Cleanup     `json:"cleanup"`
 	Conversions Conversions `json:"conversions"`
+	KeitaroSync KeitaroSync `json:"keitaro_sync"`
+}
+
+// KeitaroSync — periodic log catch-up from Keitaro (admin executor only).
+type KeitaroSync struct {
+	Enabled      bool `json:"enabled"`
+	EveryMinutes int  `json:"every_minutes"`
 }
 
 // Telegram — where notifications go.
@@ -173,6 +188,59 @@ func Default() Config {
 		Disk:        Disk{EveryMinutes: 10, MinFreePercent: 10},
 		Cleanup:     Cleanup{EveryMinutes: 24 * 60, KeysDays: 30},
 		Conversions: Conversions{EveryMinutes: 1, Template: DefaultConversionTemplate},
+		KeitaroSync: KeitaroSync{EveryMinutes: 15},
+	}
+}
+
+// Floors returns a copy of minimum schedule intervals in minutes for each job.
+// The ceiling for keitaro_sync is MaxKeitaroSyncInterval, enforced in CheckIntervals.
+func Floors() map[string]int {
+	out := make(map[string]int, len(minInterval))
+	for job, m := range minInterval {
+		out[job] = m
+	}
+	return out
+}
+
+// CheckIntervals rejects enabled jobs whose every_minutes is below the floor.
+// keitaro_sync is also capped at MaxKeitaroSyncInterval when enabled.
+// Validate does not call this; the admin uses it before saving cron.json.
+// Returns nil when every enabled job is within bounds.
+func CheckIntervals(cfg Config) error {
+	for _, job := range append(append([]string{}, Jobs...), AdminJobs...) {
+		if !cfg.Enabled(job) {
+			continue
+		}
+		m := cfg.intervalMinutes(job)
+		if lo := minInterval[job]; m < lo {
+			return fmt.Errorf("%s: interval %d min is below minimum %d min", job, m, lo)
+		}
+		if job == JobKeitaroSync && m > MaxKeitaroSyncInterval {
+			return fmt.Errorf("%s: interval %d min exceeds maximum %d min", job, m, MaxKeitaroSyncInterval)
+		}
+	}
+	return nil
+}
+
+// intervalMinutes reads every_minutes from cfg for job without clamping.
+func (c Config) intervalMinutes(job string) int {
+	switch job {
+	case JobIPLists:
+		return c.IPLists.EveryMinutes
+	case JobGeoDB:
+		return c.GeoDB.EveryMinutes
+	case JobVirusTotal:
+		return c.VirusTotal.EveryMinutes
+	case JobDisk:
+		return c.Disk.EveryMinutes
+	case JobCleanup:
+		return c.Cleanup.EveryMinutes
+	case JobConversions:
+		return c.Conversions.EveryMinutes
+	case JobKeitaroSync:
+		return c.KeitaroSync.EveryMinutes
+	default:
+		return 0
 	}
 }
 
@@ -180,27 +248,18 @@ func Default() Config {
 // someone else's API.
 var minInterval = map[string]int{
 	JobIPLists: 10, JobGeoDB: 60, JobVirusTotal: 30, JobDisk: 1, JobCleanup: 60, JobConversions: 1,
+	JobKeitaroSync: 5,
 }
 
-// Interval returns the job's period, never below its minimum.
+// Interval returns the job's period, clamped to its floor and, for
+// keitaro_sync, to MaxKeitaroSyncInterval.
 func (c Config) Interval(job string) time.Duration {
-	var m int
-	switch job {
-	case JobIPLists:
-		m = c.IPLists.EveryMinutes
-	case JobGeoDB:
-		m = c.GeoDB.EveryMinutes
-	case JobVirusTotal:
-		m = c.VirusTotal.EveryMinutes
-	case JobDisk:
-		m = c.Disk.EveryMinutes
-	case JobCleanup:
-		m = c.Cleanup.EveryMinutes
-	case JobConversions:
-		m = c.Conversions.EveryMinutes
-	}
+	m := c.intervalMinutes(job)
 	if lo := minInterval[job]; m < lo {
 		m = lo
+	}
+	if job == JobKeitaroSync && m > MaxKeitaroSyncInterval {
+		m = MaxKeitaroSyncInterval
 	}
 	return time.Duration(m) * time.Minute
 }
@@ -220,6 +279,8 @@ func (c Config) Enabled(job string) bool {
 		return c.Cleanup.Enabled
 	case JobConversions:
 		return c.Conversions.Enabled
+	case JobKeitaroSync:
+		return c.KeitaroSync.Enabled
 	}
 	return false
 }

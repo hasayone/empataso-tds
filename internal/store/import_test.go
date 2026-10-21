@@ -125,6 +125,60 @@ func TestConversionColumnsExt(t *testing.T) {
 	}
 }
 
+func TestNormalizeCHDateTime(t *testing.T) {
+	if !normalizeCHDateTime(time.Unix(0, 0)).IsZero() {
+		t.Fatal("epoch must become zero")
+	}
+	fixed := time.Date(2024, 1, 2, 3, 0, 0, 0, time.UTC)
+	if !normalizeCHDateTime(fixed).Equal(fixed) {
+		t.Fatal("real ts must stay")
+	}
+}
+
+func TestInitialWatermarkEmptyDomain(t *testing.T) {
+	c := &CH{}
+	clicks, conv, err := c.InitialWatermark(context.Background(), "")
+	if err != nil || !clicks.IsZero() || !conv.IsZero() {
+		t.Fatalf("empty domain: clicks=%v conv=%v err=%v", clicks, conv, err)
+	}
+}
+
+func TestInitialWatermarkNilClient(t *testing.T) {
+	var c *CH
+	if _, _, err := c.InitialWatermark(context.Background(), "host"); err == nil {
+		t.Fatal("nil client must error")
+	}
+}
+
+func TestExistingCIDsGuards(t *testing.T) {
+	c := &CH{}
+	from, to := time.Now().Add(-time.Hour), time.Now()
+	out, err := c.ExistingCIDs(context.Background(), "", from, to, []string{"a"})
+	if err != nil || len(out) != 0 {
+		t.Fatalf("empty domain: %v %v", out, err)
+	}
+	out, err = c.ExistingCIDs(context.Background(), "host", from, to, nil)
+	if err != nil || len(out) != 0 {
+		t.Fatalf("empty cids: %v %v", out, err)
+	}
+	var nilCH *CH
+	if _, err := nilCH.ExistingCIDs(context.Background(), "host", from, to, []string{"a"}); err == nil {
+		t.Fatal("nil client must error")
+	}
+}
+
+func TestPostbackWhereExcludeDomain(t *testing.T) {
+	where, args := postbackWhere(PostbackQuery{
+		From: time.Unix(1, 0), To: time.Unix(2, 0), ExcludeDomain: "keitaro.local",
+	}, false)
+	if !strings.Contains(where, "domain != ?") {
+		t.Fatalf("where = %q", where)
+	}
+	if len(args) != 3 || args[2] != "keitaro.local" {
+		t.Fatalf("args = %v", args)
+	}
+}
+
 func TestPurgeImportedEmptyDomain(t *testing.T) {
 	c := &CH{}
 	if err := c.PurgeImported(context.Background(), ""); err == nil {
