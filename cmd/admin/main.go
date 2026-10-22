@@ -148,6 +148,7 @@ func applyDataFiles(cfg *admin.Config, groupsFile string, log *slog.Logger) {
 	cfg.SpendPath = getenv("KUZTDS_SPEND_FILE", filepath.Join(dir, "spend.json"))
 	cfg.BotPath = getenv("KUZTDS_BOT_FILE", filepath.Join(dir, "bot_protection.json"))
 	cfg.UIPath = getenv("KUZTDS_UI_FILE", filepath.Join(dir, "ui.json"))
+	cfg.ViewsPath = getenv("KUZTDS_VIEWS_FILE", filepath.Join(dir, "views.json"))
 	pagesDir := getenv("KUZTDS_PAGES_DIR", filepath.Join(dir, "pages"))
 	cfg.Pages = admin.NewFilePages(pagesDir)
 	log.Info("pages dir", "path", pagesDir)

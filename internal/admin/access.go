@@ -101,6 +101,8 @@ func buildRouteAccess() map[string]routeRule {
 func addCoreRoutes(m map[string]routeRule, open func() routeRule, rule func(section) routeRule) {
 	m["POST /api/logout"] = open()
 	m["GET /api/me"] = open()
+	m["GET /api/me/views"] = open()
+	m["PUT /api/me/views"] = open()
 	m["POST /api/password"] = open()
 	m["GET /api/notices"] = open()
 	m["GET /api/log-fields"] = open()

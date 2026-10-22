@@ -457,6 +457,42 @@ func TestCronKeitaroSyncPanel(t *testing.T) {
 	}
 }
 
+func TestCronKeitaroSyncStateInGet(t *testing.T) {
+	dir := t.TempDir()
+	syncFile := filepath.Join(dir, "keitaro-sync.json")
+	hash, _ := security.HashPassword("p@ss")
+	s, err := New(Config{
+		AdminUser: "admin", PasswordHash: hash, Sessions: security.NewMemoryStore(),
+		Limiter: allowAll{}, SessionTTL: time.Hour,
+		KeitaroSyncFile: syncFile,
+		KeitaroBase:     "http://tracker.example", KeitaroKey: "secret-key",
+		Warehouse: &fakeSink{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	jar, _ := cookiejar.New(nil)
+	c := &http.Client{Jar: jar}
+	login(t, c, srv.URL, "admin", "p@ss")
+
+	clicksTo := time.Date(2024, 6, 1, 12, 0, 0, 0, time.UTC)
+	if err := s.saveKeitaroSync(keitaroSyncFile{
+		Host: "tracker.example", Running: true, ClicksTo: clicksTo,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := getCron(t, c, srv.URL)
+	if st.KeitaroSyncState == nil || st.KeitaroSyncState.ClicksTo != clicksTo {
+		t.Fatalf("keitaro_sync_state clicks_to: %+v", st.KeitaroSyncState)
+	}
+	job := st.Status.Jobs[cron.JobKeitaroSync]
+	if !job.Running {
+		t.Fatalf("job running: %+v", job)
+	}
+}
+
 func TestCronSaveKeitaroSyncNullPreserves(t *testing.T) {
 	dir := t.TempDir()
 	cronFile := filepath.Join(dir, "cron.json")

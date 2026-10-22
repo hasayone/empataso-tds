@@ -74,6 +74,8 @@ func TestRouteAccessCoversEveryRoute(t *testing.T) {
 var cookieOnlyRoutes = map[string]bool{
 	"POST /api/logout":               true,
 	"GET /api/me":                    true,
+	"GET /api/me/views":              true,
+	"PUT /api/me/views":              true,
 	"POST /api/password":             true,
 	"GET /api/api-keys":              true,
 	"POST /api/api-keys":             true,

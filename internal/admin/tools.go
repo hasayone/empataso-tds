@@ -416,6 +416,7 @@ type cronState struct {
 	TelegramConfigured bool   `json:"telegram_configured"`    // stored token and chat id are both set
 	KeitaroConfigured  bool   `json:"keitaro_configured"`     // tracker origin and key are both set
 	ConfigError        string `json:"config_error,omitempty"` // Validate failure; never includes a secret
+	KeitaroSyncState   *keitaroSyncFile `json:"keitaro_sync_state,omitempty"` // catch-up cursors; no secrets
 }
 
 // cronAliveWindow — the service ticks every few seconds; a heartbeat older
@@ -449,6 +450,7 @@ func (s *Server) handleCronGet(w http.ResponseWriter, r *http.Request) {
 	}
 	if syncSt, ok, err := s.loadKeitaroSync(); err == nil && ok {
 		st.Status.Jobs[cron.JobKeitaroSync] = s.keitaroSyncJobStatus(syncSt)
+		st.KeitaroSyncState = &syncSt
 	}
 	s.fillCronPanel(&st, cfg)
 	writeJSON(w, http.StatusOK, st)

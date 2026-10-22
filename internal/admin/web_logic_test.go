@@ -487,6 +487,51 @@ eq(serviceBadge('disk', {config_error:'x', telegram_configured:false, status:{jo
 eq(serviceBadge('conversions', {status:{jobs:{conversions:{last_run:'0001-01-01T00:00:00Z'}}}}).key, 'cron.first', 'zero time is the first run');
 eq(serviceBadge('keitaro_sync', {keitaro_configured:false}), {key:'cron.ktsync.off', title:''}, 'keitaro sync off without integration');
 eq(serviceBadge('keitaro_sync', {keitaro_configured:true, status:{jobs:{keitaro_sync:{last_run:'2020-01-02T00:00:00Z', next_run:'2020-01-03T00:00:00Z', ok:true}}}}).key, 'cron.next', 'keitaro sync next run');
+const cronIds=['telegram','ip_lists','geo_db','conversions'];
+eq(cronCardOrder(cronIds, ['geo_db','telegram']), ['geo_db','telegram','ip_lists','conversions'], 'cronCardOrder saved reorders known ids');
+eq(cronCardOrder(cronIds, ['nope','telegram']), ['telegram','ip_lists','geo_db','conversions'], 'cronCardOrder drops unknown saved ids');
+eq(cronCardOrder(cronIds, ['telegram','ip_lists','keitaro_sync']), ['telegram','ip_lists','geo_db','conversions'], 'cronCardOrder appends new default ids');
+eq(cronCardOrder(cronIds, null), cronIds, 'cronCardOrder null saved keeps default');
+eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram','ip_lists','conversions'], 'cronCardOrder collapses duplicate saved ids');
+{
+  const def = defaultPageViewState();
+  const st = applyPageViews({
+    bogus: 1,
+    range: { id: 'nope' },
+    flows: { sort: { k: 'name', dir: 1 }, q: 'casino', state: 'on', source: 's1', folder: 'f1' },
+    logs: { conds: [{ f: 'ip', op: 'eq', v: ['203.0.113.1'] }] },
+    offers: { sort: 'name' },
+  }, def);
+  eq(st.flows.sort, { k: 'name', dir: 1 }, 'page views flows sort');
+  eq(st.flows.q, 'casino', 'page views flows search');
+  eq(st.flows.state, 'on', 'page views flows state');
+  eq(st.range.id, 'today', 'page views bad range id dropped');
+  eq(st.offers.sort, def.offers.sort, 'page views bad sort type dropped');
+  eq(st.logs.conds.length, 1, 'page views log conds kept');
+  const put = collectPageViews(st);
+  eq(put.dashboard.psort.k, 'conv', 'page views collect dashboard psort');
+  eq(put.flows.sort, { k: 'name', dir: 1 }, 'page views collect flows sort');
+  eq(put.logs.conds[0].f, 'ip', 'page views collect log conds');
+  eq('bogus' in put, false, 'page views unknown key not collected');
+  const st2 = applyPageViews(put, def);
+  eq(st2.flows.sort, { k: 'name', dir: 1 }, 'page views round trip flows sort');
+  const withCamp = JSON.parse(JSON.stringify(st));
+  withCamp.logs.conds.push({ f: 'campaign_id', op: 'eq', v: ['g1'] });
+  eq(collectPageViews(withCamp).logs.conds.some(c => c.f === 'campaign_id'), true, 'page views manual campaign cond saved');
+  eq(applyPageViews({ range: { id: 'week' } }, def).range.id, 'week', 'page views period week');
+}
+eq(postbackBase('admin.emasotds.online','https:','https://admin.emasotds.online','http://admin.emasotds.online:8080'), 'https://admin.emasotds.online', 'postback base drops the engine port');
+eq(postbackBase('127.0.0.1','http:','http://127.0.0.1:8090','http://127.0.0.1:8080'), 'http://127.0.0.1:8080', 'postback base on localhost stays the engine');
+eq(serviceBadge('disk', {status:{jobs:{disk:{last_run:'2020-01-02T00:00:00Z', running:true, ok:false, message:'old', next_run:'2020-01-03T00:00:00Z'}}}}).key, 'Running…', 'running before stale next_run');
+eq(cronJobOutcome({last_run:'2020-01-02T00:00:00Z', running:true, ok:false, message:'old'}).badgeKey, 'Running…', 'outcome running badge');
+eq(cronJobOutcome({last_run:'2020-01-02T00:00:00Z', running:true, ok:false, message:'old'}).resultKey, null, 'outcome running hides fail');
+eq(cronJobOutcome({last_run:'2020-01-02T00:00:00Z', running:true, ok:false, message:'old'}).message, '', 'outcome running drops stale message');
+eq(cronJobOutcome({last_run:'2020-01-02T00:00:00Z', ok:true, message:'ok'}).resultKey, null, 'outcome ok with message');
+eq(cronJobOutcome({last_run:'2020-01-02T00:00:00Z', ok:true, message:'ok'}).badgeKey, 'done', 'outcome ok badge');
+eq(cronJobOutcome({last_run:'2020-01-02T00:00:00Z', ok:false, error:'x'}).resultKey, 'failed', 'outcome fail');
+eq(cronJobOutcome({last_run:'2020-01-02T00:00:00Z', ok:false, error:'x'}).dot, 'bad', 'outcome fail dot');
+const runLine=(j)=>{const o=cronJobOutcome(j); return o.running?'Running…':(o.message?'msg':(o.resultKey||''));};
+eq(runLine({last_run:'2020-01-02T00:00:00Z', running:true, ok:false}), 'Running…', 'status line running not failed');
 
 eq(shareSum([60,'40',-5,'x',12.6]), 113, 'shares: rounded, a bad or negative value counts as 0');
 eq(shareSum([]), 0, 'shares: empty list');

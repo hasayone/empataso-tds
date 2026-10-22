@@ -732,6 +732,26 @@ func TestSpaAdminHost(t *testing.T) {
 	must(t, spaFunctionLine(html, "domainCell"), "domainAdminHostHTML(d)", "host cell shows admin badge")
 }
 
+// TestSpaAutomationLayout checks automation masonry, card headers, arrange mode and keitaro hints.
+func TestSpaAutomationLayout(t *testing.T) {
+	html := spaSource()
+	must(t, html, "column-count:2", "automation two-column masonry")
+	must(t, html, `id="cron-arrange"`, "arrange settings control")
+	must(t, html, "hd-act", "job header actions wrapper")
+	must(t, html, "function cronCardOrder(", "cron card order helper")
+	must(t, html, "kuztds-cron-order", "cron order storage key")
+	for _, key := range []string{"cron.arrange", "cron.arrange.done", "cron.arrange.reset", "cron.arrange.hint"} {
+		for _, lang := range []string{"en", "ru", "uk"} {
+			if !trKeyDefined(html, lang, key) {
+				t.Errorf("missing %s in %s", key, lang)
+			}
+		}
+	}
+	syncFn := spaFunctionLine(html, "keitaroSyncCursorsHTML")
+	mustNot(t, syncFn, "last_clicks", "keitaro sync card does not repeat last run counts")
+	mustNot(t, syncFn, "cron.ktsync.last", "keitaro sync card does not repeat last run message")
+}
+
 // TestSpaKeitaroCron checks the Keitaro catch-up card on automation and import dock behaviour.
 func TestSpaKeitaroCron(t *testing.T) {
 	html := spaSource()
@@ -751,7 +771,7 @@ func TestSpaKeitaroCron(t *testing.T) {
 	must(t, spaFunctionLine(html, "cronJobDisabled"), "job==='conversions'", "conversions toggle guard")
 	must(t, spaFunctionLine(html, "cronFloor"), "CRONST.floors", "interval floor from API")
 	must(t, spaFunctionLine(html, "cronApplyInterval"), "cronFloor(job)", "clamp interval to floor")
-	must(t, spaFunctionLine(html, "paintAutomation"), "cronJobDisabled(job, CRONST)", "automation disables jobs")
+	must(t, spaFunctionLine(html, "cronJobCardHTML"), "cronJobDisabled(job, CRONST)", "automation disables jobs")
 	must(t, spaFunctionLine(html, "paintAutomation"), "cronApplyInterval(j)", "all jobs clamped on paint")
 	must(t, spaFunctionLine(html, "jobBody"), "case 'keitaro_sync'", "keitaro_sync card body")
 	must(t, spaFunctionLine(html, "jobBody"), "keitaroSyncNeedImport(CRONST)", "full import banner")
@@ -760,6 +780,21 @@ func TestSpaKeitaroCron(t *testing.T) {
 	must(t, html, "'идёт актуализация':'kt.sync.busy'", "sync busy server text")
 	must(t, spaFunctionLine(html, "ktDockTick"), "!job.sync_running", "import dock ignores sync_running")
 	must(t, spaFunctionLine(html, "ktDockPaint"), "!j.sync_running", "import progress ignores sync_running")
+}
+
+// TestSpaPageViews checks server-backed page views: load route, debounced save hooks, no range in localStorage.
+func TestSpaPageViews(t *testing.T) {
+	html := spaSource()
+	must(t, html, "'/api/me/views'", "views API route in SPA")
+	must(t, spaFunctionLine(html, "loadUserPageViews"), "'/api/me/views'", "views load after login")
+	must(t, spaFunctionLine(html, "touchPageViews"), "call('PUT','/api/me/views'", "debounced PUT")
+	must(t, spaFunctionLine(html, "bindSort"), "touchPageViews()", "sort changes touch views")
+	must(t, spaFunctionLine(html, "applyRange"), "touchPageViews()", "period changes touch views")
+	mustNot(t, spaFunctionLine(html, "applyRange"), "localStorage.setItem(RANGE_KEY", "range is not stored locally")
+	must(t, html, "LOGF.conds=[]", "logs reset clears filters explicitly")
+	mustNot(t, spaFunctionLine(html, "logs"), "if(!hold){LOG_PAGE_I=0; LOGF={conds:[]}", "logs keep filters on normal entry")
+	mustNot(t, spaFunctionLine(html, "conversions"), "if(!hold){PB={conds:[]", "conversions keep filters on normal entry")
+	mustNot(t, spaFunctionLine(html, "report"), "if(!hold) REP={conds:[]", "report keeps filters on normal entry")
 }
 
 // TestConnectedPopup checks the popup that reports newly connected domains: one timer per tab,

@@ -622,7 +622,7 @@ func TestCatalogNames(t *testing.T) {
 	must(t, rep, "reportCellText(", "report table and export share the cell text")
 	must(t, rep, "loadCols('report')", "report export uses the visible columns")
 	mustNot(t, rep, "r.group,r.stream,r.country", "report export does not dump raw ids")
-	must(t, conv, "f:'campaign_id'", "conversion filter uses campaign id")
+	must(t, spaFunctionLine(html, "pbCondsForQuery"), "f:'campaign_id'", "conversion filter uses campaign id")
 	mustNot(t, conv, "f:'campaign',", "conversion filter is not the campaign name")
 	must(t, conv, "nameOf(GROUPS, PB.campaignId)", "conversion title is the campaign name")
 	must(t, pb, "dockTotal(r", "conversion counter uses the filtered count")
@@ -1024,6 +1024,8 @@ func TestSPASettingsPickers(t *testing.T) {
 	if pb == "" {
 		t.Fatal("openPostbacks missing")
 	}
+	must(t, pb, "postbackOrigin()", "popup postback uses the public origin")
+	must(t, html, "function postbackBase(", "postback base helper")
 	must(t, pb, "status=lead", "lead postback in the popup")
 	leadOK := false
 	for _, line := range strings.Split(pb, "\n") {

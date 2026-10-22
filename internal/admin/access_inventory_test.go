@@ -217,6 +217,7 @@ func TestEveryStoredTypeIsInTheMacroInventory(t *testing.T) {
 var writeRouteGuard = map[string]string{
 	"POST /api/logout":                          "session only, stores nothing",
 	"POST /api/password":                        "own password",
+	"PUT /api/me/views":                         "own sort and filter state, never expanded",
 	"PUT /api/groups":                           "validateGroupMacros, validateGroupParams",
 	"PUT /api/groups/{id}":                      "validateGroupMacros, validateGroupParams",
 	"DELETE /api/groups/{id}":                   "removes a campaign",

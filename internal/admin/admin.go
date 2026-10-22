@@ -135,6 +135,7 @@ type Config struct {
 	SpendPath    string
 	BotPath      string
 	UIPath       string
+	ViewsPath    string
 	Lists        ListsStore
 	Pages        PagesStore
 	Manifest     ManifestStore
@@ -448,6 +449,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	s.handle(mux, "POST /api/logout", cookieOnly(http.HandlerFunc(s.handleLogout)))
 	s.handle(mux, "GET /api/me", cookieOnly(http.HandlerFunc(s.handleMe)))
+	s.handle(mux, "GET /api/me/views", cookieOnly(http.HandlerFunc(s.handleViewsGet)))
+	s.handle(mux, "PUT /api/me/views", cookieOnly(http.HandlerFunc(s.handleViewsPut)))
 	s.handle(mux, "POST /api/password", cookieOnly(http.HandlerFunc(s.handlePassword)))
 	registerAPIKeys(s, mux)
 	registerUsers(s, mux)

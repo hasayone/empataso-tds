@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/egerkuzma/kuztds/internal/admin"
 )
 
 func TestDomainWatchInterval(t *testing.T) {
@@ -26,6 +28,23 @@ func TestDomainWatchInterval(t *testing.T) {
 		if got := domainWatchInterval(raw, log); got != want {
 			t.Errorf("%q: got %v, want %v", raw, got, want)
 		}
+	}
+}
+
+func TestViewsFileDefaultPath(t *testing.T) {
+	dir := t.TempDir()
+	groups := filepath.Join(dir, "groups.json")
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var cfg admin.Config
+	applyDataFiles(&cfg, groups, log)
+	want := filepath.Join(dir, "views.json")
+	if cfg.ViewsPath != want {
+		t.Fatalf("default views path: got %q want %q", cfg.ViewsPath, want)
+	}
+	t.Setenv("KUZTDS_VIEWS_FILE", filepath.Join(dir, "custom-views.json"))
+	applyDataFiles(&cfg, groups, log)
+	if cfg.ViewsPath != filepath.Join(dir, "custom-views.json") {
+		t.Fatalf("env override: %q", cfg.ViewsPath)
 	}
 }
 

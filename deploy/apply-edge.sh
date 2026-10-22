@@ -199,7 +199,7 @@ render_cloudflare_snippets() {
 render_nginx_configs() {
 	local dest=$1 public_ip=$2 upstream=$3
 	sed "s/__PUBLIC_IP__/${public_ip}/g" "$EDGE_TEMPLATE_ADMIN" >"${dest}/kuztds.conf"
-	cp "$EDGE_TEMPLATE_ADMIN_HOST" "${dest}/kuztds-admin-host.conf"
+	sed "s/__ENGINE_UPSTREAM__/${upstream}/g" "$EDGE_TEMPLATE_ADMIN_HOST" >"${dest}/kuztds-admin-host.conf"
 	sed "s/__ENGINE_UPSTREAM__/${upstream}/g" "$EDGE_TEMPLATE_ENGINE" >"${dest}/kuztds-engine.conf"
 }
 

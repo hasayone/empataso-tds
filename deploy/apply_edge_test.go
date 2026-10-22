@@ -113,6 +113,8 @@ func TestNginxAdminHostTemplate(t *testing.T) {
 		"return 444",
 		"client_max_body_size 64m",
 		"proxy_pass http://127.0.0.1:8090",
+		"location = /postback",
+		"proxy_pass http://__ENGINE_UPSTREAM__",
 		"proxy_set_header X-Forwarded-For $remote_addr",
 		`proxy_set_header CF-Connecting-IP ""`,
 		`proxy_set_header CF-IPCountry ""`,
@@ -221,6 +223,15 @@ func TestApplyEdgeCheckMode(t *testing.T) {
 	}
 	if !strings.Contains(outS, "proxy_pass http://127.0.0.1:8090") {
 		t.Fatalf("--check: admin upstream 8090 не в выводе:\n%s", out)
+	}
+	adminAt := strings.Index(outS, "===== kuztds-admin-host.conf =====")
+	engineAt := strings.Index(outS, "===== kuztds-engine.conf =====")
+	if adminAt < 0 || engineAt < adminAt {
+		t.Fatalf("--check: нет блока admin-host перед engine:\n%s", out)
+	}
+	adminHost := outS[adminAt:engineAt]
+	if !strings.Contains(adminHost, "location = /postback") || !strings.Contains(adminHost, "proxy_pass http://127.0.0.1:18080") {
+		t.Fatalf("--check: /postback не проксируется на движок:\n%s", adminHost)
 	}
 }
 
