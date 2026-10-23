@@ -165,6 +165,94 @@ func TestViewsUnknownPageDropped(t *testing.T) {
 	}
 }
 
+// TestViewsAccountTablesStored checks that the users, roles and keywords sorts and the column sets
+// inside the page objects are kept as sent, that an unknown page key is dropped, and that a second
+// account with its own sort and columns neither sees nor overwrites the first one.
+func TestViewsAccountTablesStored(t *testing.T) {
+	viewsPath := filepath.Join(t.TempDir(), "views.json")
+	_, base := viewsServer(t, viewsPath)
+	adminC, adminCSRF := authedClient(t, base)
+
+	body := map[string]any{
+		"flows": map[string]any{
+			"sort": map[string]any{"k": "name", "dir": 1},
+			"cols": []map[string]any{{"id": "name", "on": true}, {"id": "hits", "on": false}},
+			"view": "grid", "compact": true, "page": 250,
+		},
+		"logs":     map[string]any{"cols": []map[string]any{{"id": "ts", "on": true}}, "page": 500, "pblogSort": map[string]any{"k": "ts", "dir": -1}},
+		"users":    map[string]any{"sort": map[string]any{"k": "login", "dir": 1}},
+		"roles":    map[string]any{"sort": map[string]any{"k": "name", "dir": -1}},
+		"keywords": map[string]any{"sort": map[string]any{"k": "key", "dir": 1}},
+		"tokens":   map[string]any{"sort": map[string]any{"k": "x", "dir": 1}},
+	}
+	code, got := viewsPut(t, adminC, base, adminCSRF, body)
+	if code != http.StatusOK {
+		t.Fatalf("PUT: %d", code)
+	}
+	if _, ok := got["tokens"]; ok {
+		t.Fatalf("unknown page key must be dropped: %+v", got)
+	}
+	for _, key := range []string{"flows", "logs", "users", "roles", "keywords"} {
+		if len(got[key]) == 0 {
+			t.Fatalf("page %q not stored: %+v", key, got)
+		}
+	}
+
+	code, got = viewsGet(t, adminC, base, adminCSRF)
+	if code != http.StatusOK {
+		t.Fatalf("GET: %d", code)
+	}
+	var flows struct {
+		Sort    map[string]any   `json:"sort"`
+		Cols    []map[string]any `json:"cols"`
+		View    string           `json:"view"`
+		Compact bool             `json:"compact"`
+		Page    int              `json:"page"`
+	}
+	if err := json.Unmarshal(got["flows"], &flows); err != nil {
+		t.Fatalf("decode flows: %v", err)
+	}
+	if flows.Sort["k"] != "name" || len(flows.Cols) != 2 || flows.View != "grid" || !flows.Compact || flows.Page != 250 {
+		t.Fatalf("flows view changed on the way: %s", got["flows"])
+	}
+	if !strings.Contains(string(got["users"]), `"login"`) || !strings.Contains(string(got["keywords"]), `"key"`) {
+		t.Fatalf("users or keywords sort lost: %+v", got)
+	}
+
+	code, _ = userJSON(t, adminC, http.MethodPost, base+"/api/users", adminCSRF,
+		`{"login":"carol","password":"secret1","type":"USER","enabled":true,"access":{"sections":["dashboard"],"grants":{}}}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create carol: %d", code)
+	}
+	jar, _ := cookiejar.New(nil)
+	carolC := &http.Client{Jar: jar}
+	_, carolCSRF := login(t, carolC, base, "carol", "secret1")
+
+	code, got = viewsGet(t, carolC, base, carolCSRF)
+	if code != http.StatusOK || len(got) != 0 {
+		t.Fatalf("carol must start empty: %d %+v", code, got)
+	}
+	code, _ = viewsPut(t, carolC, base, carolCSRF, map[string]any{
+		"flows": map[string]any{"sort": map[string]any{"k": "hits", "dir": -1}, "cols": []map[string]any{{"id": "num", "on": true}}},
+		"users": map[string]any{"sort": map[string]any{"k": "role", "dir": -1}},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("carol PUT: %d", code)
+	}
+
+	_, got = viewsGet(t, adminC, base, adminCSRF)
+	if err := json.Unmarshal(got["flows"], &flows); err != nil {
+		t.Fatalf("decode admin flows: %v", err)
+	}
+	if flows.Sort["k"] != "name" || len(flows.Cols) != 2 || !strings.Contains(string(got["users"]), `"login"`) {
+		t.Fatalf("admin views overwritten by carol: %+v", got)
+	}
+	_, got = viewsGet(t, carolC, base, carolCSRF)
+	if !strings.Contains(string(got["flows"]), `"hits"`) || strings.Contains(string(got["flows"]), `"name"`) || len(got["roles"]) != 0 {
+		t.Fatalf("carol views mixed with admin: %+v", got)
+	}
+}
+
 func TestViewsBodyTooLarge(t *testing.T) {
 	_, base := viewsServer(t, filepath.Join(t.TempDir(), "views.json"))
 	c, csrf := authedClient(t, base)

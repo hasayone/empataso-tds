@@ -31,6 +31,9 @@ var allowedViewPages = map[string]bool{
 	"networks":    true,
 	"sources":     true,
 	"domains":     true,
+	"users":       true,
+	"roles":       true,
+	"keywords":    true,
 }
 
 // viewsFile is the views.json document: page views keyed by user, then by page.

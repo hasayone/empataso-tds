@@ -1056,8 +1056,11 @@ async function callRaw(method,path,body,contentType){
 // get: a read that degrades to a default instead of failing the page.
 const get=(path,def)=>call('GET',path).catch(()=>def);
 
-/** PAGE_VIEWS_READY is true once the saved views were read; until then nothing is written back. */
-let PAGE_VIEWS_USER='', PAGE_VIEWS_TIMER=0, PAGE_VIEWS_LAST_SENT='', PAGE_VIEWS_READY=false;
+/** PAGE_VIEWS_READY is true once the saved views were read; until then nothing is written back.
+ * PAGE_VIEWS_LAST_SENT is the body the server is known to hold; PAGE_VIEWS_QUEUE keeps the PUT requests in order. */
+let PAGE_VIEWS_USER='', PAGE_VIEWS_TIMER=0, PAGE_VIEWS_LAST_SENT='', PAGE_VIEWS_READY=false, PAGE_VIEWS_QUEUE=Promise.resolve();
+/** VIEW_COLS holds the account's column set per catalog kind; null means the account has none and loadCols falls back to UI.cols. */
+const VIEW_COLS={flows:null, logs:null, conv:null, report:null, offers:null, networks:null, landings:null, domains:null};
 /** assignPageSort copies k and dir into an existing sort object used by bindSort.
  * @param {{k:string,dir:number}} target live sort object
  * @param {{k:string,dir:number}} src snapshot sort
@@ -1082,20 +1085,29 @@ function assignPagePSort(target, src){
  * @returns {object} snapshot for collectPageViews
  */
 function pageViewFromGlobals(){
-  return {
+  const sort=s=>({k:s.k, dir:s.dir});
+  const snap={
     range:JSON.parse(JSON.stringify(RANGE)),
     psort:{k:PSORT.k, d:PSORT.d},
-    recentSort:{k:RECENT_SORT.k, dir:RECENT_SORT.dir},
-    flows:{sort:{k:FLOW_SORT.k, dir:FLOW_SORT.dir}, q:FQ, state:FLOW_STATE, source:FLOW_SOURCE, folder:FLOW_FOLDER},
-    logs:{sort:{k:LOG_SORT.k, dir:LOG_SORT.dir}, tab:LOG_TAB, conds:JSON.parse(JSON.stringify(LOGF.conds||[]))},
-    conversions:{sort:{k:PB_SORT.k, dir:PB_SORT.dir}, conds:JSON.parse(JSON.stringify(PB.conds||[]))},
-    report:{sort:{k:REP_SORT.k, dir:REP_SORT.dir}, conds:JSON.parse(JSON.stringify(REP.conds||[]))},
-    offers:{sort:{k:OFF_SORT.k, dir:OFF_SORT.dir}},
-    networks:{sort:{k:NET_SORT.k, dir:NET_SORT.dir}, offersSort:{k:NET_OFF_SORT.k, dir:NET_OFF_SORT.dir}},
-    landings:{sort:{k:LAND_SORT.k, dir:LAND_SORT.dir}},
-    sources:{sort:{k:SRC_SORT.k, dir:SRC_SORT.dir}},
-    domains:{sort:{k:DOM_SORT.k, dir:DOM_SORT.dir}},
+    recentSort:sort(RECENT_SORT),
+    flows:{sort:sort(FLOW_SORT), q:FQ, state:FLOW_STATE, source:FLOW_SOURCE, folder:FLOW_FOLDER, view:FLOW_VIEW, compact:FLOW_COMPACT, page:FLOW_PAGE},
+    logs:{sort:sort(LOG_SORT), tab:LOG_TAB, conds:JSON.parse(JSON.stringify(LOGF.conds||[])), page:LOG_PAGE, pblogSort:sort(PB_LOG_SORT)},
+    conversions:{sort:sort(PB_SORT), conds:JSON.parse(JSON.stringify(PB.conds||[])), page:PB_PAGE},
+    report:{sort:sort(REP_SORT), conds:JSON.parse(JSON.stringify(REP.conds||[]))},
+    offers:{sort:sort(OFF_SORT)},
+    networks:{sort:sort(NET_SORT), offersSort:sort(NET_OFF_SORT)},
+    landings:{sort:sort(LAND_SORT)},
+    sources:{sort:sort(SRC_SORT)},
+    domains:{sort:sort(DOM_SORT), page:DOM_PAGE},
+    users:{sort:sort(USER_SORT)},
+    roles:{sort:sort(ROLE_SORT)},
+    keywords:{sort:sort(KEY_SORT)},
   };
+  Object.keys(PAGE_VIEW_COLS_PAGE).forEach(kind=>{
+    const cols=VIEW_COLS[kind];
+    snap[PAGE_VIEW_COLS_PAGE[kind]].cols=cols?cols.map(r=>({id:r.id, on:r.on})):null;
+  });
+  return snap;
 }
 /** applyPageViewSnapshot writes a validated snapshot into live globals without replacing bindSort objects.
  * @param {object} snap page-view snapshot
@@ -1107,19 +1119,26 @@ function applyPageViewSnapshot(snap){
   RANGE=r?JSON.parse(JSON.stringify(r)):{id:'today'};
   assignPagePSort(PSORT, snap.psort);
   assignPageSort(RECENT_SORT, snap.recentSort);
+  const def=defaultPageViewState();
   const flows=snap.flows||{};
   assignPageSort(FLOW_SORT, flows.sort||{});
   FQ=typeof flows.q==='string'?flows.q:'';
   FLOW_STATE=PAGE_VIEW_FLOW_STATES.has(flows.state)?flows.state:'all';
   FLOW_SOURCE=typeof flows.source==='string'?flows.source:'';
   FLOW_FOLDER=typeof flows.folder==='string'?flows.folder:'';
+  FLOW_VIEW=flows.view==='grid'?'grid':'table';
+  FLOW_COMPACT=flows.compact===true;
+  FLOW_PAGE=pageViewPage(flows.page, PAGE_VIEW_PAGE_MAX.flows, def.flows.page);
   const logs=snap.logs||{};
   assignPageSort(LOG_SORT, logs.sort||{});
+  assignPageSort(PB_LOG_SORT, logs.pblogSort||def.logs.pblogSort);
   LOG_TAB=logs.tab==='postbacks'||logs.tab==='system'?logs.tab:'traffic';
   LOGF={conds:JSON.parse(JSON.stringify(Array.isArray(logs.conds)?logs.conds:[]))};
+  LOG_PAGE=pageViewPage(logs.page, PAGE_VIEW_PAGE_MAX.logs, def.logs.page);
   const conv=snap.conversions||{};
   assignPageSort(PB_SORT, conv.sort||{});
   PB={conds:JSON.parse(JSON.stringify(Array.isArray(conv.conds)?conv.conds:[])), campaignId:''};
+  PB_PAGE=pageViewPage(conv.page, PAGE_VIEW_PAGE_MAX.conversions, def.conversions.page);
   const rep=snap.report||{};
   assignPageSort(REP_SORT, rep.sort||{});
   REP={conds:JSON.parse(JSON.stringify(Array.isArray(rep.conds)?rep.conds:[]))};
@@ -1129,7 +1148,15 @@ function applyPageViewSnapshot(snap){
   assignPageSort(NET_OFF_SORT, net.offersSort||{});
   assignPageSort(LAND_SORT, (snap.landings&&snap.landings.sort)||{});
   assignPageSort(SRC_SORT, (snap.sources&&snap.sources.sort)||{});
-  assignPageSort(DOM_SORT, (snap.domains&&snap.domains.sort)||{});
+  const dom=snap.domains||{};
+  assignPageSort(DOM_SORT, dom.sort||{});
+  DOM_PAGE=pageViewPage(dom.page, PAGE_VIEW_PAGE_MAX.domains, def.domains.page);
+  assignPageSort(USER_SORT, (snap.users&&snap.users.sort)||{});
+  assignPageSort(ROLE_SORT, (snap.roles&&snap.roles.sort)||{});
+  assignPageSort(KEY_SORT, (snap.keywords&&snap.keywords.sort)||{});
+  Object.keys(PAGE_VIEW_COLS_PAGE).forEach(kind=>{
+    VIEW_COLS[kind]=pageViewCols((snap[PAGE_VIEW_COLS_PAGE[kind]]||{}).cols);
+  });
 }
 /** resetPageViewsToDefaults restores page-view globals for a new session user.
  * @returns {void}
@@ -1148,30 +1175,134 @@ async function loadUserPageViews(user){
     resetPageViewsToDefaults();
     PAGE_VIEWS_USER=user;
   }
-  let views;
-  try{ views=await call('GET','/api/me/views'); }
-  catch(e){ PAGE_VIEWS_READY=false; syncHours(); return; }
-  applyPageViewSnapshot(applyPageViews(views, defaultPageViewState()));
+  let views=null;
+  for(let n=0;n<2&&views===null;n++){
+    try{ views=await call('GET','/api/me/views'); }
+    catch(e){ if(e.status!==0&&!(e.status>=500)) break; }
+  }
+  if(views===null){ PAGE_VIEWS_READY=false; syncHours(); return; }
+  const legacy=pageViewLegacy();
+  applyPageViewSnapshot(applyPageViews(views, legacy.state));
   try{localStorage.removeItem(RANGE_KEY)}catch(e){}
   syncHours();
-  PAGE_VIEWS_LAST_SENT=JSON.stringify(collectPageViews(pageViewFromGlobals()));
+  PAGE_VIEWS_LAST_SENT=JSON.stringify(collectPageViews(applyPageViews(views, defaultPageViewState())));
   PAGE_VIEWS_READY=true;
+  if(!legacy.keys.length) return;
+  const dropLegacy=()=>{ try{legacy.keys.forEach(k=>localStorage.removeItem(k))}catch(e){} };
+  if(JSON.stringify(collectPageViews(pageViewFromGlobals()))===PAGE_VIEWS_LAST_SENT) dropLegacy();
+  else flushPageViews().then(ok=>{ if(ok) dropLegacy() });
 }
-/** touchPageViews debounces PUT /api/me/views when the snapshot changed.
+/** pageViewLegacy reads the per-browser values that lived in localStorage before they moved to the account.
+ * @returns {{state:object, keys:string[]}} baseline snapshot with those values on top of the defaults, and the storage keys that held a value
+ */
+function pageViewLegacy(){
+  const state=defaultPageViewState(), keys=[];
+  const read=key=>{
+    try{
+      const v=localStorage.getItem(key);
+      if(v!=null&&v!==''){ keys.push(key); return v; }
+    }catch(e){}
+    return null;
+  };
+  const view=read(FLOW_VIEW_KEY);
+  if(view==='grid'||view==='table') state.flows.view=view;
+  const compact=read(FLOW_COMPACT_KEY);
+  if(compact!==null) state.flows.compact=compact==='1';
+  [[FLOW_PAGE_KEY,'flows'],[LOG_PAGE_KEY,'logs'],[PB_PAGE_KEY,'conversions'],[DOM_PAGE_KEY,'domains']].forEach(([key,page])=>{
+    const raw=read(key);
+    if(raw!==null) state[page].page=pageViewPage(+raw, PAGE_VIEW_PAGE_MAX[page], state[page].page);
+  });
+  return {state, keys};
+}
+/** flushPageViews sends the page-view snapshot now when it differs from what the server holds.
+ * Requests run one after another, so an older body never lands after a newer one.
+ * @returns {Promise<boolean>} true when the server holds the current snapshot, false when it was not sent or the request failed
+ */
+function flushPageViews(){
+  clearTimeout(PAGE_VIEWS_TIMER); PAGE_VIEWS_TIMER=0;
+  const run=PAGE_VIEWS_QUEUE.then(async()=>{
+    if(!PAGE_VIEWS_READY) return false;
+    const body=collectPageViews(pageViewFromGlobals());
+    const json=JSON.stringify(body);
+    if(json===PAGE_VIEWS_LAST_SENT) return true;
+    try{ await call('PUT','/api/me/views', body); }
+    catch(e){ return false; }
+    PAGE_VIEWS_LAST_SENT=json;
+    return true;
+  }).catch(()=>false);
+  PAGE_VIEWS_QUEUE=run;
+  return run;
+}
+/** touchPageViews schedules flushPageViews after a pause, so typing in a filter sends one request.
  * @returns {void}
  */
 function touchPageViews(){
   if(!PAGE_VIEWS_READY) return;
   clearTimeout(PAGE_VIEWS_TIMER);
-  PAGE_VIEWS_TIMER=setTimeout(()=>{
-    PAGE_VIEWS_TIMER=0;
-    const body=collectPageViews(pageViewFromGlobals());
-    const json=JSON.stringify(body);
-    if(json===PAGE_VIEWS_LAST_SENT) return;
-    PAGE_VIEWS_LAST_SENT=json;
-    call('PUT','/api/me/views', body).catch(()=>{});
-  }, 400);
+  PAGE_VIEWS_TIMER=setTimeout(()=>{ PAGE_VIEWS_TIMER=0; flushPageViews(); }, 400);
 }
+/** sendPageViewsOnHide sends an unsent snapshot while the tab is closing or going to the background.
+ * It uses fetch with keepalive, which outlives the page and, unlike sendBeacon, can be a PUT with the CSRF header.
+ * @returns {void}
+ */
+function sendPageViewsOnHide(){
+  if(!PAGE_VIEWS_READY) return;
+  const json=JSON.stringify(collectPageViews(pageViewFromGlobals()));
+  if(json===PAGE_VIEWS_LAST_SENT) return;
+  try{
+    fetch('/api/me/views',{method:'PUT', keepalive:true, credentials:'same-origin', headers:{'Content-Type':'application/json','X-CSRF-Token':CSRF}, body:json})
+      .then(r=>{ if(r.ok) PAGE_VIEWS_LAST_SENT=json; }).catch(()=>{});
+  }catch(e){}
+}
+addEventListener('pagehide', sendPageViewsOnHide);
+/** PAGE_VIEWS_PULLED is the time of the last re-read of the views; PAGE_VIEWS_PULL_GAP is the shortest pause between two. */
+let PAGE_VIEWS_PULLED=0;
+const PAGE_VIEWS_PULL_GAP=5000;
+/** pageViewsRepaintable reports whether the current page may be redrawn without losing the user's work.
+ * @returns {boolean} false while a window, menu, drawer or the period pop-up is open, a field has focus, there are unsaved edits or a campaign is open in the editor
+ */
+function pageViewsRepaintable(){
+  if(!view()||MENU||FORM||DRAWER||q('.scrim')||anyDirty()) return false;
+  const per=q('#range-fields'); if(per&&!per.hidden) return false;
+  const el=document.activeElement;
+  if(el&&/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName)) return false;
+  const r=route();
+  return !(r.page==='flows'&&r.arg);
+}
+/** pullPageViews re-reads the account's views when the tab comes back and applies them if another browser changed them.
+ * It runs after the queued PUT requests, does nothing while local changes are unsent, asks at most once per PAGE_VIEWS_PULL_GAP,
+ * and ignores a failed read. The page is redrawn only when pageViewsRepaintable allows; otherwise the new values wait for the next draw.
+ * @returns {Promise<boolean>} true when the server copy was applied
+ */
+function pullPageViews(){
+  const snapshot=()=>JSON.stringify(collectPageViews(pageViewFromGlobals()));
+  if(!PAGE_VIEWS_READY||PAGE_VIEWS_TIMER||Date.now()-PAGE_VIEWS_PULLED<PAGE_VIEWS_PULL_GAP) return Promise.resolve(false);
+  if(snapshot()!==PAGE_VIEWS_LAST_SENT) return Promise.resolve(false);
+  PAGE_VIEWS_PULLED=Date.now();
+  const run=PAGE_VIEWS_QUEUE.then(async()=>{
+    if(!PAGE_VIEWS_READY||PAGE_VIEWS_TIMER) return false;
+    const before=snapshot();
+    let views;
+    try{ views=await call('GET','/api/me/views'); }
+    catch(e){ return false; }
+    const next=applyPageViews(views, defaultPageViewState());
+    const server=JSON.stringify(collectPageViews(next));
+    if(PAGE_VIEWS_TIMER||snapshot()!==before||pageViewsPull(before, PAGE_VIEWS_LAST_SENT, server)!=='apply') return false;
+    applyPageViewSnapshot(next);
+    syncHours();
+    PAGE_VIEWS_LAST_SENT=server;
+    paintChrome();
+    if(pageViewsRepaintable()){ PERF=null; render(); }
+    return true;
+  }).catch(()=>false);
+  PAGE_VIEWS_QUEUE=run;
+  return run;
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState==='hidden') sendPageViewsOnHide();
+  else pullPageViews();
+});
+addEventListener('focus', pullPageViews);
 
 /* ---------- theme: light / dark, remembered per browser ---------- */
 const THEME_KEY='kuztds-theme';
@@ -1893,6 +2024,7 @@ function loginView(msg=''){
 }
 async function logout(){
   if(anyDirty()&&!await ask(tr('Log out?'),tr('There are unsaved changes; they will be lost.'),tr('Log out'),true))return;
+  await flushPageViews();
   await call('POST','/api/logout').catch(()=>{});
   clearTimeout(PAGE_VIEWS_TIMER); PAGE_VIEWS_TIMER=0;
   PAGE_VIEWS_USER=''; PAGE_VIEWS_READY=false; resetPageViewsToDefaults();
@@ -2628,8 +2760,9 @@ function dockHTML(prefix, exportBtnId){
 }
 /**
  * paintServerPager fills a dock pager: newer, older, page size and the range.
+ * A new page size is handed to setPageSize and then saved with the account's page views.
  * @param {Element|null} box pager container
- * @param {{prefix?:string,total:number,pageSize:number,pageIndex:number,setPageIndex?:function,setPageSize?:function,storageKey?:string,onReload:function}} cfg pager state and callbacks
+ * @param {{prefix?:string,total:number,pageSize:number,pageIndex:number,setPageIndex?:function,setPageSize?:function,onReload:function}} cfg pager state and callbacks
  * @returns {void}
  */
 function paintServerPager(box, cfg){
@@ -2659,7 +2792,7 @@ function paintServerPager(box, cfg){
     const v=+e.target.value;
     if(typeof cfg.setPageSize==='function') cfg.setPageSize(v);
     if(typeof cfg.setPageIndex==='function') cfg.setPageIndex(0);
-    if(cfg.storageKey){try{localStorage.setItem(cfg.storageKey,String(v))}catch(err){}}
+    touchPageViews();
     num.value=v; cfg.onReload();
   };
   q(`#${pfx}size-n`,box).onchange=e=>{
@@ -2667,7 +2800,7 @@ function paintServerPager(box, cfg){
     e.target.value=v;
     if(typeof cfg.setPageSize==='function') cfg.setPageSize(v);
     if(typeof cfg.setPageIndex==='function') cfg.setPageIndex(0);
-    if(cfg.storageKey){try{localStorage.setItem(cfg.storageKey,String(v))}catch(err){}}
+    touchPageViews();
     cfg.onReload();
   };
 }
@@ -3166,9 +3299,9 @@ function renderPerf(groups){
   wrap.innerHTML=`<div class="tw"><table class="perft"><thead><tr>${th('name',tr('Flow / stream'))}${th('hits',tr('Hits'),'num')}${shown('unique',th('unique',tr('Unique'),'num'))}${shown('bots',th('bots',tr('Bots'),'num'))}${th('conv',tr('Conv'),'num')}${shown('revenue',th('profit',tr('col.revenue'),'num'))}${th('cr',tr('CR'),'num')}</tr></thead><tbody>${body}</tbody></table></div>`;
   qa('th[data-sort]',wrap).forEach(h=>h.onclick=()=>{
     const key=h.dataset.sort;
-    if(PSORT.k===key&&key!=='name')PSORT.d=-PSORT.d; else PSORT={k:key,d:-1};
+    if(PSORT.k===key&&key!=='name') PSORT.d=-PSORT.d; else { PSORT.k=key; PSORT.d=-1; }
     renderPerf(groups);
-    touchPageViews();
+    flushPageViews();
   });
   qa('tr[data-open]',wrap).forEach(row=>{if(row.dataset.open)row.onclick=()=>go('flows/'+encodeURIComponent(row.dataset.open))});
 }
@@ -5605,6 +5738,14 @@ const PAGE_VIEW_PERIOD_IDS=['today','yesterday','week','7d','month','prevmonth',
 const PAGE_VIEW_FLOW_STATES=new Set(['all','on','off','hits']);
 const PAGE_VIEW_STR_MAX=500;
 const PAGE_VIEW_SORT_K_MAX=64;
+const PAGE_VIEW_COLS_MAX=200;
+const PAGE_VIEW_COL_ID_MAX=64;
+/** PAGE_VIEW_COLS_PAGE maps a column catalog kind to the page key that stores its column set. */
+const PAGE_VIEW_COLS_PAGE={flows:'flows', logs:'logs', conv:'conversions', report:'report', offers:'offers', networks:'networks', landings:'landings', domains:'domains'};
+/** PAGE_VIEW_PAGE_MAX maps a page key to the largest page size it stores. */
+const PAGE_VIEW_PAGE_MAX={flows:5000, logs:1000, conversions:1000, domains:5000};
+/** PAGE_VIEW_SORT_PAGES lists the page keys whose views hold a table sort. */
+const PAGE_VIEW_SORT_PAGES=['flows','logs','conversions','report','offers','networks','landings','sources','domains','users','roles','keywords'];
 /** pageViewTrimShort limits stored strings to a safe length.
  * @param {*} v raw value
  * @param {number} max maximum length
@@ -5638,6 +5779,33 @@ function pageViewPSort(sort, def){
   let d=sort.d!=null?+sort.d:+sort.dir;
   if(d!==1&&d!==-1) d=(def.d||1)<0?-1:1;
   return {k, d};
+}
+/** pageViewCols validates a column set {id, on} rows for storage.
+ * Rows without a string id of 1..64 characters, repeated ids and rows past the 200th are dropped.
+ * @param {*} list candidate column rows
+ * @returns {Array<{id:string,on:boolean}>|null} normalized rows, or null when there is no usable set
+ */
+function pageViewCols(list){
+  if(!Array.isArray(list)) return null;
+  const seen=new Set(), out=[];
+  for(const c of list){
+    if(out.length>=PAGE_VIEW_COLS_MAX) break;
+    if(!c||typeof c!=='object'||typeof c.id!=='string') continue;
+    const id=c.id.trim();
+    if(!id||id.length>PAGE_VIEW_COL_ID_MAX||seen.has(id)) continue;
+    seen.add(id);
+    out.push({id, on:c.on===true||c.on===1});
+  }
+  return out.length?out:null;
+}
+/** pageViewPage validates a page size.
+ * @param {*} v candidate size
+ * @param {number} max largest allowed size
+ * @param {number} def fallback size
+ * @returns {number} v when it is an integer in 1..max, def otherwise
+ */
+function pageViewPage(v, max, def){
+  return typeof v==='number'&&Number.isInteger(v)&&v>=1&&v<=max?v:def;
 }
 /** pageViewConds validates filter condition rows for storage.
  * @param {*} list candidate conditions
@@ -5676,27 +5844,27 @@ function pageViewRange(range, def){
   return out;
 }
 /** defaultPageViewState returns baseline page-view fields before server merge.
- * @returns {object} snapshot of sort, filters and period defaults
+ * @returns {object} snapshot of period, sorts, filters, page sizes, view options and column sets (null: no set of its own)
  */
 function defaultPageViewState(){
-  return {
+  const out={
     range:{id:'today'},
     psort:{k:'conv',d:-1},
     recentSort:{k:'',dir:-1},
-    flows:{sort:{k:'',dir:-1}, q:'', state:'all', source:'', folder:''},
-    logs:{sort:{k:'',dir:-1}, tab:'traffic', conds:[]},
-    conversions:{sort:{k:'',dir:-1}, conds:[]},
-    report:{sort:{k:'',dir:-1}, conds:[]},
-    offers:{sort:{k:'',dir:-1}},
-    networks:{sort:{k:'',dir:-1}, offersSort:{k:'',dir:-1}},
-    landings:{sort:{k:'',dir:-1}},
-    sources:{sort:{k:'',dir:-1}},
-    domains:{sort:{k:'',dir:-1}},
+    flows:{q:'', state:'all', source:'', folder:'', view:'table', compact:false, page:1000},
+    logs:{tab:'traffic', conds:[], page:100, pblogSort:{k:'ts',dir:-1}},
+    conversions:{conds:[], page:50},
+    report:{conds:[]},
+    networks:{offersSort:{k:'',dir:-1}},
+    domains:{page:50},
   };
+  PAGE_VIEW_SORT_PAGES.forEach(name=>{ out[name]=Object.assign({sort:{k:'',dir:-1}}, out[name]); });
+  Object.keys(PAGE_VIEW_COLS_PAGE).forEach(kind=>{ out[PAGE_VIEW_COLS_PAGE[kind]].cols=null; });
+  return out;
 }
 /** collectPageViews builds the PUT /api/me/views body from a snapshot.
  * @param {object} state page-view snapshot from pageViewFromGlobals
- * @returns {object} server keys range, dashboard, flows, logs, …
+ * @returns {object} server keys range, dashboard, flows, logs, …; a column set the account has none of is left out, never sent as null
  */
 function collectPageViews(state){
   const base=defaultPageViewState();
@@ -5708,35 +5876,36 @@ function collectPageViews(state){
     psort:pageViewPSort(state.psort, base.psort),
     recentSort:pageViewSort(state.recentSort, base.recentSort),
   };
-  const flows=state.flows&&typeof state.flows==='object'?state.flows:{};
+  const page=name=>state[name]&&typeof state[name]==='object'?state[name]:{};
+  const flows=page('flows');
   out.flows={
-    sort:pageViewSort(flows.sort, base.flows.sort),
     q:pageViewTrimShort(flows.q, PAGE_VIEW_STR_MAX),
     state:PAGE_VIEW_FLOW_STATES.has(flows.state)?flows.state:base.flows.state,
     source:pageViewTrimShort(flows.source, PAGE_VIEW_STR_MAX),
     folder:pageViewTrimShort(flows.folder, PAGE_VIEW_STR_MAX),
+    view:flows.view==='grid'?'grid':'table',
+    compact:flows.compact===true,
   };
-  const logs=state.logs&&typeof state.logs==='object'?state.logs:{};
+  const logs=page('logs');
   const logTab=pageViewTrimShort(logs.tab, 32);
   out.logs={
-    sort:pageViewSort(logs.sort, base.logs.sort),
     tab:logTab==='postbacks'||logTab==='system'?logTab:'traffic',
     conds:pageViewConds(logs.conds),
+    pblogSort:pageViewSort(logs.pblogSort, base.logs.pblogSort),
   };
-  const conv=state.conversions&&typeof state.conversions==='object'?state.conversions:{};
-  out.conversions={sort:pageViewSort(conv.sort, base.conversions.sort), conds:pageViewConds(conv.conds)};
-  const rep=state.report&&typeof state.report==='object'?state.report:{};
-  out.report={sort:pageViewSort(rep.sort, base.report.sort), conds:pageViewConds(rep.conds)};
-  const off=state.offers&&typeof state.offers==='object'?state.offers:{};
-  out.offers={sort:pageViewSort(off.sort, base.offers.sort)};
-  const net=state.networks&&typeof state.networks==='object'?state.networks:{};
-  out.networks={sort:pageViewSort(net.sort, base.networks.sort), offersSort:pageViewSort(net.offersSort, base.networks.offersSort)};
-  const land=state.landings&&typeof state.landings==='object'?state.landings:{};
-  out.landings={sort:pageViewSort(land.sort, base.landings.sort)};
-  const src=state.sources&&typeof state.sources==='object'?state.sources:{};
-  out.sources={sort:pageViewSort(src.sort, base.sources.sort)};
-  const dom=state.domains&&typeof state.domains==='object'?state.domains:{};
-  out.domains={sort:pageViewSort(dom.sort, base.domains.sort)};
+  out.conversions={conds:pageViewConds(page('conversions').conds)};
+  out.report={conds:pageViewConds(page('report').conds)};
+  out.networks={offersSort:pageViewSort(page('networks').offersSort, base.networks.offersSort)};
+  PAGE_VIEW_SORT_PAGES.forEach(name=>{
+    out[name]=Object.assign({sort:pageViewSort(page(name).sort, base[name].sort)}, out[name]);
+  });
+  Object.keys(PAGE_VIEW_PAGE_MAX).forEach(name=>{
+    out[name].page=pageViewPage(page(name).page, PAGE_VIEW_PAGE_MAX[name], base[name].page);
+  });
+  Object.keys(PAGE_VIEW_COLS_PAGE).forEach(kind=>{
+    const name=PAGE_VIEW_COLS_PAGE[kind], cols=pageViewCols(page(name).cols);
+    if(cols) out[name].cols=cols;
+  });
   return out;
 }
 /** applyPageViews merges server views into a baseline snapshot; unknown keys and bad types are ignored.
@@ -5754,45 +5923,53 @@ function applyPageViews(views, state){
     out.psort=pageViewPSort(dash.psort, out.psort);
     out.recentSort=pageViewSort(dash.recentSort, out.recentSort);
   }
-  const flows=views.flows;
-  if(flows&&typeof flows==='object'){
-    out.flows.sort=pageViewSort(flows.sort, out.flows.sort);
+  const page=name=>views[name]&&typeof views[name]==='object'?views[name]:null;
+  const flows=page('flows');
+  if(flows){
     if(typeof flows.q==='string') out.flows.q=pageViewTrimShort(flows.q, PAGE_VIEW_STR_MAX);
     if(PAGE_VIEW_FLOW_STATES.has(flows.state)) out.flows.state=flows.state;
     if(typeof flows.source==='string') out.flows.source=pageViewTrimShort(flows.source, PAGE_VIEW_STR_MAX);
     if(typeof flows.folder==='string') out.flows.folder=pageViewTrimShort(flows.folder, PAGE_VIEW_STR_MAX);
+    if(flows.view==='grid'||flows.view==='table') out.flows.view=flows.view;
+    if(typeof flows.compact==='boolean') out.flows.compact=flows.compact;
   }
-  const logs=views.logs;
-  if(logs&&typeof logs==='object'){
-    out.logs.sort=pageViewSort(logs.sort, out.logs.sort);
+  const logs=page('logs');
+  if(logs){
     const tab=pageViewTrimShort(logs.tab, 32);
     if(tab==='traffic'||tab==='postbacks'||tab==='system') out.logs.tab=tab;
     if(Array.isArray(logs.conds)) out.logs.conds=pageViewConds(logs.conds);
+    if(logs.pblogSort&&typeof logs.pblogSort==='object') out.logs.pblogSort=pageViewSort(logs.pblogSort, out.logs.pblogSort);
   }
-  const conv=views.conversions;
-  if(conv&&typeof conv==='object'){
-    out.conversions.sort=pageViewSort(conv.sort, out.conversions.sort);
-    if(Array.isArray(conv.conds)) out.conversions.conds=pageViewConds(conv.conds);
-  }
-  const rep=views.report;
-  if(rep&&typeof rep==='object'){
-    out.report.sort=pageViewSort(rep.sort, out.report.sort);
-    if(Array.isArray(rep.conds)) out.report.conds=pageViewConds(rep.conds);
-  }
-  const off=views.offers;
-  if(off&&typeof off==='object') out.offers.sort=pageViewSort(off.sort, out.offers.sort);
-  const net=views.networks;
-  if(net&&typeof net==='object'){
-    out.networks.sort=pageViewSort(net.sort, out.networks.sort);
-    if(net.offersSort&&typeof net.offersSort==='object') out.networks.offersSort=pageViewSort(net.offersSort, out.networks.offersSort);
-  }
-  const land=views.landings;
-  if(land&&typeof land==='object') out.landings.sort=pageViewSort(land.sort, out.landings.sort);
-  const src=views.sources;
-  if(src&&typeof src==='object') out.sources.sort=pageViewSort(src.sort, out.sources.sort);
-  const dom=views.domains;
-  if(dom&&typeof dom==='object') out.domains.sort=pageViewSort(dom.sort, out.domains.sort);
+  const conv=page('conversions');
+  if(conv&&Array.isArray(conv.conds)) out.conversions.conds=pageViewConds(conv.conds);
+  const rep=page('report');
+  if(rep&&Array.isArray(rep.conds)) out.report.conds=pageViewConds(rep.conds);
+  const net=page('networks');
+  if(net&&net.offersSort&&typeof net.offersSort==='object') out.networks.offersSort=pageViewSort(net.offersSort, out.networks.offersSort);
+  PAGE_VIEW_SORT_PAGES.forEach(name=>{
+    const v=page(name);
+    if(v) out[name].sort=pageViewSort(v.sort, out[name].sort);
+  });
+  Object.keys(PAGE_VIEW_PAGE_MAX).forEach(name=>{
+    const v=page(name);
+    if(v) out[name].page=pageViewPage(v.page, PAGE_VIEW_PAGE_MAX[name], out[name].page);
+  });
+  Object.keys(PAGE_VIEW_COLS_PAGE).forEach(kind=>{
+    const name=PAGE_VIEW_COLS_PAGE[kind], v=page(name), cols=v&&pageViewCols(v.cols);
+    if(cols) out[name].cols=cols;
+  });
   return out;
+}
+/** pageViewsPull decides whether a re-read of the account's views replaces the local ones.
+ * Local changes that were not sent yet always win: the flush that follows them sends them.
+ * @param {string} localJson JSON of the current local snapshot, as collectPageViews gives it
+ * @param {string} lastSent JSON the server is known to hold
+ * @param {string} serverJson JSON of the views just read, normalized the same way
+ * @returns {string} 'apply' when the server copy differs and nothing local is unsent, 'skip' otherwise
+ */
+function pageViewsPull(localJson, lastSent, serverJson){
+  if(localJson!==lastSent) return 'skip';
+  return serverJson!==lastSent?'apply':'skip';
 }
 /** postbackBase is the origin a partner cabinet calls for /postback.
  * A public https page uses its own origin, with no port. Localhost keeps the engine address.
@@ -6278,18 +6455,12 @@ const FLOW_VIEW_KEY='kuztds-flows-view';
 const FLOW_PAGE_KEY='kuztds-flows-page';
 const FLOW_COMPACT_KEY='kuztds-flow-compact';
 let FLOW_COMPACT=false;
-try{FLOW_COMPACT=localStorage.getItem(FLOW_COMPACT_KEY)==='1'}catch(e){}
 const FLOW_PRESETS=[10,25,50,100,1000];
 let FLOW_VIEW='table', FLOW_PICK=new Set(), FLOW_PAGE=1000, FLOW_STATE='all', FLOW_SOURCE='', FLOW_FOLDER='', FLOW_SORT={k:'',dir:-1}, FLOW_PAGE_I=0;
 let FLOW_SOURCES=[];
-try{
-  const raw=localStorage.getItem(FLOW_PAGE_KEY);
-  if(raw!=null&&raw!==''){ const n=+raw; if(n>=1&&n<=5000) FLOW_PAGE=n }
-}catch(e){}
-try{const saved=localStorage.getItem(FLOW_VIEW_KEY); if(saved==='grid'||saved==='table')FLOW_VIEW=saved}catch(e){}
 function setFlowView(v){
   FLOW_VIEW=v==='grid'?'grid':'table';
-  try{localStorage.setItem(FLOW_VIEW_KEY,FLOW_VIEW)}catch(e){}
+  touchPageViews();
   qa('[data-flow-view]').forEach(b=>b.classList.toggle('on',b.dataset.flowView===FLOW_VIEW));
   paintFlowCards();
 }
@@ -6725,13 +6896,13 @@ function paintFlowSum(rows){
     if(e.target.value==='custom'){box.hidden=false; box.focus(); return}
     box.hidden=true;
     FLOW_PAGE=+e.target.value; FLOW_PAGE_I=0;
-    try{localStorage.setItem(FLOW_PAGE_KEY,String(FLOW_PAGE))}catch(err){}
+    touchPageViews();
     box.value=FLOW_PAGE; paintFlowCards();
   };
   q('#fpage-n',page).onchange=e=>{
     let n=+e.target.value; if(!(n>=1)) n=1000; if(n>5000) n=5000;
     FLOW_PAGE=n; FLOW_PAGE_I=0; e.target.value=n;
-    try{localStorage.setItem(FLOW_PAGE_KEY,String(n))}catch(err){}
+    touchPageViews();
     paintFlowCards();
   };
 }
@@ -6950,7 +7121,7 @@ function renderFlow(){
     statusLabel.addEventListener('mouseleave',()=>{const line=q('#pagehover'); if(line) line.textContent=''});
   }
   q('#copylink').onclick=()=>copyText(url,q('#copylink'));
-  const cb=q('#compact'); if(cb) cb.onclick=()=>{FLOW_COMPACT=!FLOW_COMPACT; try{localStorage.setItem(FLOW_COMPACT_KEY,FLOW_COMPACT?'1':'0')}catch(e){} const cv=q('#canvas'); if(cv) cv.classList.toggle('compact',FLOW_COMPACT); cb.title=tr(FLOW_COMPACT?'flow.expanded':'flow.compact'); cb.setAttribute('aria-pressed',String(FLOW_COMPACT)); drawWires();};
+  const cb=q('#compact'); if(cb) cb.onclick=()=>{FLOW_COMPACT=!FLOW_COMPACT; touchPageViews(); const cv=q('#canvas'); if(cv) cv.classList.toggle('compact',FLOW_COMPACT); cb.title=tr(FLOW_COMPACT?'flow.expanded':'flow.compact'); cb.setAttribute('aria-pressed',String(FLOW_COMPACT)); drawWires();};
   q('#switch').onclick=e=>{
     e.stopPropagation();
     const find=document.createElement('input');
@@ -7079,7 +7250,7 @@ function drawWires(){
 }
 /**
  * bindSort wires column headers or a stream grip.
- * With onChange, data-sort buttons update state: the active column flips, a numeric th starts descending, a text th starts ascending, then onChange runs.
+ * With onChange, data-sort buttons update state: the active column flips, a numeric th starts descending, a text th starts ascending, then onChange runs and the page views are sent at once.
  * Without onChange, the canvas grip drags a stream row and commits the order on release.
  * @param {Element} root table root, or the flow canvas
  * @param {object} state sort state {k, dir}, or the campaign group
@@ -7101,7 +7272,7 @@ function bindSort(root, state, onChange){
         else state.dir=1;
       }
       onChange();
-      touchPageViews();
+      flushPageViews();
     });
     return;
   }
@@ -8716,7 +8887,8 @@ function loadCols(kind){
     const front=list.filter(r=>locked.has(r.id)).sort((a,b)=>order.indexOf(a.id)-order.indexOf(b.id));
     return front.concat(list.filter(r=>!locked.has(r.id)));
   };
-  let saved=UI.cols[kind];
+  const own=Array.isArray(VIEW_COLS[kind]);
+  let saved=own?VIEW_COLS[kind]:UI.cols[kind];
   if(saved===undefined) saved=null;
   if(kind==='conv'&&saved&&!Array.isArray(saved)&&typeof saved==='object'){
     return defs.map(d=>saved[d.id]==null?d:Object.assign({},d,{on:!!saved[d.id]}));
@@ -8738,7 +8910,7 @@ function loadCols(kind){
   const modelIsNew=kind==='logs'&&by.has('device_model');
   by.forEach(d=>out.push(d));
   adoptModelCol(out,modelIsNew);
-  if(kind==='flows'){
+  if(kind==='flows'&&!own){
     try{
       if(!localStorage.getItem(FLOW_COLS_MIGRATED)) migrateFlowCols(out);
     }catch(e){}
@@ -8746,12 +8918,15 @@ function loadCols(kind){
   if(out.length&&!out.some(r=>r.on)) out[0].on=true;
   return pin(out);
 }
-// saveCols stores a column list; it is called only from an explicit Apply in the columns window, never while a page loads.
+// saveCols stores a column list in the account's page views; it is called only from an explicit Apply in the columns window, never while a page loads.
 // kind is the catalog id. rows are {id,on}. The list is applied in memory at once, even when the server refuses it.
-// It returns a promise of true when the server stored the list.
+// It returns a promise of true when the server stored the list; a failure shows a toast.
 async function saveCols(kind,rows){
-  UI.cols[kind]=rows.map(r=>({id:r.id,on:!!r.on}));
-  return saveUI();
+  if(!Object.prototype.hasOwnProperty.call(VIEW_COLS,kind)) return false;
+  VIEW_COLS[kind]=pageViewCols(rows);
+  const ok=await flushPageViews();
+  if(!ok) toast(tr('ui.fail'),true);
+  return ok;
 }
 // endFlowColsMigration ends the in-memory flows migration of loadCols once the user has saved the flow columns.
 // kind is the catalog id; any other kind is ignored.
@@ -8837,12 +9012,10 @@ function bindColTools(root,kind,onRefresh,onApply){
 let LOGF={conds:[]}, LOGROWS=[], LOG_TAB='traffic', LOG_CAMPAIGN='', LOG_HOLD=false, LOG_TOTAL=0;
 const LOG_PAGE_KEY='kuztds-log-page';
 let LOG_PAGE=100, LOG_PAGE_I=0;
-try{const raw=localStorage.getItem(LOG_PAGE_KEY); if(raw!=null&&raw!==''){const n=+raw; if(n>=1&&n<=1000) LOG_PAGE=n}}catch(e){}
-let LOG_SORT={k:'',dir:-1}, LOG_SORT_RESET=false, PB_LOG_SORT={k:'ts',dir:-1};
+let LOG_SORT={k:'',dir:-1}, PB_LOG_SORT={k:'ts',dir:-1};
 const PB_PAGE_KEY='kuztds-conv-page';
 let PB_PAGE=50, PB_PAGE_I=0;
-try{const raw=localStorage.getItem(PB_PAGE_KEY); if(raw!=null&&raw!==''){const n=+raw; if(n>=1&&n<=1000) PB_PAGE=n}}catch(e){}
-let PB={conds:[], campaignId:''}, PB_ROWS=[], PB_HOLD=false, PB_SORT={k:'',dir:-1}, PB_SORT_RESET=false;
+let PB={conds:[], campaignId:''}, PB_ROWS=[], PB_HOLD=false, PB_SORT={k:'',dir:-1};
 let RECENT_SORT={k:'',dir:-1}, OFF_SORT={k:'',dir:-1}, NET_OFF_SORT={k:'',dir:-1}, SRC_SORT={k:'',dir:-1}, DOM_SORT={k:'',dir:-1}, REP_SORT={k:'',dir:-1};
 let KEY_SORT={k:'',dir:-1}, USER_SORT={k:'',dir:-1}, ROLE_SORT={k:'',dir:-1}, GRP_SORT={k:'',dir:-1}, KT_LOSS_SORT={k:'',dir:-1}, GEO_SORT={k:'',dir:-1}, LFILE_SORT={k:'',dir:-1};
 const FLT_GROUPS=[
@@ -9722,29 +9895,34 @@ function syncLogIpFromField(){
   LOGF.conds=(LOGF.conds||[]).filter(c=>!(c.f==='ip'&&c.op==='eq'));
   if(v) LOGF.conds.push({f:'ip', op:'eq', v:[v]});
 }
-async function loadLogs(){
+/** loadLogs reads one page of the click log and paints the table.
+ * A failed read is repeated once without the sort, so a sort the server cannot apply neither blocks the page nor is dropped from the account.
+ * @param {boolean} [unsorted] true to leave the sort out of this request
+ * @returns {Promise<void>}
+ */
+async function loadLogs(unsorted){
   syncLogIpFromField();
   const qs=logQS(); qs.set('limit', String(LOG_PAGE)); qs.set('offset', String(LOG_PAGE_I*LOG_PAGE));
+  if(unsorted){ qs.delete('sort'); qs.delete('dir'); }
   const wrap=q('#logwrap'); if(!wrap) return;
   let r=null;
   try{
     r=await call('GET','/api/logs?'+qs+'&'+rangeQS());
   }catch(e){
-    if(LOG_SORT.k&&!LOG_SORT_RESET){
-      LOG_SORT={k:'',dir:-1}; LOG_SORT_RESET=true; LOG_PAGE_I=0;
-      return loadLogs();
+    if(LOG_SORT.k&&!unsorted){
+      LOG_PAGE_I=0;
+      return loadLogs(true);
     }
     wrap.innerHTML=stateHTML(e.message||tr('ui.fail'),'err');
     paintLogDock(0);
     return;
   }
-  LOG_SORT_RESET=false;
   if(!q('#logwrap')) return;
   if(!r||!r.rows){wrap.innerHTML=stateHTML(tr('The log is not available — is ClickHouse connected?'),'err'); paintLogDock(0); return}
   LOGROWS=r.rows;
   LOG_TOTAL=typeof r.total==='number'?r.total:dockTotal(r, LOGROWS.length);
   const pages=Math.max(1, Math.ceil((LOG_TOTAL>0?LOG_TOTAL:0)/LOG_PAGE)||1);
-  if(LOG_PAGE_I>=pages){LOG_PAGE_I=pages-1; return loadLogs()}
+  if(LOG_PAGE_I>=pages){LOG_PAGE_I=pages-1; return loadLogs(unsorted)}
   if(!r.rows.length){wrap.innerHTML=`<div class="card">${stateHTML(tr('Nothing matches these filters'))}</div>`; paintLogDock(LOG_TOTAL); return}
   const cols=loadCols('logs').filter(c=>c.on);
   const logFields=fieldsFor('events');
@@ -9768,7 +9946,6 @@ function paintLogDock(total){
     pageIndex:LOG_PAGE_I,
     setPageIndex:v=>{LOG_PAGE_I=v},
     setPageSize:v=>{LOG_PAGE=v},
-    storageKey:LOG_PAGE_KEY,
     onReload:()=>loadLogs()
   });
 }
@@ -9811,7 +9988,11 @@ function pbCondsForQuery(){
   }
   return list;
 }
-function pbQuery(){
+/** pbQuery builds the conversions page query: period, paging, filters and sort.
+ * @param {boolean} [unsorted] true to leave the sort out
+ * @returns {string} query string without a leading question mark
+ */
+function pbQuery(unsorted){
   const b=rangeBounds();
   const qs=new URLSearchParams();
   qs.set('from', b.from.toISOString());
@@ -9819,7 +10000,7 @@ function pbQuery(){
   qs.set('limit', String(PB_PAGE));
   qs.set('offset', String(Math.max(0, PB_PAGE_I)*PB_PAGE));
   condsQS(pbCondsForQuery()).forEach((v,k)=>qs.append(k,v));
-  if(PB_SORT.k){
+  if(PB_SORT.k&&!unsorted){
     qs.set('sort', PB_SORT.k);
     qs.set('dir', (PB_SORT.dir||1)<0?'desc':'asc');
   }
@@ -9919,7 +10100,6 @@ function paintPbPage(total){
     pageIndex:PB_PAGE_I,
     setPageIndex:v=>{PB_PAGE_I=v},
     setPageSize:v=>{PB_PAGE=v},
-    storageKey:PB_PAGE_KEY,
     onReload:()=>loadPostbacks()
   });
 }
@@ -9935,22 +10115,26 @@ function paintPbDock(r, revTotal){
   sum.innerHTML=`<span class="sumi"><span class="hint">${esc(tr('conv.title'))}</span><b>${fmt(n)}</b></span><span class="sumi"><span class="hint">${esc(tr('col.revenue'))}</span><b class="c-rev">${rev}</b></span>`;
   paintPbPage(n);
 }
-async function loadPostbacks(){
+/** loadPostbacks reads one page of conversions and paints the table.
+ * A failed read is repeated once without the sort, so a sort the server cannot apply neither blocks the page nor is dropped from the account.
+ * @param {boolean} [unsorted] true to leave the sort out of this request
+ * @returns {Promise<void>}
+ */
+async function loadPostbacks(unsorted){
   const wrap=q('#pb-wrap'); if(!wrap) return;
   wrap.innerHTML=stateHTML(tr('Loading…'));
   let r=null;
   try{
-    r=await call('GET','/api/postbacks?'+pbQuery());
+    r=await call('GET','/api/postbacks?'+pbQuery(unsorted));
   }catch(e){
-    if(PB_SORT.k&&!PB_SORT_RESET){
-      PB_SORT={k:'',dir:-1}; PB_SORT_RESET=true; PB_PAGE_I=0;
-      return loadPostbacks();
+    if(PB_SORT.k&&!unsorted){
+      PB_PAGE_I=0;
+      return loadPostbacks(true);
     }
     wrap.innerHTML=stateHTML(tr('conv.down'),'err');
     paintPbDock(null, null);
     return;
   }
-  PB_SORT_RESET=false;
   if(!q('#pb-wrap')) return;
   if(!r||!Array.isArray(r.rows)){
     wrap.innerHTML=stateHTML(tr('conv.down'),'err');
@@ -9959,7 +10143,7 @@ async function loadPostbacks(){
   }
   const total=dockTotal(r, r.rows.length);
   const pages=Math.max(1, Math.ceil((total>0?total:0)/PB_PAGE)||1);
-  if(PB_PAGE_I>=pages){PB_PAGE_I=pages-1; return loadPostbacks()}
+  if(PB_PAGE_I>=pages){PB_PAGE_I=pages-1; return loadPostbacks(unsorted)}
   PB_ROWS=r.rows.slice();
   const revTotal=typeof r.total==='number'?r.total:null;
   paintPbDock(r, revTotal);
@@ -12198,10 +12382,6 @@ let DOM_PREFILL='';
 let DOM_PICK=new Set();
 const DOM_PAGE_KEY='kuztds-domains-page';
 let DOM_PAGE=50, DOM_PAGE_I=0;
-try{
-  const raw=localStorage.getItem(DOM_PAGE_KEY);
-  if(raw!=null&&raw!==''){const n=+raw; if(n>=1&&n<=5000) DOM_PAGE=n}
-}catch(e){}
 /** domainStatusText is the plain status phrase for a domain, without a dot.
  * @param {object} d domain record; checked, ok and reason pick the phrase
  * @returns {string} translated text for a cell or a toast
@@ -12413,7 +12593,7 @@ function paintDomPage(total, paint){
   q('#dpage',box).onchange=e=>{
     let n=+e.target.value; if(!(n>=1&&n<=5000)) n=50;
     DOM_PAGE=n; DOM_PAGE_I=0;
-    try{localStorage.setItem(DOM_PAGE_KEY,String(DOM_PAGE))}catch(err){}
+    touchPageViews();
     paint();
   };
 }

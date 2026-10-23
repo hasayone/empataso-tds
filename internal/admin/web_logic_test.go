@@ -520,6 +520,64 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq(collectPageViews(withCamp).logs.conds.some(c => c.f === 'campaign_id'), true, 'page views manual campaign cond saved');
   eq(applyPageViews({ range: { id: 'week' } }, def).range.id, 'week', 'page views period week');
 }
+{
+  const def = defaultPageViewState();
+  const sorted = applyPageViews({ flows: { sort: { k: 'name', dir: 1 } } }, def);
+  eq(collectPageViews(sorted).flows.sort, { k: 'name', dir: 1 }, 'flows sort by name survives collect');
+  eq(applyPageViews(collectPageViews(sorted), def).flows.sort, { k: 'name', dir: 1 }, 'flows sort by name survives collect then apply');
+  eq(def.flows.cols, null, 'no column set by default');
+  eq(collectPageViews(def).flows.cols, undefined, 'an absent column set is not in the body');
+  eq(JSON.stringify(collectPageViews(def)).includes('null'), false, 'the default body holds no null');
+
+  const cols = applyPageViews({ flows: { cols: [
+    { id: 'name', on: true }, { id: 'hits', on: false }, { id: 'name', on: false },
+    null, 'x', { id: 7, on: true }, { id: '', on: true }, { id: 'y'.repeat(65), on: true }, { on: true }, { id: 'cr', on: 1 },
+  ] } }, def);
+  eq(cols.flows.cols, [{ id: 'name', on: true }, { id: 'hits', on: false }, { id: 'cr', on: true }], 'column set drops junk and repeated ids');
+  eq(collectPageViews(cols).flows.cols, cols.flows.cols, 'column set is kept by collect');
+  eq(applyPageViews({ flows: { cols: [] } }, def).flows.cols, null, 'an empty column set is no set');
+  eq(applyPageViews({ flows: { cols: 'name' } }, def).flows.cols, null, 'a column set that is not a list is no set');
+  eq(pageViewCols(null), null, 'null column set stays null');
+  const many = Array.from({ length: 300 }, (_, i) => ({ id: 'c' + i, on: true }));
+  eq(pageViewCols(many).length, 200, 'a column set is cut at 200 rows');
+  const kinds = { flows: 'flows', logs: 'logs', conv: 'conversions', report: 'report', offers: 'offers', networks: 'networks', landings: 'landings', domains: 'domains' };
+  eq(PAGE_VIEW_COLS_PAGE, kinds, 'every column kind has its page key');
+  const all = {};
+  Object.keys(kinds).forEach(k => { all[kinds[k]] = { cols: [{ id: k, on: true }] }; });
+  const allPut = collectPageViews(applyPageViews(all, def));
+  eq(Object.keys(kinds).every(k => JSON.stringify(allPut[kinds[k]].cols) === JSON.stringify([{ id: k, on: true }])), true, 'every page keeps its own column set');
+
+  const paged = applyPageViews({ flows: { page: 250, view: 'grid', compact: true }, logs: { page: 500 }, conversions: { page: 20 }, domains: { page: 5000 } }, def);
+  eq([paged.flows.page, paged.flows.view, paged.flows.compact, paged.logs.page, paged.conversions.page, paged.domains.page], [250, 'grid', true, 500, 20, 5000], 'page sizes and flow view are read');
+  const put = collectPageViews(paged);
+  eq([put.flows.page, put.flows.view, put.flows.compact, put.logs.page, put.conversions.page, put.domains.page], [250, 'grid', true, 500, 20, 5000], 'page sizes and flow view are collected');
+  const bad = applyPageViews({ flows: { page: 5001, view: 'list', compact: 'yes' }, logs: { page: 1001 }, conversions: { page: 0 }, domains: { page: 1.5 } }, def);
+  eq([bad.flows.page, bad.flows.view, bad.flows.compact, bad.logs.page, bad.conversions.page, bad.domains.page], [1000, 'table', false, 100, 50, 50], 'a size out of range or a bad view falls back');
+  eq(collectPageViews({ flows: { page: '12', view: 'list', compact: 1 }, logs: { page: -3 } }).flows, { sort: { k: '', dir: -1 }, q: '', state: 'all', source: '', folder: '', view: 'table', compact: false, page: 1000 }, 'collect falls back on bad values');
+  const legacy = JSON.parse(JSON.stringify(def)); legacy.flows.page = 25; legacy.flows.view = 'grid';
+  eq(applyPageViews({ flows: { page: 100 } }, legacy).flows.page, 100, 'the account size wins over the browser one');
+  eq(applyPageViews({ flows: { q: 'x' } }, legacy).flows.view, 'grid', 'a browser value stays when the account has none');
+
+  const tabs = applyPageViews({ users: { sort: { k: 'login', dir: 1 } }, roles: { sort: { k: 'name', dir: -1 } }, keywords: { sort: { k: 'key', dir: 1 } } }, def);
+  eq([tabs.users.sort, tabs.roles.sort, tabs.keywords.sort], [{ k: 'login', dir: 1 }, { k: 'name', dir: -1 }, { k: 'key', dir: 1 }], 'users, roles and keywords sorts are read');
+  const tabsPut = collectPageViews(tabs);
+  eq([tabsPut.users.sort, tabsPut.roles.sort, tabsPut.keywords.sort], [{ k: 'login', dir: 1 }, { k: 'name', dir: -1 }, { k: 'key', dir: 1 }], 'users, roles and keywords sorts are collected');
+  eq(collectPageViews(def).users, { sort: { k: '', dir: -1 } }, 'users view is in every body');
+
+  eq(def.logs.pblogSort, { k: 'ts', dir: -1 }, 'S2S log default sort');
+  const pb = applyPageViews({ logs: { pblogSort: { k: 'payout', dir: 1 } } }, def);
+  eq(pb.logs.pblogSort, { k: 'payout', dir: 1 }, 'S2S log sort is read');
+  eq(collectPageViews(pb).logs.pblogSort, { k: 'payout', dir: 1 }, 'S2S log sort is collected');
+  eq(applyPageViews({ logs: { pblogSort: 'payout' } }, def).logs.pblogSort, { k: 'ts', dir: -1 }, 'a bad S2S log sort falls back');
+  eq(collectPageViews({}).logs.pblogSort, { k: 'ts', dir: -1 }, 'an empty snapshot collects the S2S default');
+  eq(pageViewsPull('a', 'a', 'b'), 'apply', 'a changed server copy replaces an untouched local one');
+  eq(pageViewsPull('a', 'a', 'a'), 'skip', 'an equal server copy changes nothing');
+  eq(pageViewsPull('c', 'a', 'b'), 'skip', 'unsent local changes win over the server copy');
+  eq(pageViewsPull('c', 'a', 'a'), 'skip', 'unsent local changes with an unchanged server copy are left to the flush');
+  eq(pageViewsPull('c', 'a', 'c'), 'skip', 'a server copy equal to the local one needs no apply while the last sent differs');
+  eq(pageViewsPull('', '', JSON.stringify(collectPageViews(def))), 'apply', 'a server copy against an empty last sent is applied');
+  eq(Object.keys(collectPageViews(def)).sort(), ['conversions', 'dashboard', 'domains', 'flows', 'keywords', 'landings', 'logs', 'networks', 'offers', 'range', 'report', 'roles', 'sources', 'users'], 'the body holds exactly the stored pages');
+}
 eq(postbackBase('admin.emasotds.online','https:','https://admin.emasotds.online','http://admin.emasotds.online:8080'), 'https://admin.emasotds.online', 'postback base drops the engine port');
 eq(postbackBase('127.0.0.1','http:','http://127.0.0.1:8090','http://127.0.0.1:8080'), 'http://127.0.0.1:8080', 'postback base on localhost stays the engine');
 eq(serviceBadge('disk', {status:{jobs:{disk:{last_run:'2020-01-02T00:00:00Z', running:true, ok:false, message:'old', next_run:'2020-01-03T00:00:00Z'}}}}).key, 'Running…', 'running before stale next_run');
