@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"math"
 	"net/http"
 	"net/url"
@@ -76,12 +79,63 @@ func parsePostback(q url.Values) postbackIn {
 	return in
 }
 
+// postbackOut is the JSON body of GET and POST /postback.
+// Status is "success" or "error". Error is set only when Status is "error".
+type postbackOut struct {
+	Status string `json:"status"`
+	Error  string `json:"error,omitempty"`
+}
+
+// writePostback writes the public /postback JSON body.
+// w is the response. code is the HTTP status. errMsg is the public error
+// text. An empty errMsg with code 200 writes {"status":"success"}.
+// Any other case writes {"status":"error","error":errMsg}.
+// A short write is ignored: the status line is already sent.
+func writePostback(w http.ResponseWriter, code int, errMsg string) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	if code == http.StatusMethodNotAllowed {
+		w.Header().Set("Allow", "GET, POST")
+	}
+	w.WriteHeader(code)
+	out := postbackOut{Status: "success"}
+	if errMsg != "" {
+		out.Status = "error"
+		out.Error = errMsg
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// postbackResult maps one accepted postback to the HTTP code, the log outcome
+// and the public error text. cid is the click id. hasStore is true when
+// ClickHouse is connected. recErr is the RecordConversion error and is read
+// only when cid is set and hasStore is true. code is 200 only when the row
+// was stored. outcome is ok, no_subid, no_store, click_not_found or
+// store_error. errMsg is empty when outcome is ok. A missing click is
+// sql.ErrNoRows. Any other recErr is store_error and does not include the
+// driver text.
+func postbackResult(cid string, hasStore bool, recErr error) (code int, outcome, errMsg string) {
+	if cid == "" {
+		return http.StatusBadRequest, "no_subid", "subid is required"
+	}
+	if !hasStore {
+		return http.StatusServiceUnavailable, "no_store", "store unavailable"
+	}
+	if recErr == nil {
+		return http.StatusOK, "ok", ""
+	}
+	if errors.Is(recErr, sql.ErrNoRows) {
+		return http.StatusNotFound, "click_not_found", "click not found"
+	}
+	return http.StatusServiceUnavailable, "store_error", "store unavailable"
+}
+
 // postback handles GET and POST /postback. It does not require the pixel key.
+// The body is JSON: {"status":"success"} or {"status":"error","error":"..."}.
 // A repeat of the same click id and status is stored again but does not queue
 // a second outbound request. The network postback URL is never called.
 func (d *engineDeps) postback(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		w.WriteHeader(http.StatusMethodNotAllowed)
+		writePostback(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
 	q := r.URL.Query()
@@ -93,34 +147,30 @@ func (d *engineDeps) postback(w http.ResponseWriter, r *http.Request) {
 	}
 	in := parsePostback(q)
 	if !in.ok {
-		w.WriteHeader(http.StatusBadRequest)
+		writePostback(w, http.StatusBadRequest, "invalid payout")
 		return
 	}
-	outcome := "ok"
-	gid := ""
-	if in.cid == "" {
-		outcome = "no_subid"
-	} else if d == nil || d.chConn == nil {
-		outcome = "no_store"
-	} else {
-		var err error
-		gid, err = d.chConn.RecordConversion(r.Context(), store.PostbackIn{
+	var recErr error
+	hasStore := d != nil && d.chConn != nil
+	if in.cid != "" && hasStore {
+		var gid string
+		gid, recErr = d.chConn.RecordConversion(r.Context(), store.PostbackIn{
 			CID: in.cid, Profit: in.profit, Status: in.status,
 			Original: in.original, TID: in.tid,
 		})
-		if err != nil {
-			outcome = "click_not_found"
+		if recErr != nil {
 			if d.log != nil {
-				d.log.Warn("postback failed", "cid", in.cid, "err", err)
+				d.log.Warn("postback failed", "cid", in.cid, "err", recErr)
 			}
 		} else {
 			d.queueOutbound(gid, in.cid, in.profit, in.status, q)
 		}
 	}
+	code, outcome, errMsg := postbackResult(in.cid, hasStore, recErr)
 	if d != nil {
 		d.notePostback(in.cid, in.status, outcome, "in", in.profit)
 	}
-	w.WriteHeader(http.StatusOK)
+	writePostback(w, code, errMsg)
 }
 
 // queueOutbound sends the campaign templates once for this click and status.

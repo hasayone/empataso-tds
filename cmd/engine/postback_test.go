@@ -1,6 +1,9 @@
 package main
 
 import (
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -92,14 +95,73 @@ func TestPostbackPathIsNotACampaign(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/postback?subid=abc&status=lead&payout=1", nil)
 	rr := httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
-	if rr.Code != http.StatusOK {
+	if rr.Code != http.StatusServiceUnavailable {
 		t.Fatalf("status %d", rr.Code)
+	}
+	if !strings.Contains(rr.Body.String(), `"status":"error"`) {
+		t.Fatalf("body %s", rr.Body.String())
 	}
 	req = httptest.NewRequest(http.MethodGet, "/?pb=secret&subid=abc&status=lead&payout=9&cid=real&profit=1", nil)
 	rr = httptest.NewRecorder()
 	mux.ServeHTTP(rr, req)
 	if rr.Code != http.StatusTeapot {
 		t.Fatalf("old pixel must stay on /, got %d", rr.Code)
+	}
+}
+
+func TestPostbackJSON(t *testing.T) {
+	d := &engineDeps{}
+	cases := []struct {
+		method, raw string
+		code        int
+		errMsg      string
+	}{
+		{http.MethodGet, "/postback?status=lead&payout=1", http.StatusBadRequest, "subid is required"},
+		{http.MethodGet, "/postback?subid=abc&payout=NaN", http.StatusBadRequest, "invalid payout"},
+		{http.MethodGet, "/postback?subid=abc&status=rejected&payout=0", http.StatusServiceUnavailable, "store unavailable"},
+		{http.MethodPut, "/postback?subid=abc", http.StatusMethodNotAllowed, "method not allowed"},
+	}
+	for _, tc := range cases {
+		req := httptest.NewRequest(tc.method, tc.raw, nil)
+		rr := httptest.NewRecorder()
+		d.postback(rr, req)
+		if rr.Code != tc.code {
+			t.Fatalf("%s %s status %d", tc.method, tc.raw, rr.Code)
+		}
+		if ct := rr.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+			t.Fatalf("content-type %q", ct)
+		}
+		var out postbackOut
+		if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+			t.Fatal(err)
+		}
+		if out.Status != "error" || out.Error != tc.errMsg {
+			t.Fatalf("%s got %+v", tc.raw, out)
+		}
+	}
+}
+
+func TestPostbackResult(t *testing.T) {
+	code, outcome, msg := postbackResult("abc", true, nil)
+	if code != http.StatusOK || outcome != "ok" || msg != "" {
+		t.Fatalf("stored %d %s %q", code, outcome, msg)
+	}
+	code, outcome, msg = postbackResult("abc", true, sql.ErrNoRows)
+	if code != http.StatusNotFound || outcome != "click_not_found" || msg != "click not found" {
+		t.Fatalf("missing click %d %s %q", code, outcome, msg)
+	}
+	code, outcome, msg = postbackResult("abc", true, errors.New("timeout"))
+	if code != http.StatusServiceUnavailable || outcome != "store_error" || msg != "store unavailable" {
+		t.Fatalf("store %d %s %q", code, outcome, msg)
+	}
+	rr := httptest.NewRecorder()
+	writePostback(rr, http.StatusOK, "")
+	var out postbackOut
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Status != "success" || out.Error != "" {
+		t.Fatalf("success body %+v", out)
 	}
 }
 

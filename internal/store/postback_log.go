@@ -17,7 +17,7 @@ type PostbackLogRow struct {
 }
 
 // WritePostbackLog appends one line. direction is "in" or "out".
-// outcome is ok, click_not_found, no_subid, or an outbound HTTP code.
+// outcome is ok, click_not_found, no_subid, no_store, store_error, or an outbound HTTP code.
 func (c *CH) WritePostbackLog(ctx context.Context, subid, status, outcome, direction string, payout float64) error {
 	if c == nil || c.conn == nil {
 		return nil
