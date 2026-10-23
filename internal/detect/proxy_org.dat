@@ -1,0 +1,23 @@
+# Substrings of hosting and VPN organization names, one per line, matched case-insensitively.
+hosting
+datacenter
+data center
+cloud hosting
+cloud computing
+vpn
+proxy
+dedicated
+colocation
+vps
+m247
+hetzner
+ovh
+digitalocean
+linode
+vultr
+leaseweb
+contabo
+scaleway
+choopa
+psychz
+quadranet

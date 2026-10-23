@@ -39,3 +39,5 @@ coverage.*
 
 # test geo database (needed by tests)
 !internal/geo/testdata/*.mmdb
+# built-in proxy org list compiled into the engine (data/proxy_org.dat stays ignored)
+!internal/detect/proxy_org.dat
