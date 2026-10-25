@@ -373,6 +373,20 @@ func TestSpaEditorKeepsAccess(t *testing.T) {
 	must(t, spaFunctionLine(html, "readAccessEditor"), "grantsFromRows(rows, !!forRole)", "the editor is read through grantsFromRows")
 	must(t, spaFunctionLine(html, "dashDims"), "visibleDims(ME, DASH_CLASSIC)", "cards of hidden dimensions are not drawn")
 	must(t, spaFunctionLine(html, "dashPanelsAll"), "visibleDims(ME, DASH_CLASSIC)", "hidden dimensions are not offered as panels")
+	dashPanels := spaFunctionLine(html, "dashboard")
+	must(t, dashPanels, "DASH_VIEW.panels", "dashboard panels go to the account snapshot")
+	mustNot(t, dashPanels, "saveUI(", "dashboard panels gear does not write shared ui.json")
+	must(t, dashPanels, "flushPageViews()", "dashboard panels gear saves account views")
+	must(t, spaFunctionLine(html, "cronOrderSave"), "flushPageViews()", "cron order saves to the account")
+	must(t, spaFunctionLine(html, "moneyCellCls"), "cpcHasSpend", "money tone uses spend map")
+	domAdd := spaBetween(html, "const openDomainAdd=(group)=>{", "const openDomainEdit=(d)=>{")
+	mustNot(t, domAdd, "stackedPrompt", "domain group create is inline")
+	must(t, domAdd, "bindGroupInlineCreate", "domain add uses inline group create")
+	for _, lang := range []string{"en", "ru", "uk"} {
+		if !trKeyDefined(html, lang, "action.done") {
+			t.Errorf("missing action.done in %s", lang)
+		}
+	}
 	must(t, spaFunctionLine(html, "paintStream"), "streamOutputGuarded(ME,s)", "the stream editor warns near the destination")
 	mustNot(t, spaFunctionLine(html, "streamOutputGuarded"), "macroFields", "the macro table stays on the server")
 	cell := spaFunctionLine(html, "logCell")

@@ -34,6 +34,7 @@ var allowedViewPages = map[string]bool{
 	"users":       true,
 	"roles":       true,
 	"keywords":    true,
+	"automation":  true,
 }
 
 // viewsFile is the views.json document: page views keyed by user, then by page.

@@ -148,6 +148,28 @@ func TestViewsTwoUsersIsolated(t *testing.T) {
 	}
 }
 
+func TestViewsAutomationPageAccepted(t *testing.T) {
+	_, base := viewsServer(t, filepath.Join(t.TempDir(), "views.json"))
+	c, csrf := authedClient(t, base)
+
+	code, got := viewsPut(t, c, base, csrf, map[string]any{
+		"automation": map[string]any{"order": []string{"telegram", "geo_db"}},
+		"secret":     map[string]string{"x": "y"},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("PUT: %d", code)
+	}
+	if _, ok := got["secret"]; ok {
+		t.Fatalf("unknown page key must be dropped: %+v", got)
+	}
+	if len(got["automation"]) == 0 {
+		t.Fatalf("automation page must be stored: %+v", got)
+	}
+	if !strings.Contains(string(got["automation"]), `"telegram"`) {
+		t.Fatalf("automation order lost: %s", got["automation"])
+	}
+}
+
 func TestViewsUnknownPageDropped(t *testing.T) {
 	_, base := viewsServer(t, filepath.Join(t.TempDir(), "views.json"))
 	c, csrf := authedClient(t, base)

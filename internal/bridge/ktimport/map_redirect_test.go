@@ -1,6 +1,9 @@
 package ktimport
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRedirectMappings(t *testing.T) {
 	cases := []struct {
@@ -82,5 +85,58 @@ func TestEmptyStreamName(t *testing.T) {
 	s := (&mapCtx{losses: &losses}).buildStream(KStream{ID: 37520, State: "active", ActionType: "blank"}, false)
 	if s.Name != "stream 37520" || s.Comment != "keitaro_stream_id=37520" {
 		t.Fatalf("%+v", s)
+	}
+}
+
+func TestBotProtectionStatus404Import(t *testing.T) {
+	html := strings.Repeat("x", 600)
+	var pages pageBag
+	var losses []Loss
+	ctx := &mapCtx{losses: &losses, pages: &pages}
+	bot := ctx.buildStream(KStream{
+		ID: 1, Name: "Bot Protection", Type: "regular", State: "active",
+		ActionType: "status404", ActionPayload: html,
+	}, false)
+	if !bot.Status || bot.Out.Redirect != "404_not_found" || bot.Out.Out != "" {
+		t.Fatalf("bot protection stream %+v", bot.Out)
+	}
+	if len(pages) != 0 {
+		t.Fatalf("page bag = %+v", pages)
+	}
+	white := ctx.buildStream(KStream{
+		ID: 2, Name: "white", Type: "regular", State: "active",
+		ActionType: "status404", ActionPayload: html,
+	}, false)
+	if !white.Status || white.Out.Redirect != "show_html_404" || !strings.HasPrefix(white.Out.Out, "@page:") {
+		t.Fatalf("white stream %+v", white.Out)
+	}
+	if len(pages) != 1 {
+		t.Fatalf("page bag = %+v", pages)
+	}
+
+	tail := ctx.buildStream(KStream{
+		ID: 3, Name: "Bot Protection -x", Type: "regular", State: "active",
+		ActionType: "status404", ActionPayload: html,
+	}, false)
+	if !tail.Status || tail.Out.Redirect != "404_not_found" || tail.Out.Out != "" {
+		t.Fatalf("bot protection tail stream %+v", tail.Out)
+	}
+
+	closing := ctx.buildStream(KStream{
+		ID: 4, Name: "Замыкающий", Type: "regular", State: "active",
+		ActionType: "status404", ActionPayload: html,
+	}, false)
+	if !closing.Status || closing.Out.Redirect != "404_not_found" || closing.Out.Out != "" {
+		t.Fatalf("closing stream %+v", closing.Out)
+	}
+	if len(pages) != 1 {
+		t.Fatalf("page bag after closing = %+v", pages)
+	}
+	closingTail := ctx.buildStream(KStream{
+		ID: 5, Name: "Замыкающий -x", Type: "regular", State: "active",
+		ActionType: "status404", ActionPayload: html,
+	}, false)
+	if !closingTail.Status || closingTail.Out.Redirect != "404_not_found" || closingTail.Out.Out != "" {
+		t.Fatalf("closing tail stream %+v", closingTail.Out)
 	}
 }

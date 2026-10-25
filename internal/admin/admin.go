@@ -381,6 +381,9 @@ func New(cfg Config) (*Server, error) {
 	}
 	s.loadRoles()
 	s.loadAPIKeys()
+	if err := s.migrateBotProtection404(context.Background()); err != nil {
+		return nil, err
+	}
 	return s, nil
 }
 

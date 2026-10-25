@@ -259,7 +259,7 @@ func streamOutput(st KStream, offers map[int]Offer, landings map[int]Landing, lo
 	if status404Action(st.ActionType) {
 		payload := strings.TrimSpace(st.ActionPayload)
 		s.Out.Chance = 100
-		if payload == "" {
+		if payload == "" || botProtectionStream(st) {
 			s.Out.Redirect = "404_not_found"
 			s.Out.Out = ""
 			return s, ""
@@ -300,6 +300,15 @@ func streamOutput(st KStream, offers map[int]Offer, landings map[int]Landing, lo
 		*losses = append(*losses, Loss{Kind: "approximated", Ref: ref, Detail: approx})
 	}
 	return s, ""
+}
+
+// botProtectionStream сообщает, что поток Keitaro — Bot Protection или «Замыкающий».
+//
+// Параметры: st — поток.
+// Результат: true для имён по правилу BotProtectionStreamName.
+// Ошибки: нет.
+func botProtectionStream(st KStream) bool {
+	return BotProtectionStreamName(st.Name)
 }
 
 // streamTitle берёт имя потока Keitaro.

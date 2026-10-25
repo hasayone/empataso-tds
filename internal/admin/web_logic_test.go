@@ -31,7 +31,7 @@ func TestLogicHelpers(t *testing.T) {
 	}
 	html := spaSource()
 	var prelude strings.Builder
-	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "asSortMeta", "applySort", "condsQS"} {
+	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "cpcHasSpend", "moneyCellCls", "asSortMeta", "applySort", "condsQS"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -578,6 +578,28 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq(pageViewsPull('', '', JSON.stringify(collectPageViews(def))), 'apply', 'a server copy against an empty last sent is applied');
   eq(Object.keys(collectPageViews(def)).sort(), ['conversions', 'dashboard', 'domains', 'flows', 'keywords', 'landings', 'logs', 'networks', 'offers', 'range', 'report', 'roles', 'sources', 'users'], 'the body holds exactly the stored pages');
 }
+{
+  const def = defaultPageViewState();
+  const st = applyPageViews({
+    bogus: 1,
+    dashboard: { panels: ['country', 'device', 'bogus'], dim: 'sub_id_2' },
+    automation: { order: ['telegram', 'geo_db', 'telegram'] },
+  }, def);
+  eq(st.dashPanels, ['country', 'device'], 'dashboard panels filtered');
+  eq(st.dashDim, 'sub_id_2', 'dashboard dim stored');
+  eq(st.automationOrder, ['telegram', 'geo_db'], 'automation order deduped');
+  const put = collectPageViews(st);
+  eq(put.dashboard.panels, ['country', 'device'], 'collect dashboard panels');
+  eq(put.dashboard.dim, 'sub_id_2', 'collect dashboard dim');
+  eq(put.automation.order, ['telegram', 'geo_db'], 'collect automation order');
+  eq('bogus' in put, false, 'unknown page key not collected');
+  const st2 = applyPageViews(put, def);
+  eq(st2.dashPanels, ['country', 'device'], 'round trip dashboard panels');
+  eq(st2.dashDim, 'sub_id_2', 'round trip dashboard dim');
+  eq(st2.automationOrder, ['telegram', 'geo_db'], 'round trip automation order');
+  eq(pageViewDashPanels(null), null, 'null panels means all visible');
+  eq(pageViewDashPanels([]), [], 'empty panels list');
+}
 eq(postbackBase('admin.emasotds.online','https:','https://admin.emasotds.online','http://admin.emasotds.online:8080'), 'https://admin.emasotds.online', 'postback base drops the engine port');
 eq(postbackBase('127.0.0.1','http:','http://127.0.0.1:8090','http://127.0.0.1:8080'), 'http://127.0.0.1:8080', 'postback base on localhost stays the engine');
 eq(serviceBadge('disk', {status:{jobs:{disk:{last_run:'2020-01-02T00:00:00Z', running:true, ok:false, message:'old', next_run:'2020-01-03T00:00:00Z'}}}}).key, 'Running…', 'running before stale next_run');
@@ -1076,6 +1098,11 @@ eq(applySort([d1,d2], {k:'t',dir:-1}, (r,k)=>r[k], {date:['t']}).map(x=>x.t), [d
 eq(applySort([d1,d2], {k:'n',dir:-1}, (r,k)=>r[k], {text:[]}).map(x=>x.n), [2,1], 'applySort number desc');
 const nm=applySort([{name:'⚡️ 711 Casino'},{name:'❌ SpinDog'},{name:'All Offers'}], {k:'name',dir:1}, (r,k)=>r[k], {name:['name']}).map(x=>x.name);
 eq(nm[0], 'All Offers', 'applySort name asc skips emoji rank');
+
+eq(moneyCellCls('rev', {amount: 0, ready: true}), '', 'zero revenue has no tone class');
+eq(moneyCellCls('rev', {amount: 12, ready: true}), 'c-rev', 'nonzero revenue has c-rev');
+eq(moneyCellCls('cost', {costBy: {}}), '', 'empty spend map has no cost class');
+eq(moneyCellCls('cost', {costBy: {USD: 100}}), 'c-cost', 'nonzero spend has c-cost');
 
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `

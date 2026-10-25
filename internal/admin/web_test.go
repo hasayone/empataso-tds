@@ -470,7 +470,7 @@ func TestCampaignMoneyAndROIDisplay(t *testing.T) {
 	must(t, html, `.lg{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);box-shadow:none}`, "legend without button shadow")
 	must(t, html, "function stackedPrompt(", "stacked overlay prompt")
 	must(t, html, "style=\"z-index:80\"", "stacked overlay z-index 80")
-	must(t, html, `<select id="dgroup"`, "domain group select")
+	must(t, html, "groupFieldBlock('dgroup'", "domain group field")
 	cc := spaFunctionLine(html, "costCode")
 	cpc := spaFunctionLine(html, "cpcCell")
 	off := spaFunctionLine(html, "offerCells")
@@ -511,8 +511,10 @@ func TestFlowsFolderField(t *testing.T) {
 	if open == "" || collect == "" || cell == "" || cat == "" || bands == "" {
 		t.Fatal("openFlowSettings, collectFlow, flowMetricCell, colCatalog or flowBands not found in SPA")
 	}
-	must(t, open, `groupFieldHTML('g_folder'`, "editor folder combobox field")
-	must(t, open, `bindPickCombo(gf`, "editor folder combobox bind")
+	must(t, open, `groupFieldBlock('g_folder'`, "editor folder combobox field")
+	must(t, html, "bindGroupCombo(gf", "editor folder combobox bind")
+	must(t, html, "bindGroupInlineCreate(", "editor folder inline create bind")
+	must(t, html, "'g_folder'", "editor folder field id")
 	must(t, collect, "delete g.folder", "empty folder deletes the key")
 	must(t, collect, "g.folder=", "non-empty folder is stored")
 	must(t, cell, "id==='folder'", "folder column cell")
@@ -1327,7 +1329,7 @@ func TestSPALogFilters(t *testing.T) {
 	must(t, spaConstLangBody(html, "I18N", "uk"), "'ROI':'ROI'", "ROI in I18N uk")
 	rep := catalogBranch(html, "report")
 	must(t, rep, "['group','conv.campaign',1]", "report catalog stays the last return")
-	must(t, html, `<select id="dgroup"`, "domain group select")
+	must(t, html, "groupFieldBlock('dgroup'", "domain group field")
 }
 
 var jsSetRe = regexp.MustCompile(`'((?:[^'\\]|\\.)*)'`)
