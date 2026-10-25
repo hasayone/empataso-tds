@@ -50,7 +50,9 @@ func (c *CH) RecordConversion(ctx context.Context, in PostbackIn) (string, error
 
 // RecordPostback finds an event by cid and writes one conversion.
 // status is part of the storage key, so a later sale does not replace an
-// earlier lead. The returned group id is the campaign the click belonged to.
+// earlier lead. A newer rejected row drops that lead and sale from revenue,
+// from lead and sale counts, and from the conversion journal.
+// The returned group id is the campaign the click belonged to.
 // It is RecordConversion with the raw status used as both the stored status
 // and the original status. Errors are the same as RecordConversion.
 func (c *CH) RecordPostback(ctx context.Context, cid string, profit float64, status string) (string, error) {
@@ -143,6 +145,25 @@ func clickExtPtr(s *clickSnap, col string) any {
 	default:
 		return new(string)
 	}
+}
+
+// voidedCIDSelect lists clicks whose newest rejected row is at least as new
+// as their newest lead or sale. A click with no rejected row is absent.
+// A later lead or sale after the rejection is absent too.
+// The statement has no placeholders and does not fail.
+func voidedCIDSelect() string {
+	return `SELECT cid FROM conversions FINAL
+		GROUP BY cid
+		HAVING maxIf(ts, status = 'rejected') > toDateTime(0)
+			AND maxIf(ts, status = 'rejected') >= maxIf(ts, status IN ('lead', 'sale'))`
+}
+
+// voidedConfirmedSQL is an AND fragment that drops lead and sale rows of a
+// click listed by voidedCIDSelect. cid and status are the outer column names,
+// qualified when the outer query aliases the conversions table.
+// Rejected rows and every other status stay. It has no placeholders and does not fail.
+func voidedConfirmedSQL(cid, status string) string {
+	return ` AND NOT (` + status + ` IN ('lead', 'sale') AND ` + cid + ` IN (` + voidedCIDSelect() + `))`
 }
 
 // prevStatus returns the latest conversion status for cid.

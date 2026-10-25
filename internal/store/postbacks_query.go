@@ -165,6 +165,7 @@ func (c *CH) EachPostback(ctx context.Context, q PostbackQuery, max int, prepare
 }
 
 // postbackMatch returns totals and the shared FROM/WHERE for conversion journal queries.
+// Lead and sale rows voided by a newer rejection are omitted from the rows, the count and the payout sum.
 func (c *CH) postbackMatch(ctx context.Context, q PostbackQuery, originConv bool) (PostbackTotals, string, []any, string, bool, error) {
 	if !c.clickCols && (q.Offer != "" || q.Landing != "" || q.Source != "" || q.Network != "") {
 		return PostbackTotals{}, "", nil, "", true, nil
@@ -180,6 +181,7 @@ func (c *CH) postbackMatch(ctx context.Context, q PostbackQuery, originConv bool
 	}
 	where += extra
 	args = append(args, extraArgs...)
+	where += voidedConfirmedSQL("cid", "status")
 	from := conversionUnion(c.clickCols, c.extConv, c.modelConv, originConv)
 	var tot PostbackTotals
 	var n uint64

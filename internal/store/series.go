@@ -3,12 +3,13 @@ package store
 import "time"
 
 // confirmedSeriesSQL is the confirmed conversion buckets for the dashboard chart.
-// Confirmed means lead and sale. FINAL collapses an unmerged repeat of the same click and status.
-// The old postbacks table is not included: it has no status.
-const confirmedSeriesSQL = `SELECT toStartOfInterval(ts, INTERVAL ? second) AS t,
+// Confirmed means lead and sale. A lead or sale whose click has a newer or
+// equal rejected row is left out. FINAL collapses an unmerged repeat of the
+// same click and status. The old postbacks table is not included: it has no status.
+var confirmedSeriesSQL = `SELECT toStartOfInterval(ts, INTERVAL ? second) AS t,
         count() AS conv, sum(profit) AS revenue
  FROM conversions FINAL
- WHERE ts >= ? AND ts < ? AND status IN ('lead', 'sale')
+ WHERE ts >= ? AND ts < ? AND status IN ('lead', 'sale')` + voidedConfirmedSQL("cid", "status") + `
  GROUP BY t`
 
 // confirmedSeriesFilteredSQL is confirmedSeriesSQL restricted to clicks in eventsWhere.
@@ -18,7 +19,7 @@ func confirmedSeriesFilteredSQL(eventsWhere string) string {
 	return `SELECT toStartOfInterval(ts, INTERVAL ? second) AS t,
         count() AS conv, sum(profit) AS revenue
  FROM conversions FINAL
- WHERE ts >= ? AND ts < ? AND status IN ('lead', 'sale')` + eventsCidInSQL(eventsWhere) + `
+ WHERE ts >= ? AND ts < ? AND status IN ('lead', 'sale')` + voidedConfirmedSQL("cid", "status") + eventsCidInSQL(eventsWhere) + `
  GROUP BY t`
 }
 

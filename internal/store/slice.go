@@ -189,7 +189,7 @@ func sliceConvSQL(c *CH, cvSQL string) string {
 	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, count() AS conv, sum(profit) AS profit_sum
 		FROM (
 		%s
-		) WHERE ts >= ? AND ts < ?%s
+		) WHERE ts >= ? AND ts < ?%s%s
 		GROUP BY group_name, stream_name, country%s`,
-		offer, source, conversionUnion(click, ext, model, origin), cvSQL, extra)
+		offer, source, conversionUnion(click, ext, model, origin), voidedConfirmedSQL("cid", "status"), cvSQL, extra)
 }

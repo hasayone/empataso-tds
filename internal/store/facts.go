@@ -194,7 +194,7 @@ func scanClickFact(rows factRow, clickCols, costCols bool) (ClickFact, error) {
 func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, wargs []any) ([]StatusFact, error) {
 	q := `SELECT offer_id, network_id, status, count(), sum(profit)
 		FROM conversions FINAL
-		WHERE ts >= ? AND ts < ?`
+		WHERE ts >= ? AND ts < ?` + voidedConfirmedSQL("cid", "status")
 	qargs := []any{from, to}
 	if where != "" {
 		q += eventsCidInSQL(where)
@@ -233,7 +233,7 @@ func groupStatusSQL(where string) string {
 			WHERE ts >= ? AND ts < ? AND cid != ''` + where + `
 			GROUP BY cid
 		) AS e ON e.cid = c.cid
-		WHERE c.ts >= ? AND c.ts < ?
+		WHERE c.ts >= ? AND c.ts < ?` + voidedConfirmedSQL("c.cid", "c.status") + `
 		GROUP BY e.gid, c.status`
 }
 

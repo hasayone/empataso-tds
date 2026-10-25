@@ -376,17 +376,15 @@ func performanceConvSQL(from, to time.Time, where string, wargs []any, haveGroup
 	if haveGroupID {
 		convID = "group_id"
 	}
-	tail := "profit, ts"
 	if where != "" {
-		tail = "profit, ts, cid"
 		extraArgs = append([]any{from, to}, wargs...)
 	}
 	sql = `SELECT group_id, group_name, stream_name, count() AS conv, sum(profit) AS profit
 		 FROM (
-		   SELECT '' AS group_id, group_name, stream_name, ` + tail + ` FROM postbacks
+		   SELECT '' AS group_id, group_name, stream_name, profit, ts, cid, '' AS status FROM postbacks
 		   UNION ALL
-		   SELECT ` + convID + `, group_name, stream_name, ` + tail + ` FROM conversions FINAL
-		 ) WHERE ts >= ? AND ts < ?`
+		   SELECT ` + convID + `, group_name, stream_name, profit, ts, cid, status FROM conversions FINAL
+		 ) WHERE ts >= ? AND ts < ?` + voidedConfirmedSQL("cid", "status")
 	if where != "" {
 		sql += eventsCidInSQL(where)
 	}

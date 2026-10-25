@@ -154,8 +154,9 @@ func TestPerformanceConvSQLGroupID(t *testing.T) {
 		t.Fatalf("extra %#v", extra)
 	}
 	for _, s := range []string{
-		"SELECT '' AS group_id, group_name, stream_name, profit, ts FROM postbacks",
-		"SELECT group_id, group_name, stream_name, profit, ts FROM conversions FINAL",
+		"SELECT '' AS group_id, group_name, stream_name, profit, ts, cid, '' AS status FROM postbacks",
+		"SELECT group_id, group_name, stream_name, profit, ts, cid, status FROM conversions FINAL",
+		"status = 'rejected'",
 		"SELECT group_id, group_name, stream_name, count() AS conv, sum(profit) AS profit",
 		"GROUP BY group_id, group_name, stream_name",
 	} {
@@ -171,10 +172,10 @@ func TestPerformanceConvSQLGroupID(t *testing.T) {
 		t.Fatalf("group: %s", plain)
 	}
 	filt, args := performanceConvSQL(time.Unix(1, 0), time.Unix(2, 0), " AND x = ?", []any{"z"}, true)
-	if !strings.Contains(filt, "'' AS group_id, group_name, stream_name, profit, ts, cid FROM postbacks") {
+	if !strings.Contains(filt, "'' AS group_id, group_name, stream_name, profit, ts, cid, '' AS status FROM postbacks") {
 		t.Fatalf("filtered postbacks: %s", filt)
 	}
-	if !strings.Contains(filt, "SELECT group_id, group_name, stream_name, profit, ts, cid FROM conversions FINAL") {
+	if !strings.Contains(filt, "SELECT group_id, group_name, stream_name, profit, ts, cid, status FROM conversions FINAL") {
 		t.Fatalf("filtered conversions: %s", filt)
 	}
 	if len(args) != 3 || args[2] != "z" {
@@ -192,6 +193,9 @@ func TestGroupStatusSQLAlias(t *testing.T) {
 	}
 	if !strings.Contains(q, "AND group_id IN (?)") {
 		t.Fatalf("where missing: %s", q)
+	}
+	if !strings.Contains(q, voidedConfirmedSQL("c.cid", "c.status")) {
+		t.Fatalf("rejected click still counts: %s", q)
 	}
 }
 
