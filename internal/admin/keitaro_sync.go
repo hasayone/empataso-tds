@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/egerkuzma/kuztds/internal/atomicfile"
+	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/cron"
 )
 
@@ -52,16 +53,28 @@ type keitaroSyncFinishIn struct {
 	Began    time.Time
 }
 
+// keitaroSyncTarget is one tracker connection for a catch-up pass.
+type keitaroSyncTarget struct {
+	syncPath      string
+	board         string
+	allBoards     bool
+	creds         ktCreds
+	manifestStore ManifestStore
+}
+
 // syncStreamOpts selects one log stream (clicks or conversions) for a catch-up window.
 type syncStreamOpts struct {
-	Creds       ktCreds
-	State       *keitaroSyncFile
-	Cursor      *time.Time
-	Back        time.Duration
-	Upper       time.Time
-	Clicks      bool
-	Conversions bool
-	Skip        *logSkipTally
+	Creds         ktCreds
+	State         *keitaroSyncFile
+	syncPath      string
+	mapScope      campaignMapScope
+	manifestStore ManifestStore
+	Cursor        *time.Time
+	Back          time.Duration
+	Upper         time.Time
+	Clicks        bool
+	Conversions   bool
+	Skip          *logSkipTally
 }
 
 // keitaroSyncFile is the persisted catch-up cursor and last run status.
@@ -125,23 +138,78 @@ func (s *Server) keitaroSyncClock() time.Time {
 	return time.Now().UTC()
 }
 
-// clearKeitaroSyncRunning clears Running in keitaro-sync.json after an admin restart.
-// It logs a warning when the file cannot be saved.
+// clearKeitaroSyncRunning clears Running in every sync state file after an admin restart.
+// It logs a warning when a file cannot be saved.
 func (s *Server) clearKeitaroSyncRunning() {
-	st, ok, err := s.loadKeitaroSync()
-	if err != nil || !ok || !st.Running {
-		return
-	}
-	st.Running = false
-	if err := s.saveKeitaroSync(st); err != nil {
-		s.logWarn("keitaro sync save failed", "err", err)
+	for _, path := range s.keitaroSyncPaths() {
+		st, ok, err := s.loadKeitaroSyncAt(path)
+		if err != nil || !ok || !st.Running {
+			continue
+		}
+		st.Running = false
+		if err := s.saveKeitaroSyncAt(path, st); err != nil {
+			s.logWarn("keitaro sync save failed", "err", err)
+		}
 	}
 }
 
-// loadKeitaroSync reads keitaro-sync.json. The bool is false when the path is empty
-// or the file is missing. Other read or JSON errors are returned as err.
+// keitaroSyncPaths returns distinct sync cursor file paths for all connections.
+func (s *Server) keitaroSyncPaths() []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range s.keitaroSyncTargets() {
+		if t.syncPath == "" || seen[t.syncPath] {
+			continue
+		}
+		seen[t.syncPath] = true
+		out = append(out, t.syncPath)
+	}
+	return out
+}
+
+// keitaroSyncTargets lists catch-up targets: one per ktConns entry, or a single global fallback.
+func (s *Server) keitaroSyncTargets() []keitaroSyncTarget {
+	conns := s.listKeitaroConns()
+	if len(conns) == 0 {
+		if s.cfg.KeitaroSyncFile == "" {
+			return nil
+		}
+		creds, manifest := s.keitaroImportBundle(config.MainBoardID)
+		return []keitaroSyncTarget{{
+			syncPath:      s.cfg.KeitaroSyncFile,
+			board:         config.MainBoardID,
+			allBoards:     true,
+			creds:         creds,
+			manifestStore: manifest,
+		}}
+	}
+	out := make([]keitaroSyncTarget, 0, len(conns))
+	for _, c := range conns {
+		if c.SyncFile == "" {
+			continue
+		}
+		manifest := c.Manifest
+		if manifest == nil {
+			manifest = s.cfg.Manifest
+		}
+		out = append(out, keitaroSyncTarget{
+			syncPath:      c.SyncFile,
+			board:         c.BoardID,
+			allBoards:     c.global,
+			creds:         ktCreds{Base: c.Base, Key: c.Key},
+			manifestStore: manifest,
+		})
+	}
+	return out
+}
+
+// loadKeitaroSync reads the global keitaro-sync.json path from config.
 func (s *Server) loadKeitaroSync() (keitaroSyncFile, bool, error) {
-	path := s.cfg.KeitaroSyncFile
+	return s.loadKeitaroSyncAt(s.cfg.KeitaroSyncFile)
+}
+
+// loadKeitaroSyncAt reads one sync state file. The bool is false when path is empty or missing.
+func (s *Server) loadKeitaroSyncAt(path string) (keitaroSyncFile, bool, error) {
 	if path == "" {
 		return keitaroSyncFile{}, false, nil
 	}
@@ -159,9 +227,13 @@ func (s *Server) loadKeitaroSync() (keitaroSyncFile, bool, error) {
 	return st, true, nil
 }
 
-// saveKeitaroSync writes st atomically to KeitaroSyncFile. An empty path is a no-op.
+// saveKeitaroSync writes st to the global sync path from config.
 func (s *Server) saveKeitaroSync(st keitaroSyncFile) error {
-	path := s.cfg.KeitaroSyncFile
+	return s.saveKeitaroSyncAt(s.cfg.KeitaroSyncFile, st)
+}
+
+// saveKeitaroSyncAt writes st atomically to path. An empty path is a no-op.
+func (s *Server) saveKeitaroSyncAt(path string, st keitaroSyncFile) error {
 	if path == "" {
 		return nil
 	}
@@ -196,33 +268,52 @@ func (s *Server) keitaroSyncOnce(ctx context.Context) {
 	cfg, err := s.loadCronConfig()
 	if err != nil {
 		s.logWarn("keitaro sync cron unreadable", "err", err)
-		s.keitaroSyncConsumeKick(wantKick, keitaroSyncFile{}, false, "cron config unreadable")
+		s.keitaroSyncConsumeKick(wantKick, "cron config unreadable")
 		return
 	}
 	now := s.keitaroSyncClock()
-	st, have, err := s.loadKeitaroSync()
-	if err != nil {
-		s.logWarn("keitaro sync state unreadable", "err", err)
-		s.keitaroSyncConsumeKick(wantKick, st, have, err.Error())
-		return
-	}
 	if wantKick {
 		s.syncKick.Store(false)
 	}
 	kick := wantKick
-	if !kick && (!cfg.KeitaroSync.Enabled || (have && !st.NextRun.IsZero() && now.Before(st.NextRun))) {
+	if !kick && !cfg.KeitaroSync.Enabled {
 		return
 	}
-	s.keitaroSyncExecute(ctx, cfg, kick, now, st, have)
+	if !kick && !s.keitaroSyncAnyDue(now) {
+		return
+	}
+	s.keitaroSyncExecute(ctx, cfg, kick, now)
 }
 
-// keitaroSyncConsumeKick clears a run-now flag and persists errText on the sync file when set.
-func (s *Server) keitaroSyncConsumeKick(kick bool, st keitaroSyncFile, have bool, errText string) {
+// keitaroSyncAnyDue reports whether any connection sync file is due or not yet created.
+func (s *Server) keitaroSyncAnyDue(now time.Time) bool {
+	targets := s.keitaroSyncTargets()
+	if len(targets) == 0 {
+		return false
+	}
+	for _, t := range targets {
+		st, have, err := s.loadKeitaroSyncAt(t.syncPath)
+		if err != nil {
+			continue
+		}
+		if !have || st.NextRun.IsZero() || !now.Before(st.NextRun) {
+			return true
+		}
+	}
+	return false
+}
+
+// keitaroSyncConsumeKick clears a run-now flag and persists errText on the global sync file when set.
+func (s *Server) keitaroSyncConsumeKick(kick bool, errText string) {
 	if kick {
 		s.syncKick.Store(false)
 	}
-	if errText == "" {
+	if errText == "" || s.cfg.KeitaroSyncFile == "" {
 		return
+	}
+	st, have, err := s.loadKeitaroSync()
+	if err != nil && !have {
+		st = keitaroSyncFile{}
 	}
 	st.LastRun = s.keitaroSyncClock()
 	st.OK = false
@@ -234,23 +325,26 @@ func (s *Server) keitaroSyncConsumeKick(kick bool, st keitaroSyncFile, have bool
 	}
 }
 
-// keitaroSyncExecute holds the import lock, runs one pass, and writes final status.
-func (s *Server) keitaroSyncExecute(ctx context.Context, cfg cron.Config, kick bool, now time.Time, st keitaroSyncFile, have bool) {
-	creds := s.keitaroCreds()
-	interval := cfg.Interval(cron.JobKeitaroSync)
-	if !creds.configured() {
-		if kick {
-			s.keitaroSyncWriteSoftFail(&st, have, now, interval, "keitaro not configured")
-		}
+// keitaroSyncExecute holds the import lock, runs one pass per connection, and writes final status.
+func (s *Server) keitaroSyncExecute(ctx context.Context, cfg cron.Config, kick bool, now time.Time) {
+	targets := s.keitaroSyncTargets()
+	if len(targets) == 0 {
 		return
 	}
+	interval := cfg.Interval(cron.JobKeitaroSync)
 	if s.cfg.Warehouse == nil {
-		s.keitaroSyncWriteSoftFail(&st, have, now, interval, "clickhouse unavailable")
+		for _, t := range targets {
+			st, have, _ := s.loadKeitaroSyncAt(t.syncPath)
+			s.keitaroSyncWriteSoftFailAt(t.syncPath, &st, have, now, interval, "clickhouse unavailable")
+		}
 		return
 	}
 	if msg := s.ktJob.beginSync(); msg != "" {
 		if kick {
-			s.keitaroSyncWriteSoftFail(&st, have, now, interval, msg)
+			for _, t := range targets {
+				st, have, _ := s.loadKeitaroSyncAt(t.syncPath)
+				s.keitaroSyncWriteSoftFailAt(t.syncPath, &st, have, now, interval, msg)
+			}
 		}
 		return
 	}
@@ -259,21 +353,34 @@ func (s *Server) keitaroSyncExecute(ctx context.Context, cfg cron.Config, kick b
 	runCtx, cancel := context.WithTimeout(ctx, keitaroSyncMaxTimeout)
 	defer cancel()
 
-	st.Host = creds.host()
-	st.Running = true
-	st.LastRun = now
-	st.Error = ""
-	if err := s.saveKeitaroSync(st); err != nil {
-		s.logWarn("keitaro sync save failed", "err", err)
+	for _, t := range targets {
+		if !t.creds.configured() {
+			if kick {
+				st, have, _ := s.loadKeitaroSyncAt(t.syncPath)
+				s.keitaroSyncWriteSoftFailAt(t.syncPath, &st, have, now, interval, "keitaro not configured")
+			}
+			continue
+		}
+		st, have, err := s.loadKeitaroSyncAt(t.syncPath)
+		if err != nil {
+			s.logWarn("keitaro sync state unreadable", "path", t.syncPath, "err", err)
+			continue
+		}
+		st.Host = t.creds.host()
+		st.Running = true
+		st.LastRun = now
+		st.Error = ""
+		if err := s.saveKeitaroSyncAt(t.syncPath, st); err != nil {
+			s.logWarn("keitaro sync save failed", "err", err)
+		}
+		began := s.keitaroSyncClock()
+		res := s.runKeitaroSyncPass(runCtx, t, &st, have)
+		s.keitaroSyncFinishRun(keitaroSyncFinishIn{State: &st, Result: res, Interval: interval, Began: began}, t.syncPath)
 	}
-
-	began := s.keitaroSyncClock()
-	res := s.runKeitaroSyncPass(runCtx, creds, &st, have)
-	s.keitaroSyncFinishRun(keitaroSyncFinishIn{State: &st, Result: res, Interval: interval, Began: began})
 }
 
-// keitaroSyncWriteSoftFail records a non-retry backoff failure (NextRun = now+interval).
-func (s *Server) keitaroSyncWriteSoftFail(st *keitaroSyncFile, have bool, now time.Time, interval time.Duration, errText string) {
+// keitaroSyncWriteSoftFailAt records a non-retry backoff failure (NextRun = now+interval).
+func (s *Server) keitaroSyncWriteSoftFailAt(path string, st *keitaroSyncFile, have bool, now time.Time, interval time.Duration, errText string) {
 	st.LastRun = now
 	st.OK = false
 	st.Error = errText
@@ -281,13 +388,13 @@ func (s *Server) keitaroSyncWriteSoftFail(st *keitaroSyncFile, have bool, now ti
 	st.Running = false
 	st.NextRun = now.Add(interval)
 	s.syncFailStreak = 0
-	if err := s.saveKeitaroSync(*st); err != nil {
+	if err := s.saveKeitaroSyncAt(path, *st); err != nil {
 		s.logWarn("keitaro sync save failed", "err", err)
 	}
 }
 
 // keitaroSyncFinishRun sets OK, message, error, next run, and counters from in.Result.
-func (s *Server) keitaroSyncFinishRun(in keitaroSyncFinishIn) {
+func (s *Server) keitaroSyncFinishRun(in keitaroSyncFinishIn, syncPath string) {
 	st := in.State
 	res := in.Result
 	st.Running = false
@@ -315,7 +422,7 @@ func (s *Server) keitaroSyncFinishRun(in keitaroSyncFinishIn) {
 		st.Error = res.ErrText
 		st.NextRun = s.keitaroSyncClock().Add(keitaroSyncBackoff(in.Interval, s.syncFailStreak))
 	}
-	if err := s.saveKeitaroSync(*st); err != nil {
+	if err := s.saveKeitaroSyncAt(syncPath, *st); err != nil {
 		s.logWarn("keitaro sync save failed", "err", err)
 	}
 	if !res.OK && !keitaroSyncSoftFail(res.ErrText) {
@@ -397,8 +504,9 @@ func syncWindowBounds(cursor, upper time.Time, back time.Duration) (from, to tim
 }
 
 // runKeitaroSyncPass bootstraps cursors when needed, then syncs clicks and conversions.
-func (s *Server) runKeitaroSyncPass(ctx context.Context, creds ktCreds, st *keitaroSyncFile, have bool) keitaroSyncPassResult {
+func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarget, st *keitaroSyncFile, have bool) keitaroSyncPassResult {
 	s.syncPassCount.Add(1)
+	creds := target.creds
 	now := s.keitaroSyncClock()
 	upper := now.Add(-keitaroSyncLag)
 	host := creds.host()
@@ -413,7 +521,7 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, creds ktCreds, st *keit
 		return keitaroSyncPassResult{ErrText: err.Error()}
 	}
 	if !have || st.Host == "" || (st.ClicksTo.IsZero() && st.ConversionsTo.IsZero()) {
-		ready, errMsg, err := s.keitaroSyncBootstrap(ctx, creds, st)
+		ready, errMsg, err := s.keitaroSyncBootstrap(ctx, creds, st, target.manifestStore)
 		if err != nil {
 			return keitaroSyncPassResult{ErrText: sanitize(err, creds.Key)}
 		}
@@ -427,7 +535,11 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, creds ktCreds, st *keit
 	}
 
 	var skip logSkipTally
-	base := syncStreamOpts{Creds: creds, State: st, Upper: upper, Skip: &skip}
+	base := syncStreamOpts{
+		Creds: creds, State: st, syncPath: target.syncPath,
+		mapScope:      campaignMapScope{board: target.board, allBoards: target.allBoards},
+		manifestStore: target.manifestStore, Upper: upper, Skip: &skip,
+	}
 	clickOpts := base
 	clickOpts.Cursor = &st.ClicksTo
 	clickOpts.Back = keitaroSyncClickBack
@@ -477,6 +589,7 @@ func (s *Server) runSyncStream(ctx context.Context, o syncStreamOpts) (int, erro
 		fromS, toS := formatKeitaroWindow(chunkStart, chunkEnd)
 		counts, _, stats, err := s.importLogWindow(ctx, o.Creds, fromS, toS, logImportOpts{
 			clicks: o.Clicks, conversions: o.Conversions, syncMode: true, skip: o.Skip,
+			mapScope: o.mapScope, manifestStore: o.manifestStore,
 		})
 		if err != nil {
 			return inserted, err
@@ -495,7 +608,7 @@ func (s *Server) runSyncStream(ctx context.Context, o syncStreamOpts) (int, erro
 		if chunkEnd.After(*o.Cursor) {
 			*o.Cursor = chunkEnd
 		}
-		if err := s.saveKeitaroSync(*o.State); err != nil {
+		if err := s.saveKeitaroSyncAt(o.syncPath, *o.State); err != nil {
 			return inserted, errors.New("save error")
 		}
 		chunkStart = chunkEnd
@@ -517,8 +630,8 @@ func keitaroSyncCheckTimes(clicks, convs time.Time, now time.Time) error {
 
 // keitaroSyncBootstrap sets cursors from manifest and warehouse watermarks when a full import exists.
 // ready is false with errMsg when a manual import is still required. err is a load or watermark failure.
-func (s *Server) keitaroSyncBootstrap(ctx context.Context, creds ktCreds, st *keitaroSyncFile) (ready bool, errMsg string, err error) {
-	manifest, err := s.loadManifest()
+func (s *Server) keitaroSyncBootstrap(ctx context.Context, creds ktCreds, st *keitaroSyncFile, manifestStore ManifestStore) (ready bool, errMsg string, err error) {
+	manifest, err := loadManifestStore(manifestStore)
 	if err != nil {
 		return false, "", err
 	}

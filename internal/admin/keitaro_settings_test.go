@@ -354,7 +354,7 @@ func TestKeitaroImportKeepsStartSnapshot(t *testing.T) {
 	if msg := e.s.ktJob.beginImport(); msg != "" {
 		t.Fatal(msg)
 	}
-	e.s.runKeitaroImport(context.Background(), keitaroImportReq{Networks: true}, "", e.s.keitaroCreds())
+	e.s.runKeitaroImport(context.Background(), keitaroImportReq{Networks: true}, "", e.s.keitaroCreds(), config.MainBoardID, e.s.cfg.Manifest)
 	job := e.s.ktJob.snapshot()
 	if job.Stage != "done" || job.Error != "" {
 		t.Fatalf("job %+v", job)

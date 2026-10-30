@@ -121,6 +121,7 @@ type Config struct {
 	Stats        StatsProvider
 	Groups       GroupsStore
 	Offers       *JSONStore[config.Offer]
+	Boards       *JSONStore[config.Board]
 	S2S          *JSONStore[config.OutboundPostback]
 	Landings     *JSONStore[config.Landing]
 	LandingFiles LandingFiles
@@ -276,6 +277,9 @@ type Server struct {
 	ktBase   string
 	ktKey    string
 	ktSource string
+	// ktConns holds tracker connections from keitaro.json; empty uses ktBase and ktKey only.
+	ktConns    []keitaroConn
+	ktFileList bool
 
 	// ncMu guards ncAcct and ncErr. Readers take a copy through namecheapAccount.
 	// ncErr is why namecheap.json was not used at start; it is empty otherwise.
@@ -476,6 +480,15 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "GET /api/report", http.HandlerFunc(s.handleReport))
 	s.handle(mux, "GET /api/keys", http.HandlerFunc(s.handleKeys))
 
+	s.handle(mux, "GET /api/boards", http.HandlerFunc(s.handleBoardsGet))
+	s.handle(mux, "POST /api/boards", http.HandlerFunc(s.handleBoardsPost))
+	s.handle(mux, "PUT /api/boards/order", http.HandlerFunc(s.handleBoardsOrderPut))
+	s.handle(mux, "PATCH /api/boards/{id}", http.HandlerFunc(s.handleBoardPatch))
+	s.handle(mux, "DELETE /api/boards/{id}", http.HandlerFunc(s.handleBoardDelete))
+	s.handle(mux, "PUT /api/boards/{id}/members", http.HandlerFunc(s.handleBoardMembersPut))
+	s.handle(mux, "POST /api/boards/{id}/assign", http.HandlerFunc(s.handleBoardAssignPost))
+	s.handle(mux, "POST /api/boards/import", http.HandlerFunc(s.handleBoardImportPost))
+	s.handle(mux, "POST /api/boards/move", http.HandlerFunc(s.handleBoardMovePost))
 	s.handle(mux, "GET /api/groups", http.HandlerFunc(s.handleGroupsGet))
 	s.handle(mux, "PUT /api/groups", http.HandlerFunc(s.handleGroupsSave))
 	s.handle(mux, "PUT /api/groups/{id}", http.HandlerFunc(s.handleGroupPut))

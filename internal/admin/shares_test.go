@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -30,9 +31,19 @@ func sharesServer(t *testing.T, seed []config.Group) (*httptest.Server, *memGrou
 		t.Fatal(err)
 	}
 	store := &memGroups{list: seed}
+	dir := t.TempDir()
+	offers := NewJSONStore[config.Offer](filepath.Join(dir, "offers.json"))
+	offerList := make([]config.Offer, 0, 9)
+	for i := 0; i < 9; i++ {
+		id := "o" + string(rune('1'+i))
+		offerList = append(offerList, config.Offer{ID: id, Name: id})
+	}
+	if err := offers.Save(context.Background(), offerList); err != nil {
+		t.Fatal(err)
+	}
 	s, err := New(Config{
 		AdminUser: "admin", PasswordHash: hash, Sessions: security.NewMemoryStore(),
-		Stats: fakeStats{}, Groups: store, Limiter: allowAll{},
+		Stats: fakeStats{}, Groups: store, Offers: offers, Limiter: allowAll{},
 		SessionTTL: time.Hour,
 	})
 	if err != nil {
@@ -212,7 +223,7 @@ func TestImportGroupsReportsSharesAboveHundred(t *testing.T) {
 			Name: "kt-1", Status: true,
 			Out: ktimport.Output{Offers: []ktimport.ShareRef{{ID: "a", Share: 60}, {ID: "b", Share: 40}}},
 		}},
-	}}, ktimport.Manifest{}, "", nil, "")
+	}}, ktimport.Manifest{}, "", nil, "", config.MainBoardID, nil)
 	if err != nil || n != 2 {
 		t.Fatalf("n=%d err=%v", n, err)
 	}

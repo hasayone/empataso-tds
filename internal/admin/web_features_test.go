@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 // TestSpaKeepsUnknownRules checks that saving a stream copies the rule keys the editor
@@ -18,6 +20,23 @@ func TestSpaKeepsUnknownRules(t *testing.T) {
 	keys := spaFunctionLine(html, "ruleKeys")
 	must(t, keys, "COND", "ruleKeys is built from the editor conditions")
 	must(t, keys, "[c.k]", "ruleKeys takes the key of each condition, sub_ids and model included")
+}
+
+// TestBotConditionSwitch checks that the stream bot filter is a switch, and the other
+// three-way filters stay selects. Values stay 0 off, 1 bots, 2 humans.
+func TestBotConditionSwitch(t *testing.T) {
+	html := spaSource()
+	row := spaFunctionLine(html, "condRow")
+	must(t, row, `id="r_bot"`, "bot condition has a switch")
+	must(t, row, `class="sw"`, "bot condition uses the switch control")
+	must(t, row, `data-mode=`, "the switch keeps any, yes and no")
+	must(t, row, `sel('r_'+c.k`, "other three-way conditions stay a select")
+	paint := spaFunctionLine(html, "paintStream")
+	must(t, paint, "if(!cur.rules.bot) cur.rules.bot=1", "a new bot condition starts on")
+	must(t, paint, "botSw.dataset.mode", "the switch writes its mode")
+	collect := spaFunctionLine(html, "collectStream")
+	must(t, collect, "el.dataset.mode", "saving the stream reads the switch mode")
+	mustNot(t, collect, `+val('r_bot')`, "the bot value is not read as a select")
 }
 
 // TestSpaModelAndSubIDs checks the device model and Sub ID conditions, the model column
@@ -187,7 +206,9 @@ func TestSpaNewKeysAreTranslated(t *testing.T) {
 		"err.sid.unknown", "sid.block", "spend.from", "spend.to", "spend.byuniq", "spend.empty", "stream.share",
 		"s2s.title", "s2s.hint", "s2s.url", "s2s.method", "s2s.status", "s2s.add", "s2s.lead", "s2s.sale",
 		"s2s.rejected", "adv.summary", "cols.title", "cols.restore", "dom.groups", "dom.count", "dom.nogroup",
-		"dom.group.clear", "err.network", "kt.stage.landing_files", "kt.stage.lists", "kt.stage.pages", "kt.stage.users",
+		"dom.group.clear", "err.network", "board.main", "board.switch", "board.create", "board.import", "board.empty",
+		"board.page.title", "board.add", "board.icon", "board.name", "board.id", "board.delete", "board.delete.confirm", "board.inuse", "board.saved",
+		"kt.stage.landing_files", "kt.stage.lists", "kt.stage.pages", "kt.stage.users",
 		"cf.intro", "cf.token", "cf.account", "cf.ip", "cf.ip.empty", "cf.test", "cf.test.ok", "cf.test.fail",
 		"cf.file.err", "cf.err.load", "cf.reg.use", "cf.reg.err", "cf.reg.hosterr", "cf.reg.manual", "cf.buy.title",
 		"cf.buy.sum", "cf.dns.cf", "cf.dns.ns", "cf.dns.a", "cf.dns.none", "dom.state.on", "dom.state.off",
@@ -886,4 +907,144 @@ func TestNetworkErrorMapping(t *testing.T) {
 	mustNot(t, spaFunctionLine(html, "call"), "await fetch(", "call does not bypass the mapping")
 	mustNot(t, spaFunctionLine(html, "callRaw"), "await fetch(", "callRaw does not bypass the mapping")
 	must(t, html, `'err.network':'Нет связи с сервером. Проверьте соединение и повторите.'`, "ru text")
+}
+
+// TestSpaBoardPanel checks the section switcher: API header, sessionStorage, cache reset and UI hooks.
+func TestSpaBoardPanel(t *testing.T) {
+	html := spaSource()
+	must(t, html, "const BOARD_KEY='kuztds_board'", "sessionStorage key")
+	must(t, html, `id="board"`, "header section button")
+	must(t, spaFunctionLine(html, "call"), "boardApplyHeaders(o.headers, path, opts.board)", "call sends X-Kuztds-Board")
+	must(t, spaFunctionLine(html, "callRaw"), "boardApplyHeaders(o.headers, path, opts.board)", "callRaw sends X-Kuztds-Board")
+	must(t, spaFunctionLine(html, "boardApplyHeaders"), "headers['X-Kuztds-Board']", "header name")
+	must(t, spaFunctionLine(html, "boardApplyHeaders"), "path==='/api/login'", "login is excluded")
+	must(t, spaFunctionLine(html, "boardSwitchRows"), "boardIconTone(row)", "section row uses the saved tint")
+	must(t, spaFunctionLine(html, "boardIconTone"), "return 'ok'", "default section without a tint stays green")
+	must(t, html, ".board-icon-grid{display:grid;grid-template-columns:repeat(auto-fill,36px);gap:6px;max-height:240px;overflow-x:hidden", "icon grid scrolls vertically only")
+	must(t, spaFunctionLine(html, "openBoardIconPicker"), "openBoardIconColorPop", "icon click opens the tint popup")
+	mustNot(t, spaFunctionLine(html, "openBoardIconPicker"), "board-icon-colors", "main picker has no tint row")
+	must(t, spaFunctionLine(html, "openBoardIconColorPop"), "board-icon-colors", "tint popup shows the ten colors")
+	must(t, html, "if(BOARD_ICON_COLOR_POP){ closeBoardIconColorPop(); return; }", "escape closes the tint popup first")
+	must(t, spaFunctionLine(html, "iconRecentPush"), "ICON_RECENT_KEY", "recent icons are a shared browser list")
+	must(t, html, "const ICON_RECENT_KEY='kuztds_icon_recent'", "recent list storage key")
+	must(t, html, "const ICON_COLORS=['clicks','uniq','conv','rev','profit','cost','bots','roi','cr','warn']", "ten icon tints")
+	must(t, html, ".menu svg.ic.ok{color:var(--ok)", "green icon in the menu")
+	must(t, spaFunctionLine(html, "boardName"), "tr('board.main')", "main section label")
+	must(t, spaFunctionLine(html, "resetBoardCaches"), "DASH_PERF=null", "dashboard perf cleared")
+	must(t, spaFunctionLine(html, "resetBoardCaches"), "FACTS={ready:false", "facts cleared")
+	must(t, spaFunctionLine(html, "resetBoardCaches"), "SPEND=[]", "spend cleared")
+	must(t, spaFunctionLine(html, "switchBoard"), "resetBoardCaches()", "switch resets caches")
+	must(t, spaFunctionLine(html, "sendPageViewsOnHide"), "boardApplyHeaders", "keepalive views carry the header")
+	must(t, spaFunctionLine(html, "userMenuItems"), "appendBoardUserMenuItems", "profile menu lists sections")
+	boardSwitchLine := spaFunctionLine(html, "boardSwitchItems")
+	mustNot(t, boardSwitchLine, "boardCreateMenuNode", "header board menu is switch-only")
+	must(t, html, ".menu button.primary{background:var(--accent)", "a primary button inside a menu keeps the accent fill")
+	must(t, spaFunctionLine(html, "boardImportSectionHTML"), `class="bi-row"`, "import row stays within the dialog")
+	must(t, html, ".bi-row input{width:16px", "import checkbox stays a checkbox")
+	must(t, html, ".bi-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis", "import name ellipsizes")
+	mustNot(t, spaFunctionLine(html, "openBoardImport"), `hint">${esc(tr('board.empty'))}</p><div id="bi-body"`, "empty hint is not shown before the list loads")
+	userMenuLine := spaFunctionLine(html, "userMenuItems")
+	must(t, userMenuLine, "userTypeLabel(ME&&ME.type)", "account caption is the translated type")
+	profileAt := strings.Index(userMenuLine, "tr('menu.settings')")
+	boardsAt := strings.Index(userMenuLine, "appendBoardUserMenuItems")
+	if profileAt < 0 || boardsAt < 0 || profileAt > boardsAt {
+		t.Errorf("profile sits above sections: profile=%d boards=%d", profileAt, boardsAt)
+	}
+	must(t, userMenuLine, "icon:'send'", "postbacks icon send")
+	must(t, userMenuLine, "icon:'tools'", "integrations icon tools")
+	must(t, userMenuLine, "icon:'user'", "users icon user")
+	appendBoardLine := spaFunctionLine(html, "appendBoardUserMenuItems")
+	must(t, appendBoardLine, "tr('board.sections')", "profile menu sections caption")
+	must(t, appendBoardLine, "tr('board.settings')", "profile menu section settings")
+	must(t, appendBoardLine, "icon:'settings'", "section settings uses the gear")
+	must(t, spaFunctionLine(html, "boardIconButtonHTML"), "board-icon-btn", "icon control is a button")
+	must(t, spaFunctionLine(html, "openBoardIconPicker"), "board-icon-grid", "icon picker is a grid")
+	must(t, spaFunctionLine(html, "openBoardIconPicker"), "tr('board.all')", "icon grid caption")
+	must(t, html, "'board.all':'Все иконки'", "ru all icons")
+	must(t, html, "'board.all':'All icons'", "en all icons")
+	must(t, html, "'board.all':'Усі іконки'", "uk all icons")
+	must(t, html, ".board-icon-colors-pop .board-icon-row{display:grid;grid-template-columns:repeat(5,36px)", "tint popup is two rows of five")
+	must(t, spaFunctionLine(html, "openBoardIconPicker"), "tr('Search…')", "icon picker has search")
+	must(t, spaFunctionLine(html, "boardsPage"), "boardIconButtonHTML", "create form uses the icon button")
+	mustNot(t, spaFunctionLine(html, "paintBoardsTable"), "boardIconSelect", "table does not use a name select")
+	must(t, html, "addEventListener('resize'", "menu resize listener")
+	must(t, spaFunctionLine(html, "ensureMenuResize"), "if(MENU) menuPlace()", "menu repositions on resize")
+	mustNot(t, html, "#/flows/{", "campaign num is not turned into a hash link")
+	must(t, spaFunctionLine(html, "boardSaveId"), "boardStorageEncode(id)", "main stored as main in sessionStorage")
+	mustNot(t, spaFunctionLine(html, "boardSaveId"), "setItem(BOARD_KEY, boardNormId", "save does not write empty main")
+	must(t, spaFunctionLine(html, "boardEffectiveId"), "boardHasStored()", "effective id respects an explicit tab choice")
+	must(t, spaFunctionLine(html, "boardEffectiveId"), "stored!=null?stored:''", "main choice does not fall back to BOARDS.current")
+	must(t, spaFunctionLine(html, "applyBoardsPayload"), "!boardHasStored()&&BOARDS.current", "payload seeds storage only before first choice")
+	mustNot(t, spaFunctionLine(html, "applyBoardsPayload"), "boardStoredId()", "payload does not treat main as unset")
+	must(t, spaFunctionLine(html, "boardStoredId"), "setItem(BOARD_KEY,'main')", "legacy empty storage migrates to main")
+	profileLine := spaFunctionLine(html, "profile")
+	must(t, profileLine, "arg==='boards'", "profile opens boards tab")
+	must(t, profileLine, "#/settings/boards", "profile boards hash")
+	must(t, profileLine, "meIsAdmin()", "boards tab is admin-only")
+	must(t, profileLine, "go('settings/boards')", "boards tab navigation")
+	must(t, html, "function boardsPage(", "boards settings page")
+	must(t, spaFunctionLine(html, "patchBoard"), "call('PATCH','/api/boards/", "boards PATCH API")
+	must(t, spaFunctionLine(html, "deleteBoardRow"), "call('DELETE','/api/boards/", "boards DELETE API")
+	must(t, spaFunctionLine(html, "deleteBoardRow"), "boardIsMain", "main board delete guard")
+	must(t, spaFunctionLine(html, "paintBoardsTable"), "boardIsMain", "main row without delete button")
+	must(t, spaFunctionLine(html, "deleteBoardRow"), "tr('board.inuse')", "409 board in use toast")
+	card := pageFnBody(html, "boardPanelCard")
+	must(t, card, "'/assign'", "board panel assign API")
+	must(t, card, "'/members'", "board panel members API")
+	must(t, spaFunctionLine(html, "bindBoardPanelCard"), "data-bassign-save", "board assign save control")
+	must(t, spaFunctionLine(html, "bindBoardPanelCard"), "data-bmembers-save", "board members save control")
+	mustNot(t, spaFunctionLine(html, "paintBoardsTable"), "boardRowIcon(row)", "table has no preview icon column")
+	must(t, spaFunctionLine(html, "paintBoardsTable"), "key:'board', cls:'ok'", "default section button shows the green board glyph")
+	must(t, spaFunctionLine(html, "paintBoardsTable"), `colspan="5"`, "composition row spans the remaining columns")
+	must(t, spaFunctionLine(html, "placeBoardIconPop"), "popLeft(r, w, false)", "icon popup stays inside the window")
+	must(t, spaFunctionLine(html, "viewBox"), "clientWidth", "icon popup uses the visible window")
+	mustNot(t, spaFunctionLine(html, "placeBoardIconPop"), "q('main')", "icon popup is not tied to the content column")
+	must(t, spaFunctionLine(html, "openBoardIconPicker"), "placeBoardIconPop", "icon picker uses the column clamp")
+	must(t, spaFunctionLine(html, "openBoardIconColorPop"), "placeBoardIconPop", "tint popup uses the column clamp")
+	must(t, html, ".board-icon-pop{position:fixed;z-index:86;width:448px;max-width:calc(100vw - 16px);box-sizing:border-box;display:flex;flex-direction:column;gap:10px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow-2);max-height:min(520px,calc(100vh - 16px));overflow-x:hidden", "icon popup clips horizontal overflow")
+	must(t, spaFunctionLine(html, "paintBoardsTable"), "boardPanelToggle", "boards table expand toggle")
+	must(t, spaFunctionLine(html, "paintBoardsTable"), "boardIsMain", "main row without panel button")
+	must(t, spaFunctionLine(html, "paintBoardsTable"), "data-bdrag", "section row has a drag handle")
+	must(t, spaFunctionLine(html, "bindBoardRowDrag"), "onpointerdown", "drag follows the pointer")
+	must(t, spaFunctionLine(html, "bindBoardRowDrag"), "board-drag-slot", "drag shows a dashed slot")
+	must(t, spaFunctionLine(html, "bindBoardRowDrag"), "board-drag-ghost", "drag row follows the pointer")
+	must(t, spaFunctionLine(html, "bindBoardRowDrag"), "ghost.style.width", "drag ghost is as wide as the table")
+	must(t, spaFunctionLine(html, "paintBoardsTable"), "board-col-icon", "icon column stays as wide as its header")
+	must(t, spaFunctionLine(html, "bindBoardPanelCard"), "tr('board.people.remove')", "member row uses the translator")
+	mustNot(t, spaFunctionLine(html, "bindBoardPanelCard"), "const tr=document.createElement('tr')", "member row must not shadow tr()")
+	must(t, spaFunctionLine(html, "bindBoardRowDrag"), "board-panel-row", "open composition moves with its section")
+	must(t, spaFunctionLine(html, "collectBoardPanelAssign"), "if(lab&&labels.has(lab)) return", "checked folder is not also sent as an id")
+	must(t, spaFunctionLine(html, "call"), "j.error==='csrf'", "csrf failure is recognized")
+	must(t, spaFunctionLine(html, "call"), "CSRF=me.csrf", "csrf retries once with a fresh token")
+	must(t, html, "'err.csrf':'Сессия устарела. Обновите страницу.'", "ru csrf message")
+	must(t, html, ".fld input:not([type=checkbox])", "checkboxes are not stretched to full width")
+	must(t, spaFunctionLine(html, "paintBoardsTable"), "icon('grip')", "drag handle is the grip icon")
+	must(t, spaFunctionLine(html, "paintBoardsTable"), "icon('trash')", "delete is an icon")
+	must(t, spaFunctionLine(html, "paintBoardsTable"), "data-bpanel", "composition stays a button")
+	must(t, spaFunctionLine(html, "bindBoardRowDrag"), "PUT','/api/boards/order'", "drag saves the section order")
+	must(t, html, "'board.move':'Переместить'", "ru move")
+}
+
+// TestSpaIconKeysAreAllowed checks the picker lists at least 200 icons and the API accepts each key.
+func TestSpaIconKeysAreAllowed(t *testing.T) {
+	html := spaSource()
+	i := strings.Index(html, "const IC={")
+	j := strings.Index(html, "\nconst icon=")
+	if i < 0 || j < i {
+		t.Fatal("IC block missing")
+	}
+	re := regexp.MustCompile(`(?m)^\s*(?:'([^']+)'|([A-Za-z][A-Za-z0-9]*)):`)
+	ms := re.FindAllStringSubmatch(html[i:j], -1)
+	if len(ms) < 200 {
+		t.Fatalf("picker icons = %d; want at least 200", len(ms))
+	}
+	for _, m := range ms {
+		k := m[1]
+		if k == "" {
+			k = m[2]
+		}
+		if err := config.ValidateBoardIcon(k); err != nil {
+			t.Fatalf("icon %s: %v", k, err)
+		}
+	}
 }

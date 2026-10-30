@@ -108,6 +108,15 @@ func addCoreRoutes(m map[string]routeRule, open func() routeRule, rule func(sect
 	m["GET /api/log-fields"] = open()
 	m["GET /api/ui"] = open()
 	m["GET /api/groups"] = open()
+	m["GET /api/boards"] = open()
+	m["POST /api/boards"] = routeRule{sec: secAny, admin: true}
+	m["PUT /api/boards/order"] = routeRule{sec: secAny, admin: true}
+	m["PATCH /api/boards/{id}"] = routeRule{sec: secAny, admin: true}
+	m["DELETE /api/boards/{id}"] = routeRule{sec: secAny, admin: true}
+	m["PUT /api/boards/{id}/members"] = routeRule{sec: secAny, admin: true}
+	m["POST /api/boards/{id}/assign"] = routeRule{sec: secAny, admin: true}
+	m["POST /api/boards/import"] = open()
+	m["POST /api/boards/move"] = open()
 
 	m["GET /api/stats/summary"] = rule(secDashboard)
 	m["GET /api/stats/timeseries"] = rule(secDashboard)
@@ -302,7 +311,7 @@ func (s *Server) handle(mux *http.ServeMux, pattern string, h http.Handler) {
 		panic("admin: route without access rule: " + pattern)
 	}
 	s.routes = append(s.routes, pattern)
-	mux.Handle(pattern, s.auth(s.guard(rule, h)))
+	mux.Handle(pattern, s.auth(s.boardScope(s.guard(rule, h))))
 }
 
 // userPages returns panel section ids visible to u in userSections order.

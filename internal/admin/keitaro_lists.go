@@ -69,17 +69,19 @@ func stripMissingIPLists(groups []ktimport.Group) ([]ktimport.Group, []ktimport.
 // A failing one is skipped. Groups that were not in the manifest stay in the file.
 // It returns how many incoming groups were saved and the skip report.
 // An error means the file could not be read, converted or saved.
-func (s *Server) importGroups(ctx context.Context, incoming []ktimport.Group, prev ktimport.Manifest, owner string, runManifest *ktimport.Manifest, host string) (int, []ktimport.Loss, error) {
+func (s *Server) importGroups(ctx context.Context, incoming []ktimport.Group, prev ktimport.Manifest, owner string, runManifest *ktimport.Manifest, host string, board string, manifestStore ManifestStore) (int, []ktimport.Loss, error) {
+	s.groupsMu.Lock()
+	defer s.groupsMu.Unlock()
 	existing, err := s.cfg.Groups.List(ctx)
 	if err != nil {
 		return 0, nil, err
 	}
 	incoming, losses := keepFirstGroups(incoming)
-	incoming, err = s.extractGlobalS2S(ctx, incoming)
+	incoming, err = s.extractGlobalS2S(ctx, board, incoming)
 	if err != nil {
 		return 0, losses, err
 	}
-	merged, extra, err := mergeImportedGroups(existing, incoming, prev, owner)
+	merged, extra, err := mergeImportedGroups(existing, incoming, prev, owner, board)
 	if err != nil {
 		return 0, append(losses, extra...), err
 	}
@@ -91,8 +93,8 @@ func (s *Server) importGroups(ctx context.Context, incoming []ktimport.Group, pr
 	conflicts := conflictIDs(extra)
 	saved, dropped := selectImportedGroups(merged, incoming, conflicts, offers)
 	losses = append(losses, dropped...)
-	recordAcceptedImportManifest(runManifest, incoming, conflicts, saved, losses)
-	if err := s.saveImportGroupsManifest(prev, runManifest, host); err != nil {
+	recordAcceptedImportManifest(runManifest, incoming, conflicts, saved, losses, campaignMapScope{board: board})
+	if err := s.saveImportGroupsManifest(manifestStore, prev, runManifest, host); err != nil {
 		return 0, losses, err
 	}
 	if err := s.cfg.Groups.Save(ctx, saved); err != nil {
@@ -130,15 +132,22 @@ func keepFirstGroups(incoming []ktimport.Group) ([]ktimport.Group, []ktimport.Lo
 // A catalog id that is not already stored is appended and saved before the caller writes groups.
 // It returns groups whose matching inline copies are removed and whose PostbackIDs hold the catalog id.
 // An error means the catalog could not be read, converted or saved. Groups are not written here.
-func (s *Server) extractGlobalS2S(ctx context.Context, incoming []ktimport.Group) ([]ktimport.Group, error) {
+func (s *Server) extractGlobalS2S(ctx context.Context, board string, incoming []ktimport.Group) ([]ktimport.Group, error) {
 	if s.cfg.S2S == nil {
 		return incoming, nil
 	}
+	board = config.NormalizeBoardID(board)
 	stored, err := s.cfg.S2S.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	existing, err := convert[[]ktimport.Postback](stored)
+	var section []config.OutboundPostback
+	for _, p := range stored {
+		if config.SameBoard(p.BoardID, board) {
+			section = append(section, p)
+		}
+	}
+	existing, err := convert[[]ktimport.Postback](section)
 	if err != nil {
 		return nil, err
 	}
@@ -146,13 +155,14 @@ func (s *Server) extractGlobalS2S(ctx context.Context, incoming []ktimport.Group
 	if pb == nil {
 		return incoming, nil
 	}
-	if s2sHasID(stored, pb.ID) {
+	if s2sHasID(section, pb.ID) {
 		return groups, nil
 	}
 	row, err := convert[config.OutboundPostback](*pb)
 	if err != nil {
 		return nil, err
 	}
+	row.BoardID = board
 	if err := s.cfg.S2S.Save(ctx, append(stored, row)); err != nil {
 		return nil, err
 	}

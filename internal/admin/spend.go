@@ -70,7 +70,7 @@ func (s *Server) handleSpendCreate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
-	if !v.admin {
+	{
 		ok, err := s.spendVisible(r.Context(), v, entry.GroupID)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "groups error")
@@ -148,7 +148,7 @@ func (s *Server) handleSpendDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "read error")
 		return
 	}
-	if !v.admin {
+	{
 		okDel, err := s.spendDeleteAllowed(r.Context(), v, list, id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "groups error")

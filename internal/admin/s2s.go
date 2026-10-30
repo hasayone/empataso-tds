@@ -10,7 +10,7 @@ import (
 	"github.com/egerkuzma/kuztds/internal/config"
 )
 
-// handleS2SGet writes the shared s2s catalog.
+// handleS2SGet writes the s2s catalog of the current section.
 // The response is a JSON array. A missing file is an empty array, never null.
 // A nil store is 503. A read error is 500. Success is 200.
 func (s *Server) handleS2SGet(w http.ResponseWriter, r *http.Request) {
@@ -26,15 +26,24 @@ func (s *Server) handleS2SGet(w http.ResponseWriter, r *http.Request) {
 	if list == nil {
 		list = []config.OutboundPostback{}
 	}
-	writeJSON(w, http.StatusOK, list)
+	v := s.viewerFrom(r.Context())
+	out := make([]config.OutboundPostback, 0, len(list))
+	for _, p := range list {
+		if !config.SameBoard(p.BoardID, v.boardCurrent) {
+			continue
+		}
+		ref := ref{id: p.ID, board: p.BoardID}
+		if v.admin || v.canSee(resS2S, ref) {
+			out = append(out, p)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
-// handleS2SPut replaces the shared s2s catalog with the JSON array in the body.
-// The body is the full list and at most 1 MiB. An empty method becomes GET.
-// An empty id is filled from PostbackID of the template signature.
-// A duplicate id is 400. Removing an id listed in any campaign PostbackIDs is 400.
+// handleS2SPut replaces the current section rows in the s2s catalog with the JSON array in the body.
+// Rows of other sections are preserved. The body is at most 1 MiB.
 // A nil store is 503. A bad body is 400. A save error is 500.
-// Success writes 200 and the stored array.
+// Success writes 200 and the stored array of the current section.
 func (s *Server) handleS2SPut(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.S2S == nil {
 		writeErr(w, http.StatusServiceUnavailable, "s2s store unavailable")
@@ -45,17 +54,38 @@ func (s *Server) handleS2SPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "bad json")
 		return
 	}
+	v := s.viewerFrom(r.Context())
+	if !v.admin && !v.boardRoleWrite(resS2S) {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	board := v.boardCurrent
+	for i := range list {
+		list[i].BoardID = board
+	}
 	if msg := prepareS2S(list); msg != "" {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	s.groupsMu.Lock()
 	defer s.groupsMu.Unlock()
-	if msg, code := s.removedS2SUse(r.Context(), list); code != 0 {
+	stored, err := s.cfg.S2S.List(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "read error")
+		return
+	}
+	var other []config.OutboundPostback
+	for _, p := range stored {
+		if !config.SameBoard(p.BoardID, board) {
+			other = append(other, p)
+		}
+	}
+	merged := append(other, list...)
+	if msg, code := s.removedS2SUse(r.Context(), merged, board); code != 0 {
 		writeErr(w, code, msg)
 		return
 	}
-	if err := s.cfg.S2S.Save(r.Context(), list); err != nil {
+	if err := s.cfg.S2S.Save(r.Context(), merged); err != nil {
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
 	}
@@ -89,11 +119,11 @@ func prepareS2S(list []config.OutboundPostback) string {
 	return ""
 }
 
-// removedS2SUse reports a catalog id that next drops while a campaign still lists it.
-// ctx is the request context. next is the prepared catalog. The caller holds groupsMu.
-// The string is the client message and the int is the HTTP status.
+// removedS2SUse reports a catalog id that next drops while a campaign of board still lists it.
+// ctx is the request context. next is the full prepared catalog. board is the section being saved.
+// The caller holds groupsMu. The string is the client message and the int is the HTTP status.
 // Both are zero when every removed id is unused. A read error is 500.
-func (s *Server) removedS2SUse(ctx context.Context, next []config.OutboundPostback) (string, int) {
+func (s *Server) removedS2SUse(ctx context.Context, next []config.OutboundPostback, board string) (string, int) {
 	prev, err := s.cfg.S2S.List(ctx)
 	if err != nil {
 		return "read error", http.StatusInternalServerError
@@ -109,9 +139,18 @@ func (s *Server) removedS2SUse(ctx context.Context, next []config.OutboundPostba
 	if err != nil {
 		return "groups error", http.StatusInternalServerError
 	}
-	used := postbackIDUse(groups)
+	var section []config.Group
+	for _, g := range groups {
+		if groupInBoard(g, board) {
+			section = append(section, g)
+		}
+	}
+	used := postbackIDUse(section)
 	for _, p := range prev {
 		if p.ID == "" {
+			continue
+		}
+		if !config.SameBoard(p.BoardID, board) {
 			continue
 		}
 		if _, ok := keep[p.ID]; ok {

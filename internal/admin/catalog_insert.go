@@ -45,6 +45,9 @@ func (c crudCatalog[T]) insert(ctx context.Context, item T, uid string) (T, int,
 	if c.hooks != nil && c.hooks.setOwner != nil {
 		c.hooks.setOwner(&item, uid)
 	}
+	if c.hooks != nil && c.hooks.setBoard != nil {
+		c.hooks.setBoard(&item, boardFrom(ctx))
+	}
 	var unlockMu func()
 	if c.hooks != nil && c.hooks.mu != nil {
 		c.hooks.mu.Lock()

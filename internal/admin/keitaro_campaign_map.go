@@ -8,6 +8,21 @@ import (
 	"github.com/kuztds/bridge/ktimport"
 )
 
+// campaignMapScope selects which stored groups may participate in log campaign mapping.
+// allBoards is true for a global tracker connection and skips board_id filtering.
+type campaignMapScope struct {
+	board     string
+	allBoards bool
+}
+
+// groupInCampaignScope reports whether g may be used for campaign mapping in scope.
+func groupInCampaignScope(g config.Group, scope campaignMapScope) bool {
+	if scope.allBoards {
+		return true
+	}
+	return config.SameBoard(g.BoardID, scope.board)
+}
+
 // recordAcceptedImportManifest appends accepted group ids and campaign map entries.
 //
 // Parameters: dst is this run's manifest fragment; incoming is the deduped mapper output;
@@ -15,14 +30,19 @@ import (
 // losses includes validation skips for incoming groups.
 // Result: dst receives KindGroups ids and campaign_id → group_id pairs for accepted groups.
 // Errors: none.
-func recordAcceptedImportManifest(dst *ktimport.Manifest, incoming []ktimport.Group, conflicts map[string]bool, saved []config.Group, losses []ktimport.Loss) {
+func recordAcceptedImportManifest(dst *ktimport.Manifest, incoming []ktimport.Group, conflicts map[string]bool, saved []config.Group, losses []ktimport.Loss, scope campaignMapScope) {
 	if dst == nil {
 		return
 	}
 	skipped := skippedGroupIDs(losses)
 	have := groupIDSet(saved)
+	byID := groupsByID(saved)
 	for _, g := range incoming {
 		if !groupImportAccepted(g, conflicts, skipped, have) {
+			continue
+		}
+		stored, ok := byID[g.ID]
+		if !ok || !groupInCampaignScope(stored, scope) {
 			continue
 		}
 		dst.Add(ktimport.KindGroups, g.ID)
@@ -71,8 +91,8 @@ func skippedGroupIDs(losses []ktimport.Loss) map[string]bool {
 // Parameters: base is the manifest loaded at run start; delta is this run's fragment; host is the tracker hostname.
 // Result: base merged with delta is persisted, including host when host is non-empty.
 // Errors: manifest store write failure.
-func (s *Server) saveImportGroupsManifest(base ktimport.Manifest, delta *ktimport.Manifest, host string) error {
-	if s.cfg.Manifest == nil {
+func (s *Server) saveImportGroupsManifest(store ManifestStore, base ktimport.Manifest, delta *ktimport.Manifest, host string) error {
+	if store == nil {
 		return nil
 	}
 	var frag ktimport.Manifest
@@ -83,7 +103,7 @@ func (s *Server) saveImportGroupsManifest(base ktimport.Manifest, delta *ktimpor
 	if host != "" {
 		next.Host = host
 	}
-	return s.cfg.Manifest.Save(next)
+	return store.Save(next)
 }
 
 // resolveLogCampaignMap builds campaign id to group id for log import.
@@ -92,8 +112,8 @@ func (s *Server) saveImportGroupsManifest(base ktimport.Manifest, delta *ktimpor
 // groups is the current groups-store snapshot; creds and ctx reach the tracker when needed.
 // Result: aliases for row mapping and optional backfill pairs to persist for legacy manifests.
 // Errors: tracker campaign list unavailable when it must be fetched.
-func (s *Server) resolveLogCampaignMap(ctx context.Context, creds ktCreds, manifest ktimport.Manifest, snapCampaigns []ktimport.Campaign, groups []config.Group) (map[int]string, map[string]string, error) {
-	aliases := filterLogAliases(manifest.LogCampaignAliases(), groups)
+func (s *Server) resolveLogCampaignMap(ctx context.Context, creds ktCreds, manifest ktimport.Manifest, snapCampaigns []ktimport.Campaign, groups []config.Group, scope campaignMapScope) (map[int]string, map[string]string, error) {
+	aliases := filterLogAliases(manifest.LogCampaignAliases(), groups, scope)
 	if len(manifest.Campaigns) > 0 {
 		return aliases, nil, nil
 	}
@@ -108,7 +128,7 @@ func (s *Server) resolveLogCampaignMap(ctx context.Context, creds ktCreds, manif
 	if len(manifest.Groups) == 0 {
 		return aliases, nil, nil
 	}
-	add, backfill := inferLegacyBackfill(manifest, groups, camps, aliases)
+	add, backfill := inferLegacyBackfill(manifest, groups, camps, aliases, scope)
 	for num, gid := range add {
 		aliases[num] = gid
 	}
@@ -124,10 +144,10 @@ func (s *Server) resolveLogCampaignMap(ctx context.Context, creds ktCreds, manif
 // existing holds pairs already resolved for this import.
 // Result: new int aliases and string pairs suitable for AddCampaignsIfAbsent.
 // Errors: none.
-func inferLegacyBackfill(manifest ktimport.Manifest, groups []config.Group, camps []ktimport.Campaign, existing map[int]string) (map[int]string, map[string]string) {
+func inferLegacyBackfill(manifest ktimport.Manifest, groups []config.Group, camps []ktimport.Campaign, existing map[int]string, scope campaignMapScope) (map[int]string, map[string]string) {
 	imported := manifest.Imported(ktimport.KindGroups)
 	byID := groupsByID(groups)
-	numOwner := manifestNumOwners(groups, imported)
+	numOwner := manifestNumOwners(groups, imported, scope)
 	proposed := ktimport.GroupIDs(camps)
 	add := map[int]string{}
 	backfill := map[string]string{}
@@ -136,7 +156,7 @@ func inferLegacyBackfill(manifest ktimport.Manifest, groups []config.Group, camp
 			continue
 		}
 		cid := strconv.Itoa(num)
-		if !legacyBackfillLink(num, gid, proposed, byID, numOwner, imported) {
+		if !legacyBackfillLink(num, gid, proposed, byID, numOwner, imported, scope) {
 			continue
 		}
 		add[num] = gid
@@ -151,12 +171,12 @@ func inferLegacyBackfill(manifest ktimport.Manifest, groups []config.Group, camp
 // byID indexes the store; numOwner maps numbers to the sole imported owner; imported checks manifest groups.
 // Result: true when every consistency rule passes.
 // Errors: none.
-func legacyBackfillLink(num int, gid string, proposed map[int]string, byID map[string]config.Group, numOwner map[int]string, imported func(string) bool) bool {
+func legacyBackfillLink(num int, gid string, proposed map[int]string, byID map[string]config.Group, numOwner map[int]string, imported func(string) bool, scope campaignMapScope) bool {
 	if !imported(gid) || proposed[num] != gid {
 		return false
 	}
 	g, ok := byID[gid]
-	if !ok || g.Num != num {
+	if !ok || g.Num != num || !groupInCampaignScope(g, scope) {
 		return false
 	}
 	owner, ok := numOwner[num]
@@ -168,11 +188,11 @@ func legacyBackfillLink(num int, gid string, proposed map[int]string, byID map[s
 // Parameters: groups is the store snapshot; imported is true for ids listed in the manifest.
 // Result: num → group id; numbers shared by several imported groups are omitted.
 // Errors: none.
-func manifestNumOwners(groups []config.Group, imported func(string) bool) map[int]string {
+func manifestNumOwners(groups []config.Group, imported func(string) bool, scope campaignMapScope) map[int]string {
 	out := map[int]string{}
 	ambiguous := map[int]bool{}
 	for _, g := range groups {
-		if !imported(g.ID) || g.Num <= 0 {
+		if !imported(g.ID) || g.Num <= 0 || !groupInCampaignScope(g, scope) {
 			continue
 		}
 		if prev, ok := out[g.Num]; ok && prev != g.ID {
@@ -192,7 +212,7 @@ func manifestNumOwners(groups []config.Group, imported func(string) bool) map[in
 // Parameters: aliases maps tracker campaign id to group id; groups is the store snapshot.
 // Result: a new map containing only pairs whose group id is present in groups.
 // Errors: none.
-func filterLogAliases(aliases map[int]string, groups []config.Group) map[int]string {
+func filterLogAliases(aliases map[int]string, groups []config.Group, scope campaignMapScope) map[int]string {
 	out := map[int]string{}
 	if len(aliases) == 0 {
 		return out
@@ -208,9 +228,11 @@ func filterLogAliases(aliases map[int]string, groups []config.Group) map[int]str
 		if gidUses[gid] > 1 {
 			continue
 		}
-		if _, ok := byID[gid]; ok {
-			out[num] = gid
+		g, ok := byID[gid]
+		if !ok || !groupInCampaignScope(g, scope) {
+			continue
 		}
+		out[num] = gid
 	}
 	return out
 }
@@ -250,8 +272,8 @@ func groupIDSet(groups []config.Group) map[string]bool {
 // Parameters: merged is the full manifest for this run; add holds new pairs only; host is the tracker hostname.
 // Result: merged with add applied via AddCampaignsIfAbsent is persisted.
 // Errors: manifest store write failure.
-func (s *Server) saveCampaignMapBackfill(merged ktimport.Manifest, add map[string]string, host string) error {
-	if s.cfg.Manifest == nil || len(add) == 0 {
+func (s *Server) saveCampaignMapBackfill(store ManifestStore, merged ktimport.Manifest, add map[string]string, host string) error {
+	if store == nil || len(add) == 0 {
 		return nil
 	}
 	next := merged
@@ -259,5 +281,5 @@ func (s *Server) saveCampaignMapBackfill(merged ktimport.Manifest, add map[strin
 	if host != "" {
 		next.Host = host
 	}
-	return s.cfg.Manifest.Save(next)
+	return store.Save(next)
 }

@@ -93,32 +93,38 @@ var macroSurface = map[string]struct {
 		"Group.ID":                          "campaign id",
 		"Group.Name":                        "campaign label",
 		"Group.Folder":                      "list grouping label",
+		"Group.BoardID":                     "panel section id; never expanded",
 		"Group.Streams[].Name":              "stream label; also the identity that places a link",
 		"Group.Streams[].Comment":           "operator note",
 		"Group.Postbacks[].ID":              "template id",
 		"Group.Postbacks[].Name":            "template label",
+		"Group.Postbacks[].BoardID":         "panel section id; never expanded",
 		"Group.Streams[].Out.Offers[].ID":   "offer id; the address is the offer's own",
 		"Group.Streams[].Out.Landings[].ID": "landing id; the page is the landing's own",
 	}},
 	"Offer": {reflect.TypeOf(config.Offer{}), map[string]string{
-		"Offer.ID":    "offer id",
-		"Offer.Name":  "offer label",
-		"Offer.Group": "catalog label",
+		"Offer.ID":      "offer id",
+		"Offer.Name":    "offer label",
+		"Offer.Group":   "catalog label",
+		"Offer.BoardID": "panel section id; never expanded",
 	}},
 	"Landing": {reflect.TypeOf(config.Landing{}), map[string]string{
-		"Landing.ID":    "landing id",
-		"Landing.Name":  "landing label",
-		"Landing.Group": "catalog label",
+		"Landing.ID":      "landing id",
+		"Landing.Name":    "landing label",
+		"Landing.Group":   "catalog label",
+		"Landing.BoardID": "panel section id; never expanded",
 	}},
 	"AffiliateNetwork": {reflect.TypeOf(config.AffiliateNetwork{}), map[string]string{
 		"AffiliateNetwork.ID":          "network id",
 		"AffiliateNetwork.Name":        "network label",
 		"AffiliateNetwork.Group":       "catalog label",
 		"AffiliateNetwork.PostbackURL": "note for the partner cabinet; the engine does not read it",
+		"AffiliateNetwork.BoardID":     "panel section id; never expanded",
 	}},
 	"OutboundPostback": {reflect.TypeOf(config.OutboundPostback{}), map[string]string{
-		"OutboundPostback.ID":   "template id",
-		"OutboundPostback.Name": "template label",
+		"OutboundPostback.ID":       "template id",
+		"OutboundPostback.Name":     "template label",
+		"OutboundPostback.BoardID":  "panel section id; never expanded",
 	}},
 }
 
@@ -137,7 +143,10 @@ var macroInert = map[string]struct {
 		"Domain.AdminReason", "Domain.AdminDNS",
 	}},
 	"TrafficSource": {reflect.TypeOf(config.TrafficSource{}), "ids, labels and query parameter names: the engine reads the names as keys, never as templates; rebinding is guarded by sourceCheck", []string{
-		"TrafficSource.ID", "TrafficSource.Name", "TrafficSource.Parameters{}", "TrafficSource.Group", "TrafficSource.CreatedBy",
+		"TrafficSource.ID", "TrafficSource.Name", "TrafficSource.Parameters{}", "TrafficSource.Group", "TrafficSource.CreatedBy", "TrafficSource.BoardID",
+	}},
+	"Board": {reflect.TypeOf(config.Board{}), "section id, name, icon and members: never expanded", []string{
+		"Board.ID", "Board.Name", "Board.Icon", "Board.IconColor", "Board.Members[].Role", "Board.Members[].UserID",
 	}},
 }
 
@@ -245,6 +254,8 @@ var writeRouteGuard = map[string]string{
 	"PUT /api/landings/{id}/files/{path...}":    "fileOpMacro: the file and the resulting entry",
 	"DELETE /api/landings/{id}/files/{path...}": "fileOpMacro: the resulting entry",
 	"POST /api/simulate":                        "dry run, stores nothing",
+	"POST /api/boards/import":                   "copy by id; ids are not templates",
+	"POST /api/boards/move":                     "move by id; ids are not templates",
 }
 
 func TestEveryWriteRouteIsInventoried(t *testing.T) {

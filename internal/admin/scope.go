@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 
+	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/security"
 )
 
@@ -13,25 +14,35 @@ const (
 	resSources   = "sources"
 	resNetworks  = "networks"
 	resDomains   = "domains"
+	resS2S       = "s2s"
 )
 
 // viewer is the resolved access of one request: who asks and what they may touch.
 type viewer struct {
-	admin    bool
-	uid      string
-	grants   map[string]security.Grant
-	hidden   map[string]bool
-	sections map[string]bool
+	admin        bool
+	uid          string
+	grants       map[string]security.Grant
+	hidden       map[string]bool
+	sections     map[string]bool
+	boardCurrent string
+	boardsAll    bool
+	boardRole    string
 }
 
 // viewerFrom loads session access for ctx. Administrators get admin=true and nil grants.
 // For other users the grants and the hidden set come from accessOf.
 func (s *Server) viewerFrom(ctx context.Context) viewer {
 	sess := sessionFrom(ctx)
-	if s.isAdmin(sess) {
-		return viewer{admin: true}
+	cur := boardFrom(ctx)
+	allBoards := boardsAllFrom(ctx)
+	role := ""
+	if b, ok := ctx.Value(boardKey).(boardSession); ok {
+		role = b.role
 	}
-	v := viewer{uid: sess.UID, grants: map[string]security.Grant{}, hidden: map[string]bool{}}
+	if s.isAdmin(sess) {
+		return viewer{admin: true, boardCurrent: cur, boardsAll: allBoards}
+	}
+	v := viewer{uid: sess.UID, grants: map[string]security.Grant{}, hidden: map[string]bool{}, boardCurrent: cur, boardsAll: allBoards, boardRole: role}
 	if u, ok := s.sessionUser(sess); ok {
 		acc := s.accessOf(u)
 		if acc.Grants != nil {
@@ -72,7 +83,7 @@ func (v viewer) mode(res string) security.Mode {
 
 // ref describes one record for access checks.
 type ref struct {
-	id, label, owner string
+	id, label, owner, board string
 }
 
 // grantHasID reports whether id appears in ids.
@@ -98,20 +109,57 @@ func grantHasLabel(labels []string, label string) bool {
 	return false
 }
 
+// boardRoleResource reports whether res is scoped by the current section member role.
+func boardRoleResource(res string) bool {
+	switch res {
+	case resCampaigns, resOffers, resLandings, resSources, resNetworks, resS2S:
+		return true
+	default:
+		return false
+	}
+}
+
+// boardRoleSee applies the section member role after global grants.
+func (v viewer) boardRoleSee(res string, r ref) bool {
+	if v.admin || v.boardRole != config.BoardRoleCreated {
+		return true
+	}
+	if !boardRoleResource(res) {
+		return true
+	}
+	if r.board != "" && !config.SameBoard(r.board, v.boardCurrent) {
+		return true
+	}
+	return r.owner == v.uid && v.uid != ""
+}
+
+// boardRoleWrite reports whether the section read role allows writes on res.
+func (v viewer) boardRoleWrite(res string) bool {
+	if v.admin || v.boardRole != config.BoardRoleRead {
+		return true
+	}
+	return !boardRoleResource(res)
+}
+
 // canSee reports whether v may read the record described by r in res.
 // Mode created shows only the records the user owns; an id or label list kept in
 // such a grant opens nothing.
 func (v viewer) canSee(res string, r ref) bool {
+	var ok bool
 	switch v.mode(res) {
 	case security.ModeFull, security.ModeRead:
-		return true
+		ok = true
 	case security.ModeSelected:
-		return grantHasID(v.grants[res].IDs, r.id) || grantHasLabel(v.grants[res].Labels, r.label)
+		ok = grantHasID(v.grants[res].IDs, r.id) || grantHasLabel(v.grants[res].Labels, r.label)
 	case security.ModeCreated:
-		return r.owner == v.uid && v.uid != ""
+		ok = r.owner == v.uid && v.uid != ""
 	default:
+		ok = false
+	}
+	if !ok {
 		return false
 	}
+	return v.boardRoleSee(res, r)
 }
 
 // canWrite reports whether v may change the record described by r in res.
@@ -119,11 +167,14 @@ func (v viewer) canWrite(res string, r ref) bool {
 	if v.admin {
 		return true
 	}
+	if !v.boardRoleWrite(res) {
+		return false
+	}
 	switch v.mode(res) {
 	case security.ModeRead:
 		return false
 	case security.ModeFull:
-		return true
+		return v.boardRoleSee(res, r)
 	case security.ModeSelected, security.ModeCreated:
 		return v.canSee(res, r)
 	default:

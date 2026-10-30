@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/egerkuzma/kuztds/internal/atomicfile"
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 const (
@@ -78,7 +79,13 @@ type User struct {
 	Hash         string    `json:"hash,omitempty"`
 	Prefs        Prefs     `json:"prefs"`
 	Access       Access    `json:"access"`
-	CreatedAt    time.Time `json:"created_at"`
+	// BoardIDs lists panel section ids this user may open. Empty meaning depends on Type and AllBoards.
+	BoardIDs []string `json:"board_ids,omitempty"`
+	// DefaultBoard is the section opened after sign-in. Empty uses MainBoardID.
+	DefaultBoard string `json:"default_board,omitempty"`
+	// AllBoards grants every section without listing BoardIDs.
+	AllBoards bool `json:"all_boards,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 	KeitaroID    int       `json:"keitaro_id,omitempty"`
 	AccessSource string    `json:"access_source,omitempty"`
 	// RoleID names a Role in roles.json. When set, the role replaces Access for a USER.
@@ -110,7 +117,39 @@ func (u User) Fingerprint() string {
 // clone returns a deep copy of u, including Access maps and slices.
 func (u User) clone() User {
 	u.Access = u.Access.clone()
+	if u.BoardIDs != nil {
+		u.BoardIDs = append([]string{}, u.BoardIDs...)
+	}
 	return u
+}
+
+// VisibleBoards returns section ids this user may open and whether every section is allowed.
+// envAdmin is true for the environment administrator (empty id or SourceEnv).
+// When all is true, ids is nil and any section id is visible.
+func (u User) VisibleBoards(envAdmin bool) (ids []string, all bool) {
+	if envAdmin || u.ID == "" || u.Source == SourceEnv {
+		return nil, true
+	}
+	if u.AllBoards {
+		return nil, true
+	}
+	if u.Type == UserAdmin && len(u.BoardIDs) == 0 {
+		return nil, true
+	}
+	if u.Type == UserRegular && len(u.BoardIDs) == 0 {
+		return []string{config.MainBoardID}, false
+	}
+	seen := make(map[string]bool, len(u.BoardIDs))
+	out := make([]string, 0, len(u.BoardIDs))
+	for _, id := range u.BoardIDs {
+		n := config.NormalizeBoardID(id)
+		if seen[n] {
+			continue
+		}
+		seen[n] = true
+		out = append(out, n)
+	}
+	return out, false
 }
 
 // clone returns a deep copy of a; nil maps and slices stay nil.

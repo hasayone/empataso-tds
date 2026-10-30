@@ -10,37 +10,59 @@ import (
 	"github.com/egerkuzma/kuztds/internal/store"
 )
 
-// campaignScope returns a Scope condition limiting stats to campaigns the viewer may see.
-// Administrators and read/full campaign grants get nil. List errors propagate to the caller.
+// campaignScope returns Scope conditions limiting stats to campaigns of the current section
+// that the viewer may see. List errors propagate to the caller.
 func (s *Server) campaignScope(ctx context.Context) ([]store.Cond, error) {
 	v := s.viewerFrom(ctx)
-	if v.admin {
-		return nil, nil
-	}
-	switch v.mode(resCampaigns) {
-	case security.ModeFull, security.ModeRead:
-		return nil, nil
-	}
+	board := v.boardCurrent
 	if s.cfg.Groups == nil {
-		return []store.Cond{{
-			Field: "campaign_id", Op: "in", Values: []string{store.ScopeNone}, Scope: true,
-		}}, nil
+		if v.admin {
+			return nil, nil
+		}
+		switch v.mode(resCampaigns) {
+		case security.ModeFull, security.ModeRead:
+			return nil, nil
+		default:
+			return []store.Cond{{
+				Field: "campaign_id", Op: "in", Values: []string{store.ScopeNone}, Scope: true,
+			}}, nil
+		}
 	}
 	groups, err := s.cfg.Groups.List(ctx)
 	if err != nil {
 		return nil, err
 	}
-	var ids []string
+	var own []string
+	var foreign []string
 	for _, g := range groups {
-		if v.canSee(resCampaigns, campaignRef(g)) {
-			ids = append(ids, g.ID)
+		if !groupInBoard(g, board) {
+			continue
 		}
+		if !v.canSee(resCampaigns, campaignRef(g)) {
+			continue
+		}
+		own = append(own, g.ID)
 	}
-	if len(ids) == 0 {
-		ids = []string{store.ScopeNone}
+	for _, g := range groups {
+		inBoard := groupInBoard(g, board)
+		visible := v.canSee(resCampaigns, campaignRef(g))
+		if inBoard && visible {
+			continue
+		}
+		foreign = append(foreign, g.ID)
+	}
+	if len(own) == 0 {
+		return []store.Cond{{
+			Field: "campaign_id", Op: "in", Values: []string{store.ScopeNone}, Scope: true,
+		}}, nil
+	}
+	if len(foreign) > 0 && len(foreign) < len(own) {
+		return []store.Cond{{
+			Field: "campaign_id", Op: "nin", Values: foreign, Scope: true,
+		}}, nil
 	}
 	return []store.Cond{{
-		Field: "campaign_id", Op: "in", Values: ids, Scope: true,
+		Field: "campaign_id", Op: "in", Values: own, Scope: true,
 	}}, nil
 }
 
@@ -173,24 +195,33 @@ func stripKeys(v any, keys map[string]bool) any {
 }
 
 // campaignRefByID loads one campaign by id and builds its access ref.
-// ok is false when the id is missing. List errors are returned as-is.
+// ok is false when the id is missing, not in the current section, or not visible. List errors are returned as-is.
 func (s *Server) campaignRefByID(ctx context.Context, id string) (ref, bool, error) {
 	if s.cfg.Groups == nil {
 		return ref{}, false, nil
 	}
+	v := s.viewerFrom(ctx)
 	groups, err := s.cfg.Groups.List(ctx)
 	if err != nil {
 		return ref{}, false, err
 	}
 	for _, g := range groups {
-		if g.ID == id {
-			return campaignRef(g), true, nil
+		if g.ID != id {
+			continue
 		}
+		if !groupInBoard(g, v.boardCurrent) {
+			return ref{}, false, nil
+		}
+		r := campaignRef(g)
+		if !v.canSee(resCampaigns, r) {
+			return ref{}, false, nil
+		}
+		return r, true, nil
 	}
 	return ref{}, false, nil
 }
 
-// spendVisible reports whether v may see spend for campaign id.
+// spendVisible reports whether v may see spend for campaign id in the current section.
 func (s *Server) spendVisible(ctx context.Context, v viewer, groupID string) (bool, error) {
 	if groupID == "" {
 		return false, nil
@@ -202,11 +233,8 @@ func (s *Server) spendVisible(ctx context.Context, v viewer, groupID string) (bo
 	return v.canSee(resCampaigns, r), nil
 }
 
-// filterSpendList returns entries the viewer may see; entries without a campaign are omitted.
+// filterSpendList returns entries the viewer may see in the current section.
 func (s *Server) filterSpendList(ctx context.Context, v viewer, list []config.SpendEntry) ([]config.SpendEntry, error) {
-	if v.admin {
-		return list, nil
-	}
 	if s.cfg.Groups == nil {
 		return []config.SpendEntry{}, nil
 	}
@@ -222,6 +250,9 @@ func (s *Server) filterSpendList(ctx context.Context, v viewer, list []config.Sp
 	for _, e := range list {
 		g, ok := byID[e.GroupID]
 		if !ok {
+			continue
+		}
+		if !groupInBoard(g, v.boardCurrent) {
 			continue
 		}
 		if v.canSee(resCampaigns, campaignRef(g)) {

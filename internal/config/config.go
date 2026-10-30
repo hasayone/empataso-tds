@@ -89,6 +89,9 @@ type Group struct {
 	SourceID string `json:"source_id,omitempty"`
 	// Folder is the operator's grouping label for the campaign list and its filter. The engine ignores it.
 	Folder string `json:"folder,omitempty"`
+	// BoardID is the panel section id for this campaign. Empty means the main section.
+	// The engine does not read it.
+	BoardID string `json:"board_id,omitempty"`
 	// CreatedBy is the users.json id of the panel user who created this record.
 	// Empty means the environment administrator or a record older than this field.
 	// The engine does not read it.

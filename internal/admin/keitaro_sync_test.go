@@ -20,6 +20,16 @@ import (
 	"github.com/kuztds/bridge/ktimport"
 )
 
+func syncTarget(s *Server, creds ktCreds) keitaroSyncTarget {
+	return keitaroSyncTarget{
+		syncPath:      s.cfg.KeitaroSyncFile,
+		board:         config.MainBoardID,
+		allBoards:     true,
+		creds:         creds,
+		manifestStore: s.cfg.Manifest,
+	}
+}
+
 func syncTestServer(t *testing.T, base, key string, sink *fakeSink, syncPath, cronPath string, now time.Time) (*Server, *httptest.Server) {
 	t.Helper()
 	s, srv := newKeitaroServers(t, base, key, &memGroups{list: []config.Group{{ID: "g1", Name: "G"}}}, sink, nil)
@@ -181,7 +191,7 @@ func TestKeitaroSyncConversionsCursorForward(t *testing.T) {
 	s.ktMu.Lock()
 	s.ktBase = fake.URL
 	s.ktMu.Unlock()
-	res := s.runKeitaroSyncPass(context.Background(), s.keitaroCreds(), &st, true)
+	res := s.runKeitaroSyncPass(context.Background(), syncTarget(s, s.keitaroCreds()), &st, true)
 	if !res.OK {
 		t.Fatal("pass failed")
 	}
@@ -214,7 +224,7 @@ func TestKeitaroSyncEightDayLagAdvances24h(t *testing.T) {
 	s.ktMu.Lock()
 	s.ktBase = fake.URL
 	s.ktMu.Unlock()
-	res := s.runKeitaroSyncPass(context.Background(), s.keitaroCreds(), &st, true)
+	res := s.runKeitaroSyncPass(context.Background(), syncTarget(s, s.keitaroCreds()), &st, true)
 	if !res.OK {
 		t.Fatal("pass failed")
 	}
@@ -238,7 +248,7 @@ func TestKeitaroSyncCursorAdvancesOnEmpty(t *testing.T) {
 	s.ktMu.Lock()
 	s.ktBase = fake.URL
 	s.ktMu.Unlock()
-	res := s.runKeitaroSyncPass(context.Background(), s.keitaroCreds(), &st, true)
+	res := s.runKeitaroSyncPass(context.Background(), syncTarget(s, s.keitaroCreds()), &st, true)
 	if !res.OK || !st.ClicksTo.After(cursor) {
 		t.Fatalf("ok=%v clicks=%v", res.OK, st.ClicksTo)
 	}
@@ -255,7 +265,7 @@ func TestKeitaroSyncCursorStaysOnError(t *testing.T) {
 		t.Fatal(err)
 	}
 	creds := ktCreds{Base: "http://tracker.example", Key: "k"}
-	res := s.runKeitaroSyncPass(context.Background(), creds, &st, true)
+	res := s.runKeitaroSyncPass(context.Background(), syncTarget(s, creds), &st, true)
 	if res.OK || res.ErrText == "" || st.ClicksTo != cursor {
 		t.Fatalf("ok=%v err=%q cursor=%v", res.OK, res.ErrText, st.ClicksTo)
 	}
@@ -279,7 +289,7 @@ func TestKeitaroSyncDedupExistingCID(t *testing.T) {
 	s.ktBase = fake.URL
 	s.ktMu.Unlock()
 	before := len(sink.events)
-	res := s.runKeitaroSyncPass(context.Background(), s.keitaroCreds(), &st, true)
+	res := s.runKeitaroSyncPass(context.Background(), syncTarget(s, s.keitaroCreds()), &st, true)
 	if !res.OK || res.Clicks != 0 || len(sink.events) != before {
 		t.Fatalf("ok=%v clicks=%d events=%d", res.OK, res.Clicks, len(sink.events))
 	}

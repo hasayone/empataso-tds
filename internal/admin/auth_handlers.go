@@ -175,16 +175,20 @@ type meRole struct {
 // Hidden is the enforced hidden set, sorted and never null: journal field names
 // plus the money group ids "profit" and "cost" when covered.
 type meResponse struct {
-	User   string            `json:"user"`
-	UID    string            `json:"uid,omitempty"`
-	Type   security.UserType `json:"type"`
-	CSRF   string            `json:"csrf"`
-	Engine string            `json:"engine"`
-	Prefs  security.Prefs    `json:"prefs"`
-	Pages  []string          `json:"pages"`
-	Access *security.Access  `json:"access,omitempty"`
-	Role   *meRole           `json:"role,omitempty"`
-	Hidden []string          `json:"hidden"`
+	User       string            `json:"user"`
+	UID        string            `json:"uid,omitempty"`
+	Type       security.UserType `json:"type"`
+	CSRF       string            `json:"csrf"`
+	Engine     string            `json:"engine"`
+	Prefs      security.Prefs    `json:"prefs"`
+	Pages      []string          `json:"pages"`
+	Access     *security.Access  `json:"access,omitempty"`
+	Role       *meRole           `json:"role,omitempty"`
+	Hidden     []string          `json:"hidden"`
+	Boards     []config.Board    `json:"boards,omitempty"`
+	Current    string            `json:"current,omitempty"`
+	DefaultID  string            `json:"default_id,omitempty"`
+	Switchable bool              `json:"switchable"`
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -212,6 +216,22 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		out.Pages = rootPages()
+	}
+	if boards, meta, err := s.visibleBoardItems(r.Context(), sess); err == nil {
+		out.Boards = boards
+		out.DefaultID = meta.defaultID
+		out.Switchable = meta.switchable
+	}
+	if bs, ok := r.Context().Value(boardKey).(boardSession); ok {
+		out.Current = bs.current
+		if out.DefaultID == "" {
+			out.DefaultID = bs.defaultID
+		}
+		if len(out.Boards) == 0 {
+			out.Switchable = bs.switchable
+		}
+	} else if out.DefaultID != "" {
+		out.Current = out.DefaultID
 	}
 	writeJSON(w, http.StatusOK, out)
 }

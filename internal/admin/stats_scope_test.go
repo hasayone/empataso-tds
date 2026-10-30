@@ -201,8 +201,21 @@ func TestStatsScopeConds(t *testing.T) {
 	st.mu.Lock()
 	rootLast := append([]store.Cond(nil), st.last...)
 	st.mu.Unlock()
-	if _, ok := scopeCond(rootLast); ok {
-		t.Fatalf("admin should not get scope: %+v", rootLast)
+	sc, ok = scopeCond(rootLast)
+	if !ok || len(sc.Values) != 3 {
+		t.Fatalf("admin in main gets scope for section campaigns: %+v", rootLast)
+	}
+	for _, id := range []string{"c1", "c2", "c3"} {
+		found := false
+		for _, v := range sc.Values {
+			if v == id {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("admin scope missing %s: %+v", id, sc.Values)
+		}
 	}
 
 	none := newClient(t)

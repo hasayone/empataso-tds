@@ -14,7 +14,7 @@ import (
 // text is never expanded, so a macro written there inserts nothing. PostbackURL is the
 // note of a network for the partner cabinet: the engine does not read it.
 var macroSkipFields = map[string]bool{
-	"ID": true, "Name": true, "Comment": true, "Folder": true, "Group": true, "PostbackURL": true,
+	"ID": true, "Name": true, "Comment": true, "Folder": true, "Group": true, "PostbackURL": true, "BoardID": true,
 }
 
 // curlyMaxLen is the longest name render reads between curly braces.

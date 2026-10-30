@@ -17,7 +17,7 @@ func TestRecordAcceptedImportManifestSkipsConflict(t *testing.T) {
 	incoming := []ktimport.Group{{ID: "promo", Name: "K", Num: 7}}
 	saved := []config.Group{{ID: "promo", Name: "Local", Num: 1}}
 	conflicts := map[string]bool{"promo": true}
-	recordAcceptedImportManifest(&m, incoming, conflicts, saved, nil)
+	recordAcceptedImportManifest(&m, incoming, conflicts, saved, nil, campaignMapScope{board: config.MainBoardID})
 	if m.Has(ktimport.KindGroups, "promo") || len(m.Campaigns) != 0 {
 		t.Fatalf("manifest %+v", m)
 	}
@@ -28,7 +28,7 @@ func TestResolveLogCampaignMapBackfill(t *testing.T) {
 	manifest := ktimport.Manifest{Groups: []string{"promo"}}
 	camps := []ktimport.Campaign{{ID: 7, Alias: "promo"}}
 	store := []config.Group{{ID: "promo", Name: "P", Num: 7}}
-	got, backfill, err := s.resolveLogCampaignMap(context.Background(), ktCreds{Base: "http://tracker.example", Key: "key"}, manifest, camps, store)
+	got, backfill, err := s.resolveLogCampaignMap(context.Background(), ktCreds{Base: "http://tracker.example", Key: "key"}, manifest, camps, store, campaignMapScope{board: config.MainBoardID})
 	if err != nil || len(backfill) != 1 || backfill["7"] != "promo" || got[7] != "promo" {
 		t.Fatalf("got=%v backfill=%v err=%v", got, backfill, err)
 	}
@@ -38,7 +38,7 @@ func TestResolveLogCampaignMapKeepsStoredAlias(t *testing.T) {
 	s, _ := newKeitaroServers(t, "http://tracker.example", "key", nil, nil, nil)
 	manifest := ktimport.Manifest{Campaigns: map[string]string{"7": "stable-id"}}
 	camps := []ktimport.Campaign{{ID: 7, Alias: "renamed"}}
-	got, backfill, err := s.resolveLogCampaignMap(context.Background(), ktCreds{}, manifest, camps, []config.Group{{ID: "stable-id", Num: 7}})
+	got, backfill, err := s.resolveLogCampaignMap(context.Background(), ktCreds{}, manifest, camps, []config.Group{{ID: "stable-id", Num: 7}}, campaignMapScope{board: config.MainBoardID})
 	if err != nil || len(backfill) != 0 || got[7] != "stable-id" {
 		t.Fatalf("got=%v backfill=%v err=%v", got, backfill, err)
 	}
@@ -47,7 +47,7 @@ func TestResolveLogCampaignMapKeepsStoredAlias(t *testing.T) {
 func TestResolveLogCampaignMapDropsMissingStore(t *testing.T) {
 	s, _ := newKeitaroServers(t, "http://tracker.example", "key", nil, nil, nil)
 	manifest := ktimport.Manifest{Campaigns: map[string]string{"7": "gone"}}
-	got, backfill, err := s.resolveLogCampaignMap(context.Background(), ktCreds{}, manifest, nil, nil)
+	got, backfill, err := s.resolveLogCampaignMap(context.Background(), ktCreds{}, manifest, nil, nil, campaignMapScope{board: config.MainBoardID})
 	if err != nil || len(backfill) != 0 || len(got) != 0 {
 		t.Fatalf("got=%v backfill=%v err=%v", got, backfill, err)
 	}
@@ -57,7 +57,7 @@ func TestLegacyBackfillRejectsDupAliasTakeover(t *testing.T) {
 	camps := []ktimport.Campaign{{ID: 11, Alias: "dup"}}
 	groups := []config.Group{{ID: "dup-dup-11", Num: 11}}
 	manifest := ktimport.Manifest{Groups: []string{"dup-dup-11"}}
-	add, backfill := inferLegacyBackfill(manifest, groups, camps, map[int]string{})
+	add, backfill := inferLegacyBackfill(manifest, groups, camps, map[int]string{}, campaignMapScope{board: config.MainBoardID})
 	if len(add) != 0 || len(backfill) != 0 {
 		t.Fatalf("add=%v backfill=%v", add, backfill)
 	}
@@ -67,7 +67,7 @@ func TestLegacyBackfillRejectsShiftedNum(t *testing.T) {
 	camps := []ktimport.Campaign{{ID: 7, Alias: "promo"}}
 	groups := []config.Group{{ID: "promo", Num: 5}}
 	manifest := ktimport.Manifest{Groups: []string{"promo"}}
-	add, backfill := inferLegacyBackfill(manifest, groups, camps, map[int]string{})
+	add, backfill := inferLegacyBackfill(manifest, groups, camps, map[int]string{}, campaignMapScope{board: config.MainBoardID})
 	if len(add) != 0 || len(backfill) != 0 {
 		t.Fatalf("add=%v backfill=%v", add, backfill)
 	}
@@ -81,7 +81,7 @@ func TestImportGroupsManifestSaveBeforeGroups(t *testing.T) {
 	incoming := []ktimport.Group{{ID: "pad", Name: "Pad", Num: 3, Streams: []ktimport.Stream{{Name: "s", Status: true}}}}
 	var run ktimport.Manifest
 	manifest.fail = true
-	_, _, err := s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "", &run, "tracker.example")
+	_, _, err := s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "", &run, "tracker.example", config.MainBoardID, manifest)
 	if err == nil {
 		t.Fatal("expected manifest error")
 	}
@@ -89,7 +89,7 @@ func TestImportGroupsManifestSaveBeforeGroups(t *testing.T) {
 		t.Fatalf("groups=%+v manifestSaved=%v", groups.list, manifest.saved)
 	}
 	manifest.fail = false
-	_, _, err = s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "", &run, "tracker.example")
+	_, _, err = s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "", &run, "tracker.example", config.MainBoardID, manifest)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestImportGroupsGroupsSaveFailManifestWritten(t *testing.T) {
 	s.cfg.Manifest = manifest
 	incoming := []ktimport.Group{{ID: "pad", Name: "Pad", Num: 3, Streams: []ktimport.Stream{{Name: "s", Status: true}}}}
 	var run ktimport.Manifest
-	_, _, err := s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "", &run, "tracker.example")
+	_, _, err := s.importGroups(context.Background(), incoming, ktimport.Manifest{}, "", &run, "tracker.example", config.MainBoardID, manifest)
 	if err == nil {
 		t.Fatal("expected groups save error")
 	}
@@ -120,7 +120,7 @@ func TestSaveCampaignMapBackfillPreservesCatalog(t *testing.T) {
 	s, _ := newKeitaroServers(t, "", "", &memGroups{}, nil, nil)
 	s.cfg.Manifest = manifest
 	merged := ktimport.Manifest{Offers: []string{"99"}, Groups: []string{"g1"}}
-	if err := s.saveCampaignMapBackfill(merged, map[string]string{"7": "g1"}, "tracker.example"); err != nil {
+	if err := s.saveCampaignMapBackfill(manifest, merged, map[string]string{"7": "g1"}, "tracker.example"); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(strings.Join(manifest.last.Offers, ","), "99") || manifest.last.Campaigns["7"] != "g1" {

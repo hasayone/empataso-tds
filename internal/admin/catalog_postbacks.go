@@ -22,7 +22,7 @@ func (s *Server) handleCampaignPostbacksGet(w http.ResponseWriter, r *http.Reque
 	v := s.viewerFrom(r.Context())
 	for _, g := range groups {
 		if g.ID == id {
-			if !v.canSee(resCampaigns, campaignRef(g)) {
+			if !groupInBoard(g, v.boardCurrent) || !v.canSee(resCampaigns, campaignRef(g)) {
 				writeErr(w, http.StatusNotFound, "not found")
 				return
 			}
@@ -69,7 +69,7 @@ func (s *Server) handleCampaignPostbacksPut(w http.ResponseWriter, r *http.Reque
 	for i := range groups {
 		if groups[i].ID == id {
 			ref := campaignRef(groups[i])
-			if !v.canSee(resCampaigns, ref) {
+			if !groupInBoard(groups[i], v.boardCurrent) || !v.canSee(resCampaigns, ref) {
 				writeErr(w, http.StatusNotFound, "not found")
 				return
 			}

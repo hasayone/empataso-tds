@@ -35,6 +35,9 @@ type Offer struct {
 	// Empty means the environment administrator or a record older than this field.
 	// The engine does not read it.
 	CreatedBy string `json:"created_by,omitempty"`
+	// BoardID is the panel section id for this record. Empty means the main section.
+	// The engine does not read it.
+	BoardID string `json:"board_id,omitempty"`
 	// Countries lists ISO 3166-1 alpha-2 codes in lowercase, for example ru.
 	Countries []string `json:"countries,omitempty"`
 	// PayoutModel is the partner payout type: cpa or cpc.
@@ -127,6 +130,9 @@ type AffiliateNetwork struct {
 	// Empty means the environment administrator or a record older than this field.
 	// The engine does not read it.
 	CreatedBy string `json:"created_by,omitempty"`
+	// BoardID is the panel section id for this record. Empty means the main section.
+	// The engine does not read it.
+	BoardID string `json:"board_id,omitempty"`
 }
 
 // Landing is a page shown before an offer.
@@ -148,6 +154,9 @@ type Landing struct {
 	// Empty means the environment administrator or a record older than this field.
 	// The engine does not read it.
 	CreatedBy string `json:"created_by,omitempty"`
+	// BoardID is the panel section id for this record. Empty means the main section.
+	// The engine does not read it.
+	BoardID string `json:"board_id,omitempty"`
 }
 
 // TrafficSource names the query keys a partner uses for keyword and sub_id_1..15.
@@ -161,6 +170,9 @@ type TrafficSource struct {
 	// Empty means the environment administrator or a record older than this field.
 	// The engine does not read it.
 	CreatedBy string `json:"created_by,omitempty"`
+	// BoardID is the panel section id for this record. Empty means the main section.
+	// The engine does not read it.
+	BoardID string `json:"board_id,omitempty"`
 }
 
 // OutboundPostback is a server-to-server template fired after an inbound conversion.
@@ -171,6 +183,9 @@ type OutboundPostback struct {
 	URL      string   `json:"url"`
 	Method   string   `json:"method"`
 	Statuses []string `json:"statuses,omitempty"`
+	// BoardID is the panel section id for this record. Empty means the main section.
+	// The engine does not read it.
+	BoardID string `json:"board_id,omitempty"`
 }
 
 // MatchesStatus reports whether the template fires for status.

@@ -3,10 +3,8 @@ package admin
 import (
 	"encoding/json"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 )
 
@@ -88,29 +86,7 @@ func (s *Server) setKeitaroState(c ktCreds, source string) {
 // It returns an error when the file exists but cannot be read or is not valid.
 // Falling back to the environment then would silently undo a saved change.
 func (s *Server) loadKeitaro() error {
-	env, source := s.keitaroEnv()
-	if s.cfg.KeitaroFile == "" {
-		s.setKeitaroState(env, source)
-		return nil
-	}
-	raw, err := os.ReadFile(s.cfg.KeitaroFile)
-	if errors.Is(err, os.ErrNotExist) {
-		s.setKeitaroState(env, source)
-		return nil
-	}
-	if err != nil {
-		return fmt.Errorf("admin: keitaro file %s: %w", s.cfg.KeitaroFile, err)
-	}
-	var body keitaroFileBody
-	if err := json.Unmarshal(raw, &body); err != nil {
-		return fmt.Errorf("admin: keitaro file %s: %w", s.cfg.KeitaroFile, err)
-	}
-	base, err := normalizeKeitaroBase(body.BaseURL)
-	if err != nil || strings.TrimSpace(body.APIKey) == "" {
-		return fmt.Errorf("admin: keitaro file %s: base_url or api_key is not valid", s.cfg.KeitaroFile)
-	}
-	s.setKeitaroState(ktCreds{Base: base, Key: body.APIKey}, keitaroSourceFile)
-	return nil
+	return s.reloadKeitaroConns()
 }
 
 // keitaroEnv returns the tracker origin and key given by the Config and their source.
@@ -249,7 +225,10 @@ func (s *Server) handleKeitaroSettingsPut(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
 	}
-	s.setKeitaroState(next, keitaroSourceFile)
+	if err := s.reloadKeitaroConns(); err != nil {
+		writeErr(w, http.StatusInternalServerError, "save error")
+		return
+	}
 	s.logInfo("keitaro settings saved", "host", next.host())
 	writeJSON(w, http.StatusOK, s.keitaroSettingsSnapshot())
 }

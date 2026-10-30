@@ -35,12 +35,18 @@ type keitaroRemoved struct {
 // The manifest is then saved empty. An import in progress, or a purge that already
 // holds the lock, is 409 and removes nothing. A warehouse error is 502.
 func (s *Server) handleKeitaroPurge(w http.ResponseWriter, r *http.Request) {
+	if !s.viewerFrom(r.Context()).boardsAll {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	if msg := s.ktJob.beginPurge(); msg != "" {
 		writeErr(w, http.StatusConflict, msg)
 		return
 	}
 	defer s.ktJob.endPurge()
-	removeKeitaroSyncFile(s.cfg.KeitaroSyncFile)
+	for _, path := range s.keitaroSyncPaths() {
+		removeKeitaroSyncFile(path)
+	}
 	creds := s.keitaroCreds()
 	manifest, err := s.loadManifest()
 	if err != nil {

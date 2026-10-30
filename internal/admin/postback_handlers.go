@@ -16,6 +16,11 @@ import (
 // r supplies from, to and limit. Missing stats yields an empty list with 200.
 // A query failure is 500.
 func (s *Server) handlePostbackLog(w http.ResponseWriter, r *http.Request) {
+	v := s.viewerFrom(r.Context())
+	if !v.boardsAll {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	if s.cfg.Stats == nil {
 		writeJSON(w, http.StatusOK, []store.PostbackLogRow{})
 		return

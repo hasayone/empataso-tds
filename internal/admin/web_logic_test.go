@@ -840,6 +840,7 @@ eq(fltCatalogItems('landing_id',{landings:[{id:'L1',name:'Land'}]})[0].key, 'L1'
 eq(fltCatalogItems('network_id',{networks:[{id:'N1',name:'Net'}]})[0].key, 'N1', 'network_id key');
 eq(fltCatalogItems('source_id',{sources:[{id:'S1',name:'Src'}]})[0].key, 'S1', 'source_id key');
 eq(fltCatalogItems('country',{countries:[{code:'pl'}]})[0].key, 'pl', 'country key lower');
+eq(fltCatalogItems('device',{}).map(x=>x.key), ['phone','computer','tablet'], 'device presets');
 
 eq(fltApplyDraft([{f:'campaign',op:'eq',v:['Away']}])[0].v, ['Away'], 'apply keeps strict without catalog');
 

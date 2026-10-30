@@ -302,7 +302,7 @@ func expectForbidden(ro matrixRole, pattern string, rule routeRule) bool {
 		return cookieOnlyRoutes[pattern]
 	}
 	if ro.isEmpty {
-		return rule.sec != secAny
+		return rule.admin || rule.sec != secAny
 	}
 	if ro.isFull {
 		if catalogCreateRoutes[pattern] {

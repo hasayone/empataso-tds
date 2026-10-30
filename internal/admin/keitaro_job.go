@@ -260,7 +260,9 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if req.needsTracker() && !s.keitaroCreds().configured() {
+	board := importBoardFrom(req, r.Context())
+	creds, manifestStore := s.keitaroImportBundle(board)
+	if req.needsTracker() && !creds.configured() {
 		writeErr(w, http.StatusServiceUnavailable, "keitaro not configured")
 		return
 	}
@@ -274,12 +276,11 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 	}
 	// Settings cannot change while the job holds the lock, so this copy is the
 	// one for the whole run. Settings can only be replaced, never cleared.
-	creds := s.keitaroCreds()
 	ctx, cancel := context.WithTimeout(context.Background(), keitaroJobTimeout)
 	owner := sessionFrom(r.Context()).UID
 	go func() {
 		defer cancel()
-		s.runKeitaroImport(ctx, req, owner, creds)
+		s.runKeitaroImport(ctx, req, owner, creds, board, manifestStore)
 	}()
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
 }
@@ -306,6 +307,8 @@ type importState struct {
 	fail          string
 	creds         ktCreds
 	snapCampaigns []ktimport.Campaign
+	board         string
+	manifestStore ManifestStore
 }
 
 // runStage runs one save stage and publishes the job when that stage succeeds.
@@ -325,7 +328,7 @@ func (s *Server) runStage(st *importState, name, key string, step func() (int, [
 		return false
 	}
 	st.counts[key] = n
-	if err := s.saveRunManifest(st.prev, st.res, st.creds.host()); err != nil {
+	if err := s.saveRunManifestStore(st.manifestStore, st.prev, st.res, st.creds.host()); err != nil {
 		st.fail = "save error"
 		return false
 	}
@@ -340,9 +343,12 @@ func (s *Server) runStage(st *importState, name, key string, step func() (int, [
 // On failure the stage is failed and the error is safe to show. Counts and losses
 // collected before the failure stay in the state. It does not return an error.
 // It logs one line with the counts and the duration. The key and URLs are not logged.
-func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, owner string, creds ktCreds) {
+func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, owner string, creds ktCreds, board string, manifestStore ManifestStore) {
 	started := time.Now()
-	st := &importState{counts: map[string]int{}, losses: []ktimport.Loss{}, owner: owner, creds: creds}
+	st := &importState{
+		counts: map[string]int{}, losses: []ktimport.Loss{}, owner: owner, creds: creds,
+		board: board, manifestStore: manifestStore,
+	}
 	defer func() {
 		s.logKeitaro("keitaro import", st.counts, time.Since(started))
 		s.ktJob.finish(st.fail, st.counts, st.losses, creds.Key)
@@ -363,7 +369,7 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 			return
 		}
 		st.snapCampaigns = snap.Campaigns
-		st.prev, err = s.loadManifest()
+		st.prev, err = loadManifestStore(st.manifestStore)
 		if err != nil {
 			st.fail = "save error"
 			return
@@ -377,7 +383,7 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 			st.fail = "save error"
 			return
 		}
-		if err := s.saveRunManifest(st.prev, st.res, creds.host()); err != nil {
+		if err := s.saveRunManifestStore(st.manifestStore, st.prev, st.res, creds.host()); err != nil {
 			st.fail = "save error"
 			return
 		}
@@ -393,7 +399,7 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 			}) && s.runStage(st, "pages", "pages", func() (int, []ktimport.Loss, error) {
 				return s.importPages(&st.res)
 			}) && s.runStage(st, "groups", "groups", func() (int, []ktimport.Loss, error) {
-				return s.importGroups(ctx, st.res.Groups, st.prev, owner, &st.res.Manifest, st.creds.host())
+				return s.importGroups(ctx, st.res.Groups, st.prev, owner, &st.res.Manifest, st.creds.host(), st.board, st.manifestStore)
 			})
 			if !ok {
 				return
@@ -411,6 +417,7 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 		counts, extra, _, err := s.importLogWindow(ctx, creds, from, to, logImportOpts{
 			clicks: req.Clicks, conversions: req.Conversions,
 			manifest: st.prev, res: st.res.Manifest, snapCampaigns: st.snapCampaigns,
+			mapScope: campaignMapScope{board: st.board}, manifestStore: st.manifestStore,
 		})
 		for k, v := range counts {
 			st.counts[k] = v
@@ -431,6 +438,8 @@ type logImportOpts struct {
 	res           ktimport.Manifest
 	snapCampaigns []ktimport.Campaign
 	skip          *logSkipTally
+	mapScope      campaignMapScope
+	manifestStore ManifestStore
 }
 
 // logFetchStats holds the latest row timestamps seen in one log fetch.
@@ -462,9 +471,13 @@ func (s *Server) importLogWindow(ctx context.Context, creds ktCreds, from, to st
 		return counts, losses, stats, nil
 	}
 	manifest := opts.manifest
+	store := opts.manifestStore
+	if store == nil {
+		store = s.cfg.Manifest
+	}
 	if manifest.Empty() {
 		var err error
-		manifest, err = s.loadManifest()
+		manifest, err = loadManifestStore(store)
 		if err != nil {
 			return counts, losses, stats, err
 		}
@@ -474,11 +487,11 @@ func (s *Server) importLogWindow(ctx context.Context, creds ktCreds, from, to st
 	if err != nil {
 		return counts, losses, stats, err
 	}
-	resolved, backfill, err := s.resolveLogCampaignMap(ctx, creds, manifest, opts.snapCampaigns, groups)
+	resolved, backfill, err := s.resolveLogCampaignMap(ctx, creds, manifest, opts.snapCampaigns, groups, opts.mapScope)
 	if err != nil {
 		return counts, losses, stats, err
 	}
-	if err := s.saveCampaignMapBackfill(manifest, backfill, creds.host()); err != nil {
+	if err := s.saveCampaignMapBackfill(store, manifest, backfill, creds.host()); err != nil {
 		return counts, losses, stats, err
 	}
 	li := logImport{from: from, to: to, host: creds.host(), creds: creds, aliases: resolved, groups: groups}

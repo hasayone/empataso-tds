@@ -23,9 +23,61 @@ var unknownLinkNoun = map[string]string{
 	resCampaigns: "campaign",
 }
 
-// mergeGroups combines stored campaigns with the request body under viewer rules.
-// It returns the merged slice, or a non-zero HTTP status and message on denial.
+// mergeGroups combines stored campaigns with the request body under viewer and section rules.
+// Campaigns of other sections stay as stored. It returns the merged slice, or a non-zero HTTP status and message on denial.
 func mergeGroups(v viewer, stored, body []config.Group) ([]config.Group, int, string) {
+	board := v.boardCurrent
+	bodyByID := map[string]config.Group{}
+	for _, g := range body {
+		bodyByID[g.ID] = g
+	}
+	storedByID := map[string]config.Group{}
+	for _, g := range stored {
+		storedByID[g.ID] = g
+	}
+	var other []config.Group
+	for _, old := range stored {
+		if groupInBoard(old, board) {
+			continue
+		}
+		other = append(other, old)
+		if g, ok := bodyByID[old.ID]; ok && !groupsEqual(old, g) {
+			return nil, http.StatusForbidden, "foreign campaign: " + old.ID
+		}
+	}
+	thisStored := make([]config.Group, 0)
+	for _, old := range stored {
+		if groupInBoard(old, board) {
+			thisStored = append(thisStored, old)
+		}
+	}
+	thisBody := make([]config.Group, 0, len(body))
+	for _, g := range body {
+		if g.ID == "" {
+			return nil, http.StatusBadRequest, "group id required"
+		}
+		if old, ok := storedByID[g.ID]; ok && !groupInBoard(old, board) {
+			return nil, http.StatusForbidden, "foreign campaign: " + g.ID
+		}
+		if !groupInBoard(g, board) && g.BoardID != "" && !config.SameBoard(g.BoardID, board) {
+			return nil, http.StatusForbidden, "foreign campaign: " + g.ID
+		}
+		if old, ok := storedByID[g.ID]; ok && groupInBoard(old, board) {
+			g.BoardID = old.BoardID
+		} else {
+			g.BoardID = board
+		}
+		thisBody = append(thisBody, g)
+	}
+	merged, code, msg := mergeBoardGroups(v, thisStored, thisBody)
+	if code != 0 {
+		return nil, code, msg
+	}
+	return append(other, merged...), 0, ""
+}
+
+// mergeBoardGroups merges campaigns within one section.
+func mergeBoardGroups(v viewer, stored, body []config.Group) ([]config.Group, int, string) {
 	if v.admin {
 		byID := map[string]config.Group{}
 		for _, g := range stored {
@@ -34,10 +86,12 @@ func mergeGroups(v viewer, stored, body []config.Group) ([]config.Group, int, st
 		out := append([]config.Group(nil), body...)
 		for i := range out {
 			if old, ok := byID[out[i].ID]; ok {
+				out[i].BoardID = old.BoardID
 				if out[i].CreatedBy == "" {
 					out[i].CreatedBy = old.CreatedBy
 				}
 			} else {
+				out[i].BoardID = v.boardCurrent
 				out[i].CreatedBy = v.uid
 			}
 		}
@@ -73,6 +127,7 @@ func mergeGroups(v viewer, stored, body []config.Group) ([]config.Group, int, st
 				return nil, http.StatusForbidden, "read-only campaign: " + old.ID
 			}
 			g.CreatedBy = old.CreatedBy
+			g.BoardID = old.BoardID
 			out = append(out, g)
 		} else {
 			out = append(out, old)
@@ -86,6 +141,7 @@ func mergeGroups(v viewer, stored, body []config.Group) ([]config.Group, int, st
 			return nil, http.StatusForbidden, "cannot create campaigns"
 		}
 		g.CreatedBy = v.uid
+		g.BoardID = v.boardCurrent
 		out = append(out, g)
 	}
 	return out, 0, ""
@@ -93,7 +149,7 @@ func mergeGroups(v viewer, stored, body []config.Group) ([]config.Group, int, st
 
 // campaignRef builds an access ref for one campaign row.
 func campaignRef(g config.Group) ref {
-	return ref{id: g.ID, label: g.Folder, owner: g.CreatedBy}
+	return ref{id: g.ID, label: g.Folder, owner: g.CreatedBy, board: g.BoardID}
 }
 
 // groupsEqual reports whether a and b are the same campaign.
@@ -183,14 +239,14 @@ func (s *Server) loadLinkCatalog(ctx context.Context, groups []config.Group) lin
 	if s.cfg.Offers != nil {
 		if list, err := s.cfg.Offers.List(ctx); err == nil {
 			for _, o := range list {
-				cat[resOffers][o.ID] = ref{id: o.ID, label: o.Group, owner: o.CreatedBy}
+				cat[resOffers][o.ID] = ref{id: o.ID, label: o.Group, owner: o.CreatedBy, board: o.BoardID}
 			}
 		}
 	}
 	if s.cfg.Landings != nil {
 		if list, err := s.cfg.Landings.List(ctx); err == nil {
 			for _, l := range list {
-				cat[resLandings][l.ID] = ref{id: l.ID, label: l.Group, owner: l.CreatedBy}
+				cat[resLandings][l.ID] = ref{id: l.ID, label: l.Group, owner: l.CreatedBy, board: l.BoardID}
 			}
 		}
 	}
@@ -204,7 +260,14 @@ func (s *Server) loadLinkCatalog(ctx context.Context, groups []config.Group) lin
 	if s.cfg.Sources != nil {
 		if list, err := s.cfg.Sources.List(ctx); err == nil {
 			for _, src := range list {
-				cat[resSources][src.ID] = ref{id: src.ID, label: src.Group, owner: src.CreatedBy}
+				cat[resSources][src.ID] = ref{id: src.ID, label: src.Group, owner: src.CreatedBy, board: src.BoardID}
+			}
+		}
+	}
+	if s.cfg.Networks != nil {
+		if list, err := s.cfg.Networks.List(ctx); err == nil {
+			for _, n := range list {
+				cat[resNetworks][n.ID] = ref{id: n.ID, label: n.Group, owner: n.CreatedBy, board: n.BoardID}
 			}
 		}
 	}
@@ -277,9 +340,6 @@ func linkAdded(links, old groupLinks, res, id string) bool {
 // checkLinks validates new references in g that were not present in old.
 // It returns an empty string when every link is allowed, otherwise a 400 message.
 func checkLinks(v viewer, g config.Group, old *config.Group, cat linkCatalog) string {
-	if v.admin {
-		return ""
-	}
 	oldLinks := newGroupLinks()
 	if old != nil {
 		oldLinks = collectGroupLinks(*old)
@@ -294,28 +354,19 @@ func checkLinks(v viewer, g config.Group, old *config.Group, cat linkCatalog) st
 			if !ok || !v.canSee(res, r) {
 				return "unknown " + unknownLinkNoun[res] + ": " + id
 			}
+			if res != resDomains && !config.SameBoard(r.board, v.boardCurrent) {
+				return "unknown " + unknownLinkNoun[res] + ": " + id
+			}
 		}
 	}
 	return ""
 }
 
 // checkCampaignAliases rejects alias/id clashes introduced by new or changed groups.
-func checkCampaignAliases(v viewer, stored, merged []config.Group) string {
-	if v.admin {
-		return ""
-	}
+func checkCampaignAliases(_ viewer, stored, merged []config.Group) string {
 	storedByID := map[string]config.Group{}
 	for _, g := range stored {
 		storedByID[g.ID] = g
-	}
-	taken := map[string]string{}
-	for _, g := range merged {
-		taken[g.ID] = g.ID
-		for _, a := range g.Aliases {
-			if a != "" {
-				taken[a] = g.ID
-			}
-		}
 	}
 	for _, g := range merged {
 		old, had := storedByID[g.ID]
@@ -337,23 +388,44 @@ func checkCampaignAliases(v viewer, stored, merged []config.Group) string {
 			if _, was := oldAlias[a]; was {
 				continue
 			}
-			if owner, ok := taken[a]; ok && owner != g.ID {
-				return "alias taken: " + a
+			if aliasTakenAmong(merged, g.ID, a) {
+				return "alias taken"
 			}
 		}
 	}
 	return ""
 }
 
-// validateUserGroupLinks runs checkLinks and alias checks on changed merged campaigns.
+// aliasTakenAmong reports whether alias is already used as an id or alias on another campaign in merged.
+func aliasTakenAmong(merged []config.Group, selfID, alias string) bool {
+	for _, g := range merged {
+		if g.ID == selfID {
+			continue
+		}
+		if g.ID == alias {
+			return true
+		}
+		for _, a := range g.Aliases {
+			if a == alias {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// validateGroupLinks runs checkLinks and alias checks on changed merged campaigns.
 // stored is the file before merge; merged is the candidate save payload.
 // It returns the first 400/validation message, or an empty string.
-func validateUserGroupLinks(v viewer, stored, merged []config.Group, cat linkCatalog) string {
+func validateGroupLinks(v viewer, stored, merged []config.Group, cat linkCatalog) string {
 	storedByID := map[string]config.Group{}
 	for _, g := range stored {
 		storedByID[g.ID] = g
 	}
 	for _, g := range merged {
+		if !groupInBoard(g, v.boardCurrent) {
+			continue
+		}
 		old, had := storedByID[g.ID]
 		if had && groupsEqual(old, g) {
 			continue

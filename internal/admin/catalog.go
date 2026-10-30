@@ -161,6 +161,8 @@ func registerOffers(s *Server, mux *http.ServeMux) {
 			label:     func(o config.Offer) string { return o.Group },
 			owner:     func(o config.Offer) string { return o.CreatedBy },
 			setOwner:  func(o *config.Offer, uid string) { o.CreatedBy = uid },
+			boardID:   func(o config.Offer) string { return o.BoardID },
+			setBoard:  func(o *config.Offer, id string) { o.BoardID = id },
 			userCheck: s.offerCheck,
 			maskOut:   maskOfferPayout,
 			keepIn:    keepOfferPayout,
@@ -247,6 +249,8 @@ func registerNetworks(s *Server, mux *http.ServeMux) {
 			label:    func(n config.AffiliateNetwork) string { return n.Group },
 			owner:    func(n config.AffiliateNetwork) string { return n.CreatedBy },
 			setOwner: func(n *config.AffiliateNetwork, uid string) { n.CreatedBy = uid },
+			boardID:  func(n config.AffiliateNetwork) string { return n.BoardID },
+			setBoard: func(n *config.AffiliateNetwork, id string) { n.BoardID = id },
 			userCheck: func(_ context.Context, v viewer, n config.AffiliateNetwork, old *config.AffiliateNetwork) string {
 				return macroCheck(v, n, old)
 			},
@@ -309,6 +313,8 @@ func registerLandings(s *Server, mux *http.ServeMux) {
 			label:    func(l config.Landing) string { return l.Group },
 			owner:    func(l config.Landing) string { return l.CreatedBy },
 			setOwner: func(l *config.Landing, uid string) { l.CreatedBy = uid },
+			boardID:  func(l config.Landing) string { return l.BoardID },
+			setBoard: func(l *config.Landing, id string) { l.BoardID = id },
 			userCheck: func(_ context.Context, v viewer, l config.Landing, old *config.Landing) string {
 				return s.landingCheck(v, l, old)
 			},
@@ -327,6 +333,8 @@ func registerSources(s *Server, mux *http.ServeMux) {
 			label:     func(src config.TrafficSource) string { return src.Group },
 			owner:     func(src config.TrafficSource) string { return src.CreatedBy },
 			setOwner:  func(src *config.TrafficSource, uid string) { src.CreatedBy = uid },
+			boardID:   func(src config.TrafficSource) string { return src.BoardID },
+			setBoard:  func(src *config.TrafficSource, id string) { src.BoardID = id },
 			userCheck: s.sourceCheck,
 		},
 	)
@@ -430,6 +438,10 @@ func (c crudCatalog[T]) crudGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := c.s.viewerFrom(r.Context())
+	if c.hooks != nil && c.hooks.boardID != nil && !config.SameBoard(c.hooks.boardID(item), v.boardCurrent) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
 	if c.hooks != nil && c.hooks.res != "" && !v.canSee(c.hooks.res, catalogItemRef(c.idOf, c.hooks, item)) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
@@ -490,6 +502,10 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 	}
 	v := c.s.viewerFrom(r.Context())
 	itemRef := catalogItemRef(c.idOf, c.hooks, old)
+	if c.hooks != nil && c.hooks.boardID != nil && !config.SameBoard(c.hooks.boardID(old), v.boardCurrent) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
 	if c.hooks != nil && c.hooks.res != "" && !v.canSee(c.hooks.res, itemRef) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
@@ -579,6 +595,10 @@ func (c crudCatalog[T]) crudDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	v := c.s.viewerFrom(r.Context())
 	itemRef := catalogItemRef(c.idOf, c.hooks, old)
+	if c.hooks != nil && c.hooks.boardID != nil && !config.SameBoard(c.hooks.boardID(old), v.boardCurrent) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
 	if c.hooks != nil && c.hooks.res != "" && !v.canSee(c.hooks.res, itemRef) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return

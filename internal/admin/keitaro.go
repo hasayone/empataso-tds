@@ -30,6 +30,8 @@ type keitaroImportReq struct {
 	Clicks      bool   `json:"clicks"`
 	From        string `json:"from"`
 	To          string `json:"to"`
+	// Board is the target panel section for this import. Empty uses the request section or main.
+	Board string `json:"board_id"`
 }
 
 // handleKeitaroStatus reports whether a tracker origin and key are set.
@@ -404,7 +406,8 @@ func mergeCatalog[B any, T any](ctx context.Context, incoming []B, cm catalogMer
 // and always keeps the stored sticky_stream switch, which Keitaro does not carry.
 // A new import keeps the number from the merge. Missing numbers are filled for ids in this import.
 // Losses are the bridge merge report. An error means a JSON conversion failed.
-func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, prev ktimport.Manifest, owner string) ([]config.Group, []ktimport.Loss, error) {
+func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, prev ktimport.Manifest, owner string, board string) ([]config.Group, []ktimport.Loss, error) {
+	board = config.NormalizeBoardID(board)
 	bridgeExisting, err := convert[[]ktimport.Group](existing)
 	if err != nil {
 		return nil, nil, err
@@ -431,6 +434,7 @@ func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, pre
 			if owner != "" && cg.CreatedBy == "" {
 				cg.CreatedBy = owner
 			}
+			cg.BoardID = board
 			out = append(out, cg)
 			continue
 		}
@@ -446,6 +450,7 @@ func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, pre
 				cg.CreatedBy = old.CreatedBy
 			}
 			cg.StickyStream = old.StickyStream
+			cg.BoardID = old.BoardID
 			out = append(out, cg)
 			continue
 		}
@@ -485,10 +490,15 @@ func ensureGroupNums(out []config.Group, ids []string) {
 // It returns an empty manifest when the store is not set.
 // It returns an error when the file cannot be read or parsed.
 func (s *Server) loadManifest() (ktimport.Manifest, error) {
-	if s.cfg.Manifest == nil {
+	return loadManifestStore(s.cfg.Manifest)
+}
+
+// loadManifestStore reads a manifest from store. A nil store yields an empty manifest.
+func loadManifestStore(store ManifestStore) (ktimport.Manifest, error) {
+	if store == nil {
 		return ktimport.Manifest{}, nil
 	}
-	return s.cfg.Manifest.Load()
+	return store.Load()
 }
 
 // saveRunManifest stores this run's manifest on top of the one loaded at the start.
@@ -496,12 +506,17 @@ func (s *Server) loadManifest() (ktimport.Manifest, error) {
 // host is the tracker hostname of this run's snapshot. A nil store does nothing.
 // It returns an error when the file cannot be written.
 func (s *Server) saveRunManifest(base ktimport.Manifest, res ktimport.Result, host string) error {
+	return s.saveRunManifestStore(s.cfg.Manifest, base, res, host)
+}
+
+// saveRunManifestStore merges res.Manifest into base and writes store.
+func (s *Server) saveRunManifestStore(store ManifestStore, base ktimport.Manifest, res ktimport.Result, host string) error {
 	next := base.Merge(res.Manifest)
 	next.Host = host
-	if s.cfg.Manifest == nil {
+	if store == nil {
 		return nil
 	}
-	return s.cfg.Manifest.Save(next)
+	return store.Save(next)
 }
 
 // convert copies v into T through JSON.

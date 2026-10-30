@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"sync"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 // catalogHooks assigns a number and tidies the list around one catalog.
@@ -40,6 +42,10 @@ type catalogHooks[T any] struct {
 	label     func(T) string
 	owner     func(T) string
 	setOwner  func(*T, string)
+	// boardID reads the section id of a row. When set, list/get/insert are scoped to the current section.
+	boardID func(T) string
+	// setBoard writes the section id on create. Nil leaves board_id as sent.
+	setBoard func(*T, string)
 	userLimit func(*T, *T) string
 	// userCheck runs for a non-admin caller on create (old is nil) and replace, after
 	// userLimit. A non-empty message refuses the write with 400. Nil allows it.
@@ -78,12 +84,25 @@ func catalogItemRef[T any](idOf func(T) string, hooks *catalogHooks[T], item T) 
 		if hooks.owner != nil {
 			r.owner = hooks.owner(item)
 		}
+		if hooks.boardID != nil {
+			r.board = hooks.boardID(item)
+		}
 	}
 	return r
 }
 
-// visibleCatalog returns list entries the viewer may read for hooks.res.
+// visibleCatalog returns list entries the viewer may read for hooks.res in the current section.
 func visibleCatalog[T any](v viewer, hooks *catalogHooks[T], idOf func(T) string, list []T) []T {
+	if hooks != nil && hooks.boardID != nil {
+		cur := v.boardCurrent
+		filtered := make([]T, 0, len(list))
+		for _, item := range list {
+			if config.SameBoard(hooks.boardID(item), cur) {
+				filtered = append(filtered, item)
+			}
+		}
+		list = filtered
+	}
 	if v.admin || hooks == nil || hooks.res == "" {
 		return list
 	}
@@ -95,6 +114,7 @@ func visibleCatalog[T any](v viewer, hooks *catalogHooks[T], idOf func(T) string
 	}
 	return out
 }
+
 
 // maskedItem returns item after hooks.maskOut for v. item is a copy, so the stored
 // record is not touched. An administrator gets item as it is.

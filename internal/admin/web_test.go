@@ -203,18 +203,9 @@ func TestDashboardUIFiltersBrand(t *testing.T) {
 	must(t, html, "/api/brand", "public brand endpoint on login")
 	mustNot(t, html, "EmpatASO", "EmpatASO branding removed")
 	mustNot(t, html, "base64,iVBOR", "embedded logo removed")
-	appLine := ""
-	if i := strings.Index(html, "function app(user)"); i >= 0 {
-		end := strings.Index(html[i:], "\nfunction ")
-		if end < 0 {
-			end = strings.Index(html[i:], "\nasync function ")
-		}
-		if end > 0 {
-			appLine = html[i : i+end]
-		}
-	}
-	must(t, appLine, `tr('menu.integrations')`, "app menu integrations")
-	mustNot(t, appLine, `tr('menu.keitaro')`, "app menu without keitaro")
+	menuLine := spaFunctionLine(html, "userMenuItems")
+	must(t, menuLine, `tr('menu.integrations')`, "user menu integrations")
+	mustNot(t, menuLine, `tr('menu.keitaro')`, "user menu without keitaro")
 	pagesAt := strings.Index(html, "const PAGES=")
 	pagesEnd := strings.Index(html[pagesAt:], "\n")
 	must(t, html[pagesAt:pagesAt+pagesEnd], "keitaro:integrations", "keitaro route alias")
@@ -713,13 +704,22 @@ func TestFlowsHeaderExportMenu(t *testing.T) {
 	fbar := spaBetween(flows, `id="fbar"`, `id="fgrid"`)
 	must(t, fbar, `id="newflow"`, "create in filter bar")
 	must(t, fbar, `id="fq"`, "search in filter bar")
+	must(t, flows, `class="toolbar bar-fit" id="fbar"`, "filter bar sizes to the row")
+	mustNot(t, fbar, `width:260px`, "search is not a fixed 260px")
+	must(t, html, `.toolbar.bar-fit .rgt select{width:auto;max-width:min(220px,100%);field-sizing:content`, "filters follow the selected label")
+	must(t, html, `.toolbar.bar-fit .lft{flex:1 1 auto;flex-wrap:nowrap;min-width:0}`, "search stays beside create")
+	must(t, html, `.toolbar.bar-fit .lft{flex:1 1 100%}`, "search takes the row on a narrow bar")
+	must(t, html, `.toolbar.bar-fit .rgt{flex:0 0 420px`, "filter slot does not shrink the search")
+	cat := spaFunctionLine(html, "catalogBar")
+	must(t, cat, `class="toolbar bar-fit"`, "catalog bar uses the same fit")
+	mustNot(t, cat, `width:260px`, "catalog search is not a fixed 260px")
 	nw := strings.Index(fbar, `id="newflow"`)
 	fq := strings.Index(fbar, `id="fq"`)
 	if nw < 0 || fq < 0 || nw >= fq {
 		t.Errorf("filter bar order create < search: new=%d search=%d", nw, fq)
 	}
 	ph := spaBetween(flows, `<div class="ph">`, `</div>
-    <div class="toolbar" id="fbar">`)
+    <div class="toolbar bar-fit" id="fbar">`)
 	mustNot(t, ph, `id="newflow"`, "create not in page header")
 	mustNot(t, ph, `id="fq"`, "search not in page header")
 	dockFn := spaFunctionLine(html, "dockHTML")
@@ -729,20 +729,57 @@ func TestFlowsHeaderExportMenu(t *testing.T) {
 		t.Errorf("export must follow the pager in dockHTML: page=%d export=%d", page, exp)
 	}
 	cards := spaFunctionLine(html, "paintFlowCards")
-	must(t, cards, `id="bulk-on"`, "bulk enable")
-	must(t, cards, `id="bulk-off"`, "bulk disable")
-	must(t, cards, `id="bulk-del"`, "bulk delete")
+	must(t, cards, `e.shiftKey`, "campaign checkbox reads Shift on click")
+	must(t, cards, `pickSpan(FLOW_PICK, FLOW_PICK_MEM, page.map(g=>g.id)`, "range uses the visible page")
+	mustNot(t, cards, `pickSpan(FLOW_PICK, FLOW_PICK_MEM, rows`, "range does not take every filtered row")
+	must(t, cards, `id==='*'`, "header checkbox stays select-all")
+	span := spaFunctionLine(html, "pickSpan")
+	must(t, span, `list.slice(lo, hi+1)`, "span is the inclusive visible slice")
+	must(t, span, `mem.span=on?next:[]`, "a later Shift drops ids that left the span")
+	doms := spaFunctionLine(html, "domains")
+	must(t, doms, `pickSpan(DOM_PICK, DOM_PICK_MEM, list.map(d=>String(d.id))`, "domain range uses the visible page")
+	must(t, doms, `bulkAct('dbulk-check','check'`, "domain bulk check icon")
+	must(t, doms, `bulkAct('dbulk-group','lists'`, "domain bulk group icon")
+	must(t, cards, `bulkAct('bulk-on','play'`, "bulk enable icon")
+	must(t, cards, `bulkAct('bulk-off','pause'`, "bulk disable icon")
+	must(t, cards, `bulkAct('bulk-del','trash'`, "bulk delete icon")
+	must(t, html, `.bulkbar button.bulk-act:active .bulk-txt`, "press shows the action label")
 	mustNot(t, cards, `class="sm" id="bulk-`, "small class on a bulk action")
 	mustNot(t, cards, `class="sm danger" id="bulk-del"`, "small danger class on bulk delete")
 	must(t, html, `.ftable td.fname{font-size:11px}`, "name cell is 11px")
 	cell := spaFunctionLine(html, "flowMetricCell")
 	must(t, cell, `class="ell fname"`, "name cell class")
-	menuFn := spaFunctionLine(html, "menu")
-	must(t, menuFn, "r.top-6-h", "menu can open above its anchor")
-	must(t, menuFn, "includes('end')", "menu end alignment")
+	menuPlaceFn := spaFunctionLine(html, "menuPlace")
+	must(t, menuPlaceFn, "r.top-6-h", "menu can open above its anchor")
+	must(t, menuPlaceFn, "includes('end')", "menu end alignment")
+	must(t, menuPlaceFn, "popLeft(r, w, end)", "menu uses the window clamp")
+	must(t, spaFunctionLine(html, "viewBox"), "clientWidth", "menu stays inside the visible window")
+	must(t, spaFunctionLine(html, "popLeft"), "r.right-w", "menu at the right edge aligns to its button")
+	mustNot(t, menuPlaceFn, `q('main')`, "menu is not tied to the content column")
+	must(t, spaFunctionLine(html, "ensureMenuResize"), "closeMenu()", "scroll closes the menu")
+	must(t, spaFunctionLine(html, "ensureMenuResize"), "document.addEventListener('scroll'", "scroll listener is capture on the document")
 	must(t, html, ".menu.end{min-width:0}", "export menu css")
 	must(t, flows, "menu(e.currentTarget,[{label:tr('Export CSV')", "export menu anchor")
 	must(t, flows, "exportFlows(true)}], 'end')", "export menu end class")
+}
+
+func TestCloneStreams(t *testing.T) {
+	html := spaSource()
+	menu := spaFunctionLine(html, "streamMenu")
+	must(t, menu, "openStreamDest(i,'clone')", "stream menu clones through a dialog")
+	must(t, menu, "openStreamDest(i,'move')", "stream menu moves through a dialog")
+	mustNot(t, menu, "others.map", "stream menu does not list every campaign")
+	dlg := spaFunctionLine(html, "openStreamDest")
+	must(t, dlg, "To another campaign", "clone dialog can target another campaign")
+	must(t, dlg, "Choose a flow…", "campaign field placeholder")
+	must(t, dlg, "copyStreamInto(s,target,null)", "clone into the chosen campaign appends a copy")
+	must(t, dlg, "copyStreamInto(s,g,i)", "clone in place inserts under the stream")
+	must(t, dlg, "g.streams.splice(i,1)", "move removes the stream from the current campaign")
+	copyFn := spaFunctionLine(html, "copyStreamInto")
+	must(t, copyFn, "clone(s)", "copy does not share the stream object")
+	mustNot(t, copyFn, "splice(i,1)", "copy leaves the source stream")
+	must(t, html, `'Clone streams':'Клонировать потоки'`, "russian clone title")
+	must(t, html, `'To another campaign':'В другую кампанию'`, "russian other-campaign checkbox")
 }
 
 // TestSpaPureAndConvMarkers checks sort helpers, conversion labels, dates, and country data markers.
@@ -789,15 +826,10 @@ func TestFlowsFilterBar(t *testing.T) {
 // Losses are grouped, and the redirect type list includes show_html_404.
 func TestKeitaroPage(t *testing.T) {
 	html := spaSource()
-	menuAt := strings.Index(html, `q('#userbtn',root).onclick`)
-	if menuAt < 0 {
+	menuLine := spaFunctionLine(html, "userMenuItems")
+	if menuLine == "" {
 		t.Fatal("user menu missing")
 	}
-	menuEnd := strings.Index(html[menuAt:], "\n")
-	if menuEnd < 0 {
-		t.Fatal("user menu line has no newline")
-	}
-	menuLine := html[menuAt : menuAt+menuEnd]
 	pbAt := strings.Index(menuLine, `tr('pb.title')`)
 	intAt := strings.Index(menuLine, `tr('menu.integrations')`)
 	setAt := strings.Index(menuLine, `tr('menu.settings')`)
@@ -1043,12 +1075,10 @@ func TestSPASettingsPickers(t *testing.T) {
 		t.Error("lead url line not found")
 	}
 	must(t, pb, "status=sale&payout={payout}", "sale postback keeps payout")
-	menuAt := strings.Index(html, `q('#userbtn'`)
-	if menuAt < 0 {
+	menuLine := spaFunctionLine(html, "userMenuItems")
+	if menuLine == "" {
 		t.Fatal("user menu missing")
 	}
-	menuEnd := strings.Index(html[menuAt:], "\n")
-	menuLine := html[menuAt : menuAt+menuEnd]
 	pbAt := strings.Index(menuLine, `tr('pb.title')`)
 	setAt := strings.Index(menuLine, `tr('menu.settings')`)
 	if pbAt < 0 || setAt < 0 || pbAt > setAt {
@@ -1216,6 +1246,13 @@ func TestCatalogSearchAndGroups(t *testing.T) {
 	must(t, bar, `class="lft"`, "catalogBar left cluster")
 	must(t, bar, `class="rgt"`, "catalogBar right cluster")
 	must(t, bar, `-refresh"`, "catalogBar refresh id template")
+	mustNot(t, bar, `${groups}`, "groups button is not in the filter bar")
+	must(t, spaFunctionLine(html, "groupHeadBtn"), `icon('folder')`, "groups control is a folder icon")
+	must(t, spaFunctionLine(html, "offers"), `groupHeadBtn('off-groups')`, "offers groups sit in the header")
+	must(t, spaFunctionLine(html, "landings"), `groupHeadBtn('land-groups')`, "landings groups sit in the header")
+	must(t, spaFunctionLine(html, "networks"), `groupHeadBtn('net-groups')`, "networks groups sit in the header")
+	must(t, spaFunctionLine(html, "sources"), `groupHeadBtn('src-groups')`, "sources groups sit in the header")
+	must(t, spaFunctionLine(html, "domains"), `groupHeadBtn('dom-groups')`, "domains groups sit in the header")
 	must(t, html, "function groupLabels(", "groupLabels helper")
 	must(t, html, "function fillGroupSelect(", "fillGroupSelect helper")
 	must(t, html, "function openGroupWindow(", "openGroupWindow helper")
@@ -1330,6 +1367,95 @@ func TestSPALogFilters(t *testing.T) {
 	rep := catalogBranch(html, "report")
 	must(t, rep, "['group','conv.campaign',1]", "report catalog stays the last return")
 	must(t, html, "groupFieldBlock('dgroup'", "domain group field")
+}
+
+// TestFilterBuilderFields checks the filter window lists every column of its table.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestFilterBuilderFields(t *testing.T) {
+	html := spaSource()
+	filt := spaFunctionLine(html, "fieldsForFilter")
+	if filt == "" {
+		t.Fatal("fieldsForFilter missing")
+	}
+	mustNot(t, filt, "fieldReady", "filter catalog ignores wave readiness")
+	must(t, filt, "f.conv:f.events", "filter catalog keeps the table column")
+	cols := spaFunctionLine(html, "fieldsFor")
+	must(t, cols, "fieldReady", "table columns stay behind a ready wave")
+	menu := spaFunctionLine(html, "fltMenuSplit")
+	must(t, menu, "fieldsForFilter(table)", "menu split uses the filter catalog")
+	must(t, menu, "FLT_GROUPS", "menu split reads the groups")
+	must(t, menu, "rest:have.filter", "names outside the groups stay in the menu")
+	b := spaFunctionLine(html, "filterBuilder")
+	if b == "" {
+		t.Fatal("filterBuilder missing")
+	}
+	must(t, b, "fltMenuSplit(table)", "builder groups parameters")
+	must(t, b, "tr('flt.ungrouped')", "fields outside groups stay visible")
+	must(t, b, "fltCanAdd(fieldsForFilter(table)", "add button stops at the row cap")
+	must(t, html, "const FLT_MAX=20", "filter row cap matches the server")
+	apply := spaFunctionLine(html, "fltApplyDraft")
+	must(t, apply, "slice(0, FLT_MAX)", "apply keeps at most FLT_MAX conditions")
+	mustNot(t, b, "fieldsFor(table)", "builder does not hide unready fields")
+	qs := spaFunctionLine(html, "condsQS")
+	must(t, qs, "qs.append('f'", "each condition value is its own f parameter")
+	must(t, html, "condsQS(logCondsForQuery())", "click log sends every condition")
+	must(t, html, "condsQS(pbCondsForQuery())", "conversions send every condition")
+	must(t, html, "condsQS(REP.conds)", "report sends every condition")
+	must(t, html, "filterBuilder('events', LOGF.conds", "clicks use the events table")
+	must(t, html, "filterBuilder('conversions', PB.conds", "conversions use the conversions table")
+	must(t, html, "filterBuilder('events', REP.conds", "report uses the events table")
+	sug := spaFunctionLine(html, "fltSuggestItems")
+	if sug == "" {
+		t.Fatal("fltSuggestItems missing")
+	}
+	must(t, sug, "fltCatalogBase(field)", "suggestions start from the catalog")
+	must(t, sug, "!loaded.length", "an empty cache does not hide the catalog")
+	must(t, b, "fltSuggestItems(row.f, opts[row.f])", "the value list reads the live catalog")
+	must(t, b, "el.dispatchEvent(new FocusEvent('focus'))", "choosing a field opens its value list")
+	pick := spaFunctionLine(html, "bindPickCombo")
+	must(t, pick, "if(PICK_COMBO&&PICK_COMBO.list) place(PICK_COMBO.list)", "scrolling keeps the value list beside the field")
+	must(t, pick, "box&&box.contains(e.target)", "a click in the value field does not close its list")
+	must(t, html, ".chits button{display:flex;width:100%;text-align:left;justify-content:flex-start", "suggestion rows keep the start of the name")
+	cat := spaFunctionLine(html, "fltCatalogItems")
+	must(t, cat, "f==='device'", "device offers the known types")
+	must(t, cat, "'phone','computer','tablet'", "device types are phone, computer, tablet")
+}
+
+// TestColumnResize checks every header can be dragged from its right edge.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestColumnResize(t *testing.T) {
+	html := spaSource()
+	head := spaFunctionLine(html, "sortableHead")
+	if head == "" {
+		t.Fatal("sortableHead missing")
+	}
+	must(t, head, "data-col=", "journal headers keep a stable column id")
+	must(t, html, `data-col="${esc(k)}"`, "campaign headers keep a stable column id")
+	must(t, html, ".col-grip{position:absolute", "the header edge is a resize grip")
+	must(t, html, "table.colw{table-layout:fixed}", "a dragged table locks column widths")
+	grip := spaFunctionLine(html, "colGrips")
+	if grip == "" {
+		t.Fatal("colGrips missing")
+	}
+	must(t, grip, "col-grip", "each header receives a grip")
+	mustNot(t, grip, "data-sort", "the grip is not a sort button")
+	bind := spaFunctionLine(html, "colBindResize")
+	if bind == "" {
+		t.Fatal("colBindResize missing")
+	}
+	must(t, bind, "closest('.col-grip')", "only the grip starts a resize")
+	must(t, bind, "stopPropagation", "a grip press does not sort or open a row menu")
+	must(t, bind, "colResetColumn", "a double click clears one column")
+	store := spaFunctionLine(html, "colWidthRead")
+	must(t, store, "COLW_KEY", "widths are read from the browser store")
+	must(t, html, "const COLW_KEY='kuztds-colw'", "widths stay in kuztds-colw")
+	write := spaFunctionLine(html, "colWidthWrite")
+	mustNot(t, write, "/api/ui", "column widths are not saved to the shared UI")
+	apply := spaFunctionLine(html, "colApplySaved")
+	must(t, apply, "colWidthRead()", "a redraw puts the stored width back")
+	watch := spaFunctionLine(html, "colWatch")
+	must(t, watch, "MutationObserver", "new tables receive grips without a per-page hook")
+	must(t, html, "colResizeStart()", "resize starts with the page")
 }
 
 var jsSetRe = regexp.MustCompile(`'((?:[^'\\]|\\.)*)'`)

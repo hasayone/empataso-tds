@@ -14,6 +14,7 @@
 - [API-ключи и Admin API](admin-api.md)
 - [Пользователи панели](users.md)
 - [Роли](roles.md)
+- [Разделы](boards.md)
 
 ## Экраны админки
 

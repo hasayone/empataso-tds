@@ -259,8 +259,9 @@ func (s *Server) domainCampaignCounts(ctx context.Context) (map[string]int, erro
 	if err != nil {
 		return nil, err
 	}
+	board := boardFrom(ctx)
 	for _, g := range groups {
-		if g.DomainID != "" {
+		if g.DomainID != "" && groupInBoard(g, board) {
 			counts[g.DomainID]++
 		}
 	}

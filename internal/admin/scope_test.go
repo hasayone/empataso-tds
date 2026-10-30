@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/security"
 )
 
@@ -74,6 +75,30 @@ func TestCanSeeBranches(t *testing.T) {
 	emptyLabel := viewer{grants: map[string]security.Grant{resOffers: {Mode: security.ModeSelected, Labels: []string{""}}}}
 	if emptyLabel.canSee(resOffers, ref{id: "x", label: ""}) {
 		t.Fatal("empty label must not match empty labels entry")
+	}
+}
+
+func TestCanWriteBoardRoleCreated(t *testing.T) {
+	foreign := ref{id: "c1", owner: "u2", board: "seo"}
+	own := ref{id: "c2", owner: "u1", board: "seo"}
+	createdBoard := viewer{
+		uid:          "u1",
+		boardCurrent: "seo",
+		boardRole:    config.BoardRoleCreated,
+		grants:       map[string]security.Grant{resCampaigns: {Mode: security.ModeFull}},
+	}
+	if createdBoard.canWrite(resCampaigns, foreign) {
+		t.Fatal("board created: foreign owner must not write")
+	}
+	if !createdBoard.canWrite(resCampaigns, own) {
+		t.Fatal("board created: own owner must write")
+	}
+	fullNoBoardRole := viewer{
+		uid:    "u1",
+		grants: map[string]security.Grant{resCampaigns: {Mode: security.ModeFull}},
+	}
+	if !fullNoBoardRole.canWrite(resCampaigns, foreign) {
+		t.Fatal("ModeFull without board role must write foreign record")
 	}
 }
 

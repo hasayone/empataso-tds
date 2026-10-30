@@ -20,15 +20,16 @@ func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := s.viewerFrom(r.Context())
-	if !v.admin {
-		filtered := make([]config.Group, 0, len(groups))
-		for _, g := range groups {
-			if v.canSee(resCampaigns, campaignRef(g)) {
-				filtered = append(filtered, g)
-			}
+	filtered := make([]config.Group, 0, len(groups))
+	for _, g := range groups {
+		if !groupInBoard(g, v.boardCurrent) {
+			continue
 		}
-		groups = filtered
+		if v.admin || v.canSee(resCampaigns, campaignRef(g)) {
+			filtered = append(filtered, g)
+		}
 	}
+	groups = filtered
 	writeJSON(w, http.StatusOK, groups)
 }
 
@@ -131,6 +132,21 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
+	var target config.Group
+	for _, g := range stored {
+		if g.ID == id {
+			target = g
+			break
+		}
+	}
+	if !groupInBoard(target, v.boardCurrent) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !v.admin && !v.canWrite(resCampaigns, campaignRef(target)) {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
 	if !s.commitGroups(w, r, v, stored, full) {
 		return
 	}
@@ -152,12 +168,12 @@ func (s *Server) commitGroups(w http.ResponseWriter, r *http.Request, v viewer, 
 		writeErr(w, code, msg)
 		return false
 	}
+	cat := s.loadLinkCatalog(r.Context(), groups)
+	if msg := validateGroupLinks(v, stored, groups, cat); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return false
+	}
 	if !v.admin {
-		cat := s.loadLinkCatalog(r.Context(), groups)
-		if msg := validateUserGroupLinks(v, stored, groups, cat); msg != "" {
-			writeErr(w, http.StatusBadRequest, msg)
-			return false
-		}
 		if msg := validateGroupMacros(v, stored, groups); msg != "" {
 			writeErr(w, http.StatusBadRequest, msg)
 			return false

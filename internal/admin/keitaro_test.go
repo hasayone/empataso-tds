@@ -628,7 +628,7 @@ func TestMergeImportedGroupNums(t *testing.T) {
 	}
 	prev := ktimport.Manifest{}
 	prev.Add(ktimport.KindGroups, "a")
-	out, _, err := mergeImportedGroups(existing, incoming, prev, "")
+	out, _, err := mergeImportedGroups(existing, incoming, prev, "", config.MainBoardID)
 	if err != nil {
 		t.Fatal(err)
 	}
