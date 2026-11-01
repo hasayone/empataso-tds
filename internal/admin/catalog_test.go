@@ -324,10 +324,10 @@ func TestTrafficSourceRejectsSubID16(t *testing.T) {
 	c := newClient(t)
 	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
 	resp := csrfDo(t, c, http.MethodPost, srv.URL+"/api/traffic-sources", csrf, config.TrafficSource{
-		ID: "src", Parameters: map[string]string{"sub_id_16": "x"},
+		ID: "src", Parameters: map[string]string{"sub_id_31": "x"},
 	})
 	if resp.StatusCode != http.StatusBadRequest {
-		t.Fatalf("sub_id_16 → %d, want 400", resp.StatusCode)
+		t.Fatalf("sub_id_31 → %d, want 400", resp.StatusCode)
 	}
 	resp.Body.Close()
 }

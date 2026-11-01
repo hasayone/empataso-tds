@@ -10,6 +10,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 // MacroDeps — data for expanding output macros.
@@ -32,7 +34,7 @@ type MacroDeps struct {
 	CID       string   // [CID] and {subid}
 	Origin    string   // {origin} — signed first-entry campaign token, url-encoded when expanded
 	Pars      []string // [PAR-1]..[PAR-5]
-	SubIDs    [15]string
+	SubIDs    [config.MaxSubID]string
 	Status    string // {status}
 	Payout    string // {payout}
 	Offer     string // {offer} — offer-step path for this click
@@ -171,10 +173,10 @@ func (d MacroDeps) scalars() []scalarMacro {
 // are not a macro, and there is no error return. The closing brace must sit
 // at index 24 or earlier, the same window as before.
 //
-// subid, country, keyword, status, payout, offer and sub_id_1..sub_id_15 are
+// subid, country, keyword, status, payout, offer and sub_id_1..sub_id_30 are
 // filled from MacroDeps and are never read from the click query. Any other name of
 // [A-Za-z0-9_-] is looked up in Query. A nil Query, a missing parameter, or a
-// name outside that set (a dot, sub_id_16, an HTML brace like {color}) is
+// name outside that set (a dot, sub_id_31, an HTML brace like {color}) is
 // left untouched.
 func (d MacroDeps) curlyAt(s string) (val string, n int) {
 	end := strings.IndexByte(s, '}')
@@ -231,14 +233,14 @@ func queryMacroName(name string) bool {
 	return true
 }
 
-// subIDIndex parses sub_id_1 .. sub_id_15 into a zero-based index.
+// subIDIndex parses sub_id_1 .. sub_id_30 into a zero-based index.
 func subIDIndex(name string) (int, bool) {
 	n, ok := strings.CutPrefix(name, "sub_id_")
 	if !ok {
 		return 0, false
 	}
 	i, err := strconv.Atoi(n)
-	if err != nil || i < 1 || i > 15 {
+	if err != nil || i < 1 || i > config.MaxSubID {
 		return 0, false
 	}
 	return i - 1, true

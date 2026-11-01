@@ -368,6 +368,19 @@ func New(cfg Config) (*Server, error) {
 	if err := s.publish(hash); err != nil {
 		return nil, err
 	}
+	if cfg.PasswordFile != "" {
+		if _, statErr := os.Stat(cfg.PasswordFile); errors.Is(statErr, os.ErrNotExist) {
+			next, seedErr := s.seedPasswordFile(cfg.PasswordFile, hash)
+			if seedErr != nil {
+				return nil, seedErr
+			}
+			if next != hash {
+				if err := s.publish(next); err != nil {
+					return nil, err
+				}
+			}
+		}
+	}
 	if err := s.loadKeitaro(); err != nil {
 		return nil, err
 	}
@@ -417,6 +430,36 @@ func initialHash(cfg Config) (string, error) {
 		return "", fmt.Errorf("admin: password file %s is empty", cfg.PasswordFile)
 	}
 	return h, nil
+}
+
+// seedPasswordFile creates path once with the hash already accepted for this start.
+// path is the password file. hash is that accepted hash, never the password.
+// It returns the hash the process should keep.
+// The file is created with O_EXCL and mode 0600, so an existing file is not replaced.
+// When the file appears between the absence check and the create, that file wins:
+// a usable hash is returned, and an empty or unreadable file is an error.
+// A write that cannot finish removes the new file, logs the path and the error
+// without the hash, and returns hash so the start continues from the environment.
+func (s *Server) seedPasswordFile(path, hash string) (string, error) {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return initialHash(Config{PasswordFile: path})
+		}
+		s.logWarn("password file was not created", "path", path, "err", err)
+		return hash, nil
+	}
+	_, werr := f.Write([]byte(hash))
+	cerr := f.Close()
+	if werr != nil || cerr != nil {
+		_ = os.Remove(path)
+		if werr == nil {
+			werr = cerr
+		}
+		s.logWarn("password file was not created", "path", path, "err", werr)
+		return hash, nil
+	}
+	return hash, nil
 }
 
 // publish validates a hash and makes it current. Every path that changes the

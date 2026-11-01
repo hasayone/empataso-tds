@@ -106,6 +106,13 @@ func TestSPAStructure(t *testing.T) {
 	must(t, html, `data-rxon=`, "switch to a regular expression")
 	must(t, html, `f_iplist_t`, "ip list chips")
 	must(t, html, `data-iptext`, "ip list text switch")
+	must(t, html, `tags.fold`, "chip lists fold to two rows")
+	must(t, html, `data-listtext`, "list condition text switch")
+	must(t, html, `data-tagmore`, "chip list expand button")
+	must(t, html, `function deviceFlags`, "device flag encoder")
+	must(t, html, `data-dyes`, "device yes or no")
+	must(t, html, `data-dfull`, "drawer full screen")
+	must(t, html, `function openStreamOrder`, "stream order from the number")
 	must(t, html, `f_iplist_text`, "ip list textarea")
 	must(t, html, `function ipEntries`, "ip entry splitter")
 	must(t, html, `flushIPDraft`, "ip list flush before campaigns")
@@ -849,6 +856,8 @@ func TestKeitaroPage(t *testing.T) {
 		"/api/keitaro/purge",
 		"/api/keitaro/job",
 		`id="kt-progress"`,
+		`id="kt-import" hidden`,
+		`data-kttab="kt-import"`,
 		"<progress",
 		`id="kt-campaigns"`,
 		`id="kt-conversions"`,
@@ -1124,7 +1133,7 @@ func TestNavIconTooltips(t *testing.T) {
 
 // TestOfferFormAndColumns checks offer editor fields and column catalogs.
 // Campaign ids stay hits, uniq and conv. The report catalog has no cost column.
-// The URL builder stops at sub_id_15 and does not offer status.
+// The URL builder stops at sub_id_30 and does not offer status.
 func TestOfferFormAndColumns(t *testing.T) {
 	html := spaSource()
 	flows := catalogBranch(html, "flows")
@@ -1137,8 +1146,10 @@ func TestOfferFormAndColumns(t *testing.T) {
 	mustNot(t, rep, "['cost'", "report catalog must not list cost")
 	macros := offerMacroSource(html)
 	must(t, macros, "{subid}", "offer URL macro subid")
-	must(t, macros, "{sub_id_15}", "offer URL macro sub_id_15")
-	mustNot(t, macros, "{sub_id_16}", "offer URL builder has no sub_id_16")
+	must(t, html, "const SUBID_MAX=30", "Sub ID ceiling is 30")
+	must(t, macros, "length:SUBID_MAX", "offer URL macros run through the ceiling")
+	must(t, macros, "'{sub_id_'+(i+1)+'}'", "offer URL macro sub_id_N")
+	mustNot(t, macros, "{sub_id_31}", "offer URL builder has no sub_id_31")
 	mustNot(t, macros, "{status}", "offer URL builder has no status macro")
 	off := spaBetween(html, "async function offers(", "async function domains(")
 	must(t, off, "payout_model", "offer save sends payout_model")
@@ -1345,7 +1356,10 @@ func TestSPALogFilters(t *testing.T) {
 	must(t, conv, "'sale_period'", "conversion sale period column")
 	must(t, conv, "'original_status'", "conversion original status column")
 	logs := catalogBranch(html, "logs")
-	must(t, logs, "'sub_id_12'", "click log sub id column")
+	must(t, logs, "length:SUBID_MAX", "click log sub id ceiling")
+	must(t, logs, "subIDCol(i+1,0)", "click log sub id columns")
+	convCols := catalogBranch(html, "conv")
+	must(t, convCols, "subIDCol(i+3,0)", "conversion sub id columns after the first two")
 	cols := spaFunctionLine(html, "loadCols")
 	must(t, cols, "group:'campaign'", "saved campaign column id")
 	must(t, cols, "ua:'useragent'", "saved user-agent column id")

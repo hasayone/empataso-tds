@@ -51,8 +51,11 @@ func TestAllowedSourceParamExtras(t *testing.T) {
 			t.Fatalf("%s rejected", name)
 		}
 	}
-	if AllowedSourceParam("cost") || AllowedSourceParam("sub_id_16") {
-		t.Fatal("cost or sub_id_16 accepted")
+	if !AllowedSourceParam("sub_id_16") || !AllowedSourceParam("sub_id_30") {
+		t.Fatal("sub_id_16 or sub_id_30 rejected")
+	}
+	if AllowedSourceParam("cost") || AllowedSourceParam("sub_id_31") {
+		t.Fatal("cost or sub_id_31 accepted")
 	}
 }
 

@@ -642,12 +642,11 @@ func (d *engineDeps) offerQuery(networkID string) string {
 	return n.OfferQuery
 }
 
-// storedSubs keeps the first twelve sub ids for the click log.
-func storedSubs(subs [config.MaxSubID]string) (out [12]string) {
-	for i := 0; i < len(out) && i < len(subs); i++ {
-		out[i] = subs[i]
-	}
-	return out
+// storedSubs copies every sub id into the click log.
+// subs is the visitor's sub_id_1 through sub_id_30. The result has the same
+// length. It does not fail.
+func storedSubs(subs [config.MaxSubID]string) [config.MaxSubID]string {
+	return subs
 }
 
 // asnText renders an AS number for macros: "" when unknown, so a template

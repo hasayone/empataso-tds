@@ -47,10 +47,10 @@ type ConversionRow struct {
 	AdCampaignID     FlexString `json:"ad_campaign_id"`
 	ExternalID       FlexString `json:"external_id"`
 	CreativeID       FlexString `json:"creative_id"`
-	Subs             [12]string
+	Subs             [30]string
 }
 
-// UnmarshalJSON читает строку конверсии и складывает sub_id_1..sub_id_12 в Subs.
+// UnmarshalJSON читает строку конверсии и складывает sub_id_1..sub_id_30 в Subs.
 //
 // Параметры: data — JSON одной строки журнала.
 // Результат: поля строки заполнены. Subs[0] — это sub_id_1.
@@ -94,9 +94,12 @@ func (r *ConversionRow) UnmarshalJSON(data []byte) error {
 		AdCampaignID     FlexString `json:"ad_campaign_id"`
 		ExternalID       FlexString `json:"external_id"`
 		CreativeID       FlexString `json:"creative_id"`
-		logSubs
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	subs, err := packSubs(data)
+	if err != nil {
 		return err
 	}
 	*r = ConversionRow{
@@ -111,7 +114,7 @@ func (r *ConversionRow) UnmarshalJSON(data []byte) error {
 		DeviceModel: aux.DeviceModel, Referrer: aux.Referrer, SearchEngine: aux.SearchEngine,
 		Keyword: aux.Keyword, ISP: aux.ISP, AdCampaignID: aux.AdCampaignID,
 		ExternalID: aux.ExternalID, CreativeID: aux.CreativeID,
-		Subs: aux.pack(),
+		Subs: subs,
 	}
 	return nil
 }
@@ -152,10 +155,10 @@ type ClickRow struct {
 	AdCampaignID   FlexString `json:"ad_campaign_id"`
 	ExternalID     FlexString `json:"external_id"`
 	CreativeID     FlexString `json:"creative_id"`
-	Subs           [12]string
+	Subs           [30]string
 }
 
-// UnmarshalJSON читает строку клика и складывает sub_id_1..sub_id_12 в Subs.
+// UnmarshalJSON читает строку клика и складывает sub_id_1..sub_id_30 в Subs.
 //
 // Параметры: data — JSON одной строки журнала.
 // Результат: поля строки заполнены. Subs[0] — это sub_id_1.
@@ -196,9 +199,12 @@ func (r *ClickRow) UnmarshalJSON(data []byte) error {
 		AdCampaignID   FlexString `json:"ad_campaign_id"`
 		ExternalID     FlexString `json:"external_id"`
 		CreativeID     FlexString `json:"creative_id"`
-		logSubs
 	}
 	if err := json.Unmarshal(data, &aux); err != nil {
+		return err
+	}
+	subs, err := packSubs(data)
+	if err != nil {
 		return err
 	}
 	*r = ClickRow{
@@ -211,34 +217,26 @@ func (r *ClickRow) UnmarshalJSON(data []byte) error {
 		IP: aux.IP, Referrer: aux.Referrer, SearchEngine: aux.SearchEngine, Keyword: aux.Keyword,
 		UserAgent: aux.UserAgent, Destination: aux.Destination, Cost: aux.Cost, Revenue: aux.Revenue,
 		AdCampaignID: aux.AdCampaignID, ExternalID: aux.ExternalID, CreativeID: aux.CreativeID,
-		Subs: aux.pack(),
+		Subs: subs,
 	}
 	return nil
 }
 
-// logSubs — поля sub_id_1..sub_id_12 внутри строки журнала.
-type logSubs struct {
-	S1  string `json:"sub_id_1"`
-	S2  string `json:"sub_id_2"`
-	S3  string `json:"sub_id_3"`
-	S4  string `json:"sub_id_4"`
-	S5  string `json:"sub_id_5"`
-	S6  string `json:"sub_id_6"`
-	S7  string `json:"sub_id_7"`
-	S8  string `json:"sub_id_8"`
-	S9  string `json:"sub_id_9"`
-	S10 string `json:"sub_id_10"`
-	S11 string `json:"sub_id_11"`
-	S12 string `json:"sub_id_12"`
-}
-
-// pack собирает двенадцать sub id в массив.
+// packSubs собирает sub_id_1..sub_id_30 из JSON строки журнала.
 //
-// Параметры: нет, читает поля получателя.
-// Результат: индекс 0 соответствует sub_id_1.
-// Ошибки: нет.
-func (s logSubs) pack() [12]string {
-	return [12]string{s.S1, s.S2, s.S3, s.S4, s.S5, s.S6, s.S7, s.S8, s.S9, s.S10, s.S11, s.S12}
+// Параметры: data — JSON объекта строки.
+// Результат: индекс 0 соответствует sub_id_1. Отсутствующий ключ даёт пустую строку.
+// Ошибки: тело не JSON-объект.
+func packSubs(data []byte) ([30]string, error) {
+	var raw map[string]FlexString
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return [30]string{}, err
+	}
+	var out [30]string
+	for i := 1; i <= len(out); i++ {
+		out[i-1] = string(raw[fmt.Sprintf("sub_id_%d", i)])
+	}
+	return out, nil
 }
 
 // FlexString принимает JSON-строку или число и хранит текст.

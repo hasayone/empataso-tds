@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 func TestExpandKeyPath(t *testing.T) {
@@ -33,13 +35,14 @@ func TestExpandOriginMacro(t *testing.T) {
 }
 
 func TestExpandCurlyKeitaroMacros(t *testing.T) {
-	var subs [15]string
+	var subs [config.MaxSubID]string
 	subs[0] = "one"
 	subs[5] = "KEEP"
-	got := Expand("https://o/?c={subid}&k={keyword}&g={country}&a={sub_id_1}&z={sub_id_6}&no={sub_id_16}", MacroDeps{
+	subs[15] = "sixteen"
+	got := Expand("https://o/?c={subid}&k={keyword}&g={country}&a={sub_id_1}&z={sub_id_6}&s={sub_id_16}&no={sub_id_31}", MacroDeps{
 		CID: "abc123", Key: "buy now", Country: "es", SubIDs: subs,
 	})
-	want := "https://o/?c=abc123&k=buy+now&g=es&a=one&z=KEEP&no={sub_id_16}"
+	want := "https://o/?c=abc123&k=buy+now&g=es&a=one&z=KEEP&s=sixteen&no={sub_id_31}"
 	if got != want {
 		t.Fatalf("curly macros:\n got=%s\nwant=%s", got, want)
 	}
@@ -137,7 +140,7 @@ func TestExpandQueryParamMacros(t *testing.T) {
 			return "", false
 		}
 	}
-	var subs [15]string
+	var subs [config.MaxSubID]string
 	subs[0] = "from-sub"
 	d := MacroDeps{CID: "cid-1", SubIDs: subs, Query: query}
 	cases := []struct{ in, want string }{

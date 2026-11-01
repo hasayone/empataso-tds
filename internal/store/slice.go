@@ -191,5 +191,5 @@ func sliceConvSQL(c *CH, cvSQL string) string {
 		%s
 		) WHERE ts >= ? AND ts < ?%s%s
 		GROUP BY group_name, stream_name, country%s`,
-		offer, source, conversionUnion(click, ext, model, origin), voidedConfirmedSQL("cid", "status"), cvSQL, extra)
+		offer, source, conversionUnion(click, ext, model, origin, c != nil && c.subConv), voidedConfirmedSQL("cid", "status"), cvSQL, extra)
 }

@@ -22,7 +22,7 @@ func TestSubIDFault(t *testing.T) {
 	}{
 		{"none", nil, ""},
 		{"valid first and last", map[string]config.SubIDFilter{"sub_id_1": ok, "sub_id_12": {Flag: config.FlagA, Empty: true}}, ""},
-		{"key above 12", map[string]config.SubIDFilter{"sub_id_13": ok}, "sub_id_13"},
+		{"key above 30", map[string]config.SubIDFilter{"sub_id_31": ok}, "sub_id_31"},
 		{"key zero", map[string]config.SubIDFilter{"sub_id_0": ok}, "sub_id_0"},
 		{"foreign key", map[string]config.SubIDFilter{"get": ok}, "get"},
 		{"flag off", map[string]config.SubIDFilter{"sub_id_2": {Flag: config.FlagOff, Values: []string{"a"}}}, "flag"},

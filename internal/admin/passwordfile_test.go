@@ -42,6 +42,20 @@ func TestNewFallsBackWhenTheFileIsAbsent(t *testing.T) {
 	if s.currentHash() != hash {
 		t.Error("expected the environment hash")
 	}
+	raw, err := os.ReadFile(s.cfg.PasswordFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.TrimSpace(string(raw)) != hash {
+		t.Fatal("the first start must store the accepted hash")
+	}
+	info, err := os.Stat(s.cfg.PasswordFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("password file mode %o", info.Mode().Perm())
+	}
 }
 
 // An unreadable file is not a missing one. Starting on the environment value
@@ -76,6 +90,55 @@ func TestNewRefusesAnEmptyFile(t *testing.T) {
 	}
 	if _, err := New(baseConfig(t, goodHash(t), p)); err == nil {
 		t.Fatal("an empty password file must not read as 'no password change happened'")
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) != 0 {
+		t.Fatal("an empty password file must not be replaced")
+	}
+}
+
+// TestNewKeepsExistingPasswordFile checks that a hash already on disk is the one
+// that starts, and that the file bytes are left as they were.
+func TestNewKeepsExistingPasswordFile(t *testing.T) {
+	envHash := goodHash(t)
+	fileHash := goodHash(t)
+	p := filepath.Join(t.TempDir(), "admin.hash")
+	if err := os.WriteFile(p, []byte(fileHash), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(baseConfig(t, envHash, p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.currentHash() != fileHash {
+		t.Fatal("the file hash must win")
+	}
+	raw, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != fileHash {
+		t.Fatal("an existing password file must not be rewritten")
+	}
+}
+
+// TestNewStartsWhenPasswordDirIsMissing checks that a password file which cannot
+// be created does not stop the start and does not change the accepted hash.
+func TestNewStartsWhenPasswordDirIsMissing(t *testing.T) {
+	hash := goodHash(t)
+	p := filepath.Join(t.TempDir(), "missing", "admin.hash")
+	s, err := New(baseConfig(t, hash, p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.currentHash() != hash {
+		t.Fatal("the environment hash must stay in use")
+	}
+	if _, err := os.Stat(p); !os.IsNotExist(err) {
+		t.Fatal("a failed create must not leave a password file")
 	}
 }
 

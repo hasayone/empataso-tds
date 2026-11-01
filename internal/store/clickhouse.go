@@ -41,6 +41,10 @@ type CH struct {
 	// name the column, and campaign unique counts filter on it, only after
 	// ensureSchema has seen it.
 	stepEvents bool
+	// subEvents and subConv: events and conversions carry sub_id_13..sub_id_30.
+	// Writes and the journal name those columns only after ensureSchema has
+	// seen them. ensureSchema does not add the columns.
+	subEvents, subConv bool
 	// originEvents and originConv: events and conversions carry origin_group_*.
 	// Writes and reads name those columns only after ensureSchema has seen them.
 	// maybeRefreshOriginWave can set these true later without restarting the process.

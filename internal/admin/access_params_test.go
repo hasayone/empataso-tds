@@ -48,9 +48,9 @@ func TestCurlyMacroRefusedWhenQueryFieldHidden(t *testing.T) {
 		{[]string{"cost"}, "https://t.example/?z={zone}", http.StatusBadRequest},
 		{[]string{"cost_cur"}, "https://t.example/?z={zone}", http.StatusBadRequest},
 		{[]string{"sub_id_3"}, "https://t.example/?k={Keyword}", http.StatusBadRequest},
-		{[]string{"sub_id_3"}, "https://t.example/?k={sub_id_16}", http.StatusBadRequest},
+		{[]string{"sub_id_3"}, "https://t.example/?k={sub_id_31}", http.StatusBadRequest},
 		{[]string{"sub_id_3"}, "https://t.example/?c={country}&s={sub_id_1}&o={offer}&i={subid}", http.StatusOK},
-		{[]string{"sub_id_3"}, "https://t.example/?r={sub_id_13}", http.StatusBadRequest},
+		{[]string{"sub_id_3"}, "https://t.example/?r={sub_id_30}", http.StatusOK},
 		{[]string{"sub_id_3"}, "https://t.example/?z={a.b}", http.StatusOK},
 		{[]string{"ip"}, "https://t.example/?z={zone}", http.StatusOK},
 		{nil, "https://t.example/?z={zone}", http.StatusOK},
@@ -79,7 +79,7 @@ func TestCurlyGuardMatchesRender(t *testing.T) {
 	deps := render.MacroDeps{Query: func(string) (string, bool) { return "V", true }}
 	g := &macroGuard{curly: true}
 	names := []string{
-		"zone", "a-b", "A_1", "Keyword", "sub_id_16", "sub_id_0", "a.b", "a b", "x",
+		"zone", "a-b", "A_1", "Keyword", "sub_id_31", "sub_id_0", "a.b", "a b", "x",
 		strings.Repeat("n", 23), strings.Repeat("n", 24), strings.Repeat("n", 25),
 	}
 	for _, name := range names {

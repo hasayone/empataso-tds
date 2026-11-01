@@ -29,7 +29,7 @@ func TestSubIDFilterNotCarried(t *testing.T) {
 	cases := map[string]KFilter{
 		"substring": subFilter("sub_id_1", "contains", `["a"]`),
 		"regex":     subFilter("sub_id_1", "accept", `["/^a/"]`),
-		"too high":  subFilter("sub_id_13", "accept", `["a"]`),
+		"too high":  subFilter("sub_id_31", "accept", `["a"]`),
 		"zero":      subFilter("sub_id_0", "accept", `["a"]`),
 	}
 	for name, f := range cases {

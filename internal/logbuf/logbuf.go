@@ -19,6 +19,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 // Event is a single log row (fields match the ClickHouse events schema).
@@ -66,8 +68,9 @@ type Event struct {
 	LandingID string
 	SourceID  string
 	NetworkID string
-	// Subs holds sub_id_1 through sub_id_12. Higher slots stay in memory only.
-	Subs [12]string
+	// Subs holds sub_id_1 through sub_id_30. A slot is written only when that
+	// column is present; the store omits the rest.
+	Subs [config.MaxSubID]string
 	// CostCents and CostCur are a price that arrived on the click itself.
 	// Zero means the click has no incoming price and a manual window may include it.
 	CostCents    int64

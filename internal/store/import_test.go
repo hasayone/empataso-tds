@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 func TestConversionColumns(t *testing.T) {
@@ -37,7 +39,7 @@ func TestConversionValuesFollowColumns(t *testing.T) {
 	row := ConversionInsert{
 		Status:    "  Sale ",
 		NetworkID: "net",
-		Subs:      [12]string{11: "s12"},
+		Subs:      [config.MaxSubID]string{11: "s12"},
 	}
 	for _, click := range []bool{false, true} {
 		_, n := conversionColumns(click)

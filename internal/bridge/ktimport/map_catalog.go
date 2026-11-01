@@ -62,7 +62,7 @@ func mapSources(rows []KSource) ([]CatSource, []Loss) {
 	return out, losses
 }
 
-// sourceParams оставляет keyword и sub_id_1..sub_id_15.
+// sourceParams оставляет keyword и sub_id_1..sub_id_30.
 //
 // Параметры: row — источник.
 // Результат: карта параметр → alias и строки отчёта по отброшенным ключам.
@@ -122,7 +122,7 @@ func splitOfferParam(raw string) (param, query string) {
 //
 // Параметры: key — ключ из Keitaro.
 // Результат: каноническое имя и true для keyword, site, ad_campaign_id,
-// creative_id, external_id и sub_id_1..sub_id_15.
+// creative_id, external_id и sub_id_1..sub_id_30.
 // Ошибки: нет.
 func canonParam(key string) (string, bool) {
 	key = strings.ToLower(strings.TrimSpace(key))
@@ -135,7 +135,7 @@ func canonParam(key string) (string, bool) {
 		return "", false
 	}
 	i, err := strconv.Atoi(n)
-	if err != nil || i < 1 || i > 15 {
+	if err != nil || i < 1 || i > 30 {
 		return "", false
 	}
 	return fmt.Sprintf("sub_id_%d", i), true

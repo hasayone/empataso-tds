@@ -4,12 +4,13 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/logbuf"
 )
 
 func TestEventColumnsMatchValues(t *testing.T) {
 	e := logbuf.Event{
-		Subs:      [12]string{11: "s12"},
+		Subs:      [config.MaxSubID]string{11: "s12"},
 		OfferID:   "off",
 		ASN:       9,
 		CostCents: 7,

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 // ConversionInsert is one row written into the conversions table.
@@ -20,7 +22,7 @@ type ConversionInsert struct {
 	Profit                                        float64
 	GroupName, StreamName, CID, Status            string
 	OfferID, LandingID, SourceID, NetworkID       string
-	Subs                                          [12]string
+	Subs                                          [config.MaxSubID]string
 	// GroupID through XRW are the ext-wave columns. They are written only
 	// when that wave is present. A zero ClickTS is stored as the Unix epoch.
 	GroupID                                                   string
@@ -78,8 +80,8 @@ func conversionValues(row ConversionInsert, clickCols bool) []any {
 	}
 	if clickCols {
 		vals = append(vals, row.OfferID, row.LandingID, row.SourceID, row.NetworkID)
-		for _, s := range row.Subs {
-			vals = append(vals, s)
+		for i := 0; i < clickWaveSubs && i < len(row.Subs); i++ {
+			vals = append(vals, row.Subs[i])
 		}
 	}
 	return vals
@@ -242,12 +244,21 @@ func (c *CH) InsertConversions(ctx context.Context, rows []ConversionInsert) err
 	c.maybeRefreshOriginWave()
 	originConv := c.originConv.Load()
 	cols, n := conversionColumnsModel(c.clickCols, c.extConv, c.modelConv, originConv)
+	if c.clickCols && c.subConv {
+		cols += ", " + subTailList()
+		n += config.MaxSubID - clickWaveSubs
+	}
 	batch, err := c.conn.PrepareBatch(ctx, "INSERT INTO conversions ("+cols+")")
 	if err != nil {
 		return fmt.Errorf("clickhouse: prepare batch: %w", err)
 	}
 	for _, row := range rows {
 		vals := conversionValuesModel(row, c.clickCols, c.extConv, c.modelConv, originConv)
+		if c.clickCols && c.subConv {
+			for i := clickWaveSubs; i < len(row.Subs); i++ {
+				vals = append(vals, row.Subs[i])
+			}
+		}
 		if len(vals) != n {
 			return fmt.Errorf("clickhouse: conversion row has %d values, want %d", len(vals), n)
 		}

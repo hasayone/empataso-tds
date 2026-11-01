@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/egerkuzma/kuztds/internal/config"
 	"github.com/egerkuzma/kuztds/internal/store"
 )
 
@@ -358,7 +359,7 @@ func logExportHeader() []string {
 		"region", "lang", "operator", "redirect", "referer", "useragent", "domain", "cid", "asn", "org", "timezone",
 		"page", "os_version", "browser_ver", "se", "via", "origin_campaign", "origin_campaign_id", "campaign_id", "offer_id", "landing_id", "source_id", "network_id",
 	}
-	for i := 1; i <= 12; i++ {
+	for i := 1; i <= config.MaxSubID; i++ {
 		h = append(h, fmt.Sprintf("sub_id_%d", i))
 	}
 	return append(h, "site", "ad_campaign_id", "creative_id", "external_id", "xrw", "device_model")
@@ -375,7 +376,7 @@ func logExportRecord(x store.LogRow) []string {
 		strconv.FormatUint(uint64(x.ASN), 10), x.Org, x.Timezone,
 		x.Page, x.OSVersion, x.BrowserVer, x.SE, x.Via, x.OriginCampaign, x.OriginCampaignID, x.CampaignID, x.OfferID, x.LandingID, x.SourceID, x.NetworkID,
 	}
-	for i := 0; i < 12; i++ {
+	for i := 0; i < config.MaxSubID; i++ {
 		cell := ""
 		if i < len(x.Subs) {
 			cell = x.Subs[i]

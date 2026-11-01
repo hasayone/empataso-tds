@@ -194,6 +194,27 @@ func (c *CH) Logs(ctx context.Context, f LogFilter) ([]LogRow, int64, error) {
 	return out, int64(total), rows.Err()
 }
 
+// subScanCount is how many sub_id columns this client selects.
+// c may be nil. The click wave is twelve columns. The sub wave adds the rest
+// only when those columns are present. It does not fail.
+func subScanCount(c *CH) int {
+	n := clickWaveSubs
+	if c != nil && c.subEvents {
+		n += len(columnsOf("events", waveSub))
+	}
+	return n
+}
+
+// subSelectCols lists sub_id_1 through the columns this client can read.
+// c selects the sub wave. The names stay in numeric order. It does not fail.
+func subSelectCols(c *CH) []string {
+	cols := make([]string, 0, subScanCount(c))
+	for i := 1; i <= subScanCount(c); i++ {
+		cols = append(cols, fmt.Sprintf("sub_id_%d", i))
+	}
+	return cols
+}
+
 // logSelect is the click SELECT list.
 // c decides which optional waves are named. extCols is the events ext list
 // for this query, computed once by the caller; nil omits that wave.
@@ -214,9 +235,7 @@ func logSelect(c *CH, extCols []string, originEvents bool) string {
 	}
 	cols = append(cols, "page", "os_version", "browser_ver", "se", "group_id")
 	if c.clickCols {
-		for i := 1; i <= 12; i++ {
-			cols = append(cols, fmt.Sprintf("sub_id_%d", i))
-		}
+		cols = append(cols, subSelectCols(c)...)
 		cols = append(cols, "offer_id", "landing_id", "source_id", "network_id")
 	}
 	cols = append(cols, extCols...)
@@ -250,7 +269,7 @@ func logDest(c *CH, r *LogRow, extCols []string, originEvents bool) ([]any, []st
 	dest = append(dest, &r.Page, &r.OSVersion, &r.BrowserVer, &r.SE, &r.CampaignID)
 	var subs []string
 	if c.clickCols {
-		subs = make([]string, 12)
+		subs = make([]string, subScanCount(c))
 		for i := range subs {
 			dest = append(dest, &subs[i])
 		}
@@ -314,6 +333,9 @@ func eventColumns(c *CH, originEvents bool) []string {
 	}
 	if c.clickCols {
 		cols = append(cols, columnsOf("events", waveClick)...)
+	}
+	if c.subEvents {
+		cols = append(cols, columnsOf("events", waveSub)...)
 	}
 	if c.costCols {
 		cols = append(cols, columnsOf("events", waveCost)...)

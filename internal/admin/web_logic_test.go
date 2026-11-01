@@ -681,12 +681,18 @@ eq(ruleExtras({a:undefined,b:0}, new Set()), {b:0}, 'ruleExtras skips undefined,
 
 // Sub ID rules.
 eq([condKeyOf('sub_id_3'), condKeyOf('sub_id_12'), condKeyOf('country'), condKeyOf('sub_id_x'), condKeyOf('')], ['sub_ids','sub_ids','country','sub_id_x',''], 'reason keys map to the Sub ID row');
-eq(subIDRows({sub_ids:{sub_id_3:{flag:1,values:['a']}, sub_id_1:{flag:2,values:['x'],empty:true}, sub_id_13:{flag:1,values:['z']}}}),
-  [{n:1,flag:2,values:['x'],empty:true},{n:3,flag:1,values:['a'],empty:false}], 'subIDRows: ordered, 1..12 only');
+eq(subIDRows({sub_ids:{sub_id_3:{flag:1,values:['a']}, sub_id_1:{flag:2,values:['x'],empty:true}, sub_id_30:{flag:1,values:['z']}, sub_id_31:{flag:1,values:['no']}}}),
+  [{n:1,flag:2,values:['x'],empty:true},{n:3,flag:1,values:['a'],empty:false},{n:30,flag:1,values:['z'],empty:false}], 'subIDRows: ordered, 1..30 only');
 eq(subIDRows({}), [], 'subIDRows: none');
 eq(subIDRows({sub_ids:{sub_id_2:{flag:7}}}), [{n:2,flag:2,values:[],empty:false}], 'subIDRows: a flag that is not 1 reads as only');
-eq(subIDMap([{n:2,flag:1,values:[' a ','',' b'],empty:false},{n:2,flag:2,values:['z'],empty:true},{n:0,flag:1,values:['q']},{n:13,flag:1,values:['q']}]),
-  {sub_id_2:{flag:2,values:['z'],empty:true}}, 'subIDMap: last row of a number wins, out-of-range dropped');
+eq(subIDMap([{n:2,flag:1,values:[' a ','',' b'],empty:false},{n:2,flag:2,values:['z'],empty:true},{n:0,flag:1,values:['q']},{n:31,flag:1,values:['q']},{n:30,flag:1,values:['q']}]),
+  {sub_id_2:{flag:2,values:['z'],empty:true}, sub_id_30:{flag:1,values:['q']}}, 'subIDMap: last row of a number wins, out-of-range dropped');
+eq(deviceFlags(true, []), {computer:0,phone:0,tablet:0}, 'device: empty pick filters nothing');
+eq(deviceFlags(true, ['phone']), {computer:1,phone:0,tablet:1}, 'device: yes keeps the picked type');
+eq(deviceFlags(false, ['phone','tablet']), {computer:0,phone:1,tablet:1}, 'device: no blocks the picked types');
+eq(deviceMode({}), {yes:true, picked:[]}, 'device: no blocks reads as yes and empty');
+eq(deviceMode({computer:1,phone:0,tablet:0}), {yes:false, picked:['computer']}, 'device: one block reads as no');
+eq(deviceMode({computer:1,phone:1,tablet:0}), {yes:true, picked:['tablet']}, 'device: more blocks than allows reads as yes');
 eq(subIDMap([{n:4,flag:1,values:['q'],empty:false}]), {sub_id_4:{flag:1,values:['q']}}, 'subIDMap: empty is written only when true');
 eq(subIDMap(null), {}, 'subIDMap: no rows');
 eq([subIDActive({values:['a'],empty:false}), subIDActive({values:[],empty:true}), subIDActive({values:[],empty:false}), subIDActive(null)], [true,true,false,false], 'subIDActive');

@@ -8,7 +8,7 @@ import (
 )
 
 func convExtraColList(click, ext, model, origin bool) []string {
-	_, cols := convExtra(click, ext, model, origin)
+	_, cols := convExtra(click, ext, model, origin, false)
 	if cols == "" {
 		return nil
 	}
@@ -96,7 +96,7 @@ func readPostbackCol(p *PostbackRow, subs []string, col string) (any, bool) {
 	default:
 		if strings.HasPrefix(col, "sub_id_") {
 			var n int
-			if _, err := fmt.Sscanf(col, "sub_id_%d", &n); err == nil && n >= 1 && n <= 12 {
+			if _, err := fmt.Sscanf(col, "sub_id_%d", &n); err == nil && n >= 1 && n <= len(subs) {
 				return subs[n-1], true
 			}
 		}
@@ -208,7 +208,7 @@ func TestPostbackColumnsMatchDest(t *testing.T) {
 				t.Fatalf("mask %04b: col %q at %d got %#v", mask, col, i, got)
 			}
 		}
-		stubs, _ := convExtra(click, ext, model, origin)
+		stubs, _ := convExtra(click, ext, model, origin, false)
 		stubNames := stubOutputNames(stubs)
 		if len(stubNames) != len(wantExtra) {
 			t.Fatalf("mask %04b: stub count %d != col count %d", mask, len(stubNames), len(wantExtra))
@@ -234,9 +234,7 @@ func logJournalCols(c *CH, extCols []string, originEvents bool) []string {
 	}
 	cols = append(cols, "page", "os_version", "browser_ver", "se", "group_id")
 	if c.clickCols {
-		for i := 1; i <= 12; i++ {
-			cols = append(cols, fmt.Sprintf("sub_id_%d", i))
-		}
+		cols = append(cols, subSelectCols(c)...)
 		cols = append(cols, "offer_id", "landing_id", "source_id", "network_id")
 	}
 	cols = append(cols, extCols...)
@@ -272,7 +270,7 @@ func readLogCol(r *LogRow, subs []string, col string) (any, bool) {
 	default:
 		if strings.HasPrefix(col, "sub_id_") {
 			var n int
-			if _, err := fmt.Sscanf(col, "sub_id_%d", &n); err == nil && n >= 1 && n <= 12 {
+			if _, err := fmt.Sscanf(col, "sub_id_%d", &n); err == nil && n >= 1 && n <= len(subs) {
 				return subs[n-1], true
 			}
 		}

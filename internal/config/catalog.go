@@ -12,8 +12,8 @@ import (
 )
 
 // MaxSubID is the highest named sub_id the engine stores. OpenAPI for the
-// traffic source lists sub_id_1 through sub_id_15; higher numbers are ignored.
-const MaxSubID = 15
+// traffic source lists sub_id_1 through sub_id_30; higher numbers are ignored.
+const MaxSubID = 30
 
 // ShareRef points a stream at an offer or a landing and carries its share.
 type ShareRef struct {
@@ -159,7 +159,7 @@ type Landing struct {
 	BoardID string `json:"board_id,omitempty"`
 }
 
-// TrafficSource names the query keys a partner uses for keyword and sub_id_1..15.
+// TrafficSource names the query keys a partner uses for keyword and sub_id_1..30.
 type TrafficSource struct {
 	ID         string            `json:"id"`
 	Name       string            `json:"name"`
@@ -233,7 +233,7 @@ func PostbackID(sig string) string {
 	return "pb-" + hex.EncodeToString(sum[:])[:10]
 }
 
-// ApplySource reads keyword and sub_id_1..15 from the query.
+// ApplySource reads keyword and sub_id_1..30 from the query.
 // A nil source uses the macro name itself as the query key.
 // The keyword return is empty when the source does not map one or the query has none.
 // The keyword and every sub id are cut to MaxValueBytes bytes at a rune boundary:
@@ -291,7 +291,7 @@ func IncomingCost(q url.Values, costKey, curKey string) (cents int64, cur string
 
 // ExtraSourceParams are the click fields a traffic source may rename.
 // The admin and the import accept this list together with keyword and
-// sub_id_1 through sub_id_15. Without a mapping each name is the query key.
+// sub_id_1 through sub_id_30. Without a mapping each name is the query key.
 var ExtraSourceParams = []string{"site", "ad_campaign_id", "creative_id", "external_id"}
 
 // MaxValueBytes is the longest stored value of one visitor-supplied field, in
@@ -362,7 +362,7 @@ func SourceExtras(q url.Values, src *TrafficSource) Extras {
 
 // AllowedSourceParam reports whether name is a traffic-source parameter the
 // engine understands. keyword, ExtraSourceParams and sub_id_1 through
-// sub_id_15 are accepted. sub_id_16 and any other name are rejected.
+// sub_id_30 are accepted. sub_id_31 and any other name are rejected.
 func AllowedSourceParam(name string) bool {
 	if name == "keyword" {
 		return true

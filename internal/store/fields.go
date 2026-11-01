@@ -3,6 +3,8 @@ package store
 import (
 	"fmt"
 	"strings"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 // wave names one generation of columns. base is the original table,
@@ -19,12 +21,17 @@ const (
 	waveModel wave = "model"
 	// waveStep adds step to events: 0 for the first step, 1 for the /offer step.
 	waveStep wave = "step"
+	// waveSub adds sub_id_13 through sub_id_30. ensureSchema does not ALTER
+	// this wave: the columns appear only after migrations/clickhouse/011_sub_id_30.sql.
+	waveSub wave = "sub"
+	// clickWaveSubs is how many sub_id columns the click wave already owns.
+	clickWaveSubs = 12
 	// waveOrigin adds origin_group_name and origin_group_id to events and conversions.
 	waveOrigin wave = "origin"
 )
 
 // allWaves lists every wave in the order probes and the fields API use.
-var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep, waveOrigin}
+var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep, waveOrigin, waveSub}
 
 // Field is one journal column shared by filters, breakdown and the SPA.
 // Name is the API name. Events and Conv are the physical columns; an empty
@@ -101,7 +108,7 @@ func buildFields() []Field {
 		{Name: "origin_campaign", Events: "origin_group_name", Conv: "origin_group_name", Type: lc, EventsWave: waveOrigin, ConvWave: waveOrigin, Dim: true, Default: "group_name"},
 		{Name: "origin_campaign_id", Events: "origin_group_id", Conv: "origin_group_id", Type: lc, EventsWave: waveOrigin, ConvWave: waveOrigin, Dim: true, Default: "group_id"},
 	}
-	for i := 1; i <= 12; i++ {
+	for i := 1; i <= clickWaveSubs; i++ {
 		name := fmt.Sprintf("sub_id_%d", i)
 		out = append(out, Field{Name: name, Events: name, Conv: name, Type: "String", EventsWave: waveClick, ConvWave: waveClick, Dim: true})
 	}
@@ -122,6 +129,10 @@ func buildFields() []Field {
 		Field{Name: "tid", Conv: "tid", Type: "String", ConvWave: waveExt},
 		Field{Name: "step", Events: "step", Type: "UInt8", EventsWave: waveStep, Default: "0", Internal: true},
 	)
+	for i := clickWaveSubs + 1; i <= config.MaxSubID; i++ {
+		name := fmt.Sprintf("sub_id_%d", i)
+		out = append(out, Field{Name: name, Events: name, Conv: name, Type: "String", EventsWave: waveSub, ConvWave: waveSub, Dim: true})
+	}
 	return out
 }
 

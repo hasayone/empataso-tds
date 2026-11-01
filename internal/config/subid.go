@@ -7,7 +7,7 @@ const maxSubIDValueLen = MaxValueBytes
 
 // SubIDRulesError checks the Sub ID rules of r.
 //
-// Every key must be sub_id_1..sub_id_12, every flag 1 or 2 and every value at
+// Every key must be sub_id_1..sub_id_30, every flag 1 or 2 and every value at
 // most 255 bytes. It returns a message for the first fault, or "" when the
 // rules are valid or absent. The message is safe to show to the panel user.
 func (r Rules) SubIDRulesError() string {

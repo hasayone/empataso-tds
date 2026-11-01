@@ -45,7 +45,7 @@ func TestSpaModelAndSubIDs(t *testing.T) {
 	html := spaSource()
 	must(t, html, "{k:'model',l:'Device model',g:'Device',kind:'list'", "model condition in the Device group")
 	must(t, html, "{k:'sub_ids',l:'Sub ID',g:'Source',kind:'subids'", "Sub ID condition in the Source group")
-	must(t, html, "const SUBID_MAX=12", "Sub ID limit")
+	must(t, html, "const SUBID_MAX=30", "Sub ID limit")
 	for _, fn := range []string{"subIDRows", "subIDMap", "subIDActive", "condKeyOf", "modelColSwap", "adoptModelCol", "subIDOverflow", "errInfo"} {
 		must(t, spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----"), "function "+fn+"(", fn+" in pure block")
 	}
@@ -110,6 +110,8 @@ func TestKeitaroSettingsUI(t *testing.T) {
 		`autocomplete="new-password"`,
 		`id="kt-save"`,
 		`id="kt-check"`,
+		`data-kttab="kt-conn"`,
+		`id="kt-conn"`,
 		"kt.key.saved",
 		"call('PUT','/api/keitaro/settings'",
 	} {
@@ -140,6 +142,9 @@ func TestNamecheapUI(t *testing.T) {
 		"detect",
 		"contacts:null",
 		"call('PUT'",
+		`data-nctab="account"`,
+		`data-nctab="contacts"`,
+		"nc.tab.account",
 	} {
 		must(t, panel, needle, "Namecheap account card")
 	}
@@ -425,7 +430,7 @@ func TestSpaTrafficSourceKeys(t *testing.T) {
 	}
 	idxKeyword := strings.Index(src, "'keyword'")
 	idxSite := strings.Index(src, "'site'")
-	idxSub := strings.Index(src, "Array.from({length:15}")
+	idxSub := strings.Index(src, "Array.from({length:SUBID_MAX}")
 	if idxKeyword < 0 || idxSite < 0 || idxSub < 0 || !(idxKeyword < idxSite && idxSite < idxSub) {
 		t.Fatal("SRC_KEYS order: keyword, extra fields, sub_id_1…")
 	}

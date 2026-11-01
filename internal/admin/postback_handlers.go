@@ -124,7 +124,7 @@ func postbackExportHeader() []string {
 		"ts", "group", "stream", "domain", "page", "device", "country", "city",
 		"profit", "cid", "status", "offer_id", "landing_id", "source_id", "network_id",
 	}
-	for i := 1; i <= 12; i++ {
+	for i := 1; i <= config.MaxSubID; i++ {
 		h = append(h, fmt.Sprintf("sub_id_%d", i))
 	}
 	return append(h,
@@ -141,7 +141,7 @@ func postbackExportRecord(p store.PostbackRow) []string {
 		p.TS.Format(time.RFC3339), p.Group, p.Stream, p.Domain, p.Page, p.Device, p.Country, p.City,
 		fmt.Sprintf("%.2f", p.Profit), p.CID, p.Status, p.Offer, p.Landing, p.Source, p.Network,
 	}
-	for i := 0; i < 12; i++ {
+	for i := 0; i < config.MaxSubID; i++ {
 		cell := ""
 		if i < len(p.Subs) {
 			cell = p.Subs[i]

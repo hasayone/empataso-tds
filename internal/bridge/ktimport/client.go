@@ -334,14 +334,14 @@ func (c *Client) getOptionalArrayOK(ctx context.Context, path string, dest any) 
 	return true, nil
 }
 
-// logColumns добавляет sub_id_1..sub_id_12 к списку колонок журнала.
+// logColumns добавляет sub_id_1..sub_id_30 к списку колонок журнала.
 //
 // Параметры: base — колонки без sub id.
 // Результат: новый срез, base не меняется.
 // Ошибки: нет.
 func logColumns(base []string) []string {
 	out := append([]string{}, base...)
-	for i := 1; i <= 12; i++ {
+	for i := 1; i <= 30; i++ {
 		out = append(out, fmt.Sprintf("sub_id_%d", i))
 	}
 	return out

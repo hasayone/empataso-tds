@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 // PostbackQuery filters the conversion journal.
@@ -182,7 +184,7 @@ func (c *CH) postbackMatch(ctx context.Context, q PostbackQuery, originConv bool
 	where += extra
 	args = append(args, extraArgs...)
 	where += voidedConfirmedSQL("cid", "status")
-	from := conversionUnion(c.clickCols, c.extConv, c.modelConv, originConv)
+	from := conversionUnion(c.clickCols, c.extConv, c.modelConv, originConv, c.subConv)
 	var tot PostbackTotals
 	var n uint64
 	if err := c.conn.QueryRow(ctx, "SELECT sum(profit), count() FROM ("+from+") WHERE "+where, args...).Scan(&tot.Profit, &n); err != nil {
@@ -213,7 +215,10 @@ func (c *CH) queryPostbackRows(ctx context.Context, page postbackPage) ([]Postba
 	var out []PostbackRow
 	for rows.Next() {
 		var p PostbackRow
-		subs := make([]string, 12)
+		subs := make([]string, clickWaveSubs)
+		if c.subConv {
+			subs = make([]string, config.MaxSubID)
+		}
 		if err := rows.Scan(c.postbackDest(&p, subs, extCols)...); err != nil {
 			return nil, err
 		}
@@ -299,7 +304,7 @@ func postbackExtDest(p *PostbackRow, subs []string, cols []string) []any {
 	for _, col := range cols {
 		if strings.HasPrefix(col, "sub_id_") {
 			var n int
-			if _, err := fmt.Sscanf(col, "sub_id_%d", &n); err == nil && n >= 1 && n <= 12 {
+			if _, err := fmt.Sscanf(col, "sub_id_%d", &n); err == nil && n >= 1 && n <= len(subs) {
 				dest = append(dest, &subs[n-1])
 				continue
 			}
@@ -414,8 +419,8 @@ func postbackWhere(q PostbackQuery, click bool) (string, []any) {
 
 // convLogExtraCols lists optional conversions columns for the journal SELECT,
 // in the same order as convExtra and conversionUnion.
-func convLogExtraCols(click, ext, model, origin bool) []string {
-	_, cols := convExtra(click, ext, model, origin)
+func convLogExtraCols(click, ext, model, origin, sub bool) []string {
+	_, cols := convExtra(click, ext, model, origin, sub)
 	if cols == "" {
 		return nil
 	}
@@ -427,7 +432,7 @@ func convLogExtraCols(click, ext, model, origin bool) []string {
 // postbackDest scans them (matches conversionUnion).
 func (c *CH) postbackColumns(originConv bool) (sel string, extraCols []string) {
 	sel = "ts, group_name, stream_name, domain, page, device, country, city, profit, cid, status"
-	extraCols = convLogExtraCols(c.clickCols, c.extConv, c.modelConv, originConv)
+	extraCols = convLogExtraCols(c.clickCols, c.extConv, c.modelConv, originConv, c.subConv)
 	if len(extraCols) > 0 {
 		sel += ", " + strings.Join(extraCols, ", ")
 	}
@@ -448,7 +453,7 @@ func (c *CH) postbackDest(p *PostbackRow, subs []string, extraCols []string) []a
 // conversionFrom is conversionUnion without the model wave.
 // click and ext select the waves; see conversionUnion.
 func conversionFrom(click, ext bool) string {
-	return conversionUnion(click, ext, false, false)
+	return conversionUnion(click, ext, false, false, false)
 }
 
 // conversionUnion is the old postbacks table plus one row per cid and status.
@@ -456,12 +461,12 @@ func conversionFrom(click, ext bool) string {
 // device_model column. origin adds origin_group_name and origin_group_id.
 // The postbacks branch uses typed stand-ins so the union lines up.
 // All flags false keep the original two-column status shape.
-func conversionUnion(click, ext, model, origin bool) string {
+func conversionUnion(click, ext, model, origin, sub bool) string {
 	base := `ts, domain, page, device, operator, country, city, profit, group_name, stream_name, cid`
 	post := `SELECT ` + base + `, '' AS status`
 	conv := `SELECT ` + base + `, status`
-	if click || ext || model || origin {
-		stubs, cols := convExtra(click, ext, model, origin)
+	if click || ext || model || origin || sub {
+		stubs, cols := convExtra(click, ext, model, origin, sub)
 		if stubs != "" {
 			post += ", " + stubs
 			conv += ", " + cols
@@ -476,7 +481,7 @@ func conversionUnion(click, ext, model, origin bool) string {
 // click, ext and model select which waves are included. Base columns are
 // omitted. The two strings have the same length and the same order. Both are
 // empty when no flag is set or the waves add nothing.
-func convExtra(click, ext, model, origin bool) (stubs, cols string) {
+func convExtra(click, ext, model, origin, sub bool) (stubs, cols string) {
 	var stubParts, colParts []string
 	for _, f := range fields {
 		if f.Conv == "" || f.ConvWave == waveBase {
@@ -494,7 +499,10 @@ func convExtra(click, ext, model, origin bool) (stubs, cols string) {
 		if f.ConvWave == waveOrigin && !origin {
 			continue
 		}
-		if f.ConvWave != waveClick && f.ConvWave != waveExt && f.ConvWave != waveModel && f.ConvWave != waveOrigin {
+		if f.ConvWave == waveSub && !sub {
+			continue
+		}
+		if f.ConvWave != waveClick && f.ConvWave != waveExt && f.ConvWave != waveModel && f.ConvWave != waveOrigin && f.ConvWave != waveSub {
 			continue
 		}
 		stubParts = append(stubParts, convStub(f))

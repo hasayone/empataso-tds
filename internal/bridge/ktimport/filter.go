@@ -212,7 +212,7 @@ func keepShort(values []string, limit int) ([]string, int) {
 }
 
 // maxRuleSubID — наибольший номер Sub ID, который есть в правилах движка.
-const maxRuleSubID = 12
+const maxRuleSubID = 30
 
 // subIDNumber разбирает имя фильтра вида sub_id_N.
 //

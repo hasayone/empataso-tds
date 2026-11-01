@@ -25,7 +25,7 @@ func TestSubIDFilterActive(t *testing.T) {
 }
 
 func TestSubIDRuleKey(t *testing.T) {
-	if SubIDRuleKey(1) != "sub_id_1" || SubIDRuleKey(MaxRuleSubID) != "sub_id_12" {
+	if SubIDRuleKey(1) != "sub_id_1" || SubIDRuleKey(MaxRuleSubID) != "sub_id_30" {
 		t.Fatalf("keys = %q %q", SubIDRuleKey(1), SubIDRuleKey(MaxRuleSubID))
 	}
 	if MaxRuleSubID > MaxSubID {
@@ -61,7 +61,7 @@ func TestSubIDRulesError(t *testing.T) {
 	if msg := (Rules{SubIDs: map[string]SubIDFilter{"sub_id_12": good}}).SubIDRulesError(); msg != "" {
 		t.Errorf("valid rule: %q", msg)
 	}
-	for _, key := range []string{"sub_id_13", "sub_id_0", "sub_id_", "SUB_ID_1", "get"} {
+	for _, key := range []string{"sub_id_31", "sub_id_0", "sub_id_", "SUB_ID_1", "get"} {
 		if msg := (Rules{SubIDs: map[string]SubIDFilter{key: good}}).SubIDRulesError(); msg == "" {
 			t.Errorf("key %q accepted", key)
 		}

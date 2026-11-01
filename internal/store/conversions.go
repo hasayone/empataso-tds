@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 // PostbackIn is one conversion to record from a click id.
@@ -71,7 +73,7 @@ type clickSnap struct {
 	asn                                         uint32
 	org                                         string
 	offer, landing, source, network             string
-	subs                                        [12]string
+	subs                                        [config.MaxSubID]string
 	site, adCampaign, creative, externalID, xrw string
 	deviceModel                                 string
 	originGid, originGname                      string
@@ -100,7 +102,7 @@ func (c *CH) readClick(ctx context.Context, cid string) (clickSnap, error) {
 		dest = append(dest, &s.asn, &s.org)
 	}
 	if c.clickCols {
-		for i := 1; i <= 12; i++ {
+		for i := 1; i <= subScanCount(c); i++ {
 			cols = append(cols, fmt.Sprintf("sub_id_%d", i))
 			dest = append(dest, &s.subs[i-1])
 		}
@@ -196,8 +198,14 @@ func (c *CH) writeConversion(ctx context.Context, snap clickSnap, in PostbackIn,
 	if c.clickCols {
 		cols += `, offer_id, landing_id, source_id, network_id, ` + subColList()
 		row = append(row, snap.offer, snap.landing, snap.source, snap.network)
-		for _, s := range snap.subs {
-			row = append(row, s)
+		for i := 0; i < clickWaveSubs; i++ {
+			row = append(row, snap.subs[i])
+		}
+		if c.subConv {
+			cols += ", " + subTailList()
+			for i := clickWaveSubs; i < len(snap.subs); i++ {
+				row = append(row, snap.subs[i])
+			}
 		}
 	}
 	if c.extConv {
@@ -250,9 +258,24 @@ func (c *CH) writeConversion(ctx context.Context, snap clickSnap, in PostbackIn,
 // subColList is sub_id_1 through sub_id_12, comma-separated.
 // It takes nothing and does not fail.
 func subColList() string {
-	parts := make([]string, 12)
-	for i := 1; i <= 12; i++ {
-		parts[i-1] = fmt.Sprintf("sub_id_%d", i)
+	return subColRange(1, clickWaveSubs)
+}
+
+// subTailList is sub_id_13 through sub_id_30, comma-separated.
+// It takes nothing and does not fail. The click wave does not include these.
+func subTailList() string {
+	return subColRange(clickWaveSubs+1, config.MaxSubID)
+}
+
+// subColRange lists sub_id_from through sub_id_to, comma-separated.
+// from and to are inclusive and from must be at least 1. It does not fail.
+func subColRange(from, to int) string {
+	if to < from {
+		return ""
+	}
+	parts := make([]string, 0, to-from+1)
+	for i := from; i <= to; i++ {
+		parts = append(parts, fmt.Sprintf("sub_id_%d", i))
 	}
 	return strings.Join(parts, ", ")
 }

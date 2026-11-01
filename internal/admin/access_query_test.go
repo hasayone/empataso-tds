@@ -19,9 +19,9 @@ import (
 // the click query by their own name.
 var extraMacros = []string{"{site}", "{ad_campaign_id}", "{creative_id}", "{external_id}"}
 
-// unstoredMacros are the Sub ID macros render fills from the query and the journal
-// does not store.
-var unstoredMacros = []string{"{sub_id_13}", "{sub_id_14}", "{sub_id_15}"}
+// unstoredMacros are Sub ID macros render fills from the query and the journal
+// does not store. sub_id_1 through sub_id_30 are stored, so the list is empty.
+var unstoredMacros []string
 
 // seedSource stores a traffic source as the administrator.
 func (r *rolesRig) seedSource(t *testing.T, id string, params map[string]string) {
@@ -41,6 +41,9 @@ func (r *rolesRig) putSource(t *testing.T, id, name string, params map[string]st
 }
 
 func TestQueryReadMacroTablesMatchRender(t *testing.T) {
+	if len(macroQueryRead) != 0 {
+		t.Fatalf("macroQueryRead = %v, want empty: every sub id through 30 is stored", macroQueryRead)
+	}
 	deps := render.MacroDeps{Query: func(string) (string, bool) { return "V", true }}
 	for _, tok := range unstoredMacros {
 		if _, ok := macroQueryRead[tok]; !ok {
@@ -112,8 +115,14 @@ func TestQueryReadMacroRefusedWhenQueryFieldHidden(t *testing.T) {
 	if got := rig.putCampaign(t, plainCampaign("https://b.example/?r={sub_id_13}&s={site}")); got != http.StatusBadRequest {
 		t.Errorf("host changed in a link with the stored macros: %d", got)
 	}
-	if got := rig.putCampaign(t, plainCampaign("https://a.example/?r={sub_id_13}&s={site}&t={sub_id_14}")); got != http.StatusBadRequest {
-		t.Errorf("a new query-read macro beside the stored ones: %d", got)
+	if got := rig.putCampaign(t, plainCampaign("https://a.example/?r={sub_id_13}&s={site}&t={sub_id_30}")); got != http.StatusBadRequest {
+		t.Errorf("editing a link that still holds {site}: %d", got)
+	}
+	if got := rig.putCampaign(t, plainCampaign("https://a.example/?t={sub_id_30}")); got != http.StatusOK {
+		t.Errorf("stored sub_id_30 on its own while keyword is hidden: %d", got)
+	}
+	if got := rig.putCampaign(t, plainCampaign("https://a.example/?t={sub_id_31}")); got != http.StatusBadRequest {
+		t.Errorf("sub_id_31 while keyword is hidden: %d", got)
 	}
 }
 
@@ -126,14 +135,14 @@ func TestHiddenKeywordSubID13RebindRefused(t *testing.T) {
 		if got := rig.putSource(t, "s1", "src", map[string]string{"keyword": "utm_term", "sub_id_1": "p1", key: "utm_term"}); got != http.StatusBadRequest {
 			t.Errorf("%s mapped to the keyword parameter: %d, want 400", key, got)
 		}
-		if got := rig.putSource(t, "s1", "src", map[string]string{"keyword": "utm_term", "sub_id_1": "p1", key: "zone"}); got != http.StatusBadRequest {
-			t.Errorf("%s mapped while a keyword is hidden: %d, want 400", key, got)
+		if got := rig.putSource(t, "s1", "src", map[string]string{"keyword": "utm_term", "sub_id_1": "p1", key: "zone"}); got != http.StatusOK {
+			t.Errorf("%s mapped while a keyword is hidden: %d, want 200", key, got)
 		}
 	}
 	code, _ := rig.api(t, rig.user, rig.ucsrf, http.MethodPost, "/api/traffic-sources",
 		config.TrafficSource{ID: "s9", Name: "new", Parameters: map[string]string{"sub_id_13": "zone"}})
-	if code != http.StatusBadRequest {
-		t.Errorf("new source mapping sub_id_13: %d, want 400", code)
+	if code != http.StatusCreated && code != http.StatusOK {
+		t.Errorf("new source mapping sub_id_13: %d, want 201", code)
 	}
 	if got := rig.putSource(t, "s1", "renamed", map[string]string{"keyword": "utm_term", "sub_id_1": "p1"}); got != http.StatusOK {
 		t.Errorf("rename with the parameters kept: %d", got)
@@ -156,8 +165,8 @@ func TestStoredSubID13MappingKept(t *testing.T) {
 	if got := rig.putSource(t, "s1", "renamed", map[string]string{"sub_id_13": "zone", "sub_id_1": "p9"}); got != http.StatusOK {
 		t.Errorf("the stored sub_id_13 name kept: %d", got)
 	}
-	if got := rig.putSource(t, "s1", "renamed", map[string]string{"sub_id_1": "p9"}); got != http.StatusBadRequest {
-		t.Errorf("the stored sub_id_13 name cleared: %d", got)
+	if got := rig.putSource(t, "s1", "renamed", map[string]string{"sub_id_1": "p9"}); got != http.StatusOK {
+		t.Errorf("a stored sub_id_13 cleared while keyword is hidden: %d", got)
 	}
 }
 
@@ -243,7 +252,7 @@ func TestCampaignSourceSwitchRefusedForUnstoredSubID(t *testing.T) {
 		source string
 		want   int
 	}{
-		{[]string{"keyword"}, "m14", http.StatusBadRequest},
+		{[]string{"keyword"}, "m14", http.StatusOK},
 		{[]string{"site"}, "msite", http.StatusBadRequest},
 		{[]string{"keyword"}, "msite", http.StatusOK},
 		{[]string{"keyword"}, "clean", http.StatusOK},

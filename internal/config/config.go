@@ -236,7 +236,7 @@ type ListFilter struct {
 }
 
 // MaxRuleSubID is the highest sub id a stream rule can filter on.
-const MaxRuleSubID = 12
+const MaxRuleSubID = 30
 
 // SubIDFilter is one sub id rule. Flag is FlagA (exclude on match) or FlagB
 // (only on match); any other flag disables it. Values are compared exactly,
@@ -308,7 +308,7 @@ type Rules struct {
 	Query ListFilter `json:"get,omitzero"`
 
 	// SubIDs filters by the traffic source's sub ids: the key is sub_id_1
-	// through sub_id_12. A key is checked against the value the campaign's
+	// through sub_id_30. A key is checked against the value the campaign's
 	// traffic source maps to that sub id, not against a fixed query name.
 	SubIDs map[string]SubIDFilter `json:"sub_ids,omitempty"`
 

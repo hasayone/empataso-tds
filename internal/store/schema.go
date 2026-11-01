@@ -80,6 +80,8 @@ func (c *CH) ensureSchemaWaves(withOrigin bool) {
 	c.modelEvents = c.ready("events", waveModel)
 	c.modelConv = c.ready("conversions", waveModel)
 	c.stepEvents = c.ready("events", waveStep)
+	c.subEvents = c.ready("events", waveSub)
+	c.subConv = c.ready("conversions", waveSub)
 	if rf := c.readyFlags; rf != nil {
 		c.originEvents.Store(rf["events"][waveOrigin])
 		c.originConv.Store(rf["conversions"][waveOrigin])

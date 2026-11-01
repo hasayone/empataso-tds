@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 func TestFieldsContract(t *testing.T) {
@@ -153,6 +155,34 @@ func migrationSQLBody(raw string) string {
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, " ")
+}
+
+func TestSubID30Migration(t *testing.T) {
+	if n := expectedCount("events", waveSub); n != config.MaxSubID-clickWaveSubs {
+		t.Fatalf("events sub wave = %d, want %d", n, config.MaxSubID-clickWaveSubs)
+	}
+	if strings.Contains(alterSQL("events", waveClick), "sub_id_13") {
+		t.Fatal("the click wave must not add sub_id_13")
+	}
+	raw, err := os.ReadFile("../../migrations/clickhouse/011_sub_id_30.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(raw)
+	if !strings.Contains(text, "sub_id_13") || !strings.Contains(text, "sub_id_30") || !strings.Contains(text, "conversions") {
+		t.Fatalf("migration 011 does not add sub_id_13..30: %s", text)
+	}
+	if strings.Contains(strings.ToUpper(text), "UPDATE") {
+		t.Fatal("migration 011 must not rewrite rows")
+	}
+	schema, err := os.ReadFile("schema.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(schema)
+	if strings.Contains(body, `schemaAlter("events", waveSub)`) || strings.Contains(body, `schemaAlter("conversions", waveSub)`) {
+		t.Fatal("ensureSchema must not add sub_id_13..30")
+	}
 }
 
 func jsonTagSet(v any) map[string]bool {

@@ -86,6 +86,9 @@ func renderMacroTokens(t *testing.T) []string {
 			}
 		case *ast.FuncDecl:
 			if x.Name.Name == "subIDIndex" {
+				if maxSub < config.MaxSubID {
+					maxSub = config.MaxSubID
+				}
 				ast.Inspect(x, func(m ast.Node) bool {
 					if lit, ok := m.(*ast.BasicLit); ok && lit.Kind == token.INT {
 						if v, _ := strconv.Atoi(lit.Value); v > maxSub {
