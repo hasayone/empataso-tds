@@ -9,6 +9,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -26,10 +27,8 @@ import (
 )
 
 func main() {
-	hashPw := flag.String("hash", "", "print the argon2id hash for a password and exit")
-	flag.Parse()
-	if *hashPw != "" {
-		os.Exit(printHash(*hashPw))
+	if code, stop := startupFlags(); stop {
+		os.Exit(code)
 	}
 
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
@@ -112,6 +111,22 @@ func main() {
 	defer scancel()
 	_ = srv.Shutdown(sctx)
 	log.Info("admin api stopped")
+}
+
+// startupFlags parses -hash and -recovery. stop true means the process should
+// exit with code and not open the API. -hash prints an argon2id hash. -recovery
+// prints a one-time code. A password is not accepted as an argument.
+func startupFlags() (code int, stop bool) {
+	hashPw := flag.String("hash", "", "print the argon2id hash for a password and exit")
+	recovery := flag.Bool("recovery", false, "print a one-time password recovery code and exit")
+	flag.Parse()
+	if *hashPw != "" {
+		return printHash(*hashPw), true
+	}
+	if *recovery {
+		return runRecovery(os.Stdout, flag.Args()), true
+	}
+	return 0, false
 }
 
 // printHash writes the argon2id hash of password to stdout and returns the process exit code:
@@ -210,7 +225,7 @@ func connectRedis(cfg *admin.Config, log *slog.Logger) {
 	if a == "" {
 		return
 	}
-	rdb, err := store.OpenRedis(a, os.Getenv("KUZTDS_REDIS_PASSWORD"), 0)
+	rdb, err := store.OpenRedisWaiting(a, os.Getenv("KUZTDS_REDIS_PASSWORD"), 0)
 	if err != nil {
 		log.Warn("redis not connected, using in-memory sessions", "err", err)
 		return
@@ -228,7 +243,7 @@ func connectClickHouse(cfg *admin.Config, log *slog.Logger) {
 	if a == "" {
 		return
 	}
-	ch, err := store.OpenCH(a, getenv("KUZTDS_CLICKHOUSE_DB", "kuztds"),
+	ch, err := store.OpenCHWaiting(a, getenv("KUZTDS_CLICKHOUSE_DB", "kuztds"),
 		getenv("KUZTDS_CLICKHOUSE_USER", "kuztds"), os.Getenv("KUZTDS_CLICKHOUSE_PASSWORD"))
 	if err != nil {
 		log.Warn("clickhouse not connected, stats disabled", "err", err)
@@ -260,6 +275,27 @@ type limiterAdapter struct{ c *store.Counters }
 
 func (a limiterAdapter) Allow(ctx context.Context, key string) (bool, error) {
 	return a.c.LoginAllow(ctx, key, 10, time.Minute)
+}
+
+// runRecovery prints one recovery code and stores only its hash.
+// w receives the code. args must be empty: the command does not take a new
+// password. The login is KUZTDS_RECOVERY_LOGIN, or KUZTDS_ADMIN_USER when that
+// is empty. The code file is written beside KUZTDS_ADMIN_PASSWORD_FILE.
+// It returns 0 after the code is printed, or 1 when the file was not written.
+func runRecovery(w io.Writer, args []string) int {
+	if len(args) > 0 {
+		fmt.Fprintln(os.Stderr, "recovery does not take a password or arguments")
+		return 1
+	}
+	login := getenv("KUZTDS_RECOVERY_LOGIN", "")
+	if login == "" {
+		login = getenv("KUZTDS_ADMIN_USER", "admin")
+	}
+	if err := admin.IssueRecoveryCode(w, login, os.Getenv("KUZTDS_ADMIN_PASSWORD_FILE"), time.Now()); err != nil {
+		fmt.Fprintf(os.Stderr, "recovery code was not created: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func getenv(k, def string) string {

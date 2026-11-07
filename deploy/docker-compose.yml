@@ -3,6 +3,7 @@
 services:
   clickhouse:
     image: clickhouse/clickhouse-server:24.8
+    restart: unless-stopped
     ports:
       - "${KUZTDS_CH_HTTP_PUBLISH:-8123:8123}"   # HTTP
       - "${KUZTDS_CH_NATIVE_PUBLISH:-9000:9000}"   # native
@@ -18,6 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
       - "${KUZTDS_REDIS_PUBLISH:-6379:6379}"

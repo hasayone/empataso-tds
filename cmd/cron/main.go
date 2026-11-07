@@ -34,7 +34,7 @@ func main() {
 	// ClickHouse is only needed to announce conversions.
 	var pb cron.PostbackSource
 	if a := os.Getenv("KUZTDS_CLICKHOUSE_ADDR"); a != "" {
-		ch, err := store.OpenCH(a, getenv("KUZTDS_CLICKHOUSE_DB", "kuztds"),
+		ch, err := store.OpenCHWaiting(a, getenv("KUZTDS_CLICKHOUSE_DB", "kuztds"),
 			getenv("KUZTDS_CLICKHOUSE_USER", "kuztds"), os.Getenv("KUZTDS_CLICKHOUSE_PASSWORD"))
 		if err != nil {
 			log.Warn("clickhouse not connected, conversion notifications unavailable", "err", err)

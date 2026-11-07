@@ -1153,7 +1153,7 @@ async function call(method,path,body,opts,retried){
   boardApplyHeaders(o.headers, path, opts.board);
   const r=await fetchOrNetErr(path,o);
   let j=null; try{j=await r.json()}catch(e){}
-  if(r.status===401&&path!=='/api/login'&&path!=='/api/me'){loginView();throw new Error('session expired')}
+  if(r.status===401&&path!=='/api/login'&&path!=='/api/recover'&&path!=='/api/me'){loginView();throw new Error('session expired')}
   if(r.status===403&&j&&j.error==='csrf'&&!retried&&method!=='GET'&&path!=='/api/me'){
     const me=await call('GET','/api/me');
     if(me&&me.csrf) CSRF=me.csrf;
@@ -1182,7 +1182,7 @@ async function callRaw(method,path,body,contentType,opts){
   boardApplyHeaders(o.headers, path, opts.board);
   const r=await fetchOrNetErr(path,o);
   let j=null; try{j=await r.json()}catch(e){}
-  if(r.status===401&&path!=='/api/login'&&path!=='/api/me'){loginView();throw new Error('session expired')}
+  if(r.status===401&&path!=='/api/login'&&path!=='/api/recover'&&path!=='/api/me'){loginView();throw new Error('session expired')}
   if(!r.ok){const e=new Error((j&&j.error)||('HTTP '+r.status));e.status=r.status;e.body=j;throw e}
   return j;
 }
@@ -3727,25 +3727,65 @@ async function boot(fresh){
     app(me.user);
   }catch(e){loginView()}
 }
-function loginView(msg=''){
+function loginMessage(e){
+  if(e&&e.status===429) return tr('Too many attempts, try again later');
+  if(e&&e.status===503) return tr('Sign-in is temporarily unavailable');
+  return tr('Invalid login or password');
+}
+function recoverMessage(e){
+  if(e&&e.status===429) return tr('Too many attempts, try again later');
+  if(e&&e.status===503) return tr('Sign-in is temporarily unavailable');
+  if(e&&e.status===400) return tr('New password (6 characters or more)');
+  return tr('The recovery code is invalid or expired');
+}
+function loginView(msg='', tone=''){
   ktDockStop(); connStop();
   get('/api/brand',null).then(b=>{if(b) applyBrand(b)});
   closeDrawer(); closeMenu(); const sb=q('#savebar'); if(sb)sb.remove();
+  const toneClass=tone==='ok'?'ok':'bad';
   const el=$(`<div class="login-wrap"><div class="card login">
     <div class="row" style="margin-bottom:20px">${brandLogoHTML()}<b style="font-size:16px"${BRAND.name?'':' hidden'}>${esc(BRAND.name)}</b><div class="spacer"></div><button class="icon ghost" data-theme-btn></button></div>
     <div class="fld"><label for="l">${tr('Username')}</label><input id="l" autocomplete="username"></div>
     <div class="fld"><label for="p">${tr('Password')}</label><input id="p" type="password" autocomplete="current-password"></div>
     <button class="primary" id="go" style="width:100%">${tr('Sign in')}</button>
-    <div class="bad" style="text-align:center;min-height:20px;margin-top:10px;font-size:13px">${esc(msg)}</div></div></div>`);
+    <button class="ghost" id="recover" type="button" style="width:100%;margin-top:8px">${tr('Reset password')}</button>
+    <div class="${toneClass}" style="text-align:center;min-height:20px;margin-top:10px;font-size:13px">${esc(msg)}</div></div></div>`);
   const submit=async()=>{
     try{await call('POST','/api/login',{login:q('#l').value,password:q('#p').value});boot(true)}
-    catch(e){loginView(e.status===429?tr('Too many attempts, try again later'):tr('Invalid login or password'))}
+    catch(e){loginView(loginMessage(e))}
   };
   q('#go',el).onclick=submit;
+  q('#recover',el).onclick=()=>recoverView();
   qa('input',el).forEach(i=>i.onkeydown=e=>{if(e.key==='Enter')submit()});
   q('[data-theme-btn]',el).onclick=toggleTheme;
   const a=q('#app'); a.innerHTML=''; a.appendChild(el); themeChanged();
   setTimeout(()=>{const l=q('#l');if(l)l.focus()},0);
+}
+function recoverView(msg='', tone=''){
+  ktDockStop(); connStop();
+  get('/api/brand',null).then(b=>{if(b) applyBrand(b)});
+  closeDrawer(); closeMenu(); const sb=q('#savebar'); if(sb)sb.remove();
+  const toneClass=tone==='ok'?'ok':'bad';
+  const el=$(`<div class="login-wrap"><div class="card login">
+    <div class="row" style="margin-bottom:20px">${brandLogoHTML()}<b style="font-size:16px"${BRAND.name?'':' hidden'}>${esc(BRAND.name)}</b><div class="spacer"></div><button class="icon ghost" data-theme-btn></button></div>
+    <div class="fld"><label for="rl">${tr('Login')}</label><input id="rl" autocomplete="username"></div>
+    <div class="fld"><label for="rc">${tr('Recovery code')}</label><input id="rc" autocomplete="one-time-code"></div>
+    <div class="fld"><label for="rp">${tr('New password (6 characters or more)')}</label><input id="rp" type="password" autocomplete="new-password"></div>
+    <button class="primary" id="rsave" style="width:100%">${tr('Set a new password')}</button>
+    <button class="ghost" id="rback" type="button" style="width:100%;margin-top:8px">${tr('Back to sign in')}</button>
+    <div class="${toneClass}" style="text-align:center;min-height:20px;margin-top:10px;font-size:13px">${esc(msg)}</div></div></div>`);
+  const submit=async()=>{
+    try{
+      await call('POST','/api/recover',{login:q('#rl').value,code:q('#rc').value,password:q('#rp').value});
+      loginView(tr('Password updated. Sign in with the new one.'),'ok');
+    }catch(e){recoverView(recoverMessage(e))}
+  };
+  q('#rsave',el).onclick=submit;
+  q('#rback',el).onclick=()=>loginView();
+  qa('input',el).forEach(i=>i.onkeydown=e=>{if(e.key==='Enter')submit()});
+  q('[data-theme-btn]',el).onclick=toggleTheme;
+  const a=q('#app'); a.innerHTML=''; a.appendChild(el); themeChanged();
+  setTimeout(()=>{const l=q('#rl');if(l)l.focus()},0);
 }
 async function logout(){
   if(anyDirty()&&!await ask(tr('Log out?'),tr('There are unsaved changes; they will be lost.'),tr('Log out'),true))return;
@@ -8253,7 +8293,7 @@ ru:{
 'the engine cannot use it and this condition never matches':'движок не может это применить, условие никогда не сработает','Remove':'Убрать','this is what stopped the test visitor':'это остановило тестового посетителя',
 'Use a list of words':'Список слов','Use a regular expression':'Регулярное выражение','API key':'Ключ API','Flag at, verdicts':'Порог, вердиктов','Also check':'Также проверить','Alert below, % free':'Сигнал, если свободно меньше, %','Paths (empty = data directory)':'Пути (пусто = каталог данных)','Keep keyword files, days':'Хранить файлы ключей, дней','Message':'Сообщение',
 'Generic S2S':'Обычный S2S','clickid, goal, sum':'clickid, goal, sum','Create':'Создать','Delete network':'Удалить сеть','No networks yet':'Сетей пока нет',
-'Too many attempts, try again later':'Слишком много попыток, попробуйте позже','Invalid login or password':'Неверный логин или пароль','Log out?':'Выйти?','There are unsaved changes; they will be lost.':'Есть несохранённые изменения, они пропадут.','Log out':'Выйти',
+'Too many attempts, try again later':'Слишком много попыток, попробуйте позже','Invalid login or password':'Неверный логин или пароль','Sign-in is temporarily unavailable':'Вход временно недоступен','Reset password':'Восстановить пароль','Login':'Логин','Recovery code':'Код восстановления','Set a new password':'Задать новый пароль','The recovery code is invalid or expired':'Код недействителен или истёк','Password updated. Sign in with the new one.':'Пароль обновлён. Войдите с новым.','Back to sign in':'Вернуться ко входу','Log out?':'Выйти?','There are unsaved changes; they will be lost.':'Есть несохранённые изменения, они пропадут.','Log out':'Выйти',
 'Delete flows?':'Удалить кампании?','They are removed when you save.':'Они удалятся, когда вы сохраните.','Flows':'Кампании','Edit':'Изменить','Move to flow':'Перенести в кампанию','Moved to':'Перенесено в','Choose a flow…':'Выберите кампанию…','from ?q=':'из ?q=','from search engines':'из поисковиков','Run now':'Запустить сейчас','Bot IP lists':'Списки IP ботов','Disk space':'Место на диске','Keyword cleanup':'Очистка ключевых слов','Conversion alerts':'Оповещения о конверсиях','VirusTotal':'VirusTotal','In lists':'В списках','Running…':'Выполняется…','done':'готово','failed':'ошибка','next':'далее','off':'выкл','Download fresh crawler ranges into the .dat lists the bot checks use.':'Скачивает свежие диапазоны краулеров в .dat-списки, которыми пользуются проверки ботов.','Download the MaxMind-format City and ASN databases. The engine reloads them by itself.':'Скачивает базы City и ASN в формате MaxMind. Движок подхватывает их сам.','Check the domains your streams send visitors to; a flagged domain is about to get browser warnings.':'Проверяет домены, куда потоки отправляют посетителей. Помеченный домен скоро получит предупреждение браузера.','Warn when the disk is nearly full — a full disk stops lists and logs from being written.':'Предупреждает, когда диск почти полон. Полный диск останавливает запись списков и журнала.','Delete collected keyword files after a number of days.':'Удаляет собранные файлы ключевых слов через заданное число дней.','Send every new conversion to Telegram.':'Отправляет каждую новую конверсию в Telegram.','Change the fetched page — find → replace':'Изменить загруженную страницу — найти → заменить','Change the page for bots — find → replace':'Изменить страницу для ботов — найти → заменить','Separation file (.dat, lines “key;output”)':'Файл разделения (.dat, строки «ключ;вывод»)','URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])':'URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])','Regexp (/…/, first group)':'Регулярное выражение (/…/, первая группа)','Cache, seconds':'Кеш, секунды','Code (macros allowed)':'Код (макросы можно)','Probability, %':'Вероятность, %','ID — the link is':'ID — ссылка','Aliases — other IDs that open this flow':'Алиасы — другие ID этой кампании','More than, requests':'Больше, запросов','Within, seconds':'За, секунд','— choose a flow —':'— выберите кампанию —','There is no other flow yet. Create one first.':'Другой кампании ещё нет. Сначала создайте её.','Country (as the CDN reports it)':'Страна (как сообщает CDN)','Any letter case; macros work in both.':'Регистр не важен, макросы работают в обеих частях.','what this stream is for — shown on the canvas':'зачем этот поток — видно на схеме','for you, shown in reports':'для вас, видно в отчётах'
 },
 uk:{
@@ -8299,7 +8339,7 @@ uk:{
 'the engine cannot use it and this condition never matches':'рушій не може це застосувати, умова ніколи не спрацює','Remove':'Прибрати','this is what stopped the test visitor':'це зупинило тестового відвідувача',
 'Use a list of words':'Список слів','Use a regular expression':'Регулярний вираз','API key':'Ключ API','Flag at, verdicts':'Поріг, вердиктів','Also check':'Також перевірити','Alert below, % free':'Сигнал, якщо вільно менше, %','Paths (empty = data directory)':'Шляхи (порожньо = каталог даних)','Keep keyword files, days':'Зберігати файли ключів, днів','Message':'Повідомлення',
 'Generic S2S':'Звичайний S2S','clickid, goal, sum':'clickid, goal, sum','Create':'Створити','Delete network':'Видалити мережу','No networks yet':'Мереж ще немає',
-'Too many attempts, try again later':'Забагато спроб, спробуйте пізніше','Invalid login or password':'Невірний логін або пароль','Log out?':'Вийти?','There are unsaved changes; they will be lost.':'Є незбережені зміни, вони зникнуть.','Log out':'Вийти',
+'Too many attempts, try again later':'Забагато спроб, спробуйте пізніше','Invalid login or password':'Невірний логін або пароль','Sign-in is temporarily unavailable':'Вхід тимчасово недоступний','Reset password':'Відновити пароль','Login':'Логін','Recovery code':'Код відновлення','Set a new password':'Задати новий пароль','The recovery code is invalid or expired':'Код недійсний або прострочений','Password updated. Sign in with the new one.':'Пароль оновлено. Увійдіть з новим.','Back to sign in':'Повернутися до входу','Log out?':'Вийти?','There are unsaved changes; they will be lost.':'Є незбережені зміни, вони зникнуть.','Log out':'Вийти',
 'Delete flows?':'Видалити кампанії?','They are removed when you save.':'Вони видаляться, коли ви збережете.','Flows':'Кампанії','Edit':'Змінити','Move to flow':'Перенести в кампанію','Moved to':'Перенесено в','Choose a flow…':'Оберіть кампанію…','from ?q=':'з ?q=','from search engines':'з пошуковиків','Run now':'Запустити зараз','Bot IP lists':'Списки IP ботів','Disk space':'Місце на диску','Keyword cleanup':'Очищення ключових слів','Conversion alerts':'Сповіщення про конверсії','VirusTotal':'VirusTotal','In lists':'У списках','Running…':'Виконується…','done':'готово','failed':'помилка','next':'далі','off':'вимк','Download fresh crawler ranges into the .dat lists the bot checks use.':'Завантажує свіжі діапазони краулерів у .dat-списки, якими користуються перевірки ботів.','Download the MaxMind-format City and ASN databases. The engine reloads them by itself.':'Завантажує бази City і ASN у форматі MaxMind. Рушій підхоплює їх сам.','Check the domains your streams send visitors to; a flagged domain is about to get browser warnings.':'Перевіряє домени, куди потоки надсилають відвідувачів. Позначений домен незабаром отримає попередження браузера.','Warn when the disk is nearly full — a full disk stops lists and logs from being written.':'Попереджає, коли диск майже повний. Повний диск зупиняє запис списків і журналу.','Delete collected keyword files after a number of days.':'Видаляє зібрані файли ключових слів через задану кількість днів.','Send every new conversion to Telegram.':'Надсилає кожну нову конверсію в Telegram.','Change the fetched page — find → replace':'Змінити завантажену сторінку — знайти → замінити','Change the page for bots — find → replace':'Змінити сторінку для ботів — знайти → замінити','Separation file (.dat, lines “key;output”)':'Файл розділення (.dat, рядки «ключ;вивід»)','URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])':'URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])','Regexp (/…/, first group)':'Регулярний вираз (/…/, перша група)','Cache, seconds':'Кеш, секунди','Code (macros allowed)':'Код (макроси можна)','Probability, %':'Ймовірність, %','ID — the link is':'ID — посилання','Aliases — other IDs that open this flow':'Аліаси — інші ID цієї кампанії','More than, requests':'Більше, запитів','Within, seconds':'За, секунд','— choose a flow —':'— оберіть кампанію —','There is no other flow yet. Create one first.':'Іншої кампанії ще немає. Спочатку створіть її.','Country (as the CDN reports it)':'Країна (як повідомляє CDN)','Any letter case; macros work in both.':'Регістр не важливий, макроси працюють в обох частинах.','what this stream is for — shown on the canvas':'навіщо цей потік — видно на схемі','for you, shown in reports':'для вас, видно у звітах'
 }
 };

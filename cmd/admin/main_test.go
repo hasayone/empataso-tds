@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -58,5 +59,27 @@ func TestKeitaroSyncFileDefaultPath(t *testing.T) {
 	t.Setenv("KUZTDS_KEITARO_SYNC_FILE", filepath.Join(dir, "custom-sync.json"))
 	if got := keitaroSyncFileForGroups(groups); got != filepath.Join(dir, "custom-sync.json") {
 		t.Fatalf("env override: %q", got)
+	}
+}
+
+func TestRunRecoveryRejectsArguments(t *testing.T) {
+	var buf bytes.Buffer
+	if runRecovery(&buf, []string{"not-a-password"}) != 1 {
+		t.Fatal("expected rejection")
+	}
+	if buf.Len() != 0 {
+		t.Fatal("a rejected recovery must not print a code")
+	}
+}
+
+func TestRunRecoveryNeedsPasswordFile(t *testing.T) {
+	t.Setenv("KUZTDS_ADMIN_PASSWORD_FILE", "")
+	t.Setenv("KUZTDS_RECOVERY_LOGIN", "admin")
+	var buf bytes.Buffer
+	if runRecovery(&buf, nil) != 1 {
+		t.Fatal("expected failure")
+	}
+	if buf.Len() != 0 {
+		t.Fatal("failure must not print a code")
 	}
 }

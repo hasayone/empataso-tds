@@ -90,6 +90,22 @@ func TestInstallComposePortDefaults(t *testing.T) {
 			t.Fatalf("docker-compose.yml: нет %q", want)
 		}
 	}
+	if strings.Count(s, "restart: unless-stopped") < 2 {
+		t.Fatal("docker-compose.yml: у clickhouse и redis должен быть restart: unless-stopped")
+	}
+	install, err := os.ReadFile("install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(install)
+	start := strings.Index(src, "render_infra_override() {")
+	end := strings.Index(src, "render_app_override() {")
+	if start < 0 || end < start {
+		t.Fatal("install.sh: не найден render_infra_override")
+	}
+	if strings.Contains(src[start:end], "restart:") {
+		t.Fatal("render_infra_override не должен задавать restart")
+	}
 	app, err := os.ReadFile("docker-compose.app.yml")
 	if err != nil {
 		t.Fatal(err)

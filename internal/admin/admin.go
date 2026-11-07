@@ -497,6 +497,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
+	mux.HandleFunc("POST /api/recover", s.handleRecover)
 	s.handle(mux, "POST /api/logout", cookieOnly(http.HandlerFunc(s.handleLogout)))
 	s.handle(mux, "GET /api/me", cookieOnly(http.HandlerFunc(s.handleMe)))
 	s.handle(mux, "GET /api/me/views", cookieOnly(http.HandlerFunc(s.handleViewsGet)))

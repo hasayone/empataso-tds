@@ -15,7 +15,7 @@ import (
 )
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(config.NormalizeHTTPHost(r.Host), "admin.") && !s.cfg.LoginRateLimitShared {
+	if s.loginClosed(r) {
 		writeErr(w, http.StatusServiceUnavailable, "login unavailable")
 		return
 	}

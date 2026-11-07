@@ -94,7 +94,7 @@ func main() {
 	// Redis counters (phase 4): uniq/firewall/limit. Optional.
 	var counters *store.Counters
 	if a := os.Getenv("KUZTDS_REDIS_ADDR"); a != "" {
-		if rdb, err := store.OpenRedis(a, os.Getenv("KUZTDS_REDIS_PASSWORD"), 0); err != nil {
+		if rdb, err := store.OpenRedisWaiting(a, os.Getenv("KUZTDS_REDIS_PASSWORD"), 0); err != nil {
 			log.Warn("redis not connected", "err", err)
 		} else {
 			counters = store.NewCounters(rdb)
@@ -180,7 +180,7 @@ func main() {
 	var chConn *store.CH
 	stepMissing := false
 	if a := os.Getenv("KUZTDS_CLICKHOUSE_ADDR"); a != "" {
-		ch, err := store.OpenCH(a, getenv("KUZTDS_CLICKHOUSE_DB", "kuztds"),
+		ch, err := store.OpenCHWaiting(a, getenv("KUZTDS_CLICKHOUSE_DB", "kuztds"),
 			getenv("KUZTDS_CLICKHOUSE_USER", "kuztds"), os.Getenv("KUZTDS_CLICKHOUSE_PASSWORD"))
 		if err != nil {
 			log.Warn("clickhouse not connected", "err", err)
