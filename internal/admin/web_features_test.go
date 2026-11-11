@@ -451,6 +451,8 @@ func TestSpaGuardedLinks(t *testing.T) {
 	must(t, src, "el.disabled?draft.parameters[el.dataset.src]", "a disabled parameter sends the saved value")
 	camp := spaFunctionLine(html, "campaignParamHTML")
 	must(t, camp, "priceParamLocked(ME)", "price and currency parameters are locked with cost hidden")
+	must(t, camp, "'{'+k+'}'", "a filled sub id shows the outgoing mask")
+	must(t, camp, "sub_id_", "the mask is the sub id slot")
 	flow := spaFunctionLine(html, "collectFlow")
 	must(t, flow, "!v('g_cost_param').disabled", "a locked price parameter is not read back")
 	must(t, flow, "!v('g_currency_param').disabled", "a locked currency parameter is not read back")
@@ -1028,6 +1030,81 @@ func TestSpaBoardPanel(t *testing.T) {
 	must(t, spaFunctionLine(html, "paintBoardsTable"), "data-bpanel", "composition stays a button")
 	must(t, spaFunctionLine(html, "bindBoardRowDrag"), "PUT','/api/boards/order'", "drag saves the section order")
 	must(t, html, "'board.move':'Переместить'", "ru move")
+}
+
+// TestSpaBoardInclude checks the main view toggle, section filters and deletes before a full campaign save.
+func TestSpaBoardInclude(t *testing.T) {
+	html := spaSource()
+	paint := spaFunctionLine(html, "paintBoardsTable")
+	if paint == "" {
+		t.Fatal("paintBoardsTable missing")
+	}
+	if i := strings.Index(paint, "list.length>1?`<button"); i < 0 {
+		t.Fatal("main button formula missing")
+	} else {
+		rest := paint[i:]
+		end := strings.Index(rest, ":'';")
+		if end < 0 || !strings.Contains(rest[:end], "<button") {
+			t.Fatal("one section must yield no main button")
+		}
+	}
+	must(t, paint, "if(list.length<=1) MAIN_PANEL_OPEN=false", "one section closes the main panel")
+	must(t, paint, "list.length>1?`<button", "two sections show the main button")
+	must(t, paint, "tr('board.include')", "main button caption is the view label")
+	must(t, paint, "tr('board.include_all')", "main panel is the include-all checkbox")
+	must(t, paint, "if(row&&host&&!boardIsMain(row.id)) boardPanelCard(row, host)", "main row does not open the composition card")
+	must(t, html, "let MAIN_PANEL_OPEN=false", "main panel has its own open flag")
+	must(t, spaFunctionLine(html, "boardPanelToggle"), "MAIN_PANEL_OPEN=!MAIN_PANEL_OPEN", "main toggle does not use the empty section id")
+	must(t, spaFunctionLine(html, "bindBoardInclude"), "call('PATCH','/api/boards/main'", "checkbox writes include_all at once")
+	must(t, spaFunctionLine(html, "bindBoardInclude"), "resetBoardCaches()", "a saved flag clears cached catalogs")
+	must(t, spaFunctionLine(html, "bindBoardInclude"), "box.checked=!want", "a failed write restores the checkbox")
+	mustNot(t, spaFunctionLine(html, "bindBoardInclude"), "boardPanelCard", "include panel has no composition card")
+	for _, text := range []string{
+		"'board.include':'Section view'",
+		"'board.include':'Вид раздела'",
+		"'board.include':'Вид розділу'",
+		"'board.include_all':'Show contents of all sections'",
+		"'board.include_all':'Отображать содержимое всех разделов'",
+		"'board.include_all':'Показувати вміст усіх розділів'",
+	} {
+		if n := strings.Count(html, text); n != 1 {
+			t.Errorf("%s defined %d times, want 1", text, n)
+		}
+	}
+	if n := strings.Count(html, "'board.include':"); n != 3 {
+		t.Errorf("board.include defined %d times, want one per language", n)
+	}
+	cat := spaFunctionLine(html, "boardPanelFetchCatalog")
+	must(t, cat, "boardRowsMain(r)", "composition keeps main rows from the wide list")
+	must(t, cat, "out.sec[k]=Array.isArray(r)?r:[]", "the section's own rows are not cut")
+	must(t, spaFunctionLine(html, "openBoardImport"), "boardRowsMain(", "import copies only the default section")
+	must(t, spaFunctionLine(html, "boardPickRows"), "keep.has(id)", "a chosen id from another section stays")
+	must(t, spaFunctionLine(html, "offerSelect"), "boardPickRows(OFFERS, CUR, id)", "offers stay in the campaign section")
+	must(t, spaFunctionLine(html, "landingSelect"), "boardPickRows(LANDINGS, CUR, id)", "landings stay in the campaign section")
+	settings := spaFunctionLine(html, "openFlowSettings")
+	must(t, settings, "boardPickRows(list||[], g, g.source_id||'')", "sources stay in the campaign section")
+	must(t, settings, "boardPickRows(GROUPS.filter(x=>x!==g), g,", "campaign targets stay in the campaign section")
+	must(t, spaFunctionLine(html, "paintStream"), "boardPickRows(GROUPS.filter(x=>x!==g), g,", "stream targets stay in the campaign section")
+	must(t, spaFunctionLine(html, "s2sGlobalHTML"), "boardPickRows(S2S_LIST||[], g,", "postback templates stay in the campaign section")
+	must(t, spaFunctionLine(html, "duplicateFlow"), "c.board_id=boardEffectiveId()", "a copy takes the section open in this tab")
+	body := spaFunctionLine(html, "saveFlows")
+	start := strings.Index(body, "if(!point){")
+	if start < 0 {
+		t.Fatal("full save branch missing")
+	}
+	branch := body[start:]
+	ret := strings.Index(branch, "return;")
+	if ret < 0 {
+		t.Fatal("full save branch does not return")
+	}
+	branch = branch[:ret]
+	del := strings.Index(branch, "call('DELETE','/api/groups/")
+	put := strings.Index(branch, "call('PUT','/api/groups'")
+	if del < 0 || put < 0 || del > put {
+		t.Fatalf("full PUT must delete before writing the array: delete=%d put=%d", del, put)
+	}
+	must(t, branch, "e.status!==404", "a missing campaign delete still counts as done")
+	must(t, branch, "prev.id!==g.id", "a changed id deletes the previous row")
 }
 
 // TestSpaIconKeysAreAllowed checks the picker lists at least 200 icons and the API accepts each key.

@@ -4,8 +4,6 @@ import (
 	"context"
 	"net/http"
 	"sync"
-
-	"github.com/egerkuzma/kuztds/internal/config"
 )
 
 // catalogHooks assigns a number and tidies the list around one catalog.
@@ -91,13 +89,15 @@ func catalogItemRef[T any](idOf func(T) string, hooks *catalogHooks[T], item T) 
 	return r
 }
 
-// visibleCatalog returns list entries the viewer may read for hooks.res in the current section.
+// visibleCatalog returns list entries the viewer may read for hooks.res.
+// A row is kept when seesBoard allows its section, then when canSee allows the record.
+// hooks may be nil. idOf reads the record id. list is the stored catalog and is not modified.
+// It does not return an error.
 func visibleCatalog[T any](v viewer, hooks *catalogHooks[T], idOf func(T) string, list []T) []T {
 	if hooks != nil && hooks.boardID != nil {
-		cur := v.boardCurrent
 		filtered := make([]T, 0, len(list))
 		for _, item := range list {
-			if config.SameBoard(hooks.boardID(item), cur) {
+			if v.seesBoard(hooks.boardID(item)) {
 				filtered = append(filtered, item)
 			}
 		}

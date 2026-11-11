@@ -247,8 +247,9 @@ type domainRow struct {
 	AdminHost string `json:"admin_host,omitempty"`
 }
 
-// domainCampaignCounts returns how many campaigns use each domain id.
-// ctx bounds Groups.List. When Groups is nil, the map is empty and every id counts as zero.
+// domainCampaignCounts returns how many campaigns in the session view use each domain id.
+// ctx carries the session section. Campaigns outside that view are not counted.
+// When Groups is nil, the map is empty and every id counts as zero.
 // The error is from Groups.List.
 func (s *Server) domainCampaignCounts(ctx context.Context) (map[string]int, error) {
 	counts := map[string]int{}
@@ -259,9 +260,9 @@ func (s *Server) domainCampaignCounts(ctx context.Context) (map[string]int, erro
 	if err != nil {
 		return nil, err
 	}
-	board := boardFrom(ctx)
+	v := s.viewerFrom(ctx)
 	for _, g := range groups {
-		if g.DomainID != "" && groupInBoard(g, board) {
+		if g.DomainID != "" && v.seesBoard(g.BoardID) {
 			counts[g.DomainID]++
 		}
 	}

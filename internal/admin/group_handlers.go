@@ -22,7 +22,7 @@ func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
 	v := s.viewerFrom(r.Context())
 	filtered := make([]config.Group, 0, len(groups))
 	for _, g := range groups {
-		if !groupInBoard(g, v.boardCurrent) {
+		if !v.seesBoard(g.BoardID) {
 			continue
 		}
 		if v.admin || v.canSee(resCampaigns, campaignRef(g)) {
@@ -139,7 +139,7 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
-	if !groupInBoard(target, v.boardCurrent) {
+	if !v.seesBoard(target.BoardID) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}

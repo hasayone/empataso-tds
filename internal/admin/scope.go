@@ -27,6 +27,9 @@ type viewer struct {
 	boardCurrent string
 	boardsAll    bool
 	boardRole    string
+	includeAll   bool
+	boardRoles   map[string]string
+	boardOpen    map[string]bool
 }
 
 // viewerFrom loads session access for ctx. Administrators get admin=true and nil grants.
@@ -36,13 +39,19 @@ func (s *Server) viewerFrom(ctx context.Context) viewer {
 	cur := boardFrom(ctx)
 	allBoards := boardsAllFrom(ctx)
 	role := ""
+	includeAll := false
+	var roles map[string]string
+	var open map[string]bool
 	if b, ok := ctx.Value(boardKey).(boardSession); ok {
 		role = b.role
+		includeAll = b.includeAll
+		roles = b.roles
+		open = b.visible
 	}
 	if s.isAdmin(sess) {
-		return viewer{admin: true, boardCurrent: cur, boardsAll: allBoards}
+		return viewer{admin: true, boardCurrent: cur, boardsAll: allBoards, includeAll: includeAll, boardOpen: open}
 	}
-	v := viewer{uid: sess.UID, grants: map[string]security.Grant{}, hidden: map[string]bool{}, boardCurrent: cur, boardsAll: allBoards, boardRole: role}
+	v := viewer{uid: sess.UID, grants: map[string]security.Grant{}, hidden: map[string]bool{}, boardCurrent: cur, boardsAll: allBoards, boardRole: role, includeAll: includeAll, boardRoles: roles, boardOpen: open}
 	if u, ok := s.sessionUser(sess); ok {
 		acc := s.accessOf(u)
 		if acc.Grants != nil {
@@ -119,26 +128,68 @@ func boardRoleResource(res string) bool {
 	}
 }
 
-// boardRoleSee applies the section member role after global grants.
+// seesBoard reports whether v may read a row stored in rowBoard.
+// rowBoard is the row section; empty means main.
+// It is true for the current section, and for another section when the current
+// section is main, the wide view is on, and the session may open that section.
+// It does not return an error.
+func (v viewer) seesBoard(rowBoard string) bool {
+	if config.SameBoard(rowBoard, v.boardCurrent) {
+		return true
+	}
+	if !v.includeAll || !config.SameBoard(v.boardCurrent, config.MainBoardID) {
+		return false
+	}
+	if v.admin || v.boardsAll {
+		return true
+	}
+	if v.boardOpen == nil {
+		return false
+	}
+	return v.boardOpen[config.NormalizeBoardID(rowBoard)]
+}
+
+// roleOn returns the member role of v on board.
+// board is the row section. An administrator, and a section with no listed role, return empty.
+// The current section uses boardRole when the map has no entry.
+// It does not return an error.
+func (v viewer) roleOn(board string) string {
+	if v.admin {
+		return ""
+	}
+	id := config.NormalizeBoardID(board)
+	if v.boardRoles != nil {
+		if role, ok := v.boardRoles[id]; ok {
+			return role
+		}
+	}
+	if config.SameBoard(id, v.boardCurrent) {
+		return v.boardRole
+	}
+	return ""
+}
+
+// boardRoleSee applies the member role of the row's section after global grants.
+// res is the catalog. r is the row. The created role sees only rows it owns, including rows outside main.
+// Administrators and other roles see the row. It does not return an error.
 func (v viewer) boardRoleSee(res string, r ref) bool {
-	if v.admin || v.boardRole != config.BoardRoleCreated {
+	if v.admin || !boardRoleResource(res) {
 		return true
 	}
-	if !boardRoleResource(res) {
-		return true
-	}
-	if r.board != "" && !config.SameBoard(r.board, v.boardCurrent) {
+	if v.roleOn(r.board) != config.BoardRoleCreated {
 		return true
 	}
 	return r.owner == v.uid && v.uid != ""
 }
 
-// boardRoleWrite reports whether the section read role allows writes on res.
-func (v viewer) boardRoleWrite(res string) bool {
-	if v.admin || v.boardRole != config.BoardRoleRead {
+// boardRoleWrite reports whether the member role on the row's section allows writes to res.
+// res is the catalog. r carries the row section. The read role cannot write. Other roles can.
+// Administrators can. It does not return an error.
+func (v viewer) boardRoleWrite(res string, r ref) bool {
+	if v.admin || !boardRoleResource(res) {
 		return true
 	}
-	return !boardRoleResource(res)
+	return v.roleOn(r.board) != config.BoardRoleRead
 }
 
 // canSee reports whether v may read the record described by r in res.
@@ -167,7 +218,7 @@ func (v viewer) canWrite(res string, r ref) bool {
 	if v.admin {
 		return true
 	}
-	if !v.boardRoleWrite(res) {
+	if !v.boardRoleWrite(res, r) {
 		return false
 	}
 	switch v.mode(res) {

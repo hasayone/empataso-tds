@@ -10,11 +10,11 @@ import (
 	"github.com/egerkuzma/kuztds/internal/store"
 )
 
-// campaignScope returns Scope conditions limiting stats to campaigns of the current section
-// that the viewer may see. List errors propagate to the caller.
+// campaignScope returns Scope conditions limiting stats to campaigns the session can see.
+// The result is a campaign_id condition, never nil, when the campaign file has rows.
+// List errors propagate to the caller.
 func (s *Server) campaignScope(ctx context.Context) ([]store.Cond, error) {
 	v := s.viewerFrom(ctx)
-	board := v.boardCurrent
 	if s.cfg.Groups == nil {
 		if v.admin {
 			return nil, nil
@@ -35,7 +35,7 @@ func (s *Server) campaignScope(ctx context.Context) ([]store.Cond, error) {
 	var own []string
 	var foreign []string
 	for _, g := range groups {
-		if !groupInBoard(g, board) {
+		if !v.seesBoard(g.BoardID) {
 			continue
 		}
 		if !v.canSee(resCampaigns, campaignRef(g)) {
@@ -44,9 +44,7 @@ func (s *Server) campaignScope(ctx context.Context) ([]store.Cond, error) {
 		own = append(own, g.ID)
 	}
 	for _, g := range groups {
-		inBoard := groupInBoard(g, board)
-		visible := v.canSee(resCampaigns, campaignRef(g))
-		if inBoard && visible {
+		if v.seesBoard(g.BoardID) && v.canSee(resCampaigns, campaignRef(g)) {
 			continue
 		}
 		foreign = append(foreign, g.ID)
@@ -195,7 +193,7 @@ func stripKeys(v any, keys map[string]bool) any {
 }
 
 // campaignRefByID loads one campaign by id and builds its access ref.
-// ok is false when the id is missing, not in the current section, or not visible. List errors are returned as-is.
+// ok is false when the id is missing, outside the session view, or not visible. List errors are returned as-is.
 func (s *Server) campaignRefByID(ctx context.Context, id string) (ref, bool, error) {
 	if s.cfg.Groups == nil {
 		return ref{}, false, nil
@@ -209,7 +207,7 @@ func (s *Server) campaignRefByID(ctx context.Context, id string) (ref, bool, err
 		if g.ID != id {
 			continue
 		}
-		if !groupInBoard(g, v.boardCurrent) {
+		if !v.seesBoard(g.BoardID) {
 			return ref{}, false, nil
 		}
 		r := campaignRef(g)
@@ -221,19 +219,28 @@ func (s *Server) campaignRefByID(ctx context.Context, id string) (ref, bool, err
 	return ref{}, false, nil
 }
 
-// spendVisible reports whether v may see spend for campaign id in the current section.
-func (s *Server) spendVisible(ctx context.Context, v viewer, groupID string) (bool, error) {
+// spendWriteCode reports whether v may create or delete spend for groupID.
+// 0 means the change is allowed. 404 means the campaign is outside the session view.
+// 403 means the campaign is visible but the role cannot change it.
+// A list error is returned with status 500.
+func (s *Server) spendWriteCode(ctx context.Context, v viewer, groupID string) (int, error) {
 	if groupID == "" {
-		return false, nil
+		return http.StatusNotFound, nil
 	}
 	r, ok, err := s.campaignRefByID(ctx, groupID)
-	if err != nil || !ok {
-		return false, err
+	if err != nil {
+		return http.StatusInternalServerError, err
 	}
-	return v.canSee(resCampaigns, r), nil
+	if !ok {
+		return http.StatusNotFound, nil
+	}
+	if !v.canWrite(resCampaigns, r) {
+		return http.StatusForbidden, nil
+	}
+	return 0, nil
 }
 
-// filterSpendList returns entries the viewer may see in the current section.
+// filterSpendList returns entries the viewer may see.
 func (s *Server) filterSpendList(ctx context.Context, v viewer, list []config.SpendEntry) ([]config.SpendEntry, error) {
 	if s.cfg.Groups == nil {
 		return []config.SpendEntry{}, nil
@@ -252,7 +259,7 @@ func (s *Server) filterSpendList(ctx context.Context, v viewer, list []config.Sp
 		if !ok {
 			continue
 		}
-		if !groupInBoard(g, v.boardCurrent) {
+		if !v.seesBoard(g.BoardID) {
 			continue
 		}
 		if v.canSee(resCampaigns, campaignRef(g)) {

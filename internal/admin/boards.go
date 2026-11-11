@@ -28,16 +28,20 @@ var (
 	ErrBoardInUse = errors.New("admin: board in use")
 	// ErrBoardOrder is returned when a reorder list is not the current set of sections.
 	ErrBoardOrder = errors.New("admin: board order")
+	// ErrBoardIncludeAll is returned when include_all is sent for a section other than main.
+	ErrBoardIncludeAll = errors.New("admin: include_all only on main")
 )
 
-// boardPatchFields holds optional name, icon and icon color updates decoded from JSON.
+// boardPatchFields holds optional name, icon, icon color and include_all updates decoded from JSON.
 type boardPatchFields struct {
-	NameSet      bool
-	Name         string
-	IconSet      bool
-	Icon         string
-	IconColorSet bool
-	IconColor    string
+	NameSet       bool
+	Name          string
+	IconSet       bool
+	Icon          string
+	IconColorSet  bool
+	IconColor     string
+	IncludeAllSet bool
+	IncludeAll    bool
 }
 
 // listBoards reads boards.json. A missing or empty store returns only the main section
@@ -91,8 +95,9 @@ func createBoard(ctx context.Context, store *JSONStore[config.Board], name, icon
 	return item, nil
 }
 
-// decodeBoardPatch reads optional name, icon and icon_color from a JSON object body.
+// decodeBoardPatch reads optional name, icon, icon_color and include_all from a JSON object body.
 // A missing key leaves the field unchanged; an empty string clears icon or icon_color.
+// include_all is a bool. A bad value returns the decode error and an empty patch.
 func decodeBoardPatch(raw map[string]json.RawMessage) (boardPatchFields, error) {
 	var patch boardPatchFields
 	if v, ok := raw["name"]; ok {
@@ -114,15 +119,27 @@ func decodeBoardPatch(raw map[string]json.RawMessage) (boardPatchFields, error) 
 			return boardPatchFields{}, err
 		}
 	}
+	if v, ok := raw["include_all"]; ok {
+		patch.IncludeAllSet = true
+		if err := json.Unmarshal(v, &patch.IncludeAll); err != nil {
+			return boardPatchFields{}, err
+		}
+	}
 	return patch, nil
 }
 
 // updateBoard applies patch to the section id and saves boards.json.
 // Main may be stored only virtually until the first patch; icon updates persist main in the file.
+// include_all is accepted only for main. True is stored as nil. A false pointer disables the wide view.
+// An empty patch returns an error and does not write. include_all on another section returns ErrBoardIncludeAll
+// and does not write.
 func updateBoard(ctx context.Context, store *JSONStore[config.Board], id string, patch boardPatchFields) (config.Board, error) {
 	id = config.NormalizeBoardID(id)
-	if !patch.NameSet && !patch.IconSet && !patch.IconColorSet {
+	if !patch.NameSet && !patch.IconSet && !patch.IconColorSet && !patch.IncludeAllSet {
 		return config.Board{}, errors.New("admin: board patch empty")
+	}
+	if patch.IncludeAllSet && !config.SameBoard(id, config.MainBoardID) {
+		return config.Board{}, ErrBoardIncludeAll
 	}
 	raw, err := store.List(ctx)
 	if err != nil {
@@ -161,6 +178,14 @@ func updateBoard(ctx context.Context, store *JSONStore[config.Board], id string,
 			return config.Board{}, err
 		}
 		cur.IconColor = patch.IconColor
+	}
+	if patch.IncludeAllSet {
+		if patch.IncludeAll {
+			cur.IncludeAll = nil
+		} else {
+			off := false
+			cur.IncludeAll = &off
+		}
 	}
 	raw[idx] = cur
 	if err := store.Save(ctx, raw); err != nil {

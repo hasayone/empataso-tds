@@ -438,7 +438,7 @@ func (c crudCatalog[T]) crudGet(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := c.s.viewerFrom(r.Context())
-	if c.hooks != nil && c.hooks.boardID != nil && !config.SameBoard(c.hooks.boardID(item), v.boardCurrent) {
+	if c.hooks != nil && c.hooks.boardID != nil && !v.seesBoard(c.hooks.boardID(item)) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -502,7 +502,7 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 	}
 	v := c.s.viewerFrom(r.Context())
 	itemRef := catalogItemRef(c.idOf, c.hooks, old)
-	if c.hooks != nil && c.hooks.boardID != nil && !config.SameBoard(c.hooks.boardID(old), v.boardCurrent) {
+	if c.hooks != nil && c.hooks.boardID != nil && !v.seesBoard(c.hooks.boardID(old)) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}
@@ -536,6 +536,9 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if !v.admin && c.hooks != nil && c.hooks.keepIn != nil {
 		c.hooks.keepIn(v, &item, &old)
+	}
+	if c.hooks != nil && c.hooks.setBoard != nil && c.hooks.boardID != nil {
+		c.hooks.setBoard(&item, c.hooks.boardID(old))
 	}
 	if c.hooks != nil && c.hooks.guard != nil {
 		if code, msg := c.hooks.guard(&item, old); code != 0 {
@@ -595,7 +598,7 @@ func (c crudCatalog[T]) crudDelete(w http.ResponseWriter, r *http.Request) {
 	}
 	v := c.s.viewerFrom(r.Context())
 	itemRef := catalogItemRef(c.idOf, c.hooks, old)
-	if c.hooks != nil && c.hooks.boardID != nil && !config.SameBoard(c.hooks.boardID(old), v.boardCurrent) {
+	if c.hooks != nil && c.hooks.boardID != nil && !v.seesBoard(c.hooks.boardID(old)) {
 		writeErr(w, http.StatusNotFound, "not found")
 		return
 	}

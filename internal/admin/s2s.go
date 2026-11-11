@@ -29,7 +29,7 @@ func (s *Server) handleS2SGet(w http.ResponseWriter, r *http.Request) {
 	v := s.viewerFrom(r.Context())
 	out := make([]config.OutboundPostback, 0, len(list))
 	for _, p := range list {
-		if !config.SameBoard(p.BoardID, v.boardCurrent) {
+		if !v.seesBoard(p.BoardID) {
 			continue
 		}
 		ref := ref{id: p.ID, board: p.BoardID}
@@ -40,10 +40,12 @@ func (s *Server) handleS2SGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// handleS2SPut replaces the current section rows in the s2s catalog with the JSON array in the body.
-// Rows of other sections are preserved. The body is at most 1 MiB.
-// A nil store is 503. A bad body is 400. A save error is 500.
-// Success writes 200 and the stored array of the current section.
+// handleS2SPut replaces the visible s2s rows with the JSON array in the body.
+// A known id keeps its stored section. A new id gets the current section. The same id is not stored twice.
+// A template missing from the body is removed when the session can see its section.
+// A template of a hidden section stays. The body is at most 1 MiB.
+// A nil store is 503. A bad body is 400. A template still used by a campaign is 400. A save error is 500.
+// Success writes 200 and the accepted rows with their stored section ids.
 func (s *Server) handleS2SPut(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.S2S == nil {
 		writeErr(w, http.StatusServiceUnavailable, "s2s store unavailable")
@@ -55,13 +57,10 @@ func (s *Server) handleS2SPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	v := s.viewerFrom(r.Context())
-	if !v.admin && !v.boardRoleWrite(resS2S) {
+	board := v.boardCurrent
+	if !v.admin && !v.boardRoleWrite(resS2S, ref{board: board}) {
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return
-	}
-	board := v.boardCurrent
-	for i := range list {
-		list[i].BoardID = board
 	}
 	if msg := prepareS2S(list); msg != "" {
 		writeErr(w, http.StatusBadRequest, msg)
@@ -74,14 +73,12 @@ func (s *Server) handleS2SPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "read error")
 		return
 	}
-	var other []config.OutboundPostback
-	for _, p := range stored {
-		if !config.SameBoard(p.BoardID, board) {
-			other = append(other, p)
-		}
+	merged, response := mergeS2SList(v, stored, list)
+	if !v.admin && !s2sWriteAllowed(v, stored, response) {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
 	}
-	merged := append(other, list...)
-	if msg, code := s.removedS2SUse(r.Context(), merged, board); code != 0 {
+	if msg, code := s.removedS2SUse(r.Context(), merged); code != 0 {
 		writeErr(w, code, msg)
 		return
 	}
@@ -89,7 +86,80 @@ func (s *Server) handleS2SPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
 	}
-	writeJSON(w, http.StatusOK, list)
+	writeJSON(w, http.StatusOK, response)
+}
+
+// mergeS2SList combines stored templates with body for the session v.
+// stored is the catalog on disk. body rows already have ids from prepareS2S.
+// A known id keeps its stored BoardID. A new id gets the current section.
+// A template missing from body is dropped when its section is the current one
+// or v.seesBoard allows that section. A template the session cannot see stays.
+// The same id is not stored twice.
+// It returns the catalog to save and the body rows with BoardID filled.
+// There is no error.
+func mergeS2SList(v viewer, stored, body []config.OutboundPostback) (merged, response []config.OutboundPostback) {
+	board := v.boardCurrent
+	storedByID := make(map[string]config.OutboundPostback, len(stored))
+	for _, p := range stored {
+		storedByID[p.ID] = p
+	}
+	response = append([]config.OutboundPostback(nil), body...)
+	inBody := make(map[string]struct{}, len(response))
+	for i := range response {
+		inBody[response[i].ID] = struct{}{}
+		if old, ok := storedByID[response[i].ID]; ok {
+			response[i].BoardID = old.BoardID
+			continue
+		}
+		response[i].BoardID = board
+	}
+	for _, p := range stored {
+		if _, ok := inBody[p.ID]; ok {
+			continue
+		}
+		if config.SameBoard(p.BoardID, board) || v.seesBoard(p.BoardID) {
+			continue
+		}
+		merged = append(merged, p)
+	}
+	merged = append(merged, response...)
+	return merged, response
+}
+
+// s2sWriteAllowed reports whether v may save body over stored.
+// An unchanged row is allowed. A new or changed row requires canWrite on its section.
+// It returns false when a write is denied. There is no error.
+func s2sWriteAllowed(v viewer, stored, body []config.OutboundPostback) bool {
+	byID := make(map[string]config.OutboundPostback, len(stored))
+	for _, p := range stored {
+		byID[p.ID] = p
+	}
+	for _, p := range body {
+		if old, ok := byID[p.ID]; ok && sameOutbound(old, p) {
+			continue
+		}
+		if !v.canWrite(resS2S, ref{id: p.ID, board: p.BoardID}) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameOutbound reports whether a and b are the same template, including section and statuses.
+// It does not return an error.
+func sameOutbound(a, b config.OutboundPostback) bool {
+	if a.ID != b.ID || a.Name != b.Name || a.URL != b.URL || a.Method != b.Method || a.BoardID != b.BoardID {
+		return false
+	}
+	if len(a.Statuses) != len(b.Statuses) {
+		return false
+	}
+	for i := range a.Statuses {
+		if a.Statuses[i] != b.Statuses[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // prepareS2S checks and fills list in place.
@@ -119,11 +189,12 @@ func prepareS2S(list []config.OutboundPostback) string {
 	return ""
 }
 
-// removedS2SUse reports a catalog id that next drops while a campaign of board still lists it.
-// ctx is the request context. next is the full prepared catalog. board is the section being saved.
+// removedS2SUse reports a catalog id that next drops while any campaign still lists it.
+// ctx is the request context. next is the full prepared catalog.
+// Usage is counted on every campaign, not only the section being saved.
 // The caller holds groupsMu. The string is the client message and the int is the HTTP status.
 // Both are zero when every removed id is unused. A read error is 500.
-func (s *Server) removedS2SUse(ctx context.Context, next []config.OutboundPostback, board string) (string, int) {
+func (s *Server) removedS2SUse(ctx context.Context, next []config.OutboundPostback) (string, int) {
 	prev, err := s.cfg.S2S.List(ctx)
 	if err != nil {
 		return "read error", http.StatusInternalServerError
@@ -139,18 +210,9 @@ func (s *Server) removedS2SUse(ctx context.Context, next []config.OutboundPostba
 	if err != nil {
 		return "groups error", http.StatusInternalServerError
 	}
-	var section []config.Group
-	for _, g := range groups {
-		if groupInBoard(g, board) {
-			section = append(section, g)
-		}
-	}
-	used := postbackIDUse(section)
+	used := postbackIDUse(groups)
 	for _, p := range prev {
 		if p.ID == "" {
-			continue
-		}
-		if !config.SameBoard(p.BoardID, board) {
 			continue
 		}
 		if _, ok := keep[p.ID]; ok {

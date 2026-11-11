@@ -87,7 +87,7 @@ func (s *Server) handleBoardsOrderPut(w http.ResponseWriter, r *http.Request) {
 		writeBoardErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+	writeJSON(w, http.StatusOK, map[string]any{"items": boardsResponseItems(items, true)})
 }
 
 // handleBoardPatch updates name and/or icon on one section.
@@ -116,7 +116,7 @@ func (s *Server) handleBoardPatch(w http.ResponseWriter, r *http.Request) {
 		writeBoardErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, updated)
+	writeJSON(w, http.StatusOK, boardClientItem(updated))
 }
 
 // handleBoardDelete removes an empty section from boards.json.
@@ -244,6 +244,8 @@ func writeBoardErr(w http.ResponseWriter, err error) {
 		writeErr(w, http.StatusBadRequest, "bad board order")
 	case config.ErrInvalidBoardIcon:
 		writeErr(w, http.StatusBadRequest, "invalid icon")
+	case ErrBoardIncludeAll:
+		writeErr(w, http.StatusBadRequest, "include_all only on main")
 	default:
 		if err != nil && err.Error() == "admin: board patch empty" {
 			writeErr(w, http.StatusBadRequest, "nothing to update")

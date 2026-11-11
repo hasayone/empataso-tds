@@ -270,6 +270,17 @@ type Board struct {
 	Icon      string        `json:"icon,omitempty"`
 	IconColor string        `json:"icon_color,omitempty"`
 	Members   []BoardMember `json:"members,omitempty"`
+	// IncludeAll is only meaningful on the main section.
+	// Nil and true mean the main view lists rows of other sections the session can open.
+	// A false pointer disables that view. True is not stored.
+	IncludeAll *bool `json:"include_all,omitempty"`
+}
+
+// IncludeAllEnabled reports whether flag shows other sections inside the main view.
+// flag is the stored pointer. Nil and true mean enabled. A false pointer means disabled.
+// It does not return an error.
+func IncludeAllEnabled(flag *bool) bool {
+	return flag == nil || *flag
 }
 
 // ValidateBoardMembers checks members for allowed roles, non-empty user ids and no duplicates.

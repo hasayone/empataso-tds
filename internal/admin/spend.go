@@ -71,12 +71,16 @@ func (s *Server) handleSpendCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	{
-		ok, err := s.spendVisible(r.Context(), v, entry.GroupID)
+		code, err := s.spendWriteCode(r.Context(), v, entry.GroupID)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "groups error")
 			return
 		}
-		if !ok {
+		if code == http.StatusForbidden {
+			writeErr(w, code, "forbidden")
+			return
+		}
+		if code != 0 {
 			writeErr(w, http.StatusNotFound, "not found")
 			return
 		}
@@ -149,12 +153,16 @@ func (s *Server) handleSpendDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	{
-		okDel, err := s.spendDeleteAllowed(r.Context(), v, list, id)
+		code, err := s.spendDeleteAllowed(r.Context(), v, list, id)
 		if err != nil {
 			writeErr(w, http.StatusInternalServerError, "groups error")
 			return
 		}
-		if !okDel {
+		if code == http.StatusForbidden {
+			writeErr(w, code, "forbidden")
+			return
+		}
+		if code != 0 {
 			writeErr(w, http.StatusNotFound, "not found")
 			return
 		}
@@ -171,20 +179,18 @@ func (s *Server) handleSpendDelete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// spendDeleteAllowed reports whether v may delete the spend row id in list.
-// ok is false when id is missing or the campaign is not visible. List errors propagate.
-func (s *Server) spendDeleteAllowed(ctx context.Context, v viewer, list []config.SpendEntry, id string) (bool, error) {
+// spendDeleteAllowed reports the HTTP status for deleting spend row id in list.
+// 0 means v may delete it. 404 means the row or its campaign is outside the view.
+// 403 means the campaign is visible but the role cannot change it.
+// A list error is returned with status 500.
+func (s *Server) spendDeleteAllowed(ctx context.Context, v viewer, list []config.SpendEntry, id string) (int, error) {
 	for _, e := range list {
 		if e.ID != id {
 			continue
 		}
-		ok, err := s.spendVisible(ctx, v, e.GroupID)
-		if err != nil {
-			return false, err
-		}
-		return ok, nil
+		return s.spendWriteCode(ctx, v, e.GroupID)
 	}
-	return false, nil
+	return http.StatusNotFound, nil
 }
 
 // dropSpend returns the list without the entry id.

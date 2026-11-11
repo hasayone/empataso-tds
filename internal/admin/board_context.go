@@ -19,6 +19,9 @@ type boardSession struct {
 	switchable bool
 	defaultID  string
 	role       string
+	includeAll bool
+	roles      map[string]string
+	visible    map[string]bool
 }
 
 // boardFrom returns the normalized current section id from ctx, or main when unset.
@@ -65,7 +68,7 @@ func (s *Server) boardScope(next http.Handler) http.Handler {
 		}
 		role := ""
 		if !meta.all && sess.UID != "" {
-			role, _ = s.boardMemberRole(r.Context(), current, sess.UID)
+			role = meta.roles[config.NormalizeBoardID(current)]
 		}
 		bs := boardSession{
 			current:    current,
@@ -73,6 +76,9 @@ func (s *Server) boardScope(next http.Handler) http.Handler {
 			switchable: meta.switchable,
 			defaultID:  meta.defaultID,
 			role:       role,
+			includeAll: meta.includeAll,
+			roles:      meta.roles,
+			visible:    meta.visibleSet,
 		}
 		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), boardKey, bs)))
 	})
@@ -84,6 +90,8 @@ type boardMeta struct {
 	defaultID   string
 	visibleIDs  []string
 	visibleSet  map[string]bool
+	includeAll  bool
+	roles       map[string]string
 }
 
 func (m boardMeta) canOpen(id string) bool {
@@ -150,6 +158,10 @@ func (s *Server) visibleBoardItems(ctx context.Context, sess security.Session) (
 	if err != nil {
 		return nil, meta, err
 	}
+	meta.includeAll = boardListIncludeAll(all)
+	if !meta.all && sess.UID != "" {
+		meta.roles = boardMemberRoles(all, sess.UID)
+	}
 	if meta.all {
 		meta.switchable = len(all) > 1
 		return boardsResponseItems(all, s.canManageBoards(sess)), meta, nil
@@ -198,17 +210,63 @@ func (s *Server) boardMemberRole(ctx context.Context, boardID, uid string) (stri
 	return "", nil
 }
 
-// boardsResponseItems returns a copy of items, clearing Members when manage is false.
+// boardsResponseItems returns a copy of items for the client.
+// items are the stored sections. manage keeps Members; otherwise Members are cleared.
+// Main gets an explicit include_all bool. Other sections omit the field.
+// The stored slice and its include_all pointers are not modified. There is no error.
 func boardsResponseItems(items []config.Board, manage bool) []config.Board {
-	if manage {
-		return items
-	}
 	out := make([]config.Board, len(items))
 	for i, b := range items {
 		out[i] = b
-		out[i].Members = nil
+		if !manage {
+			out[i].Members = nil
+		}
+		if config.SameBoard(b.ID, config.MainBoardID) {
+			on := config.IncludeAllEnabled(b.IncludeAll)
+			out[i].IncludeAll = &on
+			continue
+		}
+		out[i].IncludeAll = nil
 	}
 	return out
+}
+
+// boardClientItem returns one section as the API shows it.
+// b is the stored section. Members stay. Main gets an explicit include_all bool.
+// The stored value is not modified. There is no error.
+func boardClientItem(b config.Board) config.Board {
+	return boardsResponseItems([]config.Board{b}, true)[0]
+}
+
+// boardListIncludeAll reads the main section flag from list.
+// list is the stored sections. A missing main section is enabled.
+// It returns whether the wide main view is on. There is no error.
+func boardListIncludeAll(list []config.Board) bool {
+	for _, b := range list {
+		if config.SameBoard(b.ID, config.MainBoardID) {
+			return config.IncludeAllEnabled(b.IncludeAll)
+		}
+	}
+	return true
+}
+
+// boardMemberRoles maps a normalized section id to the member role of uid.
+// list is the stored sections. uid is the session user. Sections without that user are absent.
+// It returns nil when uid is empty. There is no error.
+func boardMemberRoles(list []config.Board, uid string) map[string]string {
+	if uid == "" {
+		return nil
+	}
+	roles := make(map[string]string)
+	for _, b := range list {
+		for _, m := range b.Members {
+			if m.UserID == uid {
+				roles[config.NormalizeBoardID(b.ID)] = m.Role
+				break
+			}
+		}
+	}
+	return roles
 }
 
 func (s *Server) canManageBoards(sess security.Session) bool {

@@ -1,6 +1,10 @@
 package config
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestNormalizeBoardID(t *testing.T) {
 	cases := []struct {
@@ -15,6 +19,31 @@ func TestNormalizeBoardID(t *testing.T) {
 		if got := NormalizeBoardID(c.in); got != c.want {
 			t.Fatalf("NormalizeBoardID(%q) = %q; want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestIncludeAllEnabled(t *testing.T) {
+	if !IncludeAllEnabled(nil) {
+		t.Fatal("nil flag is enabled")
+	}
+	on := true
+	off := false
+	if !IncludeAllEnabled(&on) || IncludeAllEnabled(&off) {
+		t.Fatal("pointer values")
+	}
+	raw, err := json.Marshal(Board{ID: MainBoardID, Name: "По умолчанию"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), "include_all") {
+		t.Fatalf("true must not be stored: %s", raw)
+	}
+	raw, err = json.Marshal(Board{ID: MainBoardID, Name: "По умолчанию", IncludeAll: &off})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"include_all":false`) {
+		t.Fatalf("false must be stored: %s", raw)
 	}
 }
 
