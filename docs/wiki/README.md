@@ -24,6 +24,7 @@
 - [Партнёрские сети](affiliate-networks.md)
 - [Сводка](dashboard.md)
 - [Перенос из Keitaro](keitaro.md)
+- [Сторож трекера](watchdog.md)
 - [Регистрация доменов через Namecheap](namecheap.md)
 - [Защита от ботов](bot-protection.md)
 - [Оформление: схема, цвет элементов, панель, файлы, кнопки](appearance.md)

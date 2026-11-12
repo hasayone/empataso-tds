@@ -50,6 +50,13 @@ func TestPostbackExportHeaderMatchesRecord(t *testing.T) {
 	if rec[10] != "'=1+1" {
 		t.Fatalf("formula cell = %q", rec[10])
 	}
+	if head[len(head)-1] != "depsum" {
+		t.Fatalf("last column = %q", head[len(head)-1])
+	}
+	got := postbackExportRecord(store.PostbackRow{DepSum: 2.5})
+	if got[len(got)-1] != "2.50" {
+		t.Fatalf("deposit cell = %q", got[len(got)-1])
+	}
 }
 
 func TestPostbackExportHiddenFields(t *testing.T) {

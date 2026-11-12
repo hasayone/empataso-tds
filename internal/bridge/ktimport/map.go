@@ -66,6 +66,10 @@ func Map(src Snapshot, sel Selection) Result {
 	if sel.Campaigns {
 		ctx := &mapCtx{offers: offers, landings: landings, groups: groups, lists: &lists, pages: &pages}
 		res.Groups, losses = ctx.mapCampaigns(src, losses)
+		losses = append(losses, applyCatalogMacros(&res, src.Campaigns)...)
+		if sel.Sources {
+			losses = append(losses, fillSourceFromCampaigns(res.Sources, src.Campaigns)...)
+		}
 	}
 	if sel.Users {
 		losses = append(losses, mapUsers(src, sel, &res)...)

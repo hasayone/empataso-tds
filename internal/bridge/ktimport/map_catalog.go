@@ -65,8 +65,8 @@ func mapSources(rows []KSource) ([]CatSource, []Loss) {
 // sourceParams оставляет keyword и sub_id_1..sub_id_30.
 //
 // Параметры: row — источник.
-// Результат: карта параметр → alias и строки отчёта по отброшенным ключам.
-// Ошибки: нет.
+// Результат: карта параметр → имя во входящей ссылке и строки отчёта по отброшенным ключам.
+// Ошибки: нет. Скобки placeholder в имя не попадают.
 func sourceParams(row KSource) (map[string]string, []Loss) {
 	keys := make([]string, 0, len(row.Parameters))
 	for key := range row.Parameters {
@@ -82,14 +82,7 @@ func sourceParams(row KSource) (map[string]string, []Loss) {
 			losses = append(losses, Loss{Kind: "skipped", Ref: ref, Detail: "параметр " + key + " не переносится"})
 			continue
 		}
-		p := row.Parameters[key]
-		val := strings.TrimSpace(p.Alias)
-		if val == "" {
-			val = strings.TrimSpace(p.Placeholder)
-		}
-		if val == "" {
-			val = strings.TrimSpace(p.Name)
-		}
+		val := incomingName(row.Parameters[key])
 		if val == "" {
 			continue
 		}

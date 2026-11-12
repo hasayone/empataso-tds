@@ -28,7 +28,8 @@ type ClickFact struct {
 }
 
 // StatusFact is one conversion status for a period.
-// Profit is the sum of payouts for that status. Rejected rows are separate.
+// Profit is the sum of payouts for that status. DepSum is the sum of deposits
+// for that status and is not the payout. Rejected rows are separate.
 type StatusFact struct {
 	OfferID   string  `json:"offer_id"`
 	NetworkID string  `json:"network_id"`
@@ -36,6 +37,7 @@ type StatusFact struct {
 	Status    string  `json:"status"`
 	N         int64   `json:"n"`
 	Profit    float64 `json:"profit"`
+	DepSum    float64 `json:"depsum"`
 }
 
 // Facts is the click and conversion breakdown used by the catalog tables.
@@ -192,7 +194,7 @@ func scanClickFact(rows factRow, clickCols, costCols bool) (ClickFact, error) {
 }
 
 func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, wargs []any) ([]StatusFact, error) {
-	q := `SELECT offer_id, network_id, status, count(), sum(profit)
+	q := `SELECT offer_id, network_id, status, count(), sum(profit), ` + sumDep(c.depsumConv, "depsum") + `
 		FROM conversions FINAL
 		WHERE ts >= ? AND ts < ?` + voidedConfirmedSQL("cid", "status")
 	qargs := []any{from, to}
@@ -211,7 +213,7 @@ func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, 
 	for rows.Next() {
 		var row StatusFact
 		var n uint64
-		if err := rows.Scan(&row.OfferID, &row.NetworkID, &row.Status, &n, &row.Profit); err != nil {
+		if err := rows.Scan(&row.OfferID, &row.NetworkID, &row.Status, &n, &row.Profit, &row.DepSum); err != nil {
 			return nil, err
 		}
 		row.N = int64(n)
@@ -222,10 +224,12 @@ func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, 
 
 // groupStatusSQL joins conversions to one campaign id per click.
 // where is empty or an events filter that starts with " AND ".
-// The aggregate is aliased gid: group_id in where must stay the events column.
-// Placeholders are from, to, the where args, then from, to. It does not fail.
-func groupStatusSQL(where string) string {
-	return `SELECT e.gid, c.status, count(), sum(c.profit)
+// dep selects sum(c.depsum); a closed wave uses a typed zero and does not
+// name the column. The aggregate is aliased gid: group_id in where must stay
+// the events column. Placeholders are from, to, the where args, then from, to.
+// It does not fail.
+func groupStatusSQL(where string, dep bool) string {
+	return `SELECT e.gid, c.status, count(), sum(c.profit), ` + sumDep(dep, "c.depsum") + `
 		FROM conversions AS c FINAL
 		INNER JOIN (
 			SELECT cid, any(group_id) AS gid
@@ -242,7 +246,7 @@ func groupStatusSQL(where string) string {
 // It returns an error when the query or a scan fails.
 func (c *CH) groupStatus(ctx context.Context, from, to time.Time, where string, wargs []any) ([]StatusFact, error) {
 	evArgs := append([]any{from, to}, wargs...)
-	rows, err := c.conn.Query(ctx, groupStatusSQL(where), append(evArgs, from, to)...)
+	rows, err := c.conn.Query(ctx, groupStatusSQL(where, c.depsumConv), append(evArgs, from, to)...)
 	if err != nil {
 		return nil, err
 	}
@@ -251,7 +255,7 @@ func (c *CH) groupStatus(ctx context.Context, from, to time.Time, where string, 
 	for rows.Next() {
 		var row StatusFact
 		var n uint64
-		if err := rows.Scan(&row.GroupID, &row.Status, &n, &row.Profit); err != nil {
+		if err := rows.Scan(&row.GroupID, &row.Status, &n, &row.Profit, &row.DepSum); err != nil {
 			return nil, err
 		}
 		row.N = int64(n)

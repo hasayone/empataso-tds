@@ -465,7 +465,7 @@ check_foreign_resources() {
 		fi
 	fi
 
-	if systemctl list-unit-files 'kuztds*' --no-legend 2>/dev/null | grep -q .; then
+	if systemctl list-unit-files 'kuztds*' --no-legend 2>/dev/null | awk '{print $1}' | grep -v '^kuztds-watchdog\.' | grep -q .; then
 		msg "найдены systemd-юниты kuztds*; установка прервана" >&2
 		exit 1
 	fi
@@ -816,6 +816,13 @@ run_install() {
 		fi
 	else
 		msg "nginx не установлен; пропуск apply-edge.sh (стек установлен без edge)"
+	fi
+
+	if [[ -f "${OUR_DEPLOY_DIR}/watchdog.sh" ]]; then
+		if ! bash "${OUR_DEPLOY_DIR}/watchdog.sh" --install; then
+			msg "не удалось включить kuztds-watchdog.timer" >&2
+			exit 1
+		fi
 	fi
 
 	date -Iseconds | write_atomic "$MARKER" 0644

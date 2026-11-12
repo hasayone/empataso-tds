@@ -551,6 +551,56 @@ var ncErrKeys = []string{
 	"nc.err.name", "nc.err.user", "nc.err.clong", "nc.err.ccountry", "nc.err.cphone", "nc.err.cemail",
 }
 
+// TestSpaDepSum checks the deposit column is translated and kept out of revenue and the chart.
+// t is the test handle. It reads the SPA source. It does not fail the process.
+func TestSpaDepSum(t *testing.T) {
+	html := spaSource()
+	for _, key := range []string{"col.depsum", "fld.depsum"} {
+		if n := strings.Count(html, "'"+key+"':"); n != 3 {
+			t.Errorf("dictionary key %q is defined %d time(s), want 3", key, n)
+		}
+	}
+	must(t, html, "'col.depsum':'DepSum'", "english column title")
+	must(t, html, "'col.depsum':'Депозит'", "russian column title")
+	must(t, html, "'fld.depsum':'Депозит'", "ukrainian field title")
+	must(t, spaFunctionLine(html, "hiddenCols"), "'depsum'", "hiding profit hides the deposit column")
+	must(t, spaFunctionLine(html, "packMetrics"), "depsum:m.depsum", "deposit is packed beside revenue")
+	mustNot(t, spaFunctionLine(html, "packMetrics"), "rev:m.rev+m.depsum", "deposit is not added into revenue")
+	must(t, spaFunctionLine(html, "foldStatus"), "o.depsum+=+r.depsum||0", "lead and sale deposits are summed")
+	must(t, html, "FLOW_USD_COLS=new Set(['revenue','depsum','uepc','epc'])", "deposit CSV is USD")
+	if strings.Contains(html, "{id:'depsum',key:") {
+		t.Fatal("chart series lists the deposit")
+	}
+}
+
+// TestSpaCatalogDock checks that offers and networks pin the campaign-style dock:
+// totals of the filter, a client pager, and CSV/HTML export. The catalog toolbar
+// does not grow an export button. t reads the SPA source and does not fail the process.
+func TestSpaCatalogDock(t *testing.T) {
+	html := spaSource()
+	off := spaFunctionLine(html, "offers")
+	net := spaFunctionLine(html, "networks")
+	must(t, off, "dockHTML('off','offexport')", "offers dock")
+	must(t, off, "has-flowdock", "offers pins the dock")
+	must(t, off, "paintCatalogDock(", "offers fills the dock")
+	must(t, off, "exportOffers(", "offers export from the dock")
+	must(t, off, "OFF_PAGE_I=0", "offers search and sort return to the first page")
+	must(t, net, "dockHTML('net','netexport')", "networks dock")
+	must(t, net, "has-flowdock", "networks pins the dock")
+	must(t, net, "paintCatalogDock(", "networks fills the dock")
+	must(t, net, "exportNetworks(", "networks export from the dock")
+	must(t, net, "NET_PAGE_I=0", "networks search and sort return to the first page")
+	mustNot(t, spaFunctionLine(html, "catalogBar"), "export", "catalog bar has no export")
+	must(t, spaFunctionLine(html, "paintCatalogDock"), "touchPageViews()", "page size is stored on the account")
+	mustNot(t, spaFunctionLine(html, "paintCatalogDock"), "localStorage", "catalog pager does not use localStorage")
+	must(t, spaFunctionLine(html, "foldPackedMetrics"), "acc.depsum+=", "deposit is summed beside revenue")
+	mustNot(t, spaFunctionLine(html, "foldPackedMetrics"), "acc.rev+=+m.depsum", "deposit is not added into revenue")
+	must(t, spaFunctionLine(html, "exportOffers"), "exportCatalogTable('offers'", "offers export uses the catalog helper")
+	must(t, spaFunctionLine(html, "exportNetworks"), "exportCatalogTable('networks'", "networks export uses the catalog helper")
+	mustNot(t, pageFnBody(html, "landings"), "dockHTML(", "landings have no catalog dock")
+	mustNot(t, pageFnBody(html, "sources"), "dockHTML(", "sources have no catalog dock")
+}
+
 // TestSpaMoneyUnified checks that every amount goes through moneyText: an empty currency code is
 // USD and written as a dollar sign, the old no-currency helpers are gone, and CSV carries plain
 // numbers with the currency in the column title.
@@ -869,6 +919,13 @@ func TestSpaPageViews(t *testing.T) {
 	for _, key := range []string{"FLOW_VIEW_KEY", "FLOW_PAGE_KEY", "FLOW_COMPACT_KEY", "LOG_PAGE_KEY", "PB_PAGE_KEY", "DOM_PAGE_KEY"} {
 		mustNot(t, html, "localStorage.setItem("+key, key+" is no longer written")
 	}
+	must(t, html, "offers:5000, networks:5000", "views cap offer and network page sizes")
+	must(t, spaFunctionLine(html, "defaultPageViewState"), "offers:{page:50}", "offers default page size")
+	must(t, spaFunctionLine(html, "defaultPageViewState"), "page:50}", "networks default page size")
+	must(t, spaFunctionLine(html, "pageViewFromGlobals"), "page:OFF_PAGE", "offers page size is collected")
+	must(t, spaFunctionLine(html, "pageViewFromGlobals"), "page:NET_PAGE", "networks page size is collected")
+	mustNot(t, html, "localStorage.setItem('OFF_PAGE'", "offers page size is not in localStorage")
+	mustNot(t, html, "localStorage.setItem('NET_PAGE'", "networks page size is not in localStorage")
 	mustNot(t, spaFunctionLine(html, "paintServerPager"), "localStorage", "the pager saves the size with the account")
 	must(t, spaFunctionLine(html, "paintServerPager"), "touchPageViews()", "a new page size is sent")
 	must(t, spaFunctionLine(html, "pageViewLegacy"), "FLOW_PAGE_KEY", "browser sizes seed an account without them")

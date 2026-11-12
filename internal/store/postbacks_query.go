@@ -33,9 +33,11 @@ const (
 )
 
 // PostbackTotals is the size of one conversion-journal match.
-// Profit is the sum of payouts. Count is the number of rows, not the page.
+// Profit is the sum of payouts. DepSum is the sum of deposits and is not
+// the payout. Count is the number of rows, not the page.
 type PostbackTotals struct {
 	Profit float64
+	DepSum float64
 	Count  int64
 }
 
@@ -184,10 +186,10 @@ func (c *CH) postbackMatch(ctx context.Context, q PostbackQuery, originConv bool
 	where += extra
 	args = append(args, extraArgs...)
 	where += voidedConfirmedSQL("cid", "status")
-	from := conversionUnion(c.clickCols, c.extConv, c.modelConv, originConv, c.subConv)
+	from := conversionUnion(c.clickCols, c.extConv, c.modelConv, originConv, c.subConv, c.depsumConv)
 	var tot PostbackTotals
 	var n uint64
-	if err := c.conn.QueryRow(ctx, "SELECT sum(profit), count() FROM ("+from+") WHERE "+where, args...).Scan(&tot.Profit, &n); err != nil {
+	if err := c.conn.QueryRow(ctx, "SELECT "+postbackSumSelect(c.depsumConv)+" FROM ("+from+") WHERE "+where, args...).Scan(&tot.Profit, &tot.DepSum, &n); err != nil {
 		return PostbackTotals{}, "", nil, "", false, err
 	}
 	tot.Count = int64(n)
@@ -382,9 +384,18 @@ func postbackExtPtr(p *PostbackRow, col string) any {
 		return &p.OriginCampaign
 	case "origin_group_id":
 		return &p.OriginCampaignID
+	case "depsum":
+		return &p.DepSum
 	default:
 		return new(string)
 	}
+}
+
+// postbackSumSelect is the journal total: payout, deposit, then the row count.
+// dep is true when conversions carry depsum. A closed wave uses a typed zero
+// and does not name the column. The string has no placeholders and does not fail.
+func postbackSumSelect(dep bool) string {
+	return "sum(profit), " + sumDep(dep, "depsum") + ", count()"
 }
 
 // postbackWhere builds the period predicate and the optional equality filters.
@@ -419,8 +430,8 @@ func postbackWhere(q PostbackQuery, click bool) (string, []any) {
 
 // convLogExtraCols lists optional conversions columns for the journal SELECT,
 // in the same order as convExtra and conversionUnion.
-func convLogExtraCols(click, ext, model, origin, sub bool) []string {
-	_, cols := convExtra(click, ext, model, origin, sub)
+func convLogExtraCols(click, ext, model, origin, sub, dep bool) []string {
+	_, cols := convExtra(click, ext, model, origin, sub, dep)
 	if cols == "" {
 		return nil
 	}
@@ -432,7 +443,7 @@ func convLogExtraCols(click, ext, model, origin, sub bool) []string {
 // postbackDest scans them (matches conversionUnion).
 func (c *CH) postbackColumns(originConv bool) (sel string, extraCols []string) {
 	sel = "ts, group_name, stream_name, domain, page, device, country, city, profit, cid, status"
-	extraCols = convLogExtraCols(c.clickCols, c.extConv, c.modelConv, originConv, c.subConv)
+	extraCols = convLogExtraCols(c.clickCols, c.extConv, c.modelConv, originConv, c.subConv, c.depsumConv)
 	if len(extraCols) > 0 {
 		sel += ", " + strings.Join(extraCols, ", ")
 	}
@@ -453,7 +464,7 @@ func (c *CH) postbackDest(p *PostbackRow, subs []string, extraCols []string) []a
 // conversionFrom is conversionUnion without the model wave.
 // click and ext select the waves; see conversionUnion.
 func conversionFrom(click, ext bool) string {
-	return conversionUnion(click, ext, false, false, false)
+	return conversionUnion(click, ext, false, false, false, false)
 }
 
 // conversionUnion is the old postbacks table plus one row per cid and status.
@@ -461,12 +472,12 @@ func conversionFrom(click, ext bool) string {
 // device_model column. origin adds origin_group_name and origin_group_id.
 // The postbacks branch uses typed stand-ins so the union lines up.
 // All flags false keep the original two-column status shape.
-func conversionUnion(click, ext, model, origin, sub bool) string {
+func conversionUnion(click, ext, model, origin, sub, dep bool) string {
 	base := `ts, domain, page, device, operator, country, city, profit, group_name, stream_name, cid`
 	post := `SELECT ` + base + `, '' AS status`
 	conv := `SELECT ` + base + `, status`
-	if click || ext || model || origin || sub {
-		stubs, cols := convExtra(click, ext, model, origin, sub)
+	if click || ext || model || origin || sub || dep {
+		stubs, cols := convExtra(click, ext, model, origin, sub, dep)
 		if stubs != "" {
 			post += ", " + stubs
 			conv += ", " + cols
@@ -477,32 +488,43 @@ func conversionUnion(click, ext, model, origin, sub bool) string {
 		` + conv + ` FROM conversions FINAL`
 }
 
-// convExtra lists stand-ins and real names for the click, ext and model waves.
-// click, ext and model select which waves are included. Base columns are
-// omitted. The two strings have the same length and the same order. Both are
-// empty when no flag is set or the waves add nothing.
-func convExtra(click, ext, model, origin, sub bool) (stubs, cols string) {
+// convExtra lists stand-ins and real names for the click, ext, model and deposit waves.
+// click, ext, model, origin, sub and dep select which waves are included.
+// Base columns are omitted. The postbacks side of dep is toFloat64(0).
+// The two strings have the same length and the same order. Both are empty
+// when no flag is set or the waves add nothing.
+func convExtra(click, ext, model, origin, sub, dep bool) (stubs, cols string) {
 	var stubParts, colParts []string
 	for _, f := range fields {
 		if f.Conv == "" || f.ConvWave == waveBase {
 			continue
 		}
-		if f.ConvWave == waveClick && !click {
-			continue
-		}
-		if f.ConvWave == waveExt && !ext {
-			continue
-		}
-		if f.ConvWave == waveModel && !model {
-			continue
-		}
-		if f.ConvWave == waveOrigin && !origin {
-			continue
-		}
-		if f.ConvWave == waveSub && !sub {
-			continue
-		}
-		if f.ConvWave != waveClick && f.ConvWave != waveExt && f.ConvWave != waveModel && f.ConvWave != waveOrigin && f.ConvWave != waveSub {
+		switch f.ConvWave {
+		case waveClick:
+			if !click {
+				continue
+			}
+		case waveExt:
+			if !ext {
+				continue
+			}
+		case waveModel:
+			if !model {
+				continue
+			}
+		case waveOrigin:
+			if !origin {
+				continue
+			}
+		case waveSub:
+			if !sub {
+				continue
+			}
+		case waveDep:
+			if !dep {
+				continue
+			}
+		default:
 			continue
 		}
 		stubParts = append(stubParts, convStub(f))

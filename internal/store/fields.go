@@ -28,10 +28,12 @@ const (
 	clickWaveSubs = 12
 	// waveOrigin adds origin_group_name and origin_group_id to events and conversions.
 	waveOrigin wave = "origin"
+	// waveDep adds depsum to conversions. It is the deposit, not the payout.
+	waveDep wave = "dep"
 )
 
 // allWaves lists every wave in the order probes and the fields API use.
-var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep, waveOrigin, waveSub}
+var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep, waveOrigin, waveDep, waveSub}
 
 // Field is one journal column shared by filters, breakdown and the SPA.
 // Name is the API name. Events and Conv are the physical columns; an empty
@@ -100,6 +102,7 @@ func buildFields() []Field {
 		{Name: "out", Events: "out", Type: "String", EventsWave: waveBase, Dim: true},
 		{Name: "status", Conv: "status", Type: lc, ConvWave: waveBase, Dim: true, Lower: true},
 		{Name: "profit", Conv: "profit", Type: "Float64", ConvWave: waveBase},
+		{Name: "depsum", Conv: "depsum", Type: "Float64", ConvWave: waveDep, Default: "0"},
 		{Name: "asn", Events: "asn", Conv: "asn", Type: "UInt32", EventsWave: waveNet, ConvWave: waveExt, Dim: true,
 			Expr: "if(asn = 0, '', concat('AS', toString(asn)))"},
 		{Name: "org", Events: "org", Conv: "org", Type: lc, EventsWave: waveNet, ConvWave: waveExt, Dim: true},

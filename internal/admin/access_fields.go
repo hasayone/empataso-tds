@@ -27,7 +27,7 @@ var fieldExtraKeys = map[string][]string{
 	"bot":         {"bots"},
 	"offer_id":    {"offer"},
 	"source_id":   {"source"},
-	"profit":      {"revenue", "payout"},
+	"profit":      {"revenue", "payout", "depsum"},
 	"cost_cents":  {"cost", "spend"},
 	"cost_cur":    {"currency"},
 	"status":      {"original_status", "prev_status"},
@@ -43,6 +43,7 @@ var derivedFields = map[string][]string{
 	"browser": {"browser_ver"},
 	"brand":   {"device_model"},
 	"device":  {"device_model"},
+	"profit":  {"depsum"},
 }
 
 // macroFields maps every macro of internal/render that inserts a click value to the

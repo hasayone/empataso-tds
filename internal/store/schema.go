@@ -60,6 +60,7 @@ func (c *CH) ensureSchemaWaves(withOrigin bool) {
 	if withOrigin {
 		c.schemaAlter("conversions", waveOrigin)
 	}
+	c.schemaAlter("conversions", waveDep)
 	c.schemaExec(`CREATE TABLE IF NOT EXISTS postback_log (
 		ts DateTime DEFAULT now(),
 		subid String,
@@ -79,6 +80,7 @@ func (c *CH) ensureSchemaWaves(withOrigin bool) {
 	c.extConv = c.ready("conversions", waveExt)
 	c.modelEvents = c.ready("events", waveModel)
 	c.modelConv = c.ready("conversions", waveModel)
+	c.depsumConv = c.ready("conversions", waveDep)
 	c.stepEvents = c.ready("events", waveStep)
 	c.subEvents = c.ready("events", waveSub)
 	c.subConv = c.ready("conversions", waveSub)

@@ -8,7 +8,7 @@ import (
 )
 
 func convExtraColList(click, ext, model, origin bool) []string {
-	_, cols := convExtra(click, ext, model, origin, false)
+	_, cols := convExtra(click, ext, model, origin, false, false)
 	if cols == "" {
 		return nil
 	}
@@ -67,6 +67,8 @@ func readPostbackCol(p *PostbackRow, subs []string, col string) (any, bool) {
 		return p.City, true
 	case "profit":
 		return p.Profit, true
+	case "depsum":
+		return p.DepSum, true
 	case "cid":
 		return p.CID, true
 	case "status":
@@ -208,7 +210,7 @@ func TestPostbackColumnsMatchDest(t *testing.T) {
 				t.Fatalf("mask %04b: col %q at %d got %#v", mask, col, i, got)
 			}
 		}
-		stubs, _ := convExtra(click, ext, model, origin, false)
+		stubs, _ := convExtra(click, ext, model, origin, false, false)
 		stubNames := stubOutputNames(stubs)
 		if len(stubNames) != len(wantExtra) {
 			t.Fatalf("mask %04b: stub count %d != col count %d", mask, len(stubNames), len(wantExtra))

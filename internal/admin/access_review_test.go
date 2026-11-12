@@ -438,16 +438,16 @@ func TestFoldConfirmed(t *testing.T) {
 		t.Fatalf("nil input: %#v", got)
 	}
 	rows := []store.StatusFact{
-		{OfferID: "o1", NetworkID: "n", GroupID: "c1", Status: "lead", N: 2, Profit: 5},
-		{OfferID: "o2", NetworkID: "n", GroupID: "c1", Status: "rejected", N: 9},
-		{OfferID: "o1", NetworkID: "n", GroupID: "c1", Status: "sale", N: 1, Profit: 2},
+		{OfferID: "o1", NetworkID: "n", GroupID: "c1", Status: "lead", N: 2, Profit: 5, DepSum: 1},
+		{OfferID: "o2", NetworkID: "n", GroupID: "c1", Status: "rejected", N: 9, DepSum: 9},
+		{OfferID: "o1", NetworkID: "n", GroupID: "c1", Status: "sale", N: 1, Profit: 2, DepSum: 2},
 		{OfferID: "o1", NetworkID: "n", GroupID: "c1", Status: "rejected", N: 4},
-		{OfferID: "", NetworkID: "", GroupID: "c1", Status: "lead", N: 3, Profit: 1.5},
+		{OfferID: "", NetworkID: "", GroupID: "c1", Status: "lead", N: 3, Profit: 1.5, DepSum: 3},
 	}
 	got := foldConfirmed(rows)
 	want := []store.StatusFact{
-		{OfferID: "o1", NetworkID: "n", GroupID: "c1", Status: "sale", N: 3, Profit: 7},
-		{GroupID: "c1", Status: "sale", N: 3, Profit: 1.5},
+		{OfferID: "o1", NetworkID: "n", GroupID: "c1", Status: "sale", N: 3, Profit: 7, DepSum: 3},
+		{GroupID: "c1", Status: "sale", N: 3, Profit: 1.5, DepSum: 3},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v", got)

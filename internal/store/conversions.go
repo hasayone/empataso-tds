@@ -12,18 +12,20 @@ import (
 )
 
 // PostbackIn is one conversion to record from a click id.
-// CID selects the click. Profit is the payout. Status is stored lowercased
-// and trimmed. Original is the raw status; when it is empty, Status is kept
-// as the raw value. TID is the network transaction id.
+// CID selects the click. Profit is the payout. DepSum is the deposit and is
+// not the payout. Status is stored lowercased and trimmed. Original is the
+// raw status; when it is empty, Status is kept as the raw value. TID is the
+// network transaction id.
 type PostbackIn struct {
 	CID              string
 	Profit           float64
+	DepSum           float64
 	Status, Original string
 	TID              string
 }
 
 // RecordConversion finds the click cid and writes one conversion.
-// ctx bounds the reads and the insert. in supplies payout, status and tid.
+// ctx bounds the reads and the insert. in supplies payout, deposit, status and tid.
 // The returned group id is the campaign the click belonged to.
 // Base click columns are always read. Net, click and ext-event columns are
 // read only when that wave is ready. Ext conversion columns, including
@@ -168,6 +170,17 @@ func voidedConfirmedSQL(cid, status string) string {
 	return ` AND NOT (` + status + ` IN ('lead', 'sale') AND ` + cid + ` IN (` + voidedCIDSelect() + `))`
 }
 
+// sumDep is the deposit aggregate, or a typed zero when the wave is absent.
+// on is true when conversions carry depsum. col is the column, qualified when
+// the query aliases the table; it is used only when on is true, so a closed
+// wave does not name the column. The string is a SELECT expression and does not fail.
+func sumDep(on bool, col string) string {
+	if !on {
+		return "toFloat64(0)"
+	}
+	return "sum(" + col + ")"
+}
+
 // prevStatus returns the latest conversion status for cid.
 // ctx bounds the query. No row returns "" and a nil error.
 // Any other scan error is returned. This point lookup omits FINAL so the
@@ -182,10 +195,12 @@ func (c *CH) prevStatus(ctx context.Context, cid string) (string, error) {
 }
 
 // writeConversion inserts one conversion copied from snap.
-// ctx bounds the batch. in supplies profit, status and tid. prev is the
-// previous status, written only with the ext wave. Status is stored
-// lowercased and trimmed; original_status keeps the raw text.
-// The row time is the server default. Returns a batch error unchanged.
+// ctx bounds the batch. in supplies profit, the deposit, status and tid.
+// prev is the previous status, written only with the ext wave. Status is
+// stored lowercased and trimmed; original_status keeps the raw text.
+// depsum is written only when that wave is ready and is never part of the
+// base column list. The row time is the server default. Returns a batch
+// error unchanged.
 func (c *CH) writeConversion(ctx context.Context, snap clickSnap, in PostbackIn, prev string) error {
 	originConv := c.originConv.Load()
 	raw := in.Original
@@ -225,6 +240,10 @@ func (c *CH) writeConversion(ctx context.Context, snap clickSnap, in PostbackIn,
 	if c.modelConv {
 		cols += ", device_model"
 		row = append(row, snap.deviceModel)
+	}
+	if c.depsumConv {
+		cols += ", depsum"
+		row = append(row, in.DepSum)
 	}
 	if originConv {
 		for _, col := range columnsOf("conversions", waveOrigin) {
@@ -294,6 +313,7 @@ type PostbackRow struct {
 	Country string    `json:"country"`
 	City    string    `json:"city"`
 	Profit  float64   `json:"profit"`
+	DepSum  float64   `json:"depsum"`
 	CID     string    `json:"cid"`
 	Status  string    `json:"status"`
 	Offer   string    `json:"offer_id,omitempty"`

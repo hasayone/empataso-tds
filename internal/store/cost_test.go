@@ -149,33 +149,40 @@ func TestScanClickFactColumns(t *testing.T) {
 }
 
 func TestPerformanceConvSQLGroupID(t *testing.T) {
-	q, extra := performanceConvSQL(time.Unix(0, 0), time.Unix(10, 0), "", nil, true)
+	q, extra := performanceConvSQL(time.Unix(0, 0), time.Unix(10, 0), "", nil, true, false)
 	if extra != nil {
 		t.Fatalf("extra %#v", extra)
 	}
 	for _, s := range []string{
-		"SELECT '' AS group_id, group_name, stream_name, profit, ts, cid, '' AS status FROM postbacks",
-		"SELECT group_id, group_name, stream_name, profit, ts, cid, status FROM conversions FINAL",
+		"SELECT '' AS group_id, group_name, stream_name, profit, toFloat64(0) AS depsum, ts, cid, '' AS status FROM postbacks",
+		"SELECT group_id, group_name, stream_name, profit, toFloat64(0) AS depsum, ts, cid, status FROM conversions FINAL",
 		"status = 'rejected'",
-		"SELECT group_id, group_name, stream_name, count() AS conv, sum(profit) AS profit",
+		"SELECT group_id, group_name, stream_name, count() AS conv, sum(profit) AS profit, sum(depsum) AS depsum",
 		"GROUP BY group_id, group_name, stream_name",
 	} {
 		if !strings.Contains(q, s) {
 			t.Fatalf("missing %s in %s", s, q)
 		}
 	}
-	plain, _ := performanceConvSQL(time.Unix(0, 0), time.Unix(10, 0), "", nil, false)
+	if strings.Contains(q, ", depsum,") {
+		t.Fatalf("closed wave names the column: %s", q)
+	}
+	plain, _ := performanceConvSQL(time.Unix(0, 0), time.Unix(10, 0), "", nil, false, false)
 	if strings.Count(plain, "'' AS group_id") != 2 {
 		t.Fatalf("both branches: %s", plain)
 	}
 	if !strings.Contains(plain, "GROUP BY group_id, group_name, stream_name") {
 		t.Fatalf("group: %s", plain)
 	}
-	filt, args := performanceConvSQL(time.Unix(1, 0), time.Unix(2, 0), " AND x = ?", []any{"z"}, true)
-	if !strings.Contains(filt, "'' AS group_id, group_name, stream_name, profit, ts, cid, '' AS status FROM postbacks") {
+	open, _ := performanceConvSQL(time.Unix(0, 0), time.Unix(10, 0), "", nil, true, true)
+	if !strings.Contains(open, "SELECT group_id, group_name, stream_name, profit, depsum, ts, cid, status FROM conversions FINAL") {
+		t.Fatalf("open deposit column: %s", open)
+	}
+	filt, args := performanceConvSQL(time.Unix(1, 0), time.Unix(2, 0), " AND x = ?", []any{"z"}, true, false)
+	if !strings.Contains(filt, "'' AS group_id, group_name, stream_name, profit, toFloat64(0) AS depsum, ts, cid, '' AS status FROM postbacks") {
 		t.Fatalf("filtered postbacks: %s", filt)
 	}
-	if !strings.Contains(filt, "SELECT group_id, group_name, stream_name, profit, ts, cid, status FROM conversions FINAL") {
+	if !strings.Contains(filt, "SELECT group_id, group_name, stream_name, profit, toFloat64(0) AS depsum, ts, cid, status FROM conversions FINAL") {
 		t.Fatalf("filtered conversions: %s", filt)
 	}
 	if len(args) != 3 || args[2] != "z" {
@@ -184,7 +191,13 @@ func TestPerformanceConvSQLGroupID(t *testing.T) {
 }
 
 func TestGroupStatusSQLAlias(t *testing.T) {
-	q := groupStatusSQL(" AND group_id IN (?)")
+	q := groupStatusSQL(" AND group_id IN (?)", false)
+	if strings.Contains(q, "depsum") {
+		t.Fatalf("closed wave names the column: %s", q)
+	}
+	if open := groupStatusSQL(" AND group_id IN (?)", true); !strings.Contains(open, "sum(c.depsum)") {
+		t.Fatalf("open deposit: %s", open)
+	}
 	if strings.Contains(q, "AS group_id") {
 		t.Fatalf("alias shadows the column: %s", q)
 	}

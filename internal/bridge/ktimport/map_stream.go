@@ -64,6 +64,12 @@ func (c *mapCtx) mapCampaign(camp Campaign, streams []KStream) (Group, []Loss) {
 	if trimmed {
 		losses = append(losses, Loss{Kind: "approximated", Ref: id, Detail: "имя группы обрезано до 64 символов"})
 	}
+	params, bad := campaignParams(camp.Parameters)
+	if bad != "" {
+		losses = append(losses, Loss{Kind: "skipped", Ref: id, Detail: bad})
+		params = nil
+	}
+	c.swaps = campaignMacroMap(params)
 	g := Group{
 		ID: id, Name: camp.Name, Num: int(camp.ID), Status: status, Redirect: "show_text", Out: "",
 		Folder: folder, Weight: strings.EqualFold(camp.Type, "weight"), Postbacks: posts,
@@ -209,7 +215,7 @@ func typeRank(t string) int {
 // Результат: поток с FilterOr, долями и правилами.
 // Ошибки: нет.
 func (c *mapCtx) buildStream(st KStream, forceOff bool) Stream {
-	s, extra := streamOutput(st, c.offers, c.landings, c.losses, c.pages, c.aliases)
+	s, extra := c.streamOutput(st)
 	rules, ok, why, flosses := mapFilters(st.Filters, c.lists, st.FilterOr)
 	ref := streamRef(int(st.ID))
 	for _, l := range flosses {
@@ -232,10 +238,11 @@ func (c *mapCtx) buildStream(st KStream, forceOff bool) Stream {
 
 // streamOutput собирает доли, запасной URL и причину выключения.
 //
-// Параметры: st — поток; offers и landings — справочники; losses — отчёт; pages — файлы длинных страниц; aliases — id кампании → id группы.
+// Параметры: st — поток. Справочники, отчёт, файлы страниц, alias кампаний и маски placeholder лежат в получателе.
 // Результат: поток без правил и текст причины. Пустая причина значит, что выход годится.
 // Ошибки: нет.
-func streamOutput(st KStream, offers map[int]Offer, landings map[int]Landing, losses *[]Loss, pages *pageBag, aliases map[int]string) (Stream, string) {
+func (c *mapCtx) streamOutput(st KStream) (Stream, string) {
+	offers, landings, losses, pages, aliases, swaps := c.offers, c.landings, c.losses, c.pages, c.aliases, c.swaps
 	s := Stream{
 		Name:    streamTitle(st),
 		Comment: fmt.Sprintf("keitaro_stream_id=%d", int(st.ID)),
@@ -265,7 +272,7 @@ func streamOutput(st KStream, offers map[int]Offer, landings map[int]Landing, lo
 			return s, ""
 		}
 		s.Out.Redirect = "show_html_404"
-		s.Out.Out = pageRef("show_html_404", rewriteMacros(payload), pages)
+		s.Out.Out = pageRef("show_html_404", finishMacros(payload, swaps), pages)
 		return s, ""
 	}
 	if strings.EqualFold(strings.TrimSpace(st.ActionType), "campaign") {
@@ -287,7 +294,7 @@ func streamOutput(st KStream, offers map[int]Offer, landings map[int]Landing, lo
 	} else if strings.TrimSpace(st.ActionPayload) != "" && !localAction(st.ActionType) && carriesOut(redirect) {
 		fallback = st.ActionPayload
 	}
-	next := rewriteMacros(fallback)
+	next := finishMacros(fallback, swaps)
 	s.Out.Redirect = redirect
 	s.Out.Out = next
 	s.Out.Chance = 100
@@ -431,6 +438,15 @@ func rewriteMacros(raw string) string {
 		}
 		return m
 	})
+}
+
+// finishMacros сначала заменяет известные макросы, затем placeholder этой кампании.
+//
+// Параметры: raw — исходная строка; swaps — placeholder → маска. Пустая карта оставляет результат rewriteMacros.
+// Результат: строка, в которой переименованный слот уже записан как {sub_id_N} или [KEY].
+// Ошибки: нет. Повторный проход по известным макросам не делается, чтобы {sub_id_1} из карты не стал [PAR-1].
+func finishMacros(raw string, swaps map[string]string) string {
+	return applyMacroMap(rewriteMacros(raw), swaps)
 }
 
 // unique убирает повторы, сохраняя порядок.

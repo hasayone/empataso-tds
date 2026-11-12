@@ -269,7 +269,7 @@ func keysGone(field string) []string {
 	case "source_id":
 		return []string{"source_id", "source"}
 	case "profit":
-		return []string{"profit", "revenue", "payout"}
+		return []string{"profit", "revenue", "payout", "depsum"}
 	case "status":
 		return []string{"status", "original_status", "prev_status"}
 	case "os":
@@ -574,7 +574,7 @@ func TestExpandHiddenMoneyGroups(t *testing.T) {
 		{[]string{"group"}, []string{"campaign"}},
 		{[]string{"cost"}, []string{"cost", "cost_cents", "cost_cur"}},
 		{[]string{"cost_cents"}, []string{"cost", "cost_cents", "cost_cur"}},
-		{[]string{"profit"}, []string{"profit"}},
+		{[]string{"profit"}, []string{"depsum", "profit"}},
 	}
 	for _, c := range cases {
 		got := hiddenList(viewer{hidden: expandHidden(c.in)})

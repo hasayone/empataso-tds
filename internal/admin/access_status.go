@@ -14,8 +14,8 @@ var confirmedStatuses = map[string]bool{"lead": true, "sale": true}
 //
 // rows are the status facts. Only confirmed statuses stay; each (offer, network,
 // campaign) key becomes one row with status foldedStatus and the summed count and
-// profit. Rejected and other statuses are dropped, and the order of the first
-// appearance of each key is kept. The result is never nil. rows is not modified.
+// profit and deposit. Rejected and other statuses are dropped, and the order of
+// the first appearance of each key is kept. The result is never nil. rows is not modified.
 func foldConfirmed(rows []store.StatusFact) []store.StatusFact {
 	type key struct{ offer, network, group string }
 	index := map[key]int{}
@@ -33,6 +33,7 @@ func foldConfirmed(rows []store.StatusFact) []store.StatusFact {
 		}
 		out[i].N += r.N
 		out[i].Profit += r.Profit
+		out[i].DepSum += r.DepSum
 	}
 	return out
 }

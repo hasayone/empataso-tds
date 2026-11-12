@@ -22,13 +22,14 @@ const postbackOriginalMax = 64
 const postbackTIDMax = 128
 
 // postbackIn is one public /postback query.
-// cid is the click id. profit is the payout. status is folded to lower
-// case. original is that status before folding, at most 64 bytes. tid is
-// the transaction id, at most 128 bytes. ok is false when a payout alias
-// parses as NaN or Inf.
+// cid is the click id. profit is the payout. depSum is the deposit and is
+// not the payout. status is folded to lower case. original is that status
+// before folding, at most 64 bytes. tid is the transaction id, at most 128
+// bytes. ok is false when a payout alias or the deposit parses as NaN or Inf.
 type postbackIn struct {
 	cid              string
 	profit           float64
+	depSum           float64
 	status, original string
 	tid              string
 	ok               bool
@@ -49,8 +50,10 @@ func firstNonEmpty(q url.Values, keys ...string) string {
 // type and goal, folded to lower case. original is that value before
 // folding, cut to 64 bytes. tid is the tid parameter, cut to 128 bytes.
 // The payout is the first value that parses as a finite number among
-// payout, profit and sum. ok is false when one of those fields parses as
-// NaN or Inf. The old ?pb= pixel does not call this function.
+// payout, profit and sum. The deposit is the first non-empty of DepSum and
+// depsum; an empty value stays 0 and a value that is not a number stays 0.
+// ok is false when a payout alias or the deposit parses as NaN or Inf.
+// The old ?pb= pixel does not call this function.
 func parsePostback(q url.Values) postbackIn {
 	rawStatus := firstNonEmpty(q, "status", "type", "goal")
 	in := postbackIn{
@@ -76,6 +79,19 @@ func parsePostback(q url.Values) postbackIn {
 		in.profit = v
 		break
 	}
+	rawDep := firstNonEmpty(q, "DepSum", "depsum")
+	if rawDep == "" {
+		return in
+	}
+	dep, err := strconv.ParseFloat(rawDep, 64)
+	if err != nil {
+		return in
+	}
+	if math.IsNaN(dep) || math.IsInf(dep, 0) {
+		in.ok = false
+		return in
+	}
+	in.depSum = dep
 	return in
 }
 
@@ -155,7 +171,7 @@ func (d *engineDeps) postback(w http.ResponseWriter, r *http.Request) {
 	if in.cid != "" && hasStore {
 		var gid string
 		gid, recErr = d.chConn.RecordConversion(r.Context(), store.PostbackIn{
-			CID: in.cid, Profit: in.profit, Status: in.status,
+			CID: in.cid, Profit: in.profit, DepSum: in.depSum, Status: in.status,
 			Original: in.original, TID: in.tid,
 		})
 		if recErr != nil {

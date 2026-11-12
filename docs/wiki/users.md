@@ -107,11 +107,11 @@
 
 В `access.hidden` допустимы имена полей журнала и группа `cost`; полный порядок работы и места, где поле не показывается, описаны в [Роли](roles.md). Доступ можно задать и ролью: пользователь с `role_id` берёт разделы, гранты и скрытые поля из роли, свой `access` у него не действует и при назначении роли обнуляется.
 
-При `profit` из JSON статистики убираются ключи `profit`, `revenue`, `payout`. При `cost` — `cost_cents`, `cost`, `cost_cur`, `currency`, `spend`. Фильтр журнала или статистики по скрытому полю даёт `400 bad filter: hidden field …`.
+При `profit` из JSON статистики убираются ключи `profit`, `revenue`, `payout`, `depsum`. При `cost` — `cost_cents`, `cost`, `cost_cur`, `currency`, `spend`. Фильтр журнала или статистики по скрытому полю даёт `400 bad filter: hidden field …`.
 
 Все методы `/api/spend` при скрытом `cost` отвечают `403 forbidden` до чтения файла расхода.
 
-Интерфейс дополнительно прячет столбцы: при `profit` — `revenue`, `profit`, `roi`, `epc`, `uepc`, `epv`, `payout`; при `cost` — `cost`, `spend`, `cpc`, `cpa`, `cpm`, а также `roi` и `profit`; при `status` — лиды, продажи, отклонённые и их CR; при `uniq` — уники, при `bot` — боты. Список берётся из `hidden` ответа `GET /api/me`. Описание — в [Роли](roles.md#интерфейс).
+Интерфейс дополнительно прячет столбцы: при `profit` — `revenue`, `profit`, `roi`, `epc`, `uepc`, `epv`, `payout`, `depsum`; при `cost` — `cost`, `spend`, `cpc`, `cpa`, `cpm`, а также `roi` и `profit`; при `status` — лиды, продажи, отклонённые и их CR; при `uniq` — уники, при `bot` — боты. Список берётся из `hidden` ответа `GET /api/me`. Описание — в [Роли](roles.md#интерфейс).
 
 ## Страница «Пользователи»
 

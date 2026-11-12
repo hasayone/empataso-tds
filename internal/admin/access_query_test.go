@@ -276,6 +276,7 @@ func TestExpandHiddenAddsDerivedFields(t *testing.T) {
 		"browser": {"browser_ver"},
 		"brand":   {"device_model"},
 		"device":  {"device_model"},
+		"profit":  {"depsum"},
 	}
 	for parent, children := range cases {
 		hidden := expandHidden([]string{parent})

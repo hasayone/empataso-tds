@@ -37,6 +37,10 @@ type CH struct {
 	// Writes and the journal name the column only after ensureSchema has seen
 	// it, otherwise the whole insert or select fails.
 	modelEvents, modelConv bool
+	// depsumConv: conversions carry depsum, the deposit. Writes and sums name
+	// the column only after ensureSchema has seen it, otherwise the insert or
+	// select fails. It is not the payout column.
+	depsumConv bool
 	// stepEvents: events carry step (0 first step, 1 the /offer step). Writes
 	// name the column, and campaign unique counts filter on it, only after
 	// ensureSchema has seen it.
@@ -273,6 +277,8 @@ type PerfRow struct {
 	Bots    int64   `json:"bots"`
 	Conv    int64   `json:"conv"`
 	Profit  float64 `json:"profit"`
+	// DepSum is the sum of deposits. It is not the payout in Profit.
+	DepSum float64 `json:"depsum"`
 	// Forwarded — visits this stream handed to another group (type "group").
 	// They are logged under the group that served them; here they are added
 	// to Hits/Unique/Bots of the stream that sent them on, so a flow's
@@ -348,7 +354,7 @@ func (c *CH) performance(ctx context.Context, w window) ([]PerfRow, error) {
 			return nil, err
 		}
 	}
-	pbSQL, pbArgs := performanceConvSQL(w.from, w.to, w.where, w.args, c.extConv)
+	pbSQL, pbArgs := performanceConvSQL(w.from, w.to, w.where, w.args, c.extConv, c.depsumConv)
 	pbs, err := c.conn.Query(ctx, pbSQL, append([]any{w.from, w.to}, pbArgs...)...)
 	if err != nil {
 		return nil, err
@@ -357,13 +363,14 @@ func (c *CH) performance(ctx context.Context, w window) ([]PerfRow, error) {
 	for pbs.Next() {
 		var groupID, group, stream string
 		var conv uint64
-		var profit float64
-		if err := pbs.Scan(&groupID, &group, &stream, &conv, &profit); err != nil {
+		var profit, dep float64
+		if err := pbs.Scan(&groupID, &group, &stream, &conv, &profit, &dep); err != nil {
 			return nil, err
 		}
 		i := idx.at(&out, groupID, group, stream)
 		out[i].Conv += int64(conv)
 		out[i].Profit += profit
+		out[i].DepSum += dep
 	}
 	return out, pbs.Err()
 }
@@ -373,21 +380,27 @@ func (c *CH) performance(ctx context.Context, w window) ([]PerfRow, error) {
 // haveGroupID is true when conversions carry group_id (the ext wave).
 // Postbacks have no such column, so that branch selects an empty group_id.
 // Without the column both branches select an empty group_id and the row shape stays one.
-// extraArgs follow the outer from and to: when where is set, subquery from, to
-// and wargs. It does not fail.
-func performanceConvSQL(from, to time.Time, where string, wargs []any, haveGroupID bool) (sql string, extraArgs []any) {
+// haveDep is true when conversions carry depsum. Postbacks always select a typed
+// zero. A closed wave selects a typed zero on conversions too and does not name
+// the column. extraArgs follow the outer from and to: when where is set, subquery
+// from, to and wargs. It does not fail.
+func performanceConvSQL(from, to time.Time, where string, wargs []any, haveGroupID, haveDep bool) (sql string, extraArgs []any) {
 	convID := "'' AS group_id"
 	if haveGroupID {
 		convID = "group_id"
 	}
+	convDep := "toFloat64(0) AS depsum"
+	if haveDep {
+		convDep = "depsum"
+	}
 	if where != "" {
 		extraArgs = append([]any{from, to}, wargs...)
 	}
-	sql = `SELECT group_id, group_name, stream_name, count() AS conv, sum(profit) AS profit
+	sql = `SELECT group_id, group_name, stream_name, count() AS conv, sum(profit) AS profit, sum(depsum) AS depsum
 		 FROM (
-		   SELECT '' AS group_id, group_name, stream_name, profit, ts, cid, '' AS status FROM postbacks
+		   SELECT '' AS group_id, group_name, stream_name, profit, toFloat64(0) AS depsum, ts, cid, '' AS status FROM postbacks
 		   UNION ALL
-		   SELECT ` + convID + `, group_name, stream_name, profit, ts, cid, status FROM conversions FINAL
+		   SELECT ` + convID + `, group_name, stream_name, profit, ` + convDep + `, ts, cid, status FROM conversions FINAL
 		 ) WHERE ts >= ? AND ts < ?` + voidedConfirmedSQL("cid", "status")
 	if where != "" {
 		sql += eventsCidInSQL(where)

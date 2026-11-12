@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
@@ -39,6 +40,47 @@ func TestParsePostbackAliases(t *testing.T) {
 	in = parsePostback(url.Values{"cid": {"C"}, "goal": {"rejected"}, "sum": {"2"}})
 	if in.cid != "C" || in.status != "rejected" || in.profit != 2 {
 		t.Fatalf("cid/goal/sum, got %q %q %v", in.cid, in.status, in.profit)
+	}
+}
+
+func TestParsePostbackDepSum(t *testing.T) {
+	in := parsePostback(url.Values{"subid": {"A"}, "payout": {"4"}, "DepSum": {"2.5"}, "depsum": {"9"}})
+	if !in.ok || in.profit != 4 || in.depSum != 2.5 {
+		t.Fatalf("deposit is separate from payout: %+v", in)
+	}
+	in = parsePostback(url.Values{"subid": {"A"}, "payout": {"1"}, "depsum": {"8"}})
+	if !in.ok || in.profit != 1 || in.depSum != 8 {
+		t.Fatalf("depsum: %+v", in)
+	}
+	in = parsePostback(url.Values{"subid": {"A"}, "payout": {"3"}})
+	if !in.ok || in.profit != 3 || in.depSum != 0 {
+		t.Fatalf("empty deposit: %+v", in)
+	}
+	if parsePostback(url.Values{"subid": {"A"}, "payout": {"3"}, "DepSum": {"NaN"}}).ok {
+		t.Fatal("deposit NaN accepted")
+	}
+	if parsePostback(url.Values{"depsum": {"Inf"}}).ok {
+		t.Fatal("deposit Inf accepted")
+	}
+	if parsePostback(url.Values{"DepSum": {"+Inf"}, "payout": {"1"}}).ok {
+		t.Fatal("deposit +Inf accepted")
+	}
+}
+
+func TestLegacyPixelDoesNotReadDepSum(t *testing.T) {
+	raw, err := os.ReadFile("handler.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	i := strings.Index(body, `if pb := r.URL.Query().Get("pb")`)
+	j := strings.Index(body, "API-client mode")
+	if i < 0 || j < i {
+		t.Fatal("pixel block not found")
+	}
+	block := body[i:j]
+	if strings.Contains(block, "DepSum") || strings.Contains(block, "depsum") || strings.Contains(block, "parsePostback") {
+		t.Fatalf("legacy pixel reads the deposit:\n%s", block)
 	}
 }
 

@@ -29,6 +29,8 @@ type SliceRow struct {
 	Bots      int64   `json:"bots"`
 	Conv      int64   `json:"conv"`
 	Profit    float64 `json:"profit"`
+	// DepSum is the sum of deposits. It is not the payout in Profit.
+	DepSum float64 `json:"depsum"`
 }
 
 // Slice groups visits for the report page.
@@ -126,8 +128,8 @@ func (c *CH) SliceMeta(ctx context.Context, from, to time.Time, conds []Cond) ([
 	for pbs.Next() {
 		var group, stream, country, offerID, sourceID string
 		var conv uint64
-		var profit float64
-		if err := pbs.Scan(&group, &stream, &country, &offerID, &sourceID, &conv, &profit); err != nil {
+		var profit, dep float64
+		if err := pbs.Scan(&group, &stream, &country, &offerID, &sourceID, &conv, &profit, &dep); err != nil {
 			return out, truncated, nil
 		}
 		i, ok := index[key{group, stream, country, offerID, sourceID}]
@@ -135,7 +137,7 @@ func (c *CH) SliceMeta(ctx context.Context, from, to time.Time, conds []Cond) ([
 			i = len(out)
 			out = append(out, SliceRow{Group: group, Stream: stream, Country: country, Offer: offerID, Source: sourceID})
 		}
-		out[i].Conv, out[i].Profit = int64(conv), profit
+		out[i].Conv, out[i].Profit, out[i].DepSum = int64(conv), profit, dep
 	}
 	if out == nil {
 		out = []SliceRow{}
@@ -176,20 +178,25 @@ func sliceEventsSQL(clickCols bool, uniq, first, evSQL string) string {
 // sees every conversions column, including ones the postbacks table lacks.
 // cvSQL is the extra AND fragment from buildWhere, or empty.
 // The payout sum is named profit_sum so a profit filter stays the column.
-// The string is a full SELECT. It does not fail.
+// The deposit sum is named depsum_sum. A closed wave uses a typed zero and
+// does not name the column. The string is a full SELECT. It does not fail.
 func sliceConvSQL(c *CH, cvSQL string) string {
 	offer, source, extra := "''", "''", ""
 	click, ext, model, origin := false, false, false, false
+	depSum := "toFloat64(0) AS depsum_sum"
 	if c != nil {
 		click, ext, model, origin = c.clickCols, c.extConv, c.modelConv, c.originConv.Load()
 		if c.clickCols {
 			offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
 		}
+		if c.depsumConv {
+			depSum = "sum(depsum) AS depsum_sum"
+		}
 	}
-	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, count() AS conv, sum(profit) AS profit_sum
+	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, count() AS conv, sum(profit) AS profit_sum, %s
 		FROM (
 		%s
 		) WHERE ts >= ? AND ts < ?%s%s
 		GROUP BY group_name, stream_name, country%s`,
-		offer, source, conversionUnion(click, ext, model, origin, c != nil && c.subConv), voidedConfirmedSQL("cid", "status"), cvSQL, extra)
+		offer, source, depSum, conversionUnion(click, ext, model, origin, c != nil && c.subConv, c != nil && c.depsumConv), voidedConfirmedSQL("cid", "status"), cvSQL, extra)
 }
