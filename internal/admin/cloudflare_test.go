@@ -42,6 +42,9 @@ type fakeCF struct {
 	// fail maps "METHOD /path" to the message of an error answer.
 	fail   map[string]string
 	nextID int
+	// onDNSPost runs once, without the lock, before the first DNS record is stored.
+	// A nil hook does nothing. The hook may block so a test can overlap a second request.
+	onDNSPost func()
 }
 
 func newFakeCF(t *testing.T) *fakeCF {
@@ -117,6 +120,13 @@ func (f *fakeCF) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		f.reply(w, http.StatusOK, true, out, len(out))
 	case len(parts) == 3 && parts[2] == "dns_records" && r.Method == http.MethodPost:
+		if f.onDNSPost != nil {
+			hook := f.onDNSPost
+			f.onDNSPost = nil
+			f.mu.Unlock()
+			hook()
+			f.mu.Lock()
+		}
 		f.nextID++
 		rec := cfRecord{ID: fmt.Sprintf("rec%03d", f.nextID), Type: fmt.Sprint(body["type"]), Name: fmt.Sprint(body["name"]), Content: fmt.Sprint(body["content"]), Proxied: body["proxied"] == true}
 		f.records[parts[1]] = append(f.records[parts[1]], rec)

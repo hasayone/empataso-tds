@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -153,30 +152,28 @@ func TestHandleDomainAdminDNSParallel(t *testing.T) {
 	e.configureCF(t)
 	e.seed(t, config.Domain{ID: "1", Host: "a.com", Role: "admin", CfZoneID: "zone001", CfStatus: cfStatusActive})
 	e.cf.zones = []*cfZone{{ID: "zone001", Name: "a.com", Status: cfStatusActive}}
-	var wg sync.WaitGroup
-	results := make([]int, 2)
-	for i := 0; i < 2; i++ {
-		wg.Add(1)
-		go func(n int) {
-			defer wg.Done()
-			code, _ := e.do(t, http.MethodPost, "/api/domains/1/admin-dns", nil)
-			results[n] = code
-		}(i)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	e.cf.onDNSPost = func() {
+		close(entered)
+		<-release
 	}
-	wg.Wait()
-	ok, conflict := 0, 0
-	for _, code := range results {
-		switch code {
-		case http.StatusOK:
-			ok++
-		case http.StatusConflict:
-			conflict++
-		default:
-			t.Fatalf("codes %v", results)
-		}
+	var first int
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		first, _ = e.do(t, http.MethodPost, "/api/domains/1/admin-dns", nil)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("first request did not reach cloudflare")
 	}
-	if ok != 1 || conflict != 1 {
-		t.Fatalf("codes %v", results)
+	second, _ := e.do(t, http.MethodPost, "/api/domains/1/admin-dns", nil)
+	close(release)
+	<-done
+	if first != http.StatusOK || second != http.StatusConflict {
+		t.Fatalf("first %d second %d", first, second)
 	}
 }
 
