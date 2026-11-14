@@ -125,7 +125,25 @@ ensure_env_key_nonempty() {
 	chmod "$mode" "$file"
 }
 
+# Public IPv4: KUZTDS_PUBLIC_IP when it is set, otherwise curl -4.
+# Prints the address. Returns 1 when the value is missing or not an IPv4 address.
+# curl's failure is not printed. A non-address from curl does not count as success.
+edge_public_ipv4() {
+	local ip=
+	if [[ -n "${KUZTDS_PUBLIC_IP:-}" ]]; then
+		ip=$KUZTDS_PUBLIC_IP
+	elif command -v curl >/dev/null 2>&1; then
+		ip=$(curl -fsS --max-time 15 -4 https://ifconfig.me/ip 2>/dev/null || true)
+	fi
+	if [[ -z "$ip" ]] || ! valid_ipv4 "$ip"; then
+		return 1
+	fi
+	printf '%s' "$ip"
+}
+
 # Ensure KUZTDS_PUBLIC_IP and KUZTDS_TRUSTED_PROXIES in server.env.
+# An empty public address is filled from the environment, the argument, or curl.
+# A non-empty address is left as it is.
 ensure_server_env_keys() {
 	local public_arg=${1:-} ip tp
 	if [[ ! -f "$EDGE_SERVER_ENV" ]]; then
@@ -138,7 +156,7 @@ ensure_server_env_keys() {
 			ip=$KUZTDS_PUBLIC_IP
 		elif [[ -n "$public_arg" ]]; then
 			ip=$public_arg
-		else
+		elif ! ip=$(edge_public_ipv4); then
 			edge_msg "задайте KUZTDS_PUBLIC_IP в ${EDGE_SERVER_ENV}, переменной окружения или аргументом" >&2
 			return 1
 		fi
@@ -146,7 +164,7 @@ ensure_server_env_keys() {
 			edge_msg "KUZTDS_PUBLIC_IP должен быть IPv4: ${ip}" >&2
 			return 1
 		fi
-		append_env_if_missing "$EDGE_SERVER_ENV" KUZTDS_PUBLIC_IP "$ip"
+		ensure_env_key_nonempty "$EDGE_SERVER_ENV" KUZTDS_PUBLIC_IP "$ip"
 	fi
 	if ! valid_ipv4 "$ip"; then
 		edge_msg "KUZTDS_PUBLIC_IP должен быть IPv4: ${ip}" >&2

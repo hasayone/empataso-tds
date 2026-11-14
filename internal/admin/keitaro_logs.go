@@ -203,13 +203,14 @@ func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImp
 			*losses = append(*losses, ktimport.Loss{Kind: "skipped", Ref: "conversions", Detail: "clickhouse unavailable"})
 		} else {
 			span := logSpan{from: li.from, to: li.to, host: li.host, place: place}
-			n, maxTS, err := s.importConversions(ctx, client, span, clickIdx, opts.syncMode, skip)
+			n, maxTS, odd, err := s.importConversions(ctx, client, span, clickIdx, opts.syncMode, skip)
 			if err != nil {
 				return stats, err
 			}
 			counts["conversions"] = n
 			stats.maxConv = maxTS
 			noteExtendedColumns(losses, client, "conversions")
+			noteOddConversionStatuses(losses, odd)
 		}
 	}
 	return stats, nil
@@ -268,6 +269,34 @@ func noteExtendedColumns(losses *[]ktimport.Loss, client *ktimport.Client, ref s
 	*losses = append(*losses, ktimport.Loss{Kind: "approximated", Ref: ref, Detail: "расширенные колонки недоступны"})
 }
 
+// noteOddConversionStatuses records conversions whose status is outside the known set.
+// losses receives one line when n is positive. n is the count from importConversions.
+// The detail names the allowed statuses and the count. A zero count adds nothing.
+// It does not return an error.
+func noteOddConversionStatuses(losses *[]ktimport.Loss, n int) {
+	if losses == nil || n <= 0 {
+		return
+	}
+	*losses = append(*losses, ktimport.Loss{
+		Kind:   "approximated",
+		Ref:    "conversions",
+		Detail: fmt.Sprintf("статус конверсии не из списка lead, sale, rejected, registration, deposit, rebill: %d", n),
+	})
+}
+
+// oddConversionStatus reports whether a conversion status is outside the imported set.
+// status is the raw tracker status. It is trimmed and lowercased. The argument is not changed.
+// It returns false for an empty status and for lead, sale, rejected, registration, deposit and rebill.
+// It returns true for any other non-empty status. It does not return an error.
+func oddConversionStatus(status string) bool {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "", "lead", "sale", "rejected", "registration", "deposit", "rebill":
+		return false
+	default:
+		return true
+	}
+}
+
 // listKeitaroGroups reads the groups used to name one log import.
 // It returns the current list. A nil store returns a nil slice and no error.
 // An error comes from the groups store.
@@ -283,11 +312,17 @@ func (s *Server) listKeitaroGroups(ctx context.Context) ([]config.Group, error) 
 // span carries the tracker range, domain host and group mapping for each row.
 // clickIdx maps sub_id to click metadata from an earlier importClicks in the same run;
 // it may be nil when conversions import alone.
-// It returns how many rows were read. An error comes from the tracker or the warehouse.
-func (s *Server) importConversions(ctx context.Context, client *ktimport.Client, span logSpan, clickIdx keitaroClickFillIndex, syncMode bool, skip *logSkipTally) (int, time.Time, error) {
+// It returns how many rows were read, the latest timestamp, and how many rows had a
+// non-empty status outside lead, sale, rejected, registration, deposit and rebill.
+// An error comes from the tracker or the warehouse. The row status is not rewritten.
+func (s *Server) importConversions(ctx context.Context, client *ktimport.Client, span logSpan, clickIdx keitaroClickFillIndex, syncMode bool, skip *logSkipTally) (int, time.Time, int, error) {
 	var batch []store.ConversionInsert
 	var maxTS time.Time
+	var odd int
 	n, err := client.FetchConversions(ctx, span.from, span.to, func(row ktimport.ConversionRow) error {
+		if oddConversionStatus(row.Status) {
+			odd++
+		}
 		var snap *store.ClickFill
 		if clickIdx != nil {
 			if fill, ok := clickIdx[row.SubID]; ok {
@@ -314,16 +349,16 @@ func (s *Server) importConversions(ctx context.Context, client *ktimport.Client,
 		return s.cfg.Warehouse.InsertConversions(ctx, cp)
 	})
 	if err != nil {
-		return n, maxTS, err
+		return n, maxTS, odd, err
 	}
 	if len(batch) == 0 {
-		return n, maxTS, nil
+		return n, maxTS, odd, nil
 	}
 	cp := append([]store.ConversionInsert(nil), batch...)
 	if err := s.cfg.Warehouse.InsertConversions(ctx, cp); err != nil {
-		return n, maxTS, err
+		return n, maxTS, odd, err
 	}
-	return n, maxTS, nil
+	return n, maxTS, odd, nil
 }
 
 // importClicks reads the click log and writes batches of 1000.

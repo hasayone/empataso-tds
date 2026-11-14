@@ -17,7 +17,7 @@ var allowedBoardIcons = map[string]struct{}{
 	"lists": {}, "tools": {}, "automation": {}, "networks": {}, "sources": {}, "offers": {},
 	"landings": {}, "domains": {}, "report": {}, "settings": {}, "logout": {}, "sun": {}, "moon": {},
 	"plus": {}, "upload": {}, "x": {}, "check": {}, "back": {}, "arrow": {}, "down": {}, "download": {},
-	"link": {}, "copy": {}, "edit": {}, "grip": {}, "more": {}, "play": {}, "trash": {}, "dup": {},
+	"link": {}, "copy": {}, "edit": {}, "grip": {}, "more": {}, "play": {}, "pause": {}, "trash": {}, "dup": {},
 	"move": {}, "target": {}, "bot": {}, "send": {}, "refresh": {}, "table": {}, "cards": {}, "alert": {},
 	"calendar": {}, "board": {}, "click": {}, "user": {}, "mail": {}, "trendup": {}, "trenddown": {},
 	"banknote": {}, "percent": {}, "chart": {}, "expand": {}, "collapse": {},

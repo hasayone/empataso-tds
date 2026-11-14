@@ -29,6 +29,8 @@ type keitaroRemoved struct {
 
 // handleKeitaroPurge removes catalogs, files and warehouse rows listed in the manifest.
 // An empty manifest returns zeros and does not read or write anything else.
+// The global sync cursor is removed only after the global manifest is saved empty.
+// Per-board sync files and manifests are left as they are.
 // The warehouse host is the manifest host exactly as recorded, because that is the text the
 // import wrote into the domain column, or the lower-case tracker hostname when that is empty.
 // Landing directories named in the manifest are removed after the warehouse.
@@ -44,9 +46,6 @@ func (s *Server) handleKeitaroPurge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer s.ktJob.endPurge()
-	for _, path := range s.keitaroSyncPaths() {
-		removeKeitaroSyncFile(path)
-	}
 	creds := s.keitaroCreds()
 	manifest, err := s.loadManifest()
 	if err != nil {
@@ -94,6 +93,7 @@ func (s *Server) handleKeitaroPurge(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusInternalServerError, "save error")
 			return
 		}
+		removeKeitaroSyncFile(s.cfg.KeitaroSyncFile)
 	}
 	s.logPurge(removed)
 	writeJSON(w, http.StatusOK, map[string]any{"removed": removed})
@@ -243,7 +243,7 @@ func purgeCatalog[T any](ctx context.Context, store *JSONStore[T], idOf func(T) 
 // purgeImportedLists removes .dat files named in the manifest.
 // imported is true for those file names. A nil func removes nothing.
 // It returns how many files were removed. A nil lists store removes nothing.
-// Names errors are ignored. Delete returns an error when a file cannot be removed.
+// A Names or Delete error is returned so the manifest is not cleared.
 func (s *Server) purgeImportedLists(imported func(string) bool) (int, error) {
 	if s.cfg.Lists == nil {
 		return 0, nil
@@ -251,7 +251,10 @@ func (s *Server) purgeImportedLists(imported func(string) bool) (int, error) {
 	if imported == nil {
 		imported = func(string) bool { return false }
 	}
-	names, _ := s.cfg.Lists.Names()
+	names, err := s.cfg.Lists.Names()
+	if err != nil {
+		return 0, err
+	}
 	n := 0
 	for _, name := range names {
 		if !imported(name) {
@@ -268,7 +271,7 @@ func (s *Server) purgeImportedLists(imported func(string) bool) (int, error) {
 // purgeImportedPages removes HTML files named in the manifest.
 // imported is true for those file names. A nil func removes nothing.
 // It returns how many files were removed. A nil pages store removes nothing.
-// Names errors are ignored. Delete returns an error when a file cannot be removed.
+// A Names or Delete error is returned so the manifest is not cleared.
 func (s *Server) purgeImportedPages(imported func(string) bool) (int, error) {
 	if s.cfg.Pages == nil {
 		return 0, nil
@@ -276,7 +279,10 @@ func (s *Server) purgeImportedPages(imported func(string) bool) (int, error) {
 	if imported == nil {
 		imported = func(string) bool { return false }
 	}
-	names, _ := s.cfg.Pages.Names()
+	names, err := s.cfg.Pages.Names()
+	if err != nil {
+		return 0, err
+	}
 	n := 0
 	for _, info := range names {
 		if !imported(info.Name) {

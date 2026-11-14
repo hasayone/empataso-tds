@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -469,6 +470,69 @@ func TestKeitaroPurgeRemovesSyncFileEarly(t *testing.T) {
 		t.Fatalf("sync file still present: %v", err)
 	}
 }
+
+func TestKeitaroPurgeEmptyManifestKeepsSyncFile(t *testing.T) {
+	dir := t.TempDir()
+	syncPath := filepath.Join(dir, "keitaro-sync.json")
+	if err := os.WriteFile(syncPath, []byte("{}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, admin := newKeitaroServers(t, "http://tracker.example", "key", nil, nil, &keitaroFiles{dir: dir})
+	s.cfg.KeitaroSyncFile = syncPath
+	if _, code := keitaroPOST(t, admin, "/api/keitaro/purge", map[string]any{}); code != http.StatusOK {
+		t.Fatalf("purge %d", code)
+	}
+	if _, err := os.Stat(syncPath); err != nil {
+		t.Fatalf("sync file: %v", err)
+	}
+}
+
+func TestKeitaroPurgeLeavesBoardSyncFile(t *testing.T) {
+	dir := t.TempDir()
+	syncPath := filepath.Join(dir, "keitaro-sync.json")
+	boardPath := filepath.Join(dir, "keitaro-sync-seo.json")
+	for _, path := range []string{syncPath, boardPath} {
+		if err := os.WriteFile(path, []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, admin := newKeitaroServers(t, "http://tracker.example", "key", nil, nil, &keitaroFiles{dir: dir})
+	s.cfg.KeitaroSyncFile = syncPath
+	if err := s.cfg.Manifest.Save(ktimport.Manifest{Host: "tracker.example", Campaigns: map[string]string{"1": "g1"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, code := keitaroPOST(t, admin, "/api/keitaro/purge", map[string]any{}); code != http.StatusOK {
+		t.Fatalf("purge %d", code)
+	}
+	if _, err := os.Stat(syncPath); !os.IsNotExist(err) {
+		t.Fatalf("global sync: %v", err)
+	}
+	if _, err := os.Stat(boardPath); err != nil {
+		t.Fatalf("board sync: %v", err)
+	}
+}
+
+func TestKeitaroPurgeNamesErrorKeepsManifest(t *testing.T) {
+	s, admin := newKeitaroServers(t, "http://tracker.example", "key", nil, nil, nil)
+	if err := s.cfg.Manifest.Save(ktimport.Manifest{Host: "tracker.example", Campaigns: map[string]string{"1": "g1"}}); err != nil {
+		t.Fatal(err)
+	}
+	s.cfg.Lists = errNamesLists{}
+	if _, code := keitaroPOST(t, admin, "/api/keitaro/purge", map[string]any{}); code != http.StatusInternalServerError {
+		t.Fatalf("purge %d", code)
+	}
+	manifest, err := s.cfg.Manifest.Load()
+	if err != nil || manifest.Empty() || manifest.Campaigns["1"] != "g1" {
+		t.Fatalf("manifest %+v err %v", manifest, err)
+	}
+}
+
+type errNamesLists struct{}
+
+func (errNamesLists) Names() ([]string, error)    { return nil, errors.New("lists unreadable") }
+func (errNamesLists) Read(string) (string, error) { return "", os.ErrNotExist }
+func (errNamesLists) Write(string, string) error  { return nil }
+func (errNamesLists) Delete(string) error         { return nil }
 
 func TestManualImportClickCounts(t *testing.T) {
 	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)

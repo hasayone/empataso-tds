@@ -47,8 +47,9 @@ func (s *Server) handleKeitaroStatus(w http.ResponseWriter, r *http.Request) {
 
 // handleKeitaroCheck counts campaigns on the tracker.
 // It returns 503 when the origin or key is empty.
-// On success it returns ok and the campaign count. A tracker error is 502.
-// The key is removed from the error text.
+// On success it returns ok, the campaign count, api "v1" and an empty product_version.
+// A tracker error is 502. Error bodies omit api and product_version.
+// The key is removed from the error text. The settings file is not written.
 func (s *Server) handleKeitaroCheck(w http.ResponseWriter, r *http.Request) {
 	creds := s.keitaroCreds()
 	if !creds.configured() {
@@ -62,7 +63,9 @@ func (s *Server) handleKeitaroCheck(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadGateway, sanitize(err, creds.Key))
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "campaigns": n})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok": true, "campaigns": n, "api": "v1", "product_version": "",
+	})
 }
 
 // needsTracker reports whether the request has to call the tracker.

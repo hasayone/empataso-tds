@@ -13,17 +13,17 @@ ensure_state_dirs() {
 
 # Назначение: заполнить KUZTDS_ADMIN_PASSWORD_HASH argon2id-хэшем пароля админки.
 # Параметры: нет. Читает KUZTDS_ADMIN_PASSWORD и KUZTDS_ADMIN_PASSWORD_HASH.
-# Результат: экспортирован KUZTDS_ADMIN_PASSWORD_HASH, пароль убран из окружения; код 0.
-# Ошибки: оба значения пусты — выход 1; kuztds-admin -hash завершился с ошибкой
-# или вернул пустой вывод — выход 1. Пароль и хэш в сообщения не попадают.
+# Результат: хэш экспортирован и пароль убран из окружения, код 0.
+# Пустые пароль и хэш тоже код 0: первый вход задаёт их формой, процесс стартует без хэша.
+# Ошибки: kuztds-admin -hash завершился с ошибкой или вернул пустой вывод — выход 1.
+# Пароль и хэш в сообщения не попадают.
 prepare_admin_hash() {
     if [ -n "${KUZTDS_ADMIN_PASSWORD_HASH:-}" ]; then
         unset KUZTDS_ADMIN_PASSWORD
         return 0
     fi
     if [ -z "${KUZTDS_ADMIN_PASSWORD:-}" ]; then
-        echo "kuztds-entrypoint: задайте KUZTDS_ADMIN_PASSWORD или KUZTDS_ADMIN_PASSWORD_HASH" >&2
-        exit 1
+        return 0
     fi
     hash=$(/usr/local/bin/kuztds-admin -hash "$KUZTDS_ADMIN_PASSWORD") || {
         echo "kuztds-entrypoint: не удалось посчитать хэш пароля админки" >&2

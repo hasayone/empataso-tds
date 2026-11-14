@@ -323,6 +323,142 @@ func TestApplyEdgeSourceSafeGlobals(t *testing.T) {
 	}
 }
 
+// edgeEnvWithoutPublicIP is the process environment without KUZTDS_PUBLIC_IP, plus extra.
+// extra entries are appended as-is. The host value must not satisfy an empty server.env.
+func edgeEnvWithoutPublicIP(extra ...string) []string {
+	out := make([]string, 0, len(os.Environ())+len(extra))
+	for _, e := range os.Environ() {
+		if strings.HasPrefix(e, "KUZTDS_PUBLIC_IP=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return append(out, extra...)
+}
+
+// writeFakeCurl puts an executable curl on dir that prints body and ignores arguments.
+// The test uses it instead of the network. It returns dir, which belongs at the front of PATH.
+func writeFakeCurl(t *testing.T, dir, body string) string {
+	t.Helper()
+	script := "#!/bin/sh\nprintf '%s\\n' '" + body + "'\n"
+	if err := os.WriteFile(filepath.Join(dir, "curl"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// TestApplyEdgeFillsEmptyPublicIP читает пустой KUZTDS_PUBLIC_IP через curl из PATH, без сети.
+func TestApplyEdgeFillsEmptyPublicIP(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash не найден в PATH")
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	tmpEnv := filepath.Join(tmp, "server.env")
+	content := "KUZTDS_TRUSTED_PROXIES=172.18.0.1/32\nKUZTDS_ADMIN_TRUSTED_PROXIES=172.18.0.1/32\nKUZTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080\n"
+	if err := os.WriteFile(tmpEnv, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	curlDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(curlDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeCurl(t, curlDir, "198.51.100.20")
+	cmd := exec.Command(bash, filepath.Join(dir, "apply-edge.sh"), "--check")
+	cmd.Dir = dir
+	cmd.Env = edgeEnvWithoutPublicIP("KUZTDS_SERVER_ENV="+tmpEnv, "PATH="+curlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("--check: %v\n%s", err, out)
+	}
+	after, err := os.ReadFile(tmpEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(after), "KUZTDS_PUBLIC_IP=198.51.100.20") {
+		t.Fatalf("пустой адрес не записан:\n%s", after)
+	}
+}
+
+// TestApplyEdgeKeepsSetPublicIP не заменяет уже заданный адрес ответом curl.
+func TestApplyEdgeKeepsSetPublicIP(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash не найден в PATH")
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	tmpEnv := filepath.Join(tmp, "server.env")
+	content := "KUZTDS_PUBLIC_IP=203.0.113.55\nKUZTDS_TRUSTED_PROXIES=172.18.0.1/32\nKUZTDS_ADMIN_TRUSTED_PROXIES=172.18.0.1/32\nKUZTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080\n"
+	if err := os.WriteFile(tmpEnv, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	curlDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(curlDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeCurl(t, curlDir, "198.51.100.8")
+	cmd := exec.Command(bash, filepath.Join(dir, "apply-edge.sh"), "--check")
+	cmd.Dir = dir
+	cmd.Env = edgeEnvWithoutPublicIP("KUZTDS_SERVER_ENV="+tmpEnv, "PATH="+curlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("--check: %v\n%s", err, out)
+	}
+	after, err := os.ReadFile(tmpEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterS := string(after)
+	if !strings.Contains(afterS, "KUZTDS_PUBLIC_IP=203.0.113.55") || strings.Contains(afterS, "198.51.100.8") {
+		t.Fatalf("заданный адрес изменился:\n%s", afterS)
+	}
+}
+
+// TestApplyEdgeRejectsBadPublicIP не пишет в файл ответ curl, который не является IPv4.
+func TestApplyEdgeRejectsBadPublicIP(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash не найден в PATH")
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tmp := t.TempDir()
+	tmpEnv := filepath.Join(tmp, "server.env")
+	content := "KUZTDS_TRUSTED_PROXIES=172.18.0.1/32\nKUZTDS_ADMIN_TRUSTED_PROXIES=172.18.0.1/32\nKUZTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080\n"
+	if err := os.WriteFile(tmpEnv, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	curlDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(curlDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeCurl(t, curlDir, "nope")
+	cmd := exec.Command(bash, filepath.Join(dir, "apply-edge.sh"), "--check")
+	cmd.Dir = dir
+	cmd.Env = edgeEnvWithoutPublicIP("KUZTDS_SERVER_ENV="+tmpEnv, "PATH="+curlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("--check должен завершиться с ошибкой:\n%s", out)
+	}
+	after, err := os.ReadFile(tmpEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(after), "KUZTDS_PUBLIC_IP=") || strings.Contains(string(after), "nope") {
+		t.Fatalf("мусор попал в файл:\n%s", after)
+	}
+}
+
 // TestComposeEdgeEnv проверяет проброс KUZTDS_PUBLIC_IP и KUZTDS_TRUSTED_PROXIES в compose.
 func TestComposeEdgeEnv(t *testing.T) {
 	data, err := os.ReadFile("docker-compose.app.yml")

@@ -599,6 +599,55 @@ func TestKeitaroHostIsLowerCase(t *testing.T) {
 	}
 }
 
+// TestKeitaroSettingsPutKeepsConnectionList checks a list file keeps every connection and board_id.
+func TestKeitaroSettingsPutKeepsConnectionList(t *testing.T) {
+	hash, err := security.HashPassword("p@ss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	file := filepath.Join(dir, "keitaro.json")
+	body := `[{"base_url":"https://a.example/admin","api_key":"k1","board_id":"seo"},{"base_url":"https://b.example/admin","api_key":"k2","board_id":"buy"}]`
+	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{
+		AdminUser: "admin", PasswordHash: hash,
+		Sessions: security.NewMemoryStore(), Stats: fakeStats{},
+		Groups: &memGroups{}, Limiter: allowAll{}, SessionTTL: time.Hour,
+		Networks:    NewJSONStore[config.AffiliateNetwork](filepath.Join(dir, "networks.json")),
+		Manifest:    NewFileManifest(filepath.Join(dir, "keitaro-import.json")),
+		KeitaroFile: file,
+		APIKeysFile: filepath.Join(dir, "api-keys.json"),
+		UsersFile:   filepath.Join(dir, "users.json"),
+		Log:         noopLog{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	e := settingsEnv{s: s, srv: srv, dir: dir, file: file}
+	code, raw := e.do(t, http.MethodPut, "/api/keitaro/settings", map[string]string{"base_url": "https://a.example/admin", "api_key": "k9"})
+	if code != http.StatusOK {
+		t.Fatalf("put %d %s", code, raw)
+	}
+	saved, err := os.ReadFile(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entries []keitaroFileEntry
+	if err := json.Unmarshal(saved, &entries); err != nil {
+		t.Fatalf("file %s: %v", saved, err)
+	}
+	if len(entries) != 2 || entries[0].BoardID != "seo" || entries[0].APIKey != "k9" || entries[0].BaseURL != "https://a.example/admin" {
+		t.Fatalf("first %+v", entries)
+	}
+	if entries[1].BoardID != "buy" || entries[1].APIKey != "k2" || entries[1].BaseURL != "https://b.example/admin" {
+		t.Fatalf("second %+v", entries)
+	}
+}
+
 // TestPurgeUsesRecordedManifestHost checks purge removes the warehouse rows under the host exactly as the import recorded it.
 func TestPurgeUsesRecordedManifestHost(t *testing.T) {
 	sink := &fakeSink{}

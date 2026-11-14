@@ -537,10 +537,10 @@ func TestFlowsFolderField(t *testing.T) {
 func TestFlowsEPCDefault(t *testing.T) {
 	html := spaSource()
 	cat := spaFunctionLine(html, "colCatalog")
-	sum := spaFunctionLine(html, "paintFlowSum")
+	sum := spaFunctionLine(html, "paintMetricSum")
 	cell := spaFunctionLine(html, "flowMetricCell")
 	if cat == "" || sum == "" || cell == "" {
-		t.Fatal("colCatalog, paintFlowSum or flowMetricCell not found in SPA")
+		t.Fatal("colCatalog, paintMetricSum or flowMetricCell not found in SPA")
 	}
 	must(t, cat, "['epc','col.epc',1]", "flows catalog turns EPC on")
 	must(t, cat, "['uepc','col.uepc',0]", "flows catalog turns uEPC off")
@@ -863,9 +863,13 @@ func TestKeitaroPage(t *testing.T) {
 		`id="kt-conversions"`,
 		`id="kt-from"`,
 		"kt.col.count",
+		`id="kt-api"`,
+		`tr('kt.api')`,
 	} {
 		must(t, src, needle, "keitaro page")
 	}
+	mustNot(t, src, "Admin API v1", "the api hint is only the translation")
+	mustNot(t, src, "textContent='kt.api'", "the translation key is not the hint text")
 	typesAt := strings.Index(html, "const TYPES=")
 	if typesAt < 0 {
 		t.Fatal("TYPES missing")
@@ -908,6 +912,9 @@ func TestKeitaroPage(t *testing.T) {
 		}
 		if !strings.Contains(html[i:i+lineEnd], `'kt.c.pages'`) {
 			t.Errorf("dictionary missing kt.c.pages next to %s", anchor)
+		}
+		if !strings.Contains(html[i:i+lineEnd], `'kt.api'`) {
+			t.Errorf("dictionary missing kt.api next to %s", anchor)
 		}
 	}
 }
@@ -1691,9 +1698,9 @@ func TestDomainsCatalogAndPager(t *testing.T) {
 	mustNot(t, html, `data-ddel=`, "inline domain delete")
 	must(t, html, "let DOM_PICK=new Set()", "domain pick set")
 	must(t, src, `data-dpick="*"`, "domain select all")
-	must(t, src, `id="dbulk-check"`, "bulk check")
-	must(t, src, `id="dbulk-group"`, "bulk group")
-	must(t, src, `id="dbulk-del"`, "bulk delete")
+	must(t, src, `bulkAct('dbulk-check'`, "bulk check")
+	must(t, src, `bulkAct('dbulk-group'`, "bulk group")
+	must(t, src, `bulkAct('dbulk-del'`, "bulk delete")
 	must(t, src, "openDomainEdit(", "edit from row menu")
 	must(t, html, "function domainPayload(", "domainPayload")
 	must(t, html, "function saveDomain(", "saveDomain")
@@ -1960,7 +1967,8 @@ func TestTerms(t *testing.T) {
 	dictDupes(t, dictBetween(t, phrase, "\nru:{", "\n},\nuk:{"), "PHRASE.ru")
 	dictDupes(t, dictBetween(t, phrase, "\nuk:{", "\n};"), "PHRASE.uk")
 	dictDupes(t, dictBetween(t, extra, "\nru:{", "\n},\nuk:{"), "PHRASE_EXTRA.ru")
-	dictDupes(t, dictBetween(t, extra, "\nuk:{", "\n};"), "PHRASE_EXTRA.uk")
+	dictDupes(t, dictBetween(t, extra, "\nuk:{", "\n},\nen:{"), "PHRASE_EXTRA.uk")
+	dictDupes(t, dictBetween(t, extra, "\nen:{", "\n};"), "PHRASE_EXTRA.en")
 	sameDictKeys(t, dictKeys(dictBetween(t, i18n, "en:{", "\n},\nru:{")), dictKeys(dictBetween(t, i18n, "\nru:{", "\n},\nuk:{")), "I18N.en", "I18N.ru")
 	sameDictKeys(t, dictKeys(dictBetween(t, i18n, "en:{", "\n},\nru:{")), dictKeys(dictBetween(t, i18n, "\nuk:{", "\n};")), "I18N.en", "I18N.uk")
 	sameDictKeys(t, dictKeys(dictBetween(t, phrase, "\nru:{", "\n},\nuk:{")), dictKeys(dictBetween(t, phrase, "\nuk:{", "\n};")), "PHRASE.ru", "PHRASE.uk")

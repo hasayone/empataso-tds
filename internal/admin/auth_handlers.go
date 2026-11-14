@@ -189,6 +189,7 @@ type meResponse struct {
 	Current    string            `json:"current,omitempty"`
 	DefaultID  string            `json:"default_id,omitempty"`
 	Switchable bool              `json:"switchable"`
+	Email      string            `json:"email,omitempty"`
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -216,6 +217,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		out.Pages = rootPages()
+		if email, ok := s.adminEmail.Load().(string); ok {
+			out.Email = email
+		}
 	}
 	if boards, meta, err := s.visibleBoardItems(r.Context(), sess); err == nil {
 		out.Boards = boards

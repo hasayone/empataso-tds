@@ -160,6 +160,8 @@ func (s *Server) handleKeitaroSettingsGet(w http.ResponseWriter, r *http.Request
 }
 
 // handleKeitaroSettingsPut saves the tracker address and key to keitaro.json.
+// A list file keeps every connection and its board_id. Only the first entry's address and key change.
+// A single object stays a single object. The version is not stored.
 // Answers: 400 for bad JSON, a bad address or a missing key, and 400 "api_key required
 // for new host" when the host changes and no new key is sent; 503 when no file
 // path is configured; 409 while an import or purge runs, and 409 manifest_host
@@ -216,7 +218,7 @@ func (s *Server) handleKeitaroSettingsPut(w http.ResponseWriter, r *http.Request
 			return
 		}
 	}
-	raw, err := json.Marshal(keitaroFileBody{BaseURL: base, APIKey: key})
+	raw, err := s.keitaroSettingsFile(base, key)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
@@ -231,6 +233,27 @@ func (s *Server) handleKeitaroSettingsPut(w http.ResponseWriter, r *http.Request
 	}
 	s.logInfo("keitaro settings saved", "host", next.host())
 	writeJSON(w, http.StatusOK, s.keitaroSettingsSnapshot())
+}
+
+// keitaroSettingsFile encodes the settings file after a successful PUT.
+// base and key are the normalized address and the key to store on the first connection.
+// A list file returns the same entries with the first address and key replaced.
+// A single object returns that object. An error means the JSON could not be encoded.
+func (s *Server) keitaroSettingsFile(base, key string) ([]byte, error) {
+	s.ktMu.RLock()
+	list := s.ktFileList
+	conns := append([]keitaroConn(nil), s.ktConns...)
+	s.ktMu.RUnlock()
+	if !list || len(conns) == 0 {
+		return json.Marshal(keitaroFileBody{BaseURL: base, APIKey: key})
+	}
+	entries := make([]keitaroFileEntry, len(conns))
+	for i, c := range conns {
+		entries[i] = keitaroFileEntry{BaseURL: c.Base, APIKey: c.Key, BoardID: c.BoardID}
+	}
+	entries[0].BaseURL = base
+	entries[0].APIKey = key
+	return json.Marshal(entries)
 }
 
 // keitaroHTTP is the client for every tracker call.

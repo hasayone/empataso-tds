@@ -103,19 +103,16 @@ app_mem_limit() {
 }
 
 # Назначение: определить публичный IPv4 для server.env и TLS.
-# Параметры: нет (KUZTDS_PUBLIC_IP или HTTP-запрос).
+# Параметры: нет (KUZTDS_PUBLIC_IP или HTTP-запрос через edge_public_ipv4).
 # Результат: адрес на stdout.
-# Ошибки: не удалось определить, код 1.
+# Ошибки: не удалось определить, код 1. Сообщение на stderr, адрес в него не попадает.
 detect_public_ipv4() {
 	local ip
-	if [[ -n "${KUZTDS_PUBLIC_IP:-}" ]]; then
-		ip=$KUZTDS_PUBLIC_IP
-	elif command -v curl >/dev/null 2>&1; then
-		ip=$(curl -fsS --max-time 15 -4 https://ifconfig.me/ip 2>/dev/null || true)
-	else
-		ip=
+	if ! declare -F edge_public_ipv4 >/dev/null; then
+		msg "задайте KUZTDS_PUBLIC_IP (IPv4) в окружении перед установкой" >&2
+		return 1
 	fi
-	if [[ -z "$ip" ]] || ! valid_ipv4 "$ip"; then
+	if ! ip=$(edge_public_ipv4); then
 		msg "задайте KUZTDS_PUBLIC_IP (IPv4) в окружении перед установкой" >&2
 		return 1
 	fi
@@ -288,15 +285,53 @@ check_env() {
 		return 1
 	fi
 	val=$(env_value "$file" KUZTDS_ADMIN_PASSWORD)
-	if [[ -z "$val" ]]; then
-		printf 'kuztds-install: задайте непустой KUZTDS_ADMIN_PASSWORD в .env\n' >&2
-		return 1
-	fi
-	if [[ "$val" == admin ]]; then
+	if [[ -n "$val" && "$val" == admin ]]; then
 		printf 'kuztds-install: KUZTDS_ADMIN_PASSWORD не должен быть значением admin\n' >&2
 		return 1
 	fi
 	return 0
+}
+
+# Назначение: собрать .env коробки с паролем ClickHouse и без пароля админки.
+# Параметры: $1 — пароль ClickHouse.
+# Результат: содержимое файла на stdout.
+# Ошибки: нет.
+render_box_env() {
+	local ch_pw=$1
+	printf 'CLICKHOUSE_PASSWORD=%s\n' "$ch_pw"
+}
+
+# Назначение: канал apt Docker для поддерживаемой системы.
+# Параметры: $1 — ID из os-release; $2 — VERSION_CODENAME.
+# Результат: «debian bookworm» или «ubuntu jammy|noble» на stdout.
+# Ошибки: другая система, код 1.
+docker_apt_channel() {
+	local id=$1 codename=$2
+	case "${id}:${codename}" in
+		ubuntu:jammy|ubuntu:noble|debian:bookworm)
+			printf '%s %s' "$id" "$codename"
+			;;
+		*)
+			return 1
+			;;
+	esac
+}
+
+# Назначение: создать .env коробки, если его нет, либо проверить существующий.
+# Параметры: $1 — путь к .env.
+# Результат: файл с паролем ClickHouse; пароль админки не добавляется и не печатается.
+# Ошибки: openssl, запись или check_env, код 1.
+ensure_box_env() {
+	local file=$1 pw
+	if [[ -f "$file" ]]; then
+		check_env "$file"
+		return
+	fi
+	if ! pw=$(openssl rand -hex 24); then
+		msg "не удалось сгенерировать пароль ClickHouse" >&2
+		return 1
+	fi
+	render_box_env "$pw" | write_atomic "$file" 0600
 }
 
 # Назначение: можно ли удалить одноразовый установщик после успеха.
@@ -368,20 +403,20 @@ have_compose() {
 }
 
 # Назначение: установить Docker CE и compose-plugin из официального репозитория.
-# Параметры: $1 — codename Ubuntu (jammy, noble).
+# Параметры: $1 — ubuntu или debian; $2 — codename (jammy, noble, bookworm).
 # Результат: Docker запущен, compose доступен.
 # Ошибки: apt/curl/systemctl, код 1.
 install_docker_packages() {
-	local codename=$1 arch
+	local distro=$1 codename=$2 arch
 	arch=$(dpkg --print-architecture)
 	export DEBIAN_FRONTEND=noninteractive
 	apt-get -o DPkg::Lock::Timeout=300 update -y
 	apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates curl
 	install -m 0755 -d /etc/apt/keyrings
-	curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+	curl -fsSL "https://download.docker.com/linux/${distro}/gpg" -o /etc/apt/keyrings/docker.asc
 	chmod a+r /etc/apt/keyrings/docker.asc
-	printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu %s stable\n' \
-		"$arch" "$codename" >/etc/apt/sources.list.d/docker.list
+	printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/%s %s stable\n' \
+		"$arch" "$distro" "$codename" >/etc/apt/sources.list.d/docker.list
 	apt-get -o DPkg::Lock::Timeout=300 update -y
 	apt-get -o DPkg::Lock::Timeout=300 install -y \
 		docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
@@ -389,11 +424,11 @@ install_docker_packages() {
 }
 
 # Назначение: убедиться, что docker compose доступен (установить при необходимости).
-# Параметры: $1 — codename Ubuntu.
-# Результат: код 0.
-# Ошибки: неподдерживаемая или неполная установка Docker, код 1.
+# Параметры: $1 — ubuntu или debian, пусто если пакеты ставить нельзя; $2 — codename.
+# Результат: код 0. Уже установленный compose не переустанавливается.
+# Ошибки: snap, docker без compose, неподдерживаемая система без docker, код 1.
 ensure_docker_compose() {
-	local codename=$1
+	local distro=$1 codename=$2
 	if have_compose; then
 		return 0
 	fi
@@ -405,7 +440,11 @@ ensure_docker_compose() {
 		msg "Docker установлен, но без плагина compose; установите docker-compose-plugin вручную" >&2
 		exit 1
 	fi
-	install_docker_packages "$codename"
+	if [[ -z "$distro" || -z "$codename" ]]; then
+		msg "нет Docker. Пакеты ставятся на Ubuntu 22.04, 24.04 и Debian 12; на другой системе нужен уже установленный docker compose" >&2
+		exit 1
+	fi
+	install_docker_packages "$distro" "$codename"
 	if ! have_compose; then
 		msg "после установки Docker compose по-прежнему недоступен" >&2
 		exit 1
@@ -683,8 +722,24 @@ run_self_test() {
 		exit 1
 	fi
 	printf 'CLICKHOUSE_PASSWORD=ch\nKUZTDS_ADMIN_PASSWORD=\n' >"$f"
-	if check_env "$f" 2>/dev/null; then
-		printf 'self-test FAIL: check_env empty admin\n'
+	check_env "$f" 2>/dev/null || { printf 'self-test FAIL: check_env empty admin\n'; exit 1; }
+	printf 'CLICKHOUSE_PASSWORD=ch\n' >"$f"
+	check_env "$f" 2>/dev/null || { printf 'self-test FAIL: check_env no admin key\n'; exit 1; }
+	local box_env
+	box_env=$(render_box_env 'cafebabe')
+	if [[ "$box_env" != 'CLICKHOUSE_PASSWORD=cafebabe' || "$box_env" == *KUZTDS_ADMIN_PASSWORD* ]]; then
+		printf 'self-test FAIL: render_box_env\n'
+		exit 1
+	fi
+	local channel
+	channel=$(docker_apt_channel debian bookworm) || { printf 'self-test FAIL: debian bookworm\n'; exit 1; }
+	assert_eq "$channel" "debian bookworm" docker_debian
+	channel=$(docker_apt_channel ubuntu noble) || { printf 'self-test FAIL: ubuntu noble\n'; exit 1; }
+	assert_eq "$channel" "ubuntu noble" docker_noble
+	channel=$(docker_apt_channel ubuntu jammy) || { printf 'self-test FAIL: ubuntu jammy\n'; exit 1; }
+	assert_eq "$channel" "ubuntu jammy" docker_jammy
+	if docker_apt_channel ubuntu focal >/dev/null 2>&1; then
+		printf 'self-test FAIL: ubuntu focal must be refused\n'
 		exit 1
 	fi
 	printf 'CLICKHOUSE_PASSWORD=ch\nKUZTDS_ADMIN_PASSWORD="secret"\n' >"$f"
@@ -722,7 +777,7 @@ run_self_test() {
 	printf 'self-test ok\n'
 }
 
-# Назначение: основной сценарий установки KuzTDS на Ubuntu.
+# Назначение: основной сценарий установки KuzTDS. Только root.
 # Параметры: нет.
 # Результат: маркер installed, сообщения об успехе.
 # Ошибки: любая проверка или шаг развёртывания, код 1.
@@ -742,15 +797,14 @@ run_install() {
 		exit 1
 	fi
 
-	if [[ ! -f /etc/os-release ]]; then
-		msg "не найден /etc/os-release" >&2
-		exit 1
-	fi
-	# shellcheck source=/dev/null
-	source /etc/os-release
-	if [[ "${ID:-}" != ubuntu ]] || { [[ "${VERSION_CODENAME:-}" != jammy && "${VERSION_CODENAME:-}" != noble ]]; }; then
-		msg "поддерживаются только Ubuntu 22.04 (jammy) и 24.04 (noble)" >&2
-		exit 1
+	local docker_distro= docker_codename= channel
+	if [[ -f /etc/os-release ]]; then
+		# shellcheck source=/dev/null
+		source /etc/os-release
+		if channel=$(docker_apt_channel "${ID:-}" "${VERSION_CODENAME:-}"); then
+			docker_distro=${channel%% *}
+			docker_codename=${channel#* }
+		fi
 	fi
 
 	local mem cpus free tier
@@ -768,9 +822,9 @@ run_install() {
 			;;
 	esac
 
-	check_env "$TDS_DIR/.env" || exit 1
+	ensure_box_env "$TDS_DIR/.env" || exit 1
 
-	ensure_docker_compose "${VERSION_CODENAME}"
+	ensure_docker_compose "$docker_distro" "$docker_codename"
 
 	check_foreign_resources
 
@@ -835,6 +889,9 @@ run_install() {
 	fi
 
 	msg "готово: движок 127.0.0.1:18080, админка 127.0.0.1:8090"
+	if [[ -z "$(env_value "$TDS_DIR/.env" KUZTDS_ADMIN_PASSWORD)" ]]; then
+		msg "первый вход спросит логин, пароль и почту главного администратора"
+	fi
 	msg "вход: ssh -L 8090:127.0.0.1:8090 user@host"
 	msg "повторный старт: ${UP_SCRIPT}"
 }

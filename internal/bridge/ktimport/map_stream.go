@@ -31,7 +31,113 @@ func (c *mapCtx) mapCampaigns(src Snapshot, losses []Loss) ([]Group, []Loss) {
 		losses = append(losses, extra...)
 		c.seen[g.ID] = true
 	}
+	losses = append(losses, campaignSettingLosses(camps)...)
 	return out, losses
+}
+
+// campaignSettingLosses собирает строки о настройках кампании, которые маппер не переносит.
+//
+// Параметры: camps — кампании одного прогона уже после сортировки.
+// Результат: строки kind approximated и ref campaigns. Пустой срез, если отличий нет.
+// Ошибки: нет. Дефолт cookies_ttl 0 или 24, обычный срок в часах, bind_visitors s или пусто, нулевая стоимость и cost_auto false строки не дают.
+func campaignSettingLosses(camps []Campaign) []Loss {
+	var ttl, bind, cost, uniq int
+	for _, camp := range camps {
+		if _, odd := campaignUniqSeconds(camp.CookiesTTL); odd {
+			ttl++
+		}
+		switch strings.ToLower(strings.TrimSpace(camp.BindVisitors)) {
+		case "sl", "slo":
+			bind++
+		}
+		if float64(camp.CostValue) != 0 || bool(camp.CostAuto) {
+			cost++
+		}
+		if campaignUniquenessSet(camp) {
+			uniq++
+		}
+	}
+	var out []Loss
+	if ttl > 0 {
+		out = append(out, Loss{Kind: "approximated", Ref: "campaigns", Detail: fmt.Sprintf("срок уникальности кампании не переносится: %d", ttl)})
+	}
+	if bind > 0 {
+		out = append(out, Loss{Kind: "approximated", Ref: "campaigns", Detail: fmt.Sprintf("привязка посетителя не переносится: %d", bind)})
+	}
+	if cost > 0 {
+		out = append(out, Loss{Kind: "approximated", Ref: "campaigns", Detail: fmt.Sprintf("стоимость кампании не переносится: %d", cost)})
+	}
+	if uniq > 0 {
+		out = append(out, Loss{Kind: "approximated", Ref: "campaigns", Detail: fmt.Sprintf("уникальность кампании по параметру не переносится: %d", uniq)})
+	}
+	return out
+}
+
+// campaignUniqSeconds переводит срок уникальности Keitaro из часов в секунды.
+//
+// Параметры: ttl — cookies_ttl кампании.
+// Результат: секунды и false для срока, который пишется в группу. 0 и 24 дают 0 и false: окно движка уже 24 часа.
+// Отрицательный срок и значение, которое не помещается в int после умножения на 3600, дают 0 и true.
+// Ошибки: нет.
+func campaignUniqSeconds(ttl FlexInt) (int, bool) {
+	n := int64(ttl)
+	if n == 0 || n == 24 {
+		return 0, false
+	}
+	if n < 0 || n > int64(^uint(0)>>1)/3600 {
+		return 0, true
+	}
+	return int(n * 3600), false
+}
+
+// campaignUniquenessSet сообщает, что у кампании задан ключ уникальности вне схемы.
+//
+// Параметры: camp — кампания после разбора снимка.
+// Результат: true, если uniqueness, uniqueness_param или uniqueness_method непусты.
+// Ошибки: нет.
+func campaignUniquenessSet(camp Campaign) bool {
+	return rawMarkerSet(camp.Uniqueness) || rawMarkerSet(camp.UniquenessParam) || rawMarkerSet(camp.UniquenessMethod)
+}
+
+// rawMarkerSet сообщает, что сырое JSON-значение ключа уникальности задано.
+//
+// Параметры: raw — значение uniqueness, uniqueness_param или uniqueness_method.
+// Результат: false для пустого, null, "", 0, false, [] и {}.
+// Ошибки: нет. Непонятный фрагмент считается заданным.
+func rawMarkerSet(raw json.RawMessage) bool {
+	s := strings.TrimSpace(string(raw))
+	switch s {
+	case "", "null", `""`, "0", "false", "[]", "{}":
+		return false
+	}
+	switch s[0] {
+	case '"':
+		var text string
+		if json.Unmarshal(raw, &text) != nil {
+			return true
+		}
+		return strings.TrimSpace(text) != ""
+	case '-', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
+		var n float64
+		if json.Unmarshal(raw, &n) != nil {
+			return true
+		}
+		return n != 0
+	case '[':
+		var arr []json.RawMessage
+		if json.Unmarshal(raw, &arr) != nil {
+			return true
+		}
+		return len(arr) != 0
+	case '{':
+		var obj map[string]json.RawMessage
+		if json.Unmarshal(raw, &obj) != nil {
+			return true
+		}
+		return len(obj) != 0
+	default:
+		return true
+	}
 }
 
 // mapCampaign превращает одну кампанию в группу.
@@ -74,6 +180,9 @@ func (c *mapCtx) mapCampaign(camp Campaign, streams []KStream) (Group, []Loss) {
 		ID: id, Name: camp.Name, Num: int(camp.ID), Status: status, Redirect: "show_text", Out: "",
 		Folder: folder, Weight: strings.EqualFold(camp.Type, "weight"), Postbacks: posts,
 		Streams: c.mapStreams(streams, !status),
+	}
+	if secs, odd := campaignUniqSeconds(camp.CookiesTTL); !odd && secs > 0 {
+		g.UniqSeconds = secs
 	}
 	if int(camp.DomainID) > 0 {
 		g.DomainID = numID(int(camp.DomainID))

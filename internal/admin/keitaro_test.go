@@ -75,14 +75,19 @@ func TestKeitaroCheck(t *testing.T) {
 		t.Fatal("response contains key")
 	}
 	var body struct {
-		OK        bool `json:"ok"`
-		Campaigns int  `json:"campaigns"`
+		OK             bool   `json:"ok"`
+		Campaigns      int    `json:"campaigns"`
+		API            string `json:"api"`
+		ProductVersion string `json:"product_version"`
 	}
 	if err := json.Unmarshal(raw, &body); err != nil {
 		t.Fatal(err)
 	}
-	if !body.OK || body.Campaigns != 3 {
+	if !body.OK || body.Campaigns != 3 || body.API != "v1" || body.ProductVersion != "" {
 		t.Fatalf("check %+v", body)
+	}
+	if !strings.Contains(string(raw), `"api":"v1"`) || !strings.Contains(string(raw), `"product_version":""`) {
+		t.Fatalf("check fields %s", raw)
 	}
 
 	bad := keitaroFake(t, "unauth")
@@ -93,6 +98,18 @@ func TestKeitaroCheck(t *testing.T) {
 	}
 	if strings.Contains(string(raw), key) {
 		t.Fatal("response contains key")
+	}
+	if strings.Contains(string(raw), "product_version") || strings.Contains(string(raw), `"api"`) {
+		t.Fatalf("502 body %s", raw)
+	}
+
+	bare := newKeitaroAdmin(t, "", "", nil, nil, nil)
+	raw, code = keitaroPOST(t, bare, "/api/keitaro/check", map[string]any{})
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("unconfigured %d %s", code, raw)
+	}
+	if strings.Contains(string(raw), "product_version") || strings.Contains(string(raw), `"api"`) {
+		t.Fatalf("503 body %s", raw)
 	}
 }
 
@@ -304,6 +321,67 @@ func TestKeitaroImportLogs(t *testing.T) {
 	}
 }
 
+func TestKeitaroOddConversionStatus(t *testing.T) {
+	key := "fixture-key"
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/admin_api/v1/conversions/log":
+			_, _ = w.Write([]byte(`{"rows":[` +
+				`{"sub_id":"t1","status":"trash","postback_datetime":"2026-10-02 03:04:05"},` +
+				`{"sub_id":"t2","status":"custom","postback_datetime":"2026-10-02 03:04:06"},` +
+				`{"sub_id":"t3","status":"lead","postback_datetime":"2026-10-02 03:04:07"},` +
+				`{"sub_id":"t4","status":"sale","postback_datetime":"2026-10-02 03:04:08"},` +
+				`{"sub_id":"t5","status":"","postback_datetime":"2026-10-02 03:04:09"},` +
+				`{"sub_id":"t6","status":"  Rejected  ","postback_datetime":"2026-10-02 03:04:10"},` +
+				`{"sub_id":"t7","status":"registration","postback_datetime":"2026-10-02 03:04:11"},` +
+				`{"sub_id":"t8","status":"deposit","postback_datetime":"2026-10-02 03:04:12"},` +
+				`{"sub_id":"t9","status":"rebill","postback_datetime":"2026-10-02 03:04:13"}` +
+				`],"total":9}`))
+		case "/admin_api/v1/campaigns":
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			_, _ = w.Write([]byte(`[]`))
+		}
+	}))
+	t.Cleanup(fake.Close)
+	sink := &fakeSink{}
+	admin := newKeitaroAdmin(t, fake.URL, key, nil, sink, nil)
+	raw := postKeitaroImport(t, admin, map[string]any{
+		"conversions": true, "from": "2026-10-01", "to": "2026-10-15",
+	})
+	if strings.Contains(string(raw), key) {
+		t.Fatal("response contains key")
+	}
+	body := waitKeitaroJob(t, admin)
+	if body.Stage != "done" || body.Error != "" || body.Counts["conversions"] != 9 {
+		t.Fatalf("job %+v", body)
+	}
+	want := "статус конверсии не из списка lead, sale, rejected, registration, deposit, rebill: 2"
+	var n int
+	for _, l := range body.Losses {
+		if l.Ref == "conversions" && l.Detail == want {
+			if l.Kind != "approximated" {
+				t.Fatalf("loss %+v", l)
+			}
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("losses %+v", body.Losses)
+	}
+	if len(sink.convs) != 9 {
+		t.Fatalf("conversions %d", len(sink.convs))
+	}
+	got := map[string]string{}
+	for _, row := range sink.convs {
+		got[row.CID] = row.Status
+	}
+	if got["t1"] != "trash" || got["t2"] != "custom" || got["t3"] != "lead" || got["t4"] != "sale" || got["t6"] != "rejected" {
+		t.Fatalf("statuses %+v", got)
+	}
+}
+
 func TestKeitaroClickUsesCampaignAlias(t *testing.T) {
 	key := "fixture-key"
 	fake := keitaroFake(t, "catalog")
@@ -413,6 +491,18 @@ func TestKeitaroLogMapping(t *testing.T) {
 		got.LandingID != "2" || got.NetworkID != "4" || got.SourceID != "8" ||
 		got.OfferID != "1" || got.Status != "sale" {
 		t.Fatalf("conversion %+v", got)
+	}
+}
+
+func TestKeitaroSubIDKeepsDot(t *testing.T) {
+	const sub = "2k5a13p.ac.2m74"
+	ev := clickEvent(ktimport.ClickRow{SubID: sub}, "tracker.example", logPlace{})
+	if ev.CID != sub {
+		t.Fatalf("click cid %q", ev.CID)
+	}
+	got := conversionInsert(ktimport.ConversionRow{SubID: sub, Status: "sale"}, "tracker.example", logPlace{}, nil)
+	if got.CID != sub || got.Status != "sale" {
+		t.Fatalf("conversion cid %q status %q", got.CID, got.Status)
 	}
 }
 

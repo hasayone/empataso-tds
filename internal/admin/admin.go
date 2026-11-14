@@ -243,6 +243,14 @@ type Server struct {
 	// the disk feels like taking.
 	pwWrite sync.Mutex
 
+	// setup is true until the first-run form writes the administrator password.
+	// It is read from the setup routes and written once the files are in place.
+	setup atomic.Bool
+
+	// adminEmail is the environment administrator address from admin.json.
+	// The value is a string. It is empty when the file has no address.
+	adminEmail atomic.Value
+
 	keys  *security.KeySet // nil when APIKeysFile is empty
 	keyMu sync.Mutex       // pairs Generate or Revoke with the following Save
 
@@ -365,20 +373,32 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.publish(hash); err != nil {
-		return nil, err
-	}
-	if cfg.PasswordFile != "" {
-		if _, statErr := os.Stat(cfg.PasswordFile); errors.Is(statErr, os.ErrNotExist) {
-			next, seedErr := s.seedPasswordFile(cfg.PasswordFile, hash)
-			if seedErr != nil {
-				return nil, seedErr
+	if hash == "" {
+		if cfg.PasswordFile == "" {
+			if err := s.publish(hash); err != nil {
+				return nil, err
 			}
-			if next != hash {
-				if err := s.publish(next); err != nil {
-					return nil, err
+		}
+		s.setup.Store(true)
+	} else {
+		if err := s.publish(hash); err != nil {
+			return nil, err
+		}
+		if cfg.PasswordFile != "" {
+			if _, statErr := os.Stat(cfg.PasswordFile); errors.Is(statErr, os.ErrNotExist) {
+				next, seedErr := s.seedPasswordFile(cfg.PasswordFile, hash)
+				if seedErr != nil {
+					return nil, seedErr
+				}
+				if next != hash {
+					if err := s.publish(next); err != nil {
+						return nil, err
+					}
 				}
 			}
+		}
+		if err := s.applyAdminProfile(); err != nil {
+			return nil, err
 		}
 	}
 	if err := s.loadKeitaro(); err != nil {
@@ -496,6 +516,8 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
 	mux.HandleFunc("GET /healthz", s.handleHealthz)
+	mux.HandleFunc("GET /api/setup", s.handleSetupGet)
+	mux.HandleFunc("POST /api/setup", s.handleSetupPost)
 	mux.HandleFunc("POST /api/login", s.handleLogin)
 	mux.HandleFunc("POST /api/recover", s.handleRecover)
 	s.handle(mux, "POST /api/logout", cookieOnly(http.HandlerFunc(s.handleLogout)))

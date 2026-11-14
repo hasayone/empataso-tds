@@ -65,7 +65,7 @@
 
 ### Интеграция
 
-`#/integrations`, карточка Cloudflare: API-токен (права на аккаунт: Zone:Edit, DNS:Edit, Zone Settings:Edit), Account ID. «Проверить» показывает число зон. Токен и Account ID хранятся в `cloudflare.json` на томе (режим `0600`), в ответах API не отдаются (`has_token`). Публичный IP сервера берётся из `KUZTDS_PUBLIC_IP` в `/etc/kuztds/server.env`; без него подключение доменов недоступно (в GET видно `public_ip`).
+`#/integrations`, карточка Cloudflare: API-токен (права на аккаунт: Zone:Edit, DNS:Edit, Zone Settings:Edit), Account ID. «Проверить» показывает число зон. Токен и Account ID хранятся в `cloudflare.json` на томе (режим `0600`), в ответах API не отдаются (`has_token`). Публичный IP сервера берётся из `KUZTDS_PUBLIC_IP` в `/etc/kuztds/server.env`; без него подключение доменов недоступно (в GET видно `public_ip`). Пустой ключ выкладка заполняет тем же запросом, что и установка, и уже заданный адрес не заменяет.
 
 | Маршрут | Назначение |
 | --- | --- |

@@ -534,7 +534,7 @@ func TestSpaHiddenForRole(t *testing.T) {
 	mustNot(t, html, "payout:payRaw>0?payRaw:0, payout_currency:q('#ocur',box).value, payout_param", "payout is not part of the fixed body")
 	must(t, spaFunctionLine(html, "renderPerf"), "shown('revenue'", "the performance table drops a hidden revenue column")
 	must(t, spaFunctionLine(html, "recentRowHTML"), "hiddenFields(ME)", "recent clicks drop hidden fields")
-	must(t, spaFunctionLine(html, "paintFlowSum"), "hs('sales'", "the flows summary drops hidden metrics")
+	must(t, spaFunctionLine(html, "paintMetricSum"), "hs('sales'", "the flows summary drops hidden metrics")
 	tip := spaFunctionLine(html, "chartTip")
 	must(t, tip, "pointMoney(p, money, cur, ready)", "the tip takes the spend of the point")
 	mustNot(t, tip, "periodSpendBy", "the tip never borrows the period spend for a point")
@@ -560,9 +560,18 @@ func TestSpaDepSum(t *testing.T) {
 			t.Errorf("dictionary key %q is defined %d time(s), want 3", key, n)
 		}
 	}
-	must(t, html, "'col.depsum':'DepSum'", "english column title")
-	must(t, html, "'col.depsum':'Депозит'", "russian column title")
-	must(t, html, "'fld.depsum':'Депозит'", "ukrainian field title")
+	must(t, html, "'col.depsum':'DepSum'", "column title is DepSum")
+	must(t, html, "'fld.depsum':'DepSum'", "field name is DepSum")
+	if n := strings.Count(html, "'col.depsum':'DepSum'"); n != 3 {
+		t.Errorf("col.depsum DepSum is defined %d time(s), want 3", n)
+	}
+	if n := strings.Count(html, "'fld.depsum':'DepSum'"); n != 3 {
+		t.Errorf("fld.depsum DepSum is defined %d time(s), want 3", n)
+	}
+	mustNot(t, html, "'col.depsum':'Депозит'", "column title is not Депозит")
+	mustNot(t, html, "'fld.depsum':'Депозит'", "field name is not Депозит")
+	must(t, html, "['cpc','col.cpc',1],['depsum','col.depsum',1]", "offers and networks put DepSum after CPC")
+	must(t, spaFunctionLine(html, "loadCols"), "placeDepSumAfterCpc(out)", "a saved list moves DepSum after CPC")
 	must(t, spaFunctionLine(html, "hiddenCols"), "'depsum'", "hiding profit hides the deposit column")
 	must(t, spaFunctionLine(html, "packMetrics"), "depsum:m.depsum", "deposit is packed beside revenue")
 	mustNot(t, spaFunctionLine(html, "packMetrics"), "rev:m.rev+m.depsum", "deposit is not added into revenue")
@@ -962,6 +971,9 @@ func TestConnectedPopup(t *testing.T) {
 func TestNetworkErrorMapping(t *testing.T) {
 	html := spaSource()
 	net := spaFunctionLine(html, "fetchOrNetErr")
+	if i := strings.Index(net, "\n/**"); i >= 0 {
+		net = net[:i]
+	}
 	must(t, net, "instanceof TypeError", "only a fetch TypeError is mapped")
 	must(t, net, "tr('err.network')", "translated text")
 	must(t, net, "e.status=0", "status 0")
