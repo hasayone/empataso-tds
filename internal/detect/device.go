@@ -1,6 +1,8 @@
 // Package detect — device and bot detection. Pure logic without external
-// dependencies; signature
-// lists (signature_ua/ref, ua_blacklist) are loaded from .dat with hot-reload.
+// dependencies. User-Agent bots are found in one pass of an Aho-Corasick
+// matcher over the built-in signatures (signature_ua_default.dat) and the
+// search engines, extended or trimmed by signature_ua.dat. The lists
+// (signature_ua/ref, ua_blacklist, proxy_org) are loaded from .dat with hot-reload.
 package detect
 
 import "strings"

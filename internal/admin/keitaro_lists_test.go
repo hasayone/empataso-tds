@@ -13,9 +13,9 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/emtds/bridge/ktimport"
 )
 
 const ipListBody = "1.2.3.4\n10.0.0.0/8\n"

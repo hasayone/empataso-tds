@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func rs(r config.Rules) *config.Stream {
@@ -69,6 +69,78 @@ func TestOrgFilter(t *testing.T) {
 	}
 	if !matches(dc, none, Deps{}) {
 		t.Error("an unknown organization is not on a blacklist")
+	}
+}
+
+// The asn filter matches the primary number or the alternative one, in the
+// same way for blacklists and whitelists.
+func TestASNFilterAlt(t *testing.T) {
+	v := Visitor{ASN: 16509, ASNAlt: 14618, Org: "Amazon.com, Inc."}
+	if !matches(rs(config.Rules{ASN: lf(config.FlagB, "AS14618")}), v, Deps{}) {
+		t.Error("whitelist by the MaxMind number must pass")
+	}
+	if !matches(rs(config.Rules{ASN: lf(config.FlagB, "16509")}), v, Deps{}) {
+		t.Error("whitelist by the primary number must pass")
+	}
+	if matches(rs(config.Rules{ASN: lf(config.FlagB, "15169")}), v, Deps{}) {
+		t.Error("whitelist of another number must reject")
+	}
+	if matches(rs(config.Rules{ASN: lf(config.FlagA, "14618")}), v, Deps{}) {
+		t.Error("blacklist by the MaxMind number must exclude the visitor")
+	}
+	if matches(rs(config.Rules{ASN: lf(config.FlagA, "16509")}), v, Deps{}) {
+		t.Error("blacklist by the primary number must exclude the visitor")
+	}
+	if !matches(rs(config.Rules{ASN: lf(config.FlagA, "15169")}), v, Deps{}) {
+		t.Error("blacklist of another number must pass")
+	}
+	// ASNAlt 0 changes nothing and never matches.
+	plain := Visitor{ASN: 16509}
+	if !matches(rs(config.Rules{ASN: lf(config.FlagB, "16509")}), plain, Deps{}) {
+		t.Error("primary match without ASNAlt must pass")
+	}
+	if matches(rs(config.Rules{ASN: lf(config.FlagB, "0")}), Visitor{}, Deps{}) {
+		t.Error("an unknown number must not match")
+	}
+}
+
+// The org filter matches the primary spelling or the alternative one, so
+// filters written in either database's names keep working.
+func TestOrgFilterAlt(t *testing.T) {
+	google := Visitor{ASN: 15169, Org: "Google LLC", OrgAlt: "GOOGLE"}
+	if !matches(rs(config.Rules{Org: lf(config.FlagB, "Google LLC")}), google, Deps{}) {
+		t.Error("whitelist in the primary spelling must pass")
+	}
+	if !matches(rs(config.Rules{Org: lf(config.FlagB, "GOOGLE")}), google, Deps{}) {
+		t.Error("whitelist in the alternative spelling must pass")
+	}
+
+	amazon := Visitor{ASN: 16509, Org: "Amazon.com, Inc.", OrgAlt: "AMAZON-02"}
+	if !matches(rs(config.Rules{Org: lf(config.FlagB, "AMAZON-02")}), amazon, Deps{}) {
+		t.Error("AMAZON-02 must match through OrgAlt")
+	}
+	if matches(rs(config.Rules{Org: lf(config.FlagA, "AMAZON-02")}), amazon, Deps{}) {
+		t.Error("blacklist in the alternative spelling must exclude the visitor")
+	}
+	if matches(rs(config.Rules{Org: lf(config.FlagA, "/^amazon-\\d+$/i")}), amazon, Deps{}) {
+		t.Error("blacklist regex must be tried against OrgAlt")
+	}
+	if !matches(rs(config.Rules{Org: lf(config.FlagA, "microsoft")}), amazon, Deps{}) {
+		t.Error("an unrelated blacklist must pass")
+	}
+
+	// An empty or placeholder OrgAlt changes nothing.
+	for _, alt := range []string{"", Empty} {
+		v := Visitor{ASN: 16509, Org: "Amazon.com, Inc.", OrgAlt: alt}
+		if !matches(rs(config.Rules{Org: lf(config.FlagB, "amazon")}), v, Deps{}) {
+			t.Errorf("OrgAlt=%q: primary match must still pass", alt)
+		}
+		if matches(rs(config.Rules{Org: lf(config.FlagB, "-")}), Visitor{Org: Empty, OrgAlt: alt}, Deps{}) {
+			t.Errorf("OrgAlt=%q: the placeholder is not an organization", alt)
+		}
+		if matches(rs(config.Rules{Org: lf(config.FlagB, "google")}), v, Deps{}) {
+			t.Errorf("OrgAlt=%q: whitelist of another org must reject", alt)
+		}
 	}
 }
 

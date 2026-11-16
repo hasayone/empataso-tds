@@ -1,10 +1,10 @@
 **English** · [Русский](ARCHITECTURE.ru.md)
 
-# KuzTDS architecture
+# EmTDS architecture
 
 Up to date as of 2026-09-30. Progress snapshot — `docs/STATUS.md`.
 
-## Four binaries
+## Services and tools
 - `cmd/engine` (:8080) — the hot path (traffic handling). A long-running process.
 - `cmd/admin` (:8090) — REST API + embedded SPA (`internal/admin/web`, go:embed).
 - `cmd/cron` — the background service (`internal/cron`): list and geo database
@@ -12,7 +12,14 @@ Up to date as of 2026-09-30. Progress snapshot — `docs/STATUS.md`.
 - `cmd/apiclient` (:9090) — client for a landing/donor page: collects visitor
   data → calls the engine `?api=` → applies the response.
 
-Shared packages live in `internal/`.
+- `cmd/mcp` — MCP server over stdio for AI agents: calls the Admin API with an
+  API key and builds its tools from `/api/openapi.json`
+  ([wiki/mcp.md](wiki/mcp.md), in Russian). A separate binary, not part of the stack.
+- `cmd/loadgen` — click generator for test campaigns ([wiki/loadgen.md](wiki/loadgen.md)).
+
+Shared packages live in `internal/`. Access to admin routes (sections, roles,
+keys, dangerous actions) is defined by a single `routeAccess` table in
+`internal/admin/access.go`; the map is in [wiki/admin-api.md](wiki/admin-api.md).
 
 ## Request lifecycle in the engine
 
@@ -23,7 +30,7 @@ HTTP request
   │
   ├─ realip middleware (XFF/CF only from trusted_proxies)
   │
-  ├─ api mode? (?api=base64(JSON), checks KUZTDS_API_KEY)
+  ├─ api mode? (?api=base64(JSON), checks EMTDS_API_KEY)
   │     yes → input (ip/ua/ref/lang/uniq/key/domain/cf_country/pars/id) from request
   │
   ├─ ipindex.Lookup(ip, ip_blacklist)        → blacklisted: 403
@@ -67,7 +74,7 @@ specific stream; bot_redirect serves bots a separate output.
 | `ipindex` | CIDR index O(log n) + list manager with hot-reload |
 | `config` | group/stream model (data rules) + JSON loader with aliases, atomic swap on hot-reload |
 | `seplist` | separation lists ("key;out") held in memory with hot-reload |
-| `geo` | Resolver: `DB` — MaxMind-format City/Country + ASN databases read into memory and swapped atomically when the files change — or `Nop`; UTC-offset helpers |
+| `geo` | Resolver: `DB` — MaxMind-format City/Country + two ASN databases (DB-IP first, MaxMind as fallback) read into memory and swapped atomically when the files change — or `Nop`; UTC-offset helpers |
 | `cron` | the background jobs, their config (JSON), status file and "run now" queue |
 | `atomicfile` | write to a temp file in the same directory, then rename |
 | `detect` | device + OS/browser/brand (mileusna/useragent) + bots, signatures with hot-reload |
@@ -78,6 +85,7 @@ specific stream; bot_redirect serves bots a separate output.
 | `logbuf` | async event buffer → batch insert into ClickHouse |
 | `security` | argon2id, tokens/sessions, CSRF, constant-time |
 | `server` | realip middleware (trusted proxies) |
+| `bridge/ktimport` | Keitaro import (started from the admin; progress lives in the admin process memory) |
 | `admin` | HTTP handlers, file stores (groups/.dat/keys), IP lookup, visitor simulator, cron config, embedded SPA |
 
 ## Key principles
@@ -97,29 +105,34 @@ specific stream; bot_redirect serves bots a separate output.
 4. **Atomic index swap** on hot-reload (`atomic.Pointer`).
 
 ## Configuration
-- Groups config: JSON file `KUZTDS_GROUPS_FILE` (source of truth).
+- Groups config: JSON file `EMTDS_GROUPS_FILE` (source of truth).
 - The engine keeps groups in memory and re-reads the file when it changes,
-  on the same `KUZTDS_RELOAD_INTERVAL` ticker as the `.dat` lists. No restart.
+  on the same `EMTDS_RELOAD_INTERVAL` ticker as the `.dat` lists. No restart.
 - The admin reads/writes the file on requests to `/api/groups` (live). The same
   file must be given to both the engine and the admin.
-- Geo databases: `KUZTDS_GEO_DB` (City or Country) and `KUZTDS_ASN_DB`, in the
-  MaxMind format. They are held in memory and re-read when the files change —
-  which is how a download by the cron service goes live.
-- Secrets/settings — via `KUZTDS_*` environment variables (see `docs/USAGE.md`).
+- Geo databases: `EMTDS_GEO_DB` (City or Country), `EMTDS_ASN_DB` and
+  `EMTDS_DBIP_ASN_DB` (DB-IP ASN Lite; by default `dbip-asn.mmdb` next to the
+  ASN file), in the MaxMind format. They are held in memory and re-read when
+  the files change — which is how a download by the cron service goes live.
+  DB-IP wins for ASN and organization, MaxMind answers on a miss, and its
+  spelling is kept as `OrgAlt` / `ASNAlt` for the filters. Attribution:
+  "IP to ASN data by DB-IP.com", CC BY 4.0 (`docs/wiki/geo-databases.md`).
+- Secrets/settings — via `EMTDS_*` environment variables (see `docs/USAGE.md`).
   The exception is the cron config, which the admin panel edits: it holds the
   Telegram token and API keys, is written `0600`, and is git-ignored.
 
 ## The cron service
 `cmd/cron` shares no connection with the engine or the admin — only files:
 
-- **config** `KUZTDS_CRON_FILE` (JSON): written by the admin (`PUT /api/cron`),
+- **config** `EMTDS_CRON_FILE` (JSON): written by the admin (`PUT /api/cron`),
   re-read by the service on every tick (5 s), validated before anything runs;
 - **status** `<config>.status.json`: written by the service after every job —
   last run, result, next run, a heartbeat — and read by the admin;
 - **run now** `<config>.run`: the admin appends a job name, the service
   consumes the file on its next tick;
-- **output**: `.dat` lists in `KUZTDS_DATA_DIR`, databases at `KUZTDS_GEO_DB` /
-  `KUZTDS_ASN_DB`, the groups file — all of which the engine hot-reloads.
+- **output**: `.dat` lists in `EMTDS_DATA_DIR`, databases at `EMTDS_GEO_DB` /
+  `EMTDS_ASN_DB` / `EMTDS_DBIP_ASN_DB`, the groups file — all of which the
+  engine hot-reloads.
 
 Each job runs in its own goroutine, one instance at a time, so a slow
 VirusTotal pass does not delay the disk check. The schedule survives a restart

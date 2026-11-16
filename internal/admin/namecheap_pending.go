@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // namecheapPendingHold is how long a pending row must exist before it may be removed. A

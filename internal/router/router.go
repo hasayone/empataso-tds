@@ -15,8 +15,8 @@ import (
 
 	"math/rand"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/geo"
 )
 
 // Empty — the "no data" value.
@@ -47,6 +47,8 @@ type Visitor struct {
 
 	ASN      uint32     // autonomous system number, 0 = unknown
 	Org      string     // its organization, or Empty
+	ASNAlt   uint32     // the number the secondary ASN database gives when it differs from ASN, or 0; the asn filter matches ASN or ASNAlt
+	OrgAlt   string     // the same organization spelled by the secondary ASN database, or ""; the org filter matches Org or OrgAlt
 	Timezone string     // IANA name ("Europe/Moscow"), or Empty
 	TZOffset string     // current UTC offset ("+3", "+5:30"), or Empty
 	Query    url.Values // query-string variables of the request
@@ -344,10 +346,10 @@ func whyAnd(s *config.Stream, v Visitor, deps Deps) string {
 
 	// Network: ASN by number ("15169" or "AS15169"), organization by /regex/
 	// or substring.
-	if rejectList(r.ASN.Flag, len(r.ASN.Values) > 0, asnAny(r.ASN.Values, v.ASN)) {
+	if rejectList(r.ASN.Flag, len(r.ASN.Values) > 0, asnAny(r.ASN.Values, v.ASN) || asnAny(r.ASN.Values, v.ASNAlt)) {
 		return "asn"
 	}
-	if rejectList(r.Org.Flag, cfgd(r.Org), !emptyish(v.Org) && textOrRegex(r.Org, v.Org)) {
+	if rejectList(r.Org.Flag, cfgd(r.Org), orgMatches(r.Org, v)) {
 		return "org"
 	}
 	// Time zone: a UTC offset ("+3", "+5:30") or an IANA name ("Europe/Moscow").
@@ -387,6 +389,16 @@ func rejectList(flag config.Flag, configured, matched bool) bool {
 }
 
 func emptyish(s string) bool { return s == "" || s == Empty }
+
+// orgMatches reports whether the org filter f matches the visitor's
+// organization under either spelling: Org or, when set, OrgAlt. Unknown
+// (empty) spellings never match.
+func orgMatches(f config.ListFilter, v Visitor) bool {
+	if !emptyish(v.Org) && textOrRegex(f, v.Org) {
+		return true
+	}
+	return !emptyish(v.OrgAlt) && textOrRegex(f, v.OrgAlt)
+}
 
 // cfgd: the filter is configured if raw or values is set.
 func cfgd(f config.ListFilter) bool { return f.Raw != "" || len(f.Values) > 0 }
@@ -439,7 +451,8 @@ func exactAny(values []string, value string) bool {
 	return false
 }
 
-// asnAny: the visitor's AS number is one of the values ("15169" or "AS15169").
+// asnAny: the AS number asn is one of the values ("15169" or "AS15169").
+// asn 0 (unknown) never matches.
 func asnAny(values []string, asn uint32) bool {
 	if asn == 0 {
 		return false

@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 func TestKeitaroImportUsers(t *testing.T) {

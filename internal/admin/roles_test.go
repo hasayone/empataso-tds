@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/security"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // api sends a JSON request with c and returns the status and the body.

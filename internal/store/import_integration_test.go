@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/logbuf"
 )
 
 func TestInitialWatermarkIntegration(t *testing.T) {
@@ -175,7 +175,7 @@ func TestPerformanceFinalDeduplicatesIntegration(t *testing.T) {
 	}
 	var row *PerfRow
 	for i := range perf {
-		if perf[i].GroupID == group && perf[i].Stream == "s1" {
+		if perf[i].Group == group && perf[i].Stream == "s1" {
 			row = &perf[i]
 			break
 		}

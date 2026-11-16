@@ -2,10 +2,15 @@
 
 # STATUS — где мы и как продолжить
 
-Снимок на 2026-10-21. Для деталей: `docs/USAGE.md`, `TODO.md`.
+Снимок на 2026-11-15. Для деталей: `docs/USAGE.md`, `TODO.md`, `docs/wiki/README.md`.
 
 ## Готово (в `main`, тесты зелёные)
-- **Admin на admin.<домен>**: основной или роль admin/both → `https://admin.<домен>/`, A `admin` в Cloudflare, nginx только через Cloudflare, `KUZTDS_ADMIN_TRUSTED_PROXIES`, `/healthz` с `X-Kuztds-Service: admin`, вход на admin.* без Redis — 503. Вики: `docs/wiki/namecheap.md`, `admin-api.md`.
+- **Переименование в EmTDS**: переменные `EMTDS_*` с запасным чтением старых `KUZTDS_*` (`config.Env`), cookie сессии `emtds_admin` (старая `kuztds_admin` принимается), заголовки `X-Emtds-*` (старые `X-Kuztds-*` принимаются), образ `emtds:local`, контейнеры `emtds-*`, проект compose `emtds-app`, том состояния `emtds-app_emtds_state`, пути на сервере `/opt/emtds`, `/etc/emtds`, `/var/lib/emtds`, nginx `emtds*.conf`. База и пользователь ClickHouse остаются `kuztds`: их переименование — перенос данных. Переход сервера: `deploy/migrate-emtds.sh`, `docs/wiki/emtds-migration.md`.
+- **API-ключи для ИИ-агентов и MCP**: ключ типа `ADMIN` или `USER` (роль или свой доступ), опасные действия (`keitaro_import`, `keitaro_purge`, `logs_delete`, `groups_replace`, `cron`, `boards`, `landing_files`) выдаются ключу отдельно, маршруты только для куки ключу закрыты, ответы с ошибкой несут стабильный `code`, у каждого ключа свой лимит запросов и журнал записей в JSONL, `GET /api/openapi.json` описывает маршруты, доступные сессии. `cmd/mcp` (`make mcp`) превращает схему в инструменты MCP по stdio. Вики: `docs/wiki/admin-api.md`, `docs/wiki/mcp.md`.
+- **Домены и интеграции**: список доменов с ролями, Cloudflare (зоны, DNS, `ssl` и `always_use_https`), регистрация в Namecheap, проверка доменов. Вики: `docs/wiki/offers-landings.md`, `docs/wiki/namecheap.md`.
+- **Каталоги, разделы и доступ**: офферы, лендинги (локальные файлы, PHP), сети, источники, разделы (boards), пользователи и роли, форма первого входа и код сброса пароля, хэш админки на томе состояния. Вики: `docs/wiki/boards.md`, `users.md`, `roles.md`.
+- **Перенос из Keitaro и постбеки**: перенос каталогов, кампаний, файлов лендингов, пользователей, кликов и конверсий со страницы `#/integrations`; `/postback` с `depsum`, исходящие шаблоны S2S (`s2s.json`), Sub ID 1…30. Вики: `docs/wiki/keitaro.md`, `postbacks.md`, `log-filters.md`.
+- **Admin на admin.<домен>**: основной или роль admin/both → `https://admin.<домен>/`, A `admin` в Cloudflare, nginx только через Cloudflare, `EMTDS_ADMIN_TRUSTED_PROXIES`, `/healthz` с `X-Emtds-Service: admin`, вход на admin.* без Redis — 503. Вики: `docs/wiki/namecheap.md`, `admin-api.md`.
 - **Актуализация Keitaro**: задача `keitaro_sync` в admin (`keitaro-sync.json`, дедуп кликов, блокировка с импортом/purge, cron «Конверсии» без Telegram-шума по домену трекера). Вики: `docs/wiki/keitaro.md`.
 - **Фазы 1–7**: ipindex (+hot-reload), realip, geo (mmdb/Nop) + detect
   (устройство/OS/браузер/бренд + боты), router (выбор потока по правилам),
@@ -44,7 +49,7 @@
   ничего. `DeleteGroupLogs` теперь ключуется по `group_id` (`clickhouse.go`).
 - **2026-09-30 — гео, cron, flows** (одна ветка):
   1. **Гео из баз в формате MaxMind.** `geo.DB` читает в память City/Country-
-     файл (`KUZTDS_GEO_DB`) и ASN-файл (`KUZTDS_ASN_DB`) и подменяет их при
+     файл (`EMTDS_GEO_DB`) и ASN-файл (`EMTDS_ASN_DB`) и подменяет их при
      изменении файлов; битая замена никогда не обнуляет данные. Новые условия
      потока: `asn`, `org`, `timezone` (смещение от UTC или имя зоны), `get`
      (параметр URL). Новые макросы `[ASN] [ORG] [TIMEZONE] [UTC]`. События
@@ -183,8 +188,8 @@
   это время обещали первый сегмент. `handler.go` + `routing_test.go`.
 
 - **Hot-reload конфига групп (2026-08-20):** движок перечитывает
-  `KUZTDS_GROUPS_FILE` при изменении и атомарно подменяет его — по тому же
-  тикеру `KUZTDS_RELOAD_INTERVAL`, что и `.dat`-списки; у `config.Groups.Replace`
+  `EMTDS_GROUPS_FILE` при изменении и атомарно подменяет его — по тому же
+  тикеру `EMTDS_RELOAD_INTERVAL`, что и `.dat`-списки; у `config.Groups.Replace`
   наконец появился вызывающий. Правки из админки вступают в силу без рестарта.
   Битый или пропавший файл пропускается и пробуется снова, работающий конфиг
   остаётся на месте, а ip_list-файлы, на которые ссылается новый поток,
@@ -259,45 +264,47 @@
 ## Осталось
 См. `TODO.md`: второй фактор для входа в админку, страница настроек
 api-клиента, четвёртая категория устройств, диапазоны версий в фильтрах
-ОС/браузера, упаковка для деплоя (Dockerfile, production-compose,
-systemd-юниты).
+ОС/браузера. Упаковка для деплоя есть: `Dockerfile`,
+`deploy/docker-compose.app.yml`, `deploy/install.sh`, таймер сторожа
+(`docs/wiki/watchdog.md`).
 
 ## Как запустить заново (дев)
 ```bash
-cd kuztds
+cd emtds
 make infra-up                         # ClickHouse + Redis
 go run ./cmd/admin -hash 'admin123' > /tmp/admin.hash   # хэш пароля
 
 # движок :8080
-KUZTDS_DATA_DIR=../database KUZTDS_GROUPS_FILE=configs/test_groups.json \
-KUZTDS_TRUSTED_PROXIES=127.0.0.1/32 KUZTDS_POSTBACK_KEY=pbsecret KUZTDS_API_KEY=apikey123 \
-KUZTDS_KEYS_DIR=/tmp/kuztds-keys KUZTDS_GEO_DB=internal/geo/testdata/GeoLite2-City-Test.mmdb \
-KUZTDS_REDIS_ADDR=localhost:6379 KUZTDS_CLICKHOUSE_ADDR=localhost:9000 \
-KUZTDS_CLICKHOUSE_DB=kuztds KUZTDS_CLICKHOUSE_USER=kuztds KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_DATA_DIR=../database EMTDS_GROUPS_FILE=configs/test_groups.json \
+EMTDS_TRUSTED_PROXIES=127.0.0.1/32 EMTDS_POSTBACK_KEY=pbsecret EMTDS_API_KEY=apikey123 \
+EMTDS_KEYS_DIR=/tmp/emtds-keys EMTDS_GEO_DB=internal/geo/testdata/GeoLite2-City-Test.mmdb \
+EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
+EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/engine
 
 # админка :8090 (admin / admin123)
-KUZTDS_ADMIN_PASSWORD_HASH="$(cat /tmp/admin.hash)" KUZTDS_ADMIN_PASSWORD_FILE=/tmp/admin.hash \
-KUZTDS_ADMIN_COOKIE_SECURE=false KUZTDS_ENGINE_URL=http://localhost:8080 \
-KUZTDS_GROUPS_FILE=configs/test_groups.json KUZTDS_DATA_DIR=../database KUZTDS_KEYS_DIR=/tmp/kuztds-keys \
-KUZTDS_REDIS_ADDR=localhost:6379 KUZTDS_CLICKHOUSE_ADDR=localhost:9000 \
-KUZTDS_CLICKHOUSE_DB=kuztds KUZTDS_CLICKHOUSE_USER=kuztds KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_ADMIN_PASSWORD_HASH="$(cat /tmp/admin.hash)" EMTDS_ADMIN_PASSWORD_FILE=/tmp/admin.hash \
+EMTDS_ADMIN_COOKIE_SECURE=false EMTDS_ENGINE_URL=http://localhost:8080 \
+EMTDS_GROUPS_FILE=configs/test_groups.json EMTDS_DATA_DIR=../database EMTDS_KEYS_DIR=/tmp/emtds-keys \
+EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
+EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/admin
 
-# cron (опционально; добавь KUZTDS_CRON_FILE / KUZTDS_GEO_DB / KUZTDS_ASN_DB и админке,
+# cron (опционально; добавь EMTDS_CRON_FILE / EMTDS_GEO_DB / EMTDS_ASN_DB и админке,
 # а два гео-пути — движку)
-KUZTDS_CRON_FILE=/tmp/kuztds-cron.json KUZTDS_DATA_DIR=../database KUZTDS_KEYS_DIR=/tmp/kuztds-keys \
-KUZTDS_GROUPS_FILE=configs/test_groups.json \
-KUZTDS_GEO_DB=/tmp/kuztds-geo/city.mmdb KUZTDS_ASN_DB=/tmp/kuztds-geo/asn.mmdb \
-KUZTDS_CLICKHOUSE_ADDR=localhost:9000 KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CRON_FILE=/tmp/emtds-cron.json EMTDS_DATA_DIR=../database EMTDS_KEYS_DIR=/tmp/emtds-keys \
+EMTDS_GROUPS_FILE=configs/test_groups.json \
+EMTDS_GEO_DB=/tmp/emtds-geo/city.mmdb EMTDS_ASN_DB=/tmp/emtds-geo/asn.mmdb \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/cron
 ```
 Схема ClickHouse применяется автоматически из `migrations/clickhouse/*.sql` на
 свежей базе; на существующей движок и админка сами добавляют новые колонки при
-старте.
+старте, кроме волны Sub ID 13…30: `migrations/clickhouse/011_sub_id_30.sql`
+применяют вручную (`docs/wiki/log-filters.md`).
 
 ## Заметки
-- Админка и движок должны указывать на ОДИН `KUZTDS_GROUPS_FILE`. Админка читает
+- Админка и движок должны указывать на ОДИН `EMTDS_GROUPS_FILE`. Админка читает
   и пишет его live; движок перечитывает его при изменении, по тикеру
-  `KUZTDS_RELOAD_INTERVAL`. Рестарт не нужен.
+  `EMTDS_RELOAD_INTERVAL`. Рестарт не нужен.
 - Группа: `id` = идентификатор и адрес `/<id>`; `name` — опциональное отображаемое имя.

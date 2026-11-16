@@ -9,8 +9,8 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/router"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/router"
 )
 
 const (

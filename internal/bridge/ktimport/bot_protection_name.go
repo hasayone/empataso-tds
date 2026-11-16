@@ -9,7 +9,7 @@ import (
 const botProtectionPrefix = "Bot Protection"
 const closingStreamPrefix = "Замыкающий"
 
-// BotProtectionStreamName сообщает, что имя потока — Bot Protection или «Замыкающий» в Keitaro или kuztds.
+// BotProtectionStreamName сообщает, что имя потока — Bot Protection или «Замыкающий» в Keitaro или emtds.
 //
 // Параметры: name — имя потока.
 // Результат: true, когда после обрезки пробелов имя без учёта регистра равно одному из этих имён

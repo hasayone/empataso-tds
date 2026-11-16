@@ -59,7 +59,7 @@ func TestConnectionReuse(t *testing.T) {
 	run(old, srvOld)
 
 	srvNew, openedNew := countingServer(t, h)
-	run(New("ua", nil), srvNew)
+	run(NewWithLimits("ua", nil, Limits{AllowPrivate: true}), srvNew)
 
 	t.Logf("%d requests, 16 concurrent: default transport opened %d connections, tuned opened %d",
 		n, openedOld.Load(), openedNew.Load())
@@ -87,7 +87,7 @@ func TestMaxConnsPerHostIsTheCeiling(t *testing.T) {
 		<-release
 	})
 
-	c := NewWithLimits("ua", nil, Limits{MaxConnsPerHost: 4, Backstop: 2 * time.Second})
+	c := NewWithLimits("ua", nil, Limits{MaxConnsPerHost: 4, Backstop: 2 * time.Second, AllowPrivate: true})
 
 	var wg sync.WaitGroup
 	for i := 0; i < 64; i++ {
@@ -115,7 +115,7 @@ func TestBackstopBoundsAForgottenCall(t *testing.T) {
 	srv, _ := countingServer(t, func(w http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done() // hold until the client gives up
 	})
-	c := NewWithLimits("ua", nil, Limits{Backstop: 300 * time.Millisecond})
+	c := NewWithLimits("ua", nil, Limits{Backstop: 300 * time.Millisecond, AllowPrivate: true})
 
 	start := time.Now()
 	_, err := c.Get(context.Background(), srv.URL)

@@ -25,7 +25,7 @@ var gzipPool = sync.Pool{
 // It returns the wrapping handler. It does not return an error.
 func gzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !acceptsGzip(r) || upgradeRequest(r) {
+		if !gzipEligible(r) {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -33,6 +33,27 @@ func gzipMiddleware(next http.Handler) http.Handler {
 		defer gw.finish()
 		next.ServeHTTP(gw, r)
 	})
+}
+
+// gzipEligible reports whether gzipMiddleware compresses the response to r:
+// the client accepts gzip and the request is neither a protocol switch nor a request for an
+// event stream, whose chunks must reach the client as they are written.
+// It does not return an error.
+func gzipEligible(r *http.Request) bool {
+	return acceptsGzip(r) && !upgradeRequest(r) && !aiWantsSSE(r)
+}
+
+// addVary adds token to the Vary header of h unless a value already lists it.
+// It does not return an error.
+func addVary(h http.Header, token string) {
+	for _, v := range h.Values("Vary") {
+		for _, part := range strings.Split(v, ",") {
+			if strings.EqualFold(strings.TrimSpace(part), token) {
+				return
+			}
+		}
+	}
+	h.Add("Vary", token)
 }
 
 // acceptsGzip reports whether Accept-Encoding lists a gzip coding token.
@@ -141,7 +162,7 @@ func (g *gzipResponseWriter) begin() {
 		return
 	}
 	h.Set("Content-Encoding", "gzip")
-	h.Add("Vary", "Accept-Encoding")
+	addVary(h, "Accept-Encoding")
 	h.Del("Content-Length")
 	g.ResponseWriter.WriteHeader(g.status)
 	zw := gzipPool.Get().(*gzip.Writer)

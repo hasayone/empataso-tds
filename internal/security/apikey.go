@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/egerkuzma/kuztds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/atomicfile"
 )
 
 const (
@@ -27,7 +27,7 @@ const (
 	maxAPIKeyNameLen = 64
 	// apiKeyIDBytes is the entropy of APIKey.ID (12 hex characters).
 	apiKeyIDBytes = 6
-	// apiKeyBodyBytes is the entropy of the secret after the "kz_" prefix
+	// apiKeyBodyBytes is the entropy of the secret after the "em_" prefix
 	// (40 hex characters, so the raw key is 43 characters).
 	apiKeyBodyBytes = 20
 	// apiKeyPrefixLen is how many hex characters of that secret are kept for
@@ -38,7 +38,18 @@ const (
 	apiKeyGenAttempts = 3
 )
 
-const apiKeyPrefix = "kz_"
+const (
+	// APIKeyPrefix starts every key issued now.
+	APIKeyPrefix = "em_"
+	// LegacyAPIKeyPrefix starts keys issued before the em_ prefix; Verify still accepts them.
+	LegacyAPIKeyPrefix = "kz_"
+)
+
+// HasAPIKeyPrefix reports whether raw starts with APIKeyPrefix or LegacyAPIKeyPrefix.
+// raw is the secret as sent by the client. There is no error.
+func HasAPIKeyPrefix(raw string) bool {
+	return strings.HasPrefix(raw, APIKeyPrefix) || strings.HasPrefix(raw, LegacyAPIKeyPrefix)
+}
 
 var (
 	// ErrAPIKeyName is returned when the name is empty after trimming.
@@ -61,25 +72,50 @@ var (
 // APIKey is one admin or engine credential, stored without the raw secret.
 //
 // ID is 12 hex characters from crypto/rand. Prefix is the first 8 hex
-// characters of the secret that follows "kz_", so a table can show which key
-// is which. Hash is hex(sha256(raw)) and is written to the key file; Public
+// characters of the secret that follows the lead, so a table can show which key
+// is which. Lead is the text before that secret: APIKeyPrefix for a key issued
+// or rotated now; a record written before the field existed has none and its
+// key starts with LegacyAPIKeyPrefix. Hash is hex(sha256(raw)) and is written to the key file; Public
 // clears it before an API response. Scopes contains ScopeAdmin, ScopeEngine,
 // or both. RevokedAt is nil while the key is active, so the key file omits
 // revoked_at for a live key.
+//
+// Type, RoleID, Access and Actions decide what the key may do on the admin API
+// (see KeyAccess). A key file written before they existed has none of them,
+// which reads as an ADMIN key without dangerous actions. A key whose Type or
+// Actions the file spells wrong is marked invalid when loaded and Verify
+// refuses it, so a typo never widens access.
 type APIKey struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
 	Prefix    string     `json:"prefix"`
+	Lead      string     `json:"lead,omitempty"`
 	Hash      string     `json:"hash,omitempty"`
 	Scopes    []string   `json:"scopes"`
 	CreatedAt time.Time  `json:"created_at"`
 	RevokedAt *time.Time `json:"revoked_at,omitempty"`
+	Type      string     `json:"type,omitempty"`
+	RoleID    string     `json:"role_id,omitempty"`
+	Access    *Access    `json:"access,omitempty"`
+	Actions   []string   `json:"actions,omitempty"`
+
+	// ExpiresAt nil means the key never expires; a record written before the
+	// field existed has none.
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	// LastUsedAt and LastUsedIP are the last recorded admin API use, at most
+	// KeyTouchEvery stale; LastUsedIP is masked (a.b.c.x or an IPv6 /48).
+	LastUsedAt *time.Time `json:"last_used_at,omitempty"`
+	LastUsedIP string     `json:"last_used_ip,omitempty"`
+
+	// invalid is set by normalizeLoaded when the stored access fields fail
+	// ValidKeyAccess. It is not part of the key file.
+	invalid bool
 }
 
 // Public returns a copy of k with Hash cleared.
 //
-// The copy does not share Scopes or RevokedAt with k. Callers may marshal it
-// into an API response; there is no error.
+// The copy does not share Scopes, RevokedAt, Access or Actions with k. Callers
+// may marshal it into an API response; there is no error.
 func (k APIKey) Public() APIKey {
 	cp := k.clone()
 	cp.Hash = ""
@@ -107,16 +143,22 @@ func (k APIKey) HasScope(scope string) bool {
 	return false
 }
 
-// clone returns a copy of k whose Scopes and RevokedAt are not shared.
-// Hash is kept. There is no error.
+// clone returns a copy of k whose Scopes, RevokedAt, Access and Actions are
+// not shared. Hash is kept. There is no error.
 func (k APIKey) clone() APIKey {
 	if k.Scopes != nil {
 		k.Scopes = append([]string{}, k.Scopes...)
 	}
-	if k.RevokedAt != nil {
-		t := *k.RevokedAt
-		k.RevokedAt = &t
+	if k.Actions != nil {
+		k.Actions = append([]string{}, k.Actions...)
 	}
+	if k.Access != nil {
+		acc := k.Access.clone()
+		k.Access = &acc
+	}
+	k.RevokedAt = copyTime(k.RevokedAt)
+	k.ExpiresAt = copyTime(k.ExpiresAt)
+	k.LastUsedAt = copyTime(k.LastUsedAt)
 	return k
 }
 
@@ -155,6 +197,8 @@ type KeySet struct {
 	mu     sync.RWMutex
 	keys   []*APIKey
 	byHash map[string]*APIKey
+	// dirty is set by Touch and cleared by TakeDirty.
+	dirty bool
 }
 
 // NewKeySet returns an empty set safe for concurrent use. There is no error.
@@ -217,40 +261,40 @@ func (s *KeySet) Save(path string) error {
 }
 
 // Generate adds a key named name with scopes and returns the raw secret once.
+// The key has no type, role, access or actions, which reads as an ADMIN key
+// without dangerous actions; GenerateWith sets them.
 //
 // name is trimmed and must be non-empty and at most 64 Unicode characters.
 // scopes must be a non-empty subset of ScopeAdmin and ScopeEngine; duplicates
-// are removed. raw is "kz_" plus 40 hex characters from crypto/rand and is
+// are removed. raw is "em_" plus 40 hex characters from crypto/rand and is
 // not stored. key is a copy of the stored record, including Hash. ErrAPIKeyName,
 // ErrAPIKeyNameLen, ErrAPIKeyScope, a random-source error, or errAPIKeyGenerate
 // is returned with an empty raw and a zero key; the set is unchanged then.
 func (s *KeySet) Generate(name string, scopes []string) (raw string, key APIKey, err error) {
-	name, scopes, err = normalizeKeyRequest(name, scopes)
-	if err != nil {
-		return "", APIKey{}, err
-	}
-	for range apiKeyGenAttempts {
-		raw, rec, genErr := newAPIKey(name, scopes)
-		if genErr != nil {
-			return "", APIKey{}, genErr
-		}
-		if s.storeNew(rec) {
-			return raw, rec.clone(), nil
-		}
-	}
-	return "", APIKey{}, errAPIKeyGenerate
+	return s.GenerateWith(name, scopes, KeyAccess{})
 }
 
 // Verify reports whether raw is an active key that has scope.
 //
-// An empty raw returns a zero key and false. Otherwise the SHA-256 of raw is
+// An empty raw, or one that starts with neither APIKeyPrefix nor
+// LegacyAPIKeyPrefix, returns a zero key and false. Otherwise the SHA-256 of raw is
 // looked up in byHash (the hash is not a secret, so the map key is enough to
 // find it) and the stored hash is compared again with subtle.ConstantTimeCompare.
-// A miss, a mismatch, a revoked key, or a key without scope returns a zero
-// key and false. On success the returned key is a copy and includes Hash;
-// call Public before writing it to an API response or a log.
+// A miss, a mismatch, a revoked or expired key, a key without scope, or a key whose
+// stored type or actions are invalid returns a zero key and false. On success the returned key is a copy and includes Hash;
+// call Public before writing it to an API response or a log. Check tells an expired key apart.
 func (s *KeySet) Verify(raw, scope string) (APIKey, bool) {
-	if raw == "" {
+	k, err := s.Check(raw, scope, time.Now())
+	return k, err == nil
+}
+
+// lookup returns a copy of the record whose hash matches raw.
+//
+// raw must carry APIKeyPrefix or LegacyAPIKeyPrefix. The SHA-256 of raw is
+// looked up in byHash and compared again with subtle.ConstantTimeCompare. The
+// copy keeps the invalid mark. A miss returns a zero key and false. There is no error.
+func (s *KeySet) lookup(raw string) (APIKey, bool) {
+	if !HasAPIKeyPrefix(raw) {
 		return APIKey{}, false
 	}
 	sum := sha256.Sum256([]byte(raw))
@@ -258,13 +302,7 @@ func (s *KeySet) Verify(raw, scope string) (APIKey, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	k := s.byHash[hexHash]
-	if k == nil {
-		return APIKey{}, false
-	}
-	if subtle.ConstantTimeCompare([]byte(k.Hash), []byte(hexHash)) != 1 {
-		return APIKey{}, false
-	}
-	if !k.Active() || !k.HasScope(scope) {
+	if k == nil || subtle.ConstantTimeCompare([]byte(k.Hash), []byte(hexHash)) != 1 {
 		return APIKey{}, false
 	}
 	return k.clone(), true
@@ -272,7 +310,7 @@ func (s *KeySet) Verify(raw, scope string) (APIKey, bool) {
 
 // Rotate replaces the secret of the active key id and returns the new raw secret once.
 //
-// id selects the record. raw is "kz_" plus 40 hex characters and is not stored.
+// id selects the record. raw is "em_" plus 40 hex characters and is not stored.
 // key is a copy of the updated record, including Hash. ID, Name, Scopes and
 // CreatedAt stay as they were. ErrAPIKeyNotFound means no record has id.
 // ErrAPIKeyRevoked means the record exists but is not active. A random-source
@@ -301,6 +339,7 @@ func (s *KeySet) Rotate(id string) (raw string, key APIKey, err error) {
 			delete(s.byHash, k.Hash)
 		}
 		k.Prefix = prefix
+		k.Lead = APIKeyPrefix
 		k.Hash = hash
 		s.byHash[hash] = k
 		return raw, k.clone(), nil
@@ -434,7 +473,7 @@ func normalizeKeyRequest(name string, scopes []string) (string, []string, error)
 
 // freshSecret builds one raw key and the prefix and hash stored beside it.
 //
-// raw is "kz_" plus 40 hex characters from crypto/rand. prefix is the first
+// raw is "em_" plus 40 hex characters from crypto/rand. prefix is the first
 // 8 hex characters of the secret body. hash is hex(sha256(raw)). An error
 // means crypto/rand failed. Nothing is stored.
 func freshSecret() (raw, prefix, hash string, err error) {
@@ -442,7 +481,7 @@ func freshSecret() (raw, prefix, hash string, err error) {
 	if err != nil {
 		return "", "", "", err
 	}
-	raw = apiKeyPrefix + body
+	raw = APIKeyPrefix + body
 	sum := sha256.Sum256([]byte(raw))
 	return raw, body[:apiKeyPrefixLen], hex.EncodeToString(sum[:]), nil
 }
@@ -465,6 +504,7 @@ func newAPIKey(name string, scopes []string) (string, *APIKey, error) {
 		ID:        id,
 		Name:      name,
 		Prefix:    prefix,
+		Lead:      APIKeyPrefix,
 		Hash:      hash,
 		Scopes:    append([]string{}, scopes...),
 		CreatedAt: time.Now().UTC(),
@@ -586,12 +626,20 @@ func readKeyFile(path string) ([]*APIKey, error) {
 // normalizeLoaded returns a heap copy of rec ready to store.
 //
 // Hash is trimmed and lowercased. A zero RevokedAt becomes nil so the next
-// Save omits it. Scopes are copied. There is no error; a record this cannot
-// fix is still stored and simply fails Verify.
+// Save omits it. Scopes, Actions and Access are copied. The type, role, access
+// and actions are kept as the file spells them, and the record is marked
+// invalid when ValidKeyAccess refuses them. There is no error; a record this
+// cannot fix is still stored and simply fails Verify.
 func normalizeLoaded(rec APIKey) *APIKey {
 	rec.Hash = strings.ToLower(strings.TrimSpace(rec.Hash))
 	if rec.Scopes != nil {
 		rec.Scopes = append([]string{}, rec.Scopes...)
+	}
+	rec = rec.clone()
+	_, err := ValidKeyAccess(rec.keyAccess())
+	rec.invalid = err != nil
+	if rec.ExpiresAt != nil && rec.ExpiresAt.IsZero() {
+		rec.ExpiresAt = nil
 	}
 	if rec.RevokedAt != nil {
 		if rec.RevokedAt.IsZero() {

@@ -7,12 +7,12 @@ import (
 	"os"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // apiKeys is the set of credentials accepted by ?api= mode.
 //
-// env is KUZTDS_API_KEY and may be empty. set is the file-backed collection
+// env is EMTDS_API_KEY and may be empty. set is the file-backed collection
 // and may be nil when no key file is configured. Neither value is logged.
 type apiKeys struct {
 	env string

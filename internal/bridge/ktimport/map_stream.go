@@ -12,6 +12,8 @@ import (
 // mapCampaigns превращает кампании в группы.
 //
 // Параметры: src — снимок; losses — уже собранный отчёт. Справочники лежат в получателе.
+// При only > 0 группа строится только для этой кампании, остальные лишь занимают свои id,
+// чтобы id групп совпали с полным переносом.
 // Результат: группы и отчёт вместе с потерями кампаний.
 // Ошибки: нет.
 func (c *mapCtx) mapCampaigns(src Snapshot, losses []Loss) ([]Group, []Loss) {
@@ -25,13 +27,20 @@ func (c *mapCtx) mapCampaigns(src Snapshot, losses []Loss) ([]Group, []Loss) {
 		return camps[i].Alias < camps[j].Alias
 	})
 	var out []Group
+	var mapped []Campaign
 	for _, camp := range camps {
+		if c.only > 0 && int(camp.ID) != c.only {
+			id, _, _ := assignedID(camp.Alias, int(camp.ID), c.seen)
+			c.seen[id] = true
+			continue
+		}
 		g, extra := c.mapCampaign(camp, src.Streams[strconv.Itoa(int(camp.ID))])
 		out = append(out, g)
 		losses = append(losses, extra...)
 		c.seen[g.ID] = true
+		mapped = append(mapped, camp)
 	}
-	losses = append(losses, campaignSettingLosses(camps)...)
+	losses = append(losses, campaignSettingLosses(mapped)...)
 	return out, losses
 }
 
@@ -278,7 +287,7 @@ func bytesTrim(raw json.RawMessage) string {
 // mapStreams упорядочивает потоки: forced, regular, default.
 //
 // Параметры: streams — потоки кампании; forceOff — выключить все потоки. Справочники и отчёт лежат в получателе.
-// Результат: потоки kuztds, по одному на поток Keitaro.
+// Результат: потоки emtds, по одному на поток Keitaro.
 // Ошибки: нет.
 func (c *mapCtx) mapStreams(streams []KStream, forceOff bool) []Stream {
 	sorted := append([]KStream(nil), streams...)
@@ -318,19 +327,24 @@ func typeRank(t string) int {
 	}
 }
 
-// buildStream собирает один поток kuztds без размножения filter_or.
+// skippedFiltersNote отделяет в заметке потока имена фильтров Keitaro, которые перенос пропустил.
+// Заметка начинается с keitaro_stream_id=N, пометка идёт после него.
+const skippedFiltersNote = "; не перенесены фильтры Keitaro: "
+
+// buildStream собирает один поток emtds без размножения filter_or.
 //
 // Параметры: st — поток; forceOff — выключить поток. Справочники и отчёт лежат в получателе.
 // Результат: поток с FilterOr, долями и правилами.
 // Ошибки: нет.
 func (c *mapCtx) buildStream(st KStream, forceOff bool) Stream {
 	s, extra := c.streamOutput(st)
-	rules, ok, why, flosses := mapFilters(st.Filters, c.lists, st.FilterOr)
+	rules, ok, why, flosses, skipped := mapFilters(st.Filters, c.lists, st.FilterOr)
 	ref := streamRef(int(st.ID))
 	for _, l := range flosses {
 		l.Ref = ref
 		*c.losses = append(*c.losses, l)
 	}
+	s.Comment = RenoteStream(s.Comment, skipped)
 	s.Rules = rules
 	s.FilterOr = st.FilterOr
 	on := !forceOff && !strings.EqualFold(st.State, "disabled") && extra == ""
@@ -354,7 +368,7 @@ func (c *mapCtx) streamOutput(st KStream) (Stream, string) {
 	offers, landings, losses, pages, aliases, swaps := c.offers, c.landings, c.losses, c.pages, c.aliases, c.swaps
 	s := Stream{
 		Name:    streamTitle(st),
-		Comment: fmt.Sprintf("keitaro_stream_id=%d", int(st.ID)),
+		Comment: StreamNote(int(st.ID), nil),
 		Out:     Output{Redirect: "show_text", Out: "", Chance: 100},
 	}
 	ref := streamRef(int(st.ID))
@@ -534,7 +548,7 @@ func localOffer(st KStream, offers map[int]Offer, losses *[]Loss) bool {
 	return found
 }
 
-// rewriteMacros заменяет известные макросы Keitaro на метки kuztds.
+// rewriteMacros заменяет известные макросы Keitaro на метки emtds.
 // Неизвестное имя в фигурных скобках остаётся: движок читает его как параметр URL.
 //
 // Параметры: raw — исходная строка URL или текста.

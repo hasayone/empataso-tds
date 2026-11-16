@@ -17,7 +17,7 @@ func localAction(action string) bool {
 	return strings.Contains(a, "local") || strings.Contains(a, "php")
 }
 
-// redirectOf переводит action_type Keitaro в тип редиректа kuztds.
+// redirectOf переводит action_type Keitaro в тип редиректа emtds.
 //
 // Параметры: action — action_type; второй аргумент — схема потока, на выбор типа не влияет.
 // Результат: тип из render.Do и текст приближения. Пустой текст значит точное соответствие.
@@ -54,7 +54,7 @@ func redirectOf(action, _ string) (string, string) {
 
 // carriesOut сообщает, что тип редиректа показывает поле out.
 //
-// Параметры: redirect — тип kuztds.
+// Параметры: redirect — тип emtds.
 // Результат: true, если движок берёт адрес или текст из out.
 // Ошибки: нет.
 func carriesOut(redirect string) bool {
@@ -106,7 +106,7 @@ func campaignAction(payload string, aliases map[int]string) (string, string, str
 // GroupIDs возвращает id группы для каждой кампании так же, как mapCampaigns.
 //
 // Параметры: camps — кампании снимка или списка GET /admin_api/v1/campaigns.
-// Результат: id кампании Keitaro → id группы kuztds.
+// Результат: id кампании Keitaro → id группы emtds.
 // Ошибки: нет.
 func GroupIDs(camps []Campaign) map[int]string {
 	return campaignAliases(camps)

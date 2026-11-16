@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // denyLogin refuses every login attempt.
@@ -144,7 +144,7 @@ func TestAPIKeyCookieAndHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw := created.Key
-	if !strings.HasPrefix(raw, "kz_") || len(raw) < 11 || raw[3:11] != created.Item.Prefix || created.Item.Hash != "" {
+	if !strings.HasPrefix(raw, "em_") || len(raw) < 11 || raw[3:11] != created.Item.Prefix || created.Item.Hash != "" {
 		t.Fatal("create response key shape")
 	}
 	if created.Item.ID == "" || !created.Item.HasScope(security.ScopeAdmin) {
@@ -357,7 +357,7 @@ func TestAPIKeyRotateUpdateHardDelete(t *testing.T) {
 	if err := json.Unmarshal(rotBody, &rotated); err != nil {
 		t.Fatal(err)
 	}
-	if rotated.Key == "" || rotated.Key == created.Key || !strings.HasPrefix(rotated.Key, "kz_") || len(rotated.Key) != 43 {
+	if rotated.Key == "" || rotated.Key == created.Key || !strings.HasPrefix(rotated.Key, "em_") || len(rotated.Key) != 43 {
 		t.Fatal("rotate response key shape")
 	}
 	if rotated.Item.ID != created.Item.ID || rotated.Item.Prefix == created.Item.Prefix || rotated.Item.Prefix != rotated.Key[3:11] {

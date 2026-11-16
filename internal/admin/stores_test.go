@@ -4,12 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func TestFileGroupsRoundTrip(t *testing.T) {
@@ -84,18 +87,28 @@ func TestFileKeysValidation(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "g1", "2026-06-07-se.dat"), []byte("se1\n"), 0o644)
 	fk := NewFileKeys(dir)
 
-	if c, err := fk.Read("g1", "2026-06-07", false); err != nil || c != "kw1\nkw2\n" {
-		t.Fatalf("read keys: %q err %v", c, err)
+	read := func(group, date string, se bool) (string, int64, error) {
+		rc, size, err := fk.Open(group, date, se)
+		if err != nil {
+			return "", 0, err
+		}
+		defer rc.Close()
+		b, err := io.ReadAll(rc)
+		return string(b), size, err
 	}
-	if c, err := fk.Read("g1", "2026-06-07", true); err != nil || c != "se1\n" {
+	if c, size, err := read("g1", "2026-06-07", false); err != nil || c != "kw1\nkw2\n" || size != 8 {
+		t.Fatalf("read keys: %q size %d err %v", c, size, err)
+	}
+	if c, _, err := read("g1", "2026-06-07", true); err != nil || c != "se1\n" {
 		t.Fatalf("read se keys: %q err %v", c, err)
 	}
-	// injections in group/date
-	if _, err := fk.Read("../etc", "2026-06-07", false); err == nil {
-		t.Error("bad group must be rejected")
+	for _, bad := range [][2]string{{"../etc", "2026-06-07"}, {"g1", "../../x"}, {"..", "2026-06-07"}, {"g1", ".."}, {"", "2026-06-07"}} {
+		if _, _, err := fk.Open(bad[0], bad[1], false); !errors.Is(err, errBadKeysName) {
+			t.Errorf("Open(%q, %q) err %v, want errBadKeysName", bad[0], bad[1], err)
+		}
 	}
-	if _, err := fk.Read("g1", "../../x", false); err == nil {
-		t.Error("bad date must be rejected")
+	if _, _, err := fk.Open("g1", "2026-06-08", false); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("missing list err %v, want fs.ErrNotExist", err)
 	}
 }
 

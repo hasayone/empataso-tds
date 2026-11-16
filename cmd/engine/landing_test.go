@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/logbuf"
-	"github.com/egerkuzma/kuztds/internal/render"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/render"
 )
 
 func TestLocalLandingHTMLAndAssets(t *testing.T) {
@@ -72,7 +72,7 @@ func TestLocalLandingHTMLAndAssets(t *testing.T) {
 	if !strings.Contains(body, "utm=fb") {
 		t.Fatalf("query dropped: %s", body)
 	}
-	if len(ins.events) != 1 || ins.events[0].LandingID != "7" || ins.events[0].Redirect != "landing" {
+	if len(ins.events) != 1 || ins.events[0].LandingID != "7" || ins.events[0].Redirect != "landing" || ins.events[0].Out != "7" {
 		t.Fatalf("event %+v", ins.events)
 	}
 	if !strings.Contains(body, ins.events[0].CID) {
@@ -96,11 +96,12 @@ func TestLocalLandingHTMLAndAssets(t *testing.T) {
 }
 
 func TestLandingPHPProxy(t *testing.T) {
-	var gotPath, gotQuery, gotCID, gotIP string
+	var gotPath, gotQuery, gotCID, gotLegacyCID, gotIP string
 	php := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
-		gotCID = r.Header.Get("X-Kuztds-Cid")
+		gotCID = r.Header.Get("X-Emtds-Cid")
+		gotLegacyCID = r.Header.Get("X-Kuztds-Cid")
 		gotIP = r.Header.Get("X-Forwarded-For")
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte("<head></head><a href=\"{offer}\">go</a>"))
@@ -120,6 +121,9 @@ func TestLandingPHPProxy(t *testing.T) {
 	})
 	if gotPath != "/7/index.php" || gotQuery != "x=1" || gotCID != "0123456789" || gotIP != "203.0.113.8" {
 		t.Fatalf("php saw path %s query %s cid %s ip %s", gotPath, gotQuery, gotCID, gotIP)
+	}
+	if gotLegacyCID != gotCID {
+		t.Fatalf("php saw X-Kuztds-Cid %q, want %q", gotLegacyCID, gotCID)
 	}
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<base href=\"/l/7/\">") {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
@@ -171,7 +175,15 @@ func TestLandingPHPAssetRedirect(t *testing.T) {
 		_, _ = w.Write([]byte("gone"))
 	}))
 	defer php.Close()
-	srv := newLandingServer(t.TempDir(), php.URL, nil, discardLog())
+	dir := t.TempDir()
+	land := filepath.Join(dir, "7")
+	if err := os.Mkdir(land, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(land, "index.php"), []byte("<?php ?>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := newLandingServer(dir, php.URL, nil, discardLog())
 	req := httptest.NewRequest(http.MethodGet, "http://example/l/7/index.php", nil)
 	rec := httptest.NewRecorder()
 	srv.serveAsset(rec, req)

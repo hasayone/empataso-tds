@@ -9,13 +9,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/detect"
-	"github.com/egerkuzma/kuztds/internal/fetch"
-	"github.com/egerkuzma/kuztds/internal/geo"
-	"github.com/egerkuzma/kuztds/internal/ipindex"
-	"github.com/egerkuzma/kuztds/internal/logbuf"
-	"github.com/egerkuzma/kuztds/internal/server"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/egerkuzma/emtds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/ipindex"
+	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/server"
 )
 
 // captureIns collects the batches logbuf flushes, so a test can assert on what
@@ -51,8 +50,8 @@ func curlEnv(t *testing.T, groups *config.Groups, trashMode string, opts ...func
 	go buf.Run(ctx)
 	d := &engineDeps{
 		log: log, lists: lists, sigs: detect.NewSignatures(dir, log), geores: geo.Nop{},
-		groups: groups, logs: buf, fetcher: fetch.New("", nil),
-		dataDir: dir, keysDir: dir, trashMode: trashMode,
+		groups: groups, logs: buf, fetcher: testFetcher(),
+		dataDir: dir, keyFiles: newKeyWriter(dir, 0, nil), trashMode: trashMode,
 	}
 	for _, o := range opts {
 		o(d)

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 var spendMu sync.Mutex
@@ -89,7 +89,7 @@ func (s *Server) handleSpendCreate(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Stats != nil {
 		rows, err := s.cfg.Stats.ClickBuckets(r.Context(), entry.GroupID, entry.From, entry.To, body.IncludeBots)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "stats error")
+			writeStatsErr(w, err, "stats error")
 			return
 		}
 		for _, row := range rows {

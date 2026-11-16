@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "at": "2026-01-15T10:00:00Z",
+  "script_version": "1.0.0",
+  "repo": "git@github.com:<owner>/emtds.git",
+  "channel": "release",
+  "signing": true,
+  "docker_ok": true,
+  "inbox": false,
+  "images": {
+    "local": "sha256:aabbccddee11",
+    "engine": "sha256:aabbccddee11",
+    "admin": "sha256:aabbccddee11",
+    "cron": "sha256:aabbccddee11"
+  },
+  "mismatch": false
+}

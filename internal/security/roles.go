@@ -10,7 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/egerkuzma/kuztds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/atomicfile"
 )
 
 // maxRoleNameRunes bounds the length of a role name.

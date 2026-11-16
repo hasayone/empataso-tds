@@ -4,7 +4,7 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 var (

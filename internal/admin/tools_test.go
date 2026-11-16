@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/cron"
-	"github.com/egerkuzma/kuztds/internal/geo"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/cron"
+	"github.com/egerkuzma/emtds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // toolsServer is an admin with a data directory, the MaxMind test databases
@@ -33,7 +33,7 @@ func toolsServer(t *testing.T) (base string, c *http.Client, csrf, dir string) {
 	if err := os.WriteFile(filepath.Join(dir, "signature_ua.dat"), []byte("bot\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	db, err := geo.Open("../geo/testdata/GeoLite2-City-Test.mmdb", "../geo/testdata/GeoLite2-ASN-Test.mmdb", nil)
+	db, err := geo.OpenWith(geo.Paths{City: "../geo/testdata/GeoLite2-City-Test.mmdb", ASN: "../geo/testdata/GeoLite2-ASN-Test.mmdb"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -582,7 +582,7 @@ func TestCronGetMissingGeoAndBadConfig(t *testing.T) {
 	}
 }
 
-// Without KUZTDS_CRON_FILE the page still loads (defaults, marked
+// Without EMTDS_CRON_FILE the page still loads (defaults, marked
 // unavailable) and writes are refused rather than dropped.
 func TestCronUnavailable(t *testing.T) {
 	srv, _, _ := fullServer(t, nil)

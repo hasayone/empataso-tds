@@ -4,7 +4,7 @@ import "fmt"
 
 // MergeByID подменяет записи прошлого переноса и дописывает новые.
 //
-// Параметры: existing — то, что уже лежит в kuztds; incoming — результат маппера; idOf — достаёт id; imported — true для id из манифеста. nil значит, что таких id нет.
+// Параметры: existing — то, что уже лежит в emtds; incoming — результат маппера; idOf — достаёт id; imported — true для id из манифеста. nil значит, что таких id нет.
 // Результат: список, где запись из incoming заменила старую только при imported(id). Чужой id не тронут. Отсутствующая в incoming запись сохранена. Потери этого слияния отбрасываются.
 // Ошибки: нет.
 func MergeByID[T any](existing, incoming []T, idOf func(T) string, imported func(id string) bool) []T {

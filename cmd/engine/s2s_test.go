@@ -1,11 +1,10 @@
 package main
 
 import (
-	"net/url"
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func TestS2SCatalogQueues(t *testing.T) {
@@ -16,7 +15,7 @@ func TestS2SCatalogQueues(t *testing.T) {
 	book := loadBook(t, "s2s.json", []config.OutboundPostback{pb}, func(p config.OutboundPostback) string { return p.ID })
 	g := config.NewGroups(&config.Group{ID: "g1", Status: true, PostbackIDs: []string{"pb-fixed"}})
 	d := &engineDeps{groups: g, s2s: book, outbound: make(chan outboundJob, 4)}
-	if !d.fireOutbound("g1", "abc", 1, "sale", url.Values{}) {
+	if !d.fireOutbound("g1", "abc", "", 1, "sale", [config.MaxSubID]string{}) {
 		t.Fatal("catalog template was not queued")
 	}
 	if len(d.outbound) != 1 {
@@ -42,7 +41,7 @@ func TestS2SDedupLocalAndGlobal(t *testing.T) {
 		PostbackIDs: []string{"pb-1"},
 	})
 	d := &engineDeps{groups: g, s2s: book, outbound: make(chan outboundJob, 4)}
-	if !d.fireOutbound("g1", "abc", 1, "sale", nil) {
+	if !d.fireOutbound("g1", "abc", "", 1, "sale", [config.MaxSubID]string{}) {
 		t.Fatal("shared template was not queued")
 	}
 	if len(d.outbound) != 1 {
@@ -57,7 +56,7 @@ func TestS2SMissingIDNotQueued(t *testing.T) {
 	book := loadBook(t, "s2s.json", []config.OutboundPostback{other}, func(p config.OutboundPostback) string { return p.ID })
 	g := config.NewGroups(&config.Group{ID: "g1", Status: true, PostbackIDs: []string{"pb-missing"}})
 	d := &engineDeps{log: discardLog(), groups: g, s2s: book, outbound: make(chan outboundJob, 2)}
-	if d.fireOutbound("g1", "abc", 1, "sale", nil) {
+	if d.fireOutbound("g1", "abc", "", 1, "sale", [config.MaxSubID]string{}) {
 		t.Fatal("missing template reported success")
 	}
 	if len(d.outbound) != 0 {

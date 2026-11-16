@@ -7,16 +7,31 @@ import (
 	"math"
 	"net/http"
 	"os"
+	"path"
 	"regexp"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // JSONStore reads and writes a JSON array. Save replaces the whole file.
+// mu serializes read-modify-write cycles of every writer that takes lock.
 type JSONStore[T any] struct {
 	path string
+	mu   sync.Mutex
+}
+
+// lock takes the write lock of the file and returns the function that releases it.
+// A nil store has nothing to lock. List and Save do not take the lock themselves,
+// so a writer that holds it may call them.
+func (s *JSONStore[T]) lock() func() {
+	if s == nil {
+		return func() {}
+	}
+	s.mu.Lock()
+	return s.mu.Unlock
 }
 
 // NewJSONStore returns a store for path. The file is created on the first save.
@@ -103,6 +118,9 @@ func validSource(src config.TrafficSource) string {
 	return ""
 }
 
+// validPostback checks the method and the URL of one outbound template.
+// p is the template. An empty status list is accepted: the engine sends it on every status.
+// It returns a client message, or an empty string when the template can be stored.
 func validPostback(p config.OutboundPostback) string {
 	method := strings.ToUpper(strings.TrimSpace(p.Method))
 	if method == "" {
@@ -114,9 +132,6 @@ func validPostback(p config.OutboundPostback) string {
 	u := strings.TrimSpace(p.URL)
 	if !strings.HasPrefix(u, "https://") && !strings.HasPrefix(u, "http://") {
 		return "url must be http or https"
-	}
-	if len(p.Statuses) == 0 {
-		return "status required"
 	}
 	return ""
 }
@@ -151,11 +166,17 @@ func prepSource(src *config.TrafficSource) {
 }
 
 func registerOffers(s *Server, mux *http.ServeMux) {
-	registerCRUD(s, mux, "/api/offers", s.cfg.Offers,
-		func(o config.Offer) string { return o.ID },
-		func(o *config.Offer, id string) { o.ID = id },
-		validOffer,
-		&catalogHooks[config.Offer]{
+	mountCRUD(s, mux, "/api/offers", s.offerCatalog())
+}
+
+// offerCatalog returns the handlers' state of the offer catalog.
+// Registration and restoreCatalogByRes build it the same way, so both see one set of hooks.
+func (s *Server) offerCatalog() crudCatalog[config.Offer] {
+	return crudCatalog[config.Offer]{s: s, store: s.cfg.Offers,
+		idOf:  func(o config.Offer) string { return o.ID },
+		setID: func(o *config.Offer, id string) { o.ID = id },
+		valid: validOffer,
+		hooks: &catalogHooks[config.Offer]{
 			seq: s.cfg.SeqOffers, floor: s.offerFloor, prep: prepOffer,
 			res:       resOffers,
 			label:     func(o config.Offer) string { return o.Group },
@@ -166,8 +187,10 @@ func registerOffers(s *Server, mux *http.ServeMux) {
 			userCheck: s.offerCheck,
 			maskOut:   maskOfferPayout,
 			keepIn:    keepOfferPayout,
+
+			restoreCheck: s.offerRestoreCheck,
 		},
-	)
+	}
 }
 
 func validOffer(o config.Offer) string {
@@ -239,11 +262,16 @@ func validOfferPayoutCurrency(code string) string {
 }
 
 func registerNetworks(s *Server, mux *http.ServeMux) {
-	registerCRUD(s, mux, "/api/affiliate-networks", s.cfg.Networks,
-		func(o config.AffiliateNetwork) string { return o.ID },
-		func(o *config.AffiliateNetwork, id string) { o.ID = id },
-		validNetwork,
-		&catalogHooks[config.AffiliateNetwork]{
+	mountCRUD(s, mux, "/api/affiliate-networks", s.networkCatalog())
+}
+
+// networkCatalog returns the handlers' state of the affiliate network catalog.
+func (s *Server) networkCatalog() crudCatalog[config.AffiliateNetwork] {
+	return crudCatalog[config.AffiliateNetwork]{s: s, store: s.cfg.Networks,
+		idOf:  func(o config.AffiliateNetwork) string { return o.ID },
+		setID: func(o *config.AffiliateNetwork, id string) { o.ID = id },
+		valid: validNetwork,
+		hooks: &catalogHooks[config.AffiliateNetwork]{
 			seq: s.cfg.SeqNetworks, floor: s.networkFloor, prep: prepNetwork,
 			res:      resNetworks,
 			label:    func(n config.AffiliateNetwork) string { return n.Group },
@@ -255,7 +283,7 @@ func registerNetworks(s *Server, mux *http.ServeMux) {
 				return macroCheck(v, n, old)
 			},
 		},
-	)
+	}
 }
 
 func validNetwork(n config.AffiliateNetwork) string {
@@ -291,6 +319,7 @@ func validOfferQuery(s string) string {
 // validLanding checks a landing id, for a remote landing its URL, and a non-empty Entry.
 // An Entry that config.SafeLandingRel refuses is a value the engine silently ignores in
 // favour of index.php or index.html, so it is rejected instead of stored.
+// A non-empty Entry must have one of the allowed extensions: .html, .htm, .php.
 // o is the landing. It returns an empty string when the record is acceptable.
 // It does not return an error; the string is the client message.
 func validLanding(o config.Landing) string {
@@ -298,16 +327,27 @@ func validLanding(o config.Landing) string {
 		if _, ok := config.SafeLandingRel(entry); !ok {
 			return "entry must be a relative path inside the landing"
 		}
+		switch strings.ToLower(path.Ext(entry)) {
+		case ".html", ".htm", ".php":
+			// allowed
+		default:
+			return "entry must have extension .html, .htm or .php"
+		}
 	}
 	return validDestination(o.ID, o.URL, o.Local)
 }
 
 func registerLandings(s *Server, mux *http.ServeMux) {
-	registerCRUD(s, mux, "/api/landings", s.cfg.Landings,
-		func(o config.Landing) string { return o.ID },
-		func(o *config.Landing, id string) { o.ID = id },
-		validLanding,
-		&catalogHooks[config.Landing]{
+	mountCRUD(s, mux, "/api/landings", s.landingCatalog())
+}
+
+// landingCatalog returns the handlers' state of the landing catalog.
+func (s *Server) landingCatalog() crudCatalog[config.Landing] {
+	return crudCatalog[config.Landing]{s: s, store: s.cfg.Landings,
+		idOf:  func(o config.Landing) string { return o.ID },
+		setID: func(o *config.Landing, id string) { o.ID = id },
+		valid: validLanding,
+		hooks: &catalogHooks[config.Landing]{
 			seq: s.cfg.SeqLandings, floor: s.landingFloor, prep: prepLanding, onDelete: s.removeLandingFiles,
 			res:      resLandings,
 			label:    func(l config.Landing) string { return l.Group },
@@ -319,15 +359,20 @@ func registerLandings(s *Server, mux *http.ServeMux) {
 				return s.landingCheck(v, l, old)
 			},
 		},
-	)
+	}
 }
 
 func registerSources(s *Server, mux *http.ServeMux) {
-	registerCRUD(s, mux, "/api/traffic-sources", s.cfg.Sources,
-		func(o config.TrafficSource) string { return o.ID },
-		func(o *config.TrafficSource, id string) { o.ID = id },
-		validSource,
-		&catalogHooks[config.TrafficSource]{
+	mountCRUD(s, mux, "/api/traffic-sources", s.sourceCatalog())
+}
+
+// sourceCatalog returns the handlers' state of the traffic source catalog.
+func (s *Server) sourceCatalog() crudCatalog[config.TrafficSource] {
+	return crudCatalog[config.TrafficSource]{s: s, store: s.cfg.Sources,
+		idOf:  func(o config.TrafficSource) string { return o.ID },
+		setID: func(o *config.TrafficSource, id string) { o.ID = id },
+		valid: validSource,
+		hooks: &catalogHooks[config.TrafficSource]{
 			seq: s.cfg.SeqSources, floor: s.sourceFloor, prep: prepSource,
 			res:       resSources,
 			label:     func(src config.TrafficSource) string { return src.Group },
@@ -337,7 +382,7 @@ func registerSources(s *Server, mux *http.ServeMux) {
 			setBoard:  func(src *config.TrafficSource, id string) { src.BoardID = id },
 			userCheck: s.sourceCheck,
 		},
-	)
+	}
 }
 
 // registerCRUD mounts list, create, read, replace and delete for one catalog.
@@ -472,16 +517,8 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 	}
 	pathID := r.PathValue("id")
 	c.setID(&item, pathID)
-	var unlockMu func()
-	if c.hooks != nil && c.hooks.mu != nil {
-		c.hooks.mu.Lock()
-		unlockMu = c.hooks.mu.Unlock
-		defer func() {
-			if unlockMu != nil {
-				unlockMu()
-			}
-		}()
-	}
+	unlock := c.lockWrite()
+	defer unlock()
 	list, err := c.store.List(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "read error")
@@ -496,8 +533,9 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	exp := aiExpectFrom(r.Context())
 	if idx < 0 {
-		writeErr(w, http.StatusNotFound, "not found")
+		c.s.writeMissing(w, exp)
 		return
 	}
 	v := c.s.viewerFrom(r.Context())
@@ -512,6 +550,10 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 	}
 	if c.hooks != nil && c.hooks.res != "" && !v.canWrite(c.hooks.res, itemRef) {
 		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if err := exp.check(old, true); err != nil {
+		c.s.failWrite(w, err)
 		return
 	}
 	if !v.admin && c.hooks != nil && c.hooks.userLimit != nil {
@@ -550,6 +592,10 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
+	if err := exp.before(old); err != nil {
+		c.s.failWrite(w, err)
+		return
+	}
 	list[idx] = item
 	if c.hooks != nil && c.hooks.tidy != nil {
 		list = c.hooks.tidy(list, c.idOf(item))
@@ -558,14 +604,31 @@ func (c crudCatalog[T]) crudPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
 	}
-	if unlockMu != nil {
-		unlockMu()
-		unlockMu = nil
-	}
+	exp.after(item)
+	unlock()
 	if c.hooks != nil && c.hooks.afterWrite != nil {
 		c.hooks.afterWrite(item, &old)
 	}
 	c.respondOne(w, r, v, item, http.StatusOK)
+}
+
+// lockWrite serializes one read-modify-write of the catalog file.
+// It takes hooks.mu when set, then the store lock that mergeCatalog also takes.
+// It returns the release function; calling it more than once is safe.
+func (c crudCatalog[T]) lockWrite() func() {
+	if c.hooks != nil && c.hooks.mu != nil {
+		c.hooks.mu.Lock()
+	}
+	unlockStore := c.store.lock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			unlockStore()
+			if c.hooks != nil && c.hooks.mu != nil {
+				c.hooks.mu.Unlock()
+			}
+		})
+	}
 }
 
 // crudDelete handles DELETE with see/write grant checks.
@@ -573,10 +636,8 @@ func (c crudCatalog[T]) crudDelete(w http.ResponseWriter, r *http.Request) {
 	if c.hooks != nil && c.hooks.preDelete != nil && c.hooks.preDelete(w, r) {
 		return
 	}
-	if c.hooks != nil && c.hooks.mu != nil {
-		c.hooks.mu.Lock()
-		defer c.hooks.mu.Unlock()
-	}
+	unlock := c.lockWrite()
+	defer unlock()
 	list, err := c.store.List(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "read error")
@@ -592,8 +653,9 @@ func (c crudCatalog[T]) crudDelete(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 	}
+	exp := aiExpectFrom(r.Context())
 	if idx < 0 {
-		writeErr(w, http.StatusNotFound, "not found")
+		c.s.writeMissing(w, exp)
 		return
 	}
 	v := c.s.viewerFrom(r.Context())
@@ -610,17 +672,26 @@ func (c crudCatalog[T]) crudDelete(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	if err := exp.check(old, true); err != nil {
+		c.s.failWrite(w, err)
+		return
+	}
 	if c.hooks != nil && c.hooks.guardDelete != nil {
 		if code, msg := c.hooks.guardDelete(old); code != 0 {
 			writeErr(w, code, msg)
 			return
 		}
 	}
+	if err := exp.before(old); err != nil {
+		c.s.failWrite(w, err)
+		return
+	}
 	next := append(list[:idx], list[idx+1:]...)
 	if err := c.store.Save(r.Context(), next); err != nil {
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
 	}
+	unlock()
 	if c.hooks != nil && c.hooks.onDelete != nil {
 		c.hooks.onDelete(id)
 	}

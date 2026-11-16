@@ -7,16 +7,44 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/atomicfile"
-	"github.com/egerkuzma/kuztds/internal/ipindex"
+	"github.com/egerkuzma/emtds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/egerkuzma/emtds/internal/ipindex"
 )
 
-const maxListBytes = 32 << 20
+const (
+	// maxListBytes caps the response of an IP list source.
+	maxListBytes = 32 << 20
+	// maxPrivateRelayBytes caps the iCloud Private Relay file, which is a CSV
+	// with hundreds of thousands of rows.
+	maxPrivateRelayBytes = 64 << 20
+)
+
+// isCSVSource reports whether the response of src is CSV: its URL path ends in
+// .csv or it feeds the Private Relay list. Only then does a comma end the
+// address on a line.
+func isCSVSource(src IPSource) bool {
+	if src.Target == detect.ListPrivateRelay {
+		return true
+	}
+	u, err := url.Parse(cleanURL(src.URL))
+	return err == nil && strings.HasSuffix(strings.ToLower(u.Path), ".csv")
+}
+
+// listLimit returns the size cap of the response of src.
+func listLimit(src IPSource) int64 {
+	if src.Target == detect.ListPrivateRelay {
+		return maxPrivateRelayBytes
+	}
+	return maxListBytes
+}
 
 // runIPLists refreshes every source in cfg into the data directory.
 // ctx cancels the fetches. The string is one "name: count" per list file,
@@ -61,7 +89,7 @@ func (r *Runner) runIPLists(ctx context.Context, cfg IPLists) (string, error) {
 // sectioned body with no named sections. Names written before the failure
 // stay in the map.
 func (r *Runner) updateList(ctx context.Context, src IPSource) (map[string]int, error) {
-	body, err := r.get(ctx, src.URL, nil, "", "", maxListBytes)
+	body, err := r.get(ctx, src.URL, nil, "", "", listLimit(src))
 	if err != nil {
 		return nil, err
 	}
@@ -71,6 +99,7 @@ func (r *Runner) updateList(ctx context.Context, src IPSource) (map[string]int, 
 		return nil, err
 	}
 
+	csv := isCSVSource(src)
 	lists := map[string][]string{}
 	if t := bytes.TrimSpace(raw); len(t) > 0 && t[0] == '{' {
 		if src.Target == "" {
@@ -82,9 +111,9 @@ func (r *Runner) updateList(ctx context.Context, src IPSource) (map[string]int, 
 		}
 		lists[src.Target] = lines
 	} else if src.Target != "" {
-		lists[src.Target] = cleanLines(string(raw))
+		lists[src.Target] = cleanLines(string(raw), csv)
 	} else {
-		lists = splitSections(string(raw))
+		lists = splitSections(string(raw), csv)
 	}
 
 	out := map[string]int{}
@@ -138,24 +167,38 @@ func prefixesFromJSON(b []byte) ([]string, error) {
 }
 
 // cleanLines keeps addresses and "# label" lines, drops everything else.
-func cleanLines(s string) []string {
+// With csv set, a row such as "172.224.226.0/27,GB,GB-EN,London," is kept as
+// its first field, the address or CIDR; without it such a line is dropped.
+func cleanLines(s string, csv bool) []string {
 	var out []string
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		if strings.HasPrefix(line, "#") || isEntry(line) {
+		if strings.HasPrefix(line, "#") {
 			out = append(out, line)
+		} else if entry, ok := entryOf(line, csv); ok {
+			out = append(out, entry)
 		}
 	}
 	return out
 }
 
+// entryOf returns the address, CIDR or range a list line stands for. A line
+// with csv set is a CSV row and only its first field counts. ok is false when
+// the line is not a single valid entry.
+func entryOf(line string, csv bool) (entry string, ok bool) {
+	if i := strings.IndexByte(line, ','); csv && i >= 0 {
+		line = strings.TrimSpace(line[:i])
+	}
+	return line, isEntry(line)
+}
+
 // splitSections turns "# google\n1.2.3.0/24\n# yandex\n…" into one list per
 // section, named ip_<section>. Lines before the first section, and sections
-// whose name is not a plain word, are dropped.
-func splitSections(s string) map[string][]string {
+// whose name is not a plain word, are dropped. csv is as in cleanLines.
+func splitSections(s string, csv bool) map[string][]string {
 	out := map[string][]string{}
 	cur := ""
 	for _, line := range strings.Split(s, "\n") {
@@ -172,14 +215,24 @@ func splitSections(s string) map[string][]string {
 			}
 			continue
 		}
-		if cur != "" && isEntry(line) {
-			out[cur] = append(out[cur], line)
+		if entry, ok := entryOf(line, csv); cur != "" && ok {
+			out[cur] = append(out[cur], entry)
 		}
 	}
 	return out
 }
 
+// isEntry reports whether line is exactly one address, CIDR or range.
+// Plain addresses and CIDRs are checked without the list parser, which
+// allocates a buffer per call: the iCloud Private Relay file has hundreds of
+// thousands of rows.
 func isEntry(line string) bool {
+	if _, err := netip.ParsePrefix(line); err == nil {
+		return true
+	}
+	if _, err := netip.ParseAddr(line); err == nil {
+		return true
+	}
 	idx, err := ipindex.Parse(strings.NewReader(line))
 	return err == nil && idx.Len() == 1
 }
@@ -201,7 +254,7 @@ func mergeLines(path string, fresh []string) []string {
 	if err != nil {
 		return fresh
 	}
-	have := cleanLines(string(b))
+	have := cleanLines(string(b), false)
 	seen := make(map[string]bool, len(have))
 	for _, l := range have {
 		seen[l] = true

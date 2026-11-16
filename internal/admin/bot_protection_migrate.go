@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // migrateBotProtection404 переписывает сохранённые потоки Bot Protection и «Замыкающий» с show_html_404

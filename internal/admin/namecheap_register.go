@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 const (
@@ -49,11 +49,13 @@ type ncRegisterReq struct {
 
 // writeNC writes an error body with extra fields next to the message.
 // code is the HTTP status, msg the error text, extra the additional JSON fields.
+// The "code" field is set after extra is copied, so extra cannot replace it.
 func writeNC(w http.ResponseWriter, code int, msg string, extra map[string]any) {
 	body := map[string]any{"error": msg}
 	for k, v := range extra {
 		body[k] = v
 	}
+	body["code"] = errCode(code, msg)
 	writeJSON(w, code, body)
 }
 

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // sourceParamField returns the click field a traffic source parameter key feeds:
@@ -49,9 +49,15 @@ func sourceFields() []string {
 
 // fieldReadNames returns the query parameter names the engine reads for the source
 // field when the source maps it as params says: the mapped name, or the plain field
-// name when unmapped. The keyword has no plain name but is also taken from "q", the
-// parameter of a request that carries a keyword on its own.
-func fieldReadNames(params map[string]string, field string) []string {
+// name when unmapped. The keyword is read under the mapped name when there is one and
+// also under the names of config.KeywordParams the engine falls back to when the mapped
+// parameter is absent or empty, except an alias (keyword, utm_term) that
+// config.KeywordNameTaken gives to another parameter of params, or one in skip (the
+// price names of campaigns, which the engine does not read as a keyword either).
+// config.LegacyKeywordParam (q) is always listed: it was the keyword before the aliases
+// and the engine still reads it whatever else is bound to it. skip may be nil. A name
+// appears once.
+func fieldReadNames(params map[string]string, field string, skip map[string]bool) []string {
 	var out []string
 	if name := strings.TrimSpace(params[field]); name != "" {
 		out = append(out, name)
@@ -59,7 +65,12 @@ func fieldReadNames(params map[string]string, field string) []string {
 		out = append(out, field)
 	}
 	if field == "keyword" {
-		out = append(out, "q")
+		for _, name := range config.KeywordParams {
+			legacy := name == config.LegacyKeywordParam
+			if !slices.Contains(out, name) && (legacy || !skip[name]) && !config.KeywordNameTaken(name, params, "", "") {
+				out = append(out, name)
+			}
+		}
 	}
 	return out
 }
@@ -73,7 +84,7 @@ func hiddenQueryNames(v viewer, params map[string]string) map[string]bool {
 		if f == "cost" || !fieldHidden(v, f) {
 			continue
 		}
-		for _, name := range fieldReadNames(params, f) {
+		for _, name := range fieldReadNames(params, f, nil) {
 			out[name] = true
 		}
 	}
@@ -99,6 +110,8 @@ func priceNames(groups ...config.Group) map[string]bool {
 // Sub ID or extra click field hidden for v (mapped, or by its plain name), or a name in
 // prices, the price names of campaigns. The unmapped plain names count. Such a field
 // would copy the hidden value into a visible journal column or a {sub_id_N} macro.
+// The alias names (keyword, utm_term) of a visible keyword that the engine skips
+// (another parameter of params, or a name in prices) are not reads; q always is one.
 func hiddenReads(v viewer, params map[string]string, prices map[string]bool) map[string]bool {
 	carried := hiddenQueryNames(v, params)
 	for name := range prices {
@@ -109,7 +122,7 @@ func hiddenReads(v viewer, params map[string]string, prices map[string]bool) map
 		if fieldHidden(v, f) {
 			continue
 		}
-		for _, name := range fieldReadNames(params, f) {
+		for _, name := range fieldReadNames(params, f, prices) {
 			if carried[name] {
 				out[f] = true
 			}
@@ -195,8 +208,9 @@ func (s *Server) sourceCheck(ctx context.Context, v viewer, item config.TrafficS
 // new source must not name a parameter of a keyword or Sub ID hidden from the viewer,
 // and must not make a visible field read the query name of a hidden field or, with the
 // price hidden, of the price of this campaign, mapped or by its plain name, unless the
-// previous source already did (newHiddenRead). A campaign saved on a source without a
-// change of source is not checked.
+// previous source already did (newHiddenRead). A campaign parameter of a hidden field
+// cannot be set, changed or cleared. A campaign whose source and parameters are unchanged
+// is not checked.
 // stored is the file before the save, merged the candidate list, sources the stored
 // traffic sources. Campaigns that did not change are skipped.
 // It returns the client message, or "" when allowed.
@@ -220,24 +234,86 @@ func validateGroupParams(v viewer, stored, merged []config.Group, sources []conf
 		if fieldHidden(v, "cost") && (!sameText(g.CostParam, old.CostParam) || !sameText(g.CurrencyParam, old.CurrencyParam)) {
 			return "campaign price parameter belongs to a hidden field"
 		}
-		if g.SourceID == old.SourceID {
+		if msg := changedHiddenCampaignParam(v, old.Parameters, g.Parameters); msg != "" {
+			return msg
+		}
+		if g.SourceID == old.SourceID && sameParamMap(old.Parameters, g.Parameters) {
 			continue
 		}
-		for key, val := range sourceByID[g.SourceID].Parameters {
-			if strings.TrimSpace(val) != "" && hiddenSourceKey(v, key) {
-				return "source maps " + strings.TrimSpace(key) + ", a hidden field"
+		if g.SourceID != old.SourceID {
+			for key, val := range sourceByID[g.SourceID].Parameters {
+				if strings.TrimSpace(val) != "" && hiddenSourceKey(v, key) {
+					return "source maps " + strings.TrimSpace(key) + ", a hidden field"
+				}
 			}
 		}
 		var prices map[string]bool
 		if fieldHidden(v, "cost") {
 			prices = priceNames(g)
 		}
-		next, prev := sourceByID[g.SourceID].Parameters, sourceByID[old.SourceID].Parameters
-		if f := newHiddenRead(v, next, prev, prices); f != "" {
+		nextSrc := sourceByID[g.SourceID]
+		prevSrc := sourceByID[old.SourceID]
+		if f := newHiddenRead(v, effectiveParams(&nextSrc, g.Parameters), effectiveParams(&prevSrc, old.Parameters), prices); f != "" {
 			return "source maps " + f + ", a hidden field"
 		}
 	}
 	return ""
+}
+
+// changedHiddenCampaignParam reports a campaign parameter of a hidden field that
+// was set, changed or cleared. before is the stored map and now the candidate.
+// A missing key and an empty value are different: one keeps the source name and
+// the other clears it. It returns the client message, or "" when nothing hidden moved.
+func changedHiddenCampaignParam(v viewer, before, now map[string]string) string {
+	keys := make([]string, 0, len(before)+len(now))
+	seen := map[string]bool{}
+	for k := range before {
+		seen[k] = true
+		keys = append(keys, k)
+	}
+	for k := range now {
+		if !seen[k] {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if !hiddenSourceKey(v, k) {
+			continue
+		}
+		bv, bok := before[k]
+		nv, nok := now[k]
+		if bok != nok || !sameText(bv, nv) {
+			return "source parameter " + strings.TrimSpace(k) + " belongs to a hidden field"
+		}
+	}
+	return ""
+}
+
+// sameParamMap reports whether a and b carry the same keys and the same trimmed values.
+// A nil map and an empty map are the same. It does not allocate.
+func sameParamMap(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		w, ok := b[k]
+		if !ok || !sameText(v, w) {
+			return false
+		}
+	}
+	return true
+}
+
+// effectiveParams is the query-name map the engine reads for src overlaid with over.
+// src may be nil. over nil keeps the source names. The result may be nil.
+// Neither argument is modified. There is no error.
+func effectiveParams(src *config.TrafficSource, over map[string]string) map[string]string {
+	got := config.EffectiveSource(&config.Group{Parameters: over}, src)
+	if got == nil {
+		return nil
+	}
+	return got.Parameters
 }
 
 // hiddenSourceList returns the stored traffic sources for a viewer who has a keyword, a

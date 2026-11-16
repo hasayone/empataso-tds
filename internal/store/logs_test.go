@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/logbuf"
 )
 
 func TestEventColumnsMatchValues(t *testing.T) {

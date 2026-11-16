@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/emtds/bridge/ktimport"
 )
 
 func TestKeitaroImportConflict(t *testing.T) {
@@ -38,6 +38,10 @@ func TestKeitaroImportConflict(t *testing.T) {
 	raw, code := keitaroPOST(t, admin, "/api/keitaro/import", map[string]any{"campaigns": true})
 	if code != http.StatusConflict || !strings.Contains(string(raw), "import already running") || strings.Contains(string(raw), key) {
 		t.Fatalf("second import %d %s", code, raw)
+	}
+	raw, code = keitaroPOST(t, admin, "/api/keitaro/import", map[string]any{"campaign_id": 7})
+	if code != http.StatusConflict || !strings.Contains(string(raw), "import already running") {
+		t.Fatalf("campaign dosync during import %d %s", code, raw)
 	}
 	raw, code = keitaroPOST(t, admin, "/api/keitaro/purge", map[string]any{})
 	if code != http.StatusConflict || !strings.Contains(string(raw), "import already running") || strings.Contains(string(raw), key) {

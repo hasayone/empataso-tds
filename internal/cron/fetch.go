@@ -37,20 +37,66 @@ func (r *Runner) get(ctx context.Context, rawURL string, hdr map[string]string, 
 
 // fetch is get that also returns the response headers.
 func (r *Runner) fetch(ctx context.Context, rawURL string, hdr map[string]string, user, pass string, limit int64) (io.ReadCloser, http.Header, error) {
+	return r.send(ctx, fetchRequest{URL: rawURL, Header: hdr, User: user, Pass: pass, Limit: limit})
+}
+
+// maxRedirects is how many redirects send follows, as net/http does by default.
+const maxRedirects = 10
+
+// fetchRequest describes one download.
+type fetchRequest struct {
+	URL        string            // used without the spaces around it, see cleanURL
+	Header     map[string]string // extra request headers, such as If-Modified-Since
+	User, Pass string            // basic auth; sent only when either is not empty
+	Limit      int64             // most bytes of body the caller may read
+	// Allow, when not nil, must accept URL and every redirect target. A source
+	// that may only talk to some hosts sets it.
+	Allow func(*url.URL) bool
+}
+
+// restricted returns a copy of the runner's client that follows redirects only
+// to addresses allow accepts, and at most maxRedirects of them.
+func (r *Runner) restricted(allow func(*url.URL) bool) *http.Client {
+	c := *r.http
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		if len(via) >= maxRedirects {
+			return errors.New("too many redirects")
+		}
+		if !allow(req.URL) {
+			return fmt.Errorf("redirect to %s is not allowed", hostOf(req.URL.String()))
+		}
+		return nil
+	}
+	return &c
+}
+
+// send performs the GET that q describes and returns the body of a 200,
+// capped at q.Limit bytes, with the response headers. The caller closes the body.
+// A refused address or redirect ends the request with an error that names the
+// host only. A non-200 answer is an *httpStatus. Transport errors name the host
+// and drop the URL, which may carry a key in its query string.
+func (r *Runner) send(ctx context.Context, q fetchRequest) (io.ReadCloser, http.Header, error) {
+	rawURL := cleanURL(q.URL)
+	client := r.http
+	if q.Allow != nil {
+		if u, err := url.Parse(rawURL); err != nil || !q.Allow(u) {
+			return nil, nil, fmt.Errorf("%s: this source may not use that address", hostOf(rawURL))
+		}
+		client = r.restricted(q.Allow)
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, nil, fmt.Errorf("bad URL %q", rawURL)
 	}
-	req.Header.Set("User-Agent", "kuztds-cron")
-	for k, v := range hdr {
+	req.Header.Set("User-Agent", "emtds-cron")
+	for k, v := range q.Header {
 		req.Header.Set(k, v)
 	}
-	if user != "" || pass != "" {
-		req.SetBasicAuth(user, pass)
+	if q.User != "" || q.Pass != "" {
+		req.SetBasicAuth(q.User, q.Pass)
 	}
-	resp, err := r.http.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
-		// Drop the URL from the text: it may carry a key in its query string.
 		var ue *url.Error
 		if errors.As(err, &ue) {
 			err = ue.Err
@@ -61,9 +107,8 @@ func (r *Runner) fetch(ctx context.Context, rawURL string, hdr map[string]string
 		resp.Body.Close()
 		return nil, nil, &httpStatus{host: hostOf(rawURL), code: resp.StatusCode}
 	}
-	return &capped{r: io.LimitReader(resp.Body, limit+1), c: resp.Body, left: limit, host: hostOf(rawURL)}, resp.Header, nil
+	return &capped{r: io.LimitReader(resp.Body, q.Limit+1), c: resp.Body, left: q.Limit, host: hostOf(rawURL)}, resp.Header, nil
 }
-
 func hostOf(rawURL string) string {
 	if u, err := url.Parse(rawURL); err == nil && u.Host != "" {
 		return u.Host

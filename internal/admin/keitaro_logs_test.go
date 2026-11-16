@@ -6,8 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/emtds/bridge/ktimport"
 )
 
 func TestKeitaroDevice(t *testing.T) {
@@ -154,5 +155,31 @@ func TestConversionInsertExtended(t *testing.T) {
 	}
 	if ev.AdCampaignID != "12" || ev.CreativeID != "c" || ev.ExternalID != "e" || ev.Site != "" || ev.XRW != "" {
 		t.Fatalf("click %+v", ev)
+	}
+}
+
+// TestClickEventDestination — the tracker destination lands in out; a landing marker becomes redirect landing.
+func TestClickEventDestination(t *testing.T) {
+	long := "https://offer.example/?q=" + strings.Repeat("x", 3000)
+	tests := []struct {
+		name, raw, out, redirect string
+	}{
+		{"offer url", `{"sub_id":"a","destination":"https://go.example/click?pid=1&sub1=k"}`, "https://go.example/click?pid=1&sub1=k", ""},
+		{"landing marker", `{"sub_id":"b","landing_id":"7","destination":"LP"}`, "7", "landing"},
+		{"landing without destination", `{"sub_id":"c","landing_id":7}`, "7", "landing"},
+		{"landing with offer url", `{"sub_id":"d","landing_id":7,"destination":" https://go.example/o "}`, "https://go.example/o", ""},
+		{"marker without landing", `{"sub_id":"e","destination":"LP"}`, "LP", ""},
+		{"empty", `{"sub_id":"f"}`, "", ""},
+		{"long url", `{"sub_id":"g","destination":"` + long + `"}`, long[:logbuf.MaxOut], ""},
+	}
+	for _, tc := range tests {
+		var row ktimport.ClickRow
+		if err := json.Unmarshal([]byte(tc.raw), &row); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		ev := clickEvent(row, "tracker.example", logPlace{})
+		if ev.Out != tc.out || ev.Redirect != tc.redirect {
+			t.Fatalf("%s: out %q redirect %q, want %q %q", tc.name, ev.Out, ev.Redirect, tc.out, tc.redirect)
+		}
 	}
 }

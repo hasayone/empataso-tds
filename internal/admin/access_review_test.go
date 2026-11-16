@@ -16,10 +16,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/render"
-	"github.com/egerkuzma/kuztds/internal/security"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/render"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // setRole replaces the access of the role of the rig.
@@ -154,6 +154,12 @@ func macroClassified(tok string) bool {
 	return false
 }
 
+func TestRootSubIDMacroUsesRootCIDAccess(t *testing.T) {
+	if got := macroFields["{root_subid}"]; got != "root_cid" {
+		t.Fatalf("root_subid field = %q, want root_cid", got)
+	}
+}
+
 func TestEveryRenderMacroIsClassified(t *testing.T) {
 	tokens := renderMacroTokens(t)
 	if len(tokens) < 30 {
@@ -194,6 +200,7 @@ func TestHiddenMacroRefusedInCampaign(t *testing.T) {
 		{"ip", "[IP]"}, {"ip", "[ip]"}, {"useragent", "[USERAGENT]"}, {"asn", "[ASN]"},
 		{"keyword", "{keyword}"}, {"keyword", "[KEY]"}, {"status", "{status}"}, {"profit", "{payout}"},
 		{"sub_id_3", "{sub_id_3}"}, {"sub_id_3", "[PAR-3]"}, {"country", "[()COUNTRY()]"}, {"cid", "{subid}"},
+		{"root_cid", "{root_subid}"},
 	}
 	rig := newRolesRig(t, "")
 	for _, c := range cases {

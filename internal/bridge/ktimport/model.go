@@ -209,7 +209,7 @@ type KUserPrefs struct {
 	Timezone string `json:"timezone"`
 }
 
-// CatUser — пользователь kuztds после маппинга прав Keitaro.
+// CatUser — пользователь emtds после маппинга прав Keitaro.
 type CatUser struct {
 	ID       string              `json:"id"`
 	Login    string              `json:"login"`
@@ -228,20 +228,20 @@ type CatGrant struct {
 	Labels []string `json:"labels,omitempty"`
 }
 
-// Group — группа kuztds, которую принимает PUT /api/groups.
+// Group — группа emtds, которую принимает PUT /api/groups.
 // Num — номер в списке кампаний. Маппер пишет id кампании Keitaro. Ноль значит, что слияние ещё не выдало номер.
 // PostbackIDs — id общих шаблонов каталога s2s. Тот же шаблон в Postbacks не дублируется.
 type Group struct {
-	ID          string     `json:"id"`
-	Aliases     []string   `json:"aliases,omitempty"`
-	Name        string     `json:"name"`
-	Status      bool       `json:"status"`
-	Redirect    string     `json:"redirect"`
-	Out         string     `json:"out"`
-	Folder      string     `json:"folder,omitempty"`
-	DomainID    string     `json:"domain_id,omitempty"`
-	SourceID    string     `json:"source_id,omitempty"`
-	Weight      bool       `json:"weight,omitempty"`
+	ID       string   `json:"id"`
+	Aliases  []string `json:"aliases,omitempty"`
+	Name     string   `json:"name"`
+	Status   bool     `json:"status"`
+	Redirect string   `json:"redirect"`
+	Out      string   `json:"out"`
+	Folder   string   `json:"folder,omitempty"`
+	DomainID string   `json:"domain_id,omitempty"`
+	SourceID string   `json:"source_id,omitempty"`
+	Weight   bool     `json:"weight,omitempty"`
 	// UniqSeconds — окно уникальности в секундах. Ноль оставляет окно движка в 24 часа.
 	UniqSeconds int        `json:"uniq_seconds,omitempty"`
 	Num         int        `json:"num,omitempty"`
@@ -260,7 +260,7 @@ type Postback struct {
 	Statuses []string `json:"statuses,omitempty"`
 }
 
-// Stream — поток kuztds. Name — имя потока Keitaro, пустое становится stream и id. Comment хранит keitaro_stream_id.
+// Stream — поток emtds. Name — имя потока Keitaro, пустое становится stream и id. Comment хранит keitaro_stream_id.
 type Stream struct {
 	Name     string `json:"name"`
 	Status   bool   `json:"status"`
@@ -276,33 +276,35 @@ type Stream struct {
 // Brand — бренд устройства, точное совпадение. Model — модель устройства, точное совпадение.
 // Unique: 0 — любой визит и в JSON не пишется, 1 — только уникальные, 2 — только повторные.
 // Bot: 0 — фильтр выключен, 1 — оставить ботов, 2 — оставить людей.
+// HasReferer: 0 — фильтр выключен, 1 — только с Referer, 2 — только без Referer.
 // Proxy: 0 — фильтр выключен и в JSON не пишется, 1 — только прокси, 2 — только не прокси.
 // IPVersion: 0 — фильтр выключен и в JSON не пишется, 1 — только IPv4, 2 — только IPv6.
 type Rules struct {
-	Country   ListFilter   `json:"country,omitempty"`
-	City      ListFilter   `json:"city,omitempty"`
-	Region    ListFilter   `json:"region,omitempty"`
-	Lang      ListFilter   `json:"lang,omitempty"`
-	UAText    ListFilter   `json:"ua_text,omitempty"`
-	Referer   ListFilter   `json:"referer_text,omitempty"`
-	Key       ListFilter   `json:"key_text,omitempty"`
-	OS        ListFilter   `json:"os,omitempty"`
-	Browser   ListFilter   `json:"browser,omitempty"`
-	Brand     ListFilter   `json:"brand,omitempty"`
-	Model     ListFilter   `json:"model,omitempty"`
-	Query     ListFilter   `json:"get,omitempty"`
-	Timezone  ListFilter   `json:"timezone,omitempty"`
-	ASN       ListFilter   `json:"asn,omitempty"`
-	Org       ListFilter   `json:"org,omitempty"`
-	IPList    IPListFilter `json:"ip_list,omitempty"`
-	Schedule  Schedule     `json:"schedule,omitempty"`
-	Computer  int          `json:"computer,omitempty"`
-	Phone     int          `json:"phone,omitempty"`
-	Tablet    int          `json:"tablet,omitempty"`
-	Unique    int          `json:"unique,omitempty"`
-	Bot       int          `json:"bot,omitempty"`
-	Proxy     int          `json:"proxy,omitempty"`
-	IPVersion int          `json:"ip_version,omitempty"`
+	Country    ListFilter   `json:"country,omitempty"`
+	City       ListFilter   `json:"city,omitempty"`
+	Region     ListFilter   `json:"region,omitempty"`
+	Lang       ListFilter   `json:"lang,omitempty"`
+	UAText     ListFilter   `json:"ua_text,omitempty"`
+	Referer    ListFilter   `json:"referer_text,omitempty"`
+	Key        ListFilter   `json:"key_text,omitempty"`
+	OS         ListFilter   `json:"os,omitempty"`
+	Browser    ListFilter   `json:"browser,omitempty"`
+	Brand      ListFilter   `json:"brand,omitempty"`
+	Model      ListFilter   `json:"model,omitempty"`
+	Query      ListFilter   `json:"get,omitempty"`
+	Timezone   ListFilter   `json:"timezone,omitempty"`
+	ASN        ListFilter   `json:"asn,omitempty"`
+	Org        ListFilter   `json:"org,omitempty"`
+	IPList     IPListFilter `json:"ip_list,omitempty"`
+	Schedule   Schedule     `json:"schedule,omitempty"`
+	Computer   int          `json:"computer,omitempty"`
+	Phone      int          `json:"phone,omitempty"`
+	Tablet     int          `json:"tablet,omitempty"`
+	Unique     int          `json:"unique,omitempty"`
+	Bot        int          `json:"bot,omitempty"`
+	HasReferer int          `json:"has_referer,omitempty"`
+	Proxy      int          `json:"proxy,omitempty"`
+	IPVersion  int          `json:"ip_version,omitempty"`
 
 	// SubIDs — правила Sub ID источника по ключам sub_id_1..sub_id_12, точное совпадение.
 	SubIDs map[string]SubIDFilter `json:"sub_ids,omitempty"`
@@ -352,7 +354,7 @@ type ShareRef struct {
 	Share int    `json:"share"`
 }
 
-// CatOffer — оффер каталога kuztds.
+// CatOffer — оффер каталога emtds.
 type CatOffer struct {
 	ID             string   `json:"id"`
 	Name           string   `json:"name"`
@@ -368,7 +370,7 @@ type CatOffer struct {
 	Local          bool     `json:"local,omitempty"`
 }
 
-// CatLanding — лендинг каталога kuztds.
+// CatLanding — лендинг каталога emtds.
 // Entry — относительный путь входного файла локального лендинга. Импорт оставляет его пустым.
 type CatLanding struct {
 	ID     string `json:"id"`
@@ -380,7 +382,7 @@ type CatLanding struct {
 	Group  string `json:"group,omitempty"`
 }
 
-// CatNetwork — партнёрская сеть каталога kuztds.
+// CatNetwork — партнёрская сеть каталога emtds.
 type CatNetwork struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
@@ -390,7 +392,7 @@ type CatNetwork struct {
 	OfferQuery  string `json:"offer_query,omitempty"`
 }
 
-// CatSource — источник трафика каталога kuztds.
+// CatSource — источник трафика каталога emtds.
 // Parameters принимает только keyword и sub_id_1..sub_id_15.
 type CatSource struct {
 	ID         string            `json:"id"`
@@ -442,10 +444,12 @@ type Selection struct {
 	Users     bool
 	// Known сообщает, что id каталога уже переносился раньше (из prev-манифеста).
 	Known func(kind, id string) bool
+	// Campaign — id кампании Keitaro для досинка одной кампании; 0 переносит все кампании.
+	Campaign int
 }
 
-// MaxBody — предел тела PUT /api/groups в kuztds.
+// MaxBody — предел тела PUT /api/groups в emtds.
 const MaxBody = 8 << 20
 
-// MaxHops — предел цепочки group → group в kuztds.
+// MaxHops — предел цепочки group → group в emtds.
 const MaxHops = 3

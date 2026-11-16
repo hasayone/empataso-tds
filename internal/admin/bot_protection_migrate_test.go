@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 type countingGroups struct {
@@ -107,7 +107,7 @@ func TestMigrateBotProtection404DeletesOrphanPage(t *testing.T) {
 		ID: "c1", Status: true,
 		Streams: []config.Stream{{
 			Name: "Bot Protection", Status: true,
-			Out:  config.Output{Redirect: "show_html_404", Out: "@page:" + pageName, Chance: 100},
+			Out: config.Output{Redirect: "show_html_404", Out: "@page:" + pageName, Chance: 100},
 		}},
 	}}}}
 	s := &Server{cfg: Config{Groups: groups, Pages: pages}}
@@ -130,7 +130,7 @@ func TestMigrateBotProtection404OnNew(t *testing.T) {
 		ID: "c1", Name: "Camp", Status: true,
 		Streams: []config.Stream{{
 			Name: "bot protection", Status: true,
-			Out:  config.Output{Redirect: "show_html_404", Out: "@page:" + pageName, Chance: 100},
+			Out: config.Output{Redirect: "show_html_404", Out: "@page:" + pageName, Chance: 100},
 		}},
 	}}
 	b, err := json.Marshal(seed)

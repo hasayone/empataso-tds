@@ -3,13 +3,14 @@ package render
 import (
 	"math/rand"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func TestExpandKeyPath(t *testing.T) {
@@ -32,6 +33,39 @@ func TestExpandOriginMacro(t *testing.T) {
 	if got != "https://b/?origin=a%2Bb%2Fc" {
 		t.Fatalf("origin encoding: %s", got)
 	}
+}
+
+func TestExpandRootSubIDMacro(t *testing.T) {
+	t.Run("current click is root", func(t *testing.T) {
+		got := Expand("https://b/?cid={root_subid}", MacroDeps{CID: "click-1"})
+		if got != "https://b/?cid=click-1" {
+			t.Fatalf("root_subid fallback: %s", got)
+		}
+	})
+	t.Run("ancestor is root", func(t *testing.T) {
+		got := Expand("https://b/?cid={root_subid}", MacroDeps{CID: "click-2", RootCID: "click-1"})
+		if got != "https://b/?cid=click-1" {
+			t.Fatalf("root_subid ancestor: %s", got)
+		}
+	})
+	t.Run("query escaping", func(t *testing.T) {
+		got := Expand("https://b/?cid={root_subid}", MacroDeps{CID: "click-2", RootCID: "root+a/b"})
+		if got != "https://b/?cid=root%2Ba%2Fb" {
+			t.Fatalf("root_subid encoding: %s", got)
+		}
+	})
+	t.Run("query cannot override root", func(t *testing.T) {
+		query := url.Values{"root_subid": {"evil"}}
+		got := Expand("{root_subid}", MacroDeps{
+			CID: "c",
+			Query: func(name string) (string, bool) {
+				return query.Get(name), query.Has(name)
+			},
+		})
+		if got != "c" {
+			t.Fatalf("root_subid query override: %s", got)
+		}
+	})
 }
 
 func TestExpandCurlyKeitaroMacros(t *testing.T) {

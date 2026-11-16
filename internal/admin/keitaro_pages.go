@@ -1,6 +1,6 @@
 package admin
 
-import "github.com/kuztds/bridge/ktimport"
+import "github.com/emtds/bridge/ktimport"
 
 // importPages writes HTML files before groups are saved.
 // res is the mapper output for this run. It returns how many files were written.

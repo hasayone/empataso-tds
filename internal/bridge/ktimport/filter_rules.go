@@ -215,22 +215,80 @@ func dayIndex(raw string) (int, bool, bool) {
 }
 
 // uniqueFilter переносит уникальность.
-// В kuztds 0 — любой визит, 1 — только уникальные, 2 — только повторные.
+// В emtds 0 — любой визит, 1 — только уникальные, 2 — только повторные.
+//
+// Keitaro кладёт в payload область уникальности: stream, campaign или global; режим accept
+// оставляет уникальных, reject — повторных. Движок считает уникальность внутри кампании, поэтому
+// область stream и global переносится приближённо. Payload вида yes/no читается как прежде.
 //
 // Параметры: f — фильтр.
-// Результат: правило Unique и признаки переноса.
+// Результат: правило Unique, признаки переноса и пояснение для области не campaign.
 // Ошибки: нет.
 func uniqueFilter(f KFilter) (Rules, bool, bool, string) {
-	return triFilter(f, "unique", func(v int) Rules { return Rules{Unique: v} })
+	apply := func(v int) Rules { return Rules{Unique: v} }
+	scope := uniqueScope(f.Payload)
+	if scope == "" {
+		return presenceFilter(f, "uniqueness", apply)
+	}
+	rules, ok, _, _ := presenceFilter(KFilter{Name: f.Name, Mode: f.Mode}, "uniqueness", apply)
+	if scope == "campaign" {
+		return rules, ok, false, ""
+	}
+	return rules, ok, true, "фильтр uniqueness перенесён приближённо: область " + scope + " заменена уникальностью в кампании"
+}
+
+// uniqueScope читает область уникальности Keitaro из payload.
+//
+// Параметры: raw — payload фильтра uniqueness.
+// Результат: stream, campaign или global; пустая строка для любой другой формы.
+// Ошибки: нет.
+func uniqueScope(raw json.RawMessage) string {
+	values, _, _, ok := readPayload(raw)
+	if !ok || len(values) != 1 {
+		return ""
+	}
+	switch v := strings.ToLower(values[0]); v {
+	case "stream", "campaign", "global":
+		return v
+	default:
+		return ""
+	}
 }
 
 // botFilter переносит фильтр бота: 1 оставляет ботов, 2 оставляет людей.
+// Keitaro шлёт его с payload null, и смысл задаёт режим: accept — только боты, reject — только люди.
 //
 // Параметры: f — фильтр.
 // Результат: правило Bot и признаки переноса.
 // Ошибки: нет.
 func botFilter(f KFilter) (Rules, bool, bool, string) {
-	return triFilter(f, "bot", func(v int) Rules { return Rules{Bot: v} })
+	return presenceFilter(f, "bot", func(v int) Rules { return Rules{Bot: v} })
+}
+
+// emptyRefererFilter переносит фильтр пустого Referer в правило has_referer.
+// accept оставляет визиты без Referer (has_referer 2), reject — визиты с Referer (has_referer 1).
+//
+// Параметры: f — фильтр empty_referrer; payload Keitaro не шлёт.
+// Результат: правило HasReferer и признаки переноса.
+// Ошибки: нет.
+func emptyRefererFilter(f KFilter) (Rules, bool, bool, string) {
+	return presenceFilter(f, "empty_referrer", func(v int) Rules { return Rules{HasReferer: 3 - v} })
+}
+
+// presenceFilter читает фильтр-признак Keitaro, у которого нет значения: bot, proxy, empty_referrer.
+// Пустой payload значит «признак есть»: accept даёт 1, reject даёт 2. Payload yes/no читает triFilter.
+//
+// Параметры: f — фильтр; name — имя для отчёта; apply — кладёт код в правила.
+// Результат: правила и признаки переноса.
+// Ошибки: нет.
+func presenceFilter(f KFilter, name string, apply func(int) Rules) (Rules, bool, bool, string) {
+	if !emptyPayload(f.Payload) {
+		return triFilter(f, name, apply)
+	}
+	if isReject(f.Mode) {
+		return apply(2), true, false, ""
+	}
+	return apply(1), true, false, ""
 }
 
 // ipvFilter maps a Keitaro IP-version filter onto Rules.IPVersion.
@@ -538,6 +596,9 @@ func mergeRules(base, add Rules) Rules {
 	}
 	if add.Bot != 0 {
 		base.Bot = add.Bot
+	}
+	if add.HasReferer != 0 {
+		base.HasReferer = add.HasReferer
 	}
 	if add.Proxy != 0 {
 		base.Proxy = add.Proxy

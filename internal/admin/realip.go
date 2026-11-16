@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// parseAdminTrustedProxies parses CIDR lines from KUZTDS_ADMIN_TRUSTED_PROXIES.
+// parseAdminTrustedProxies parses CIDR lines from EMTDS_ADMIN_TRUSTED_PROXIES.
 // raw is the list from the environment; empty entries are skipped. A bare address becomes /32 or /128.
 // When raw yields no prefixes, localhost defaults apply. An invalid entry is an error.
 func parseAdminTrustedProxies(raw []string) ([]netip.Prefix, error) {

@@ -10,9 +10,23 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/store"
 )
+
+// msgQueryTooHeavy is the error text of a statistics query stopped by its
+// ClickHouse time or memory limit.
+const msgQueryTooHeavy = "query too heavy"
+
+// writeStatsErr answers a failed statistics query.
+// A query stopped by its limits is 504 msgQueryTooHeavy; any other err is 500 msg.
+func writeStatsErr(w http.ResponseWriter, err error, msg string) {
+	if store.IsQueryTooHeavy(err) {
+		writeErr(w, http.StatusGatewayTimeout, msgQueryTooHeavy)
+		return
+	}
+	writeErr(w, http.StatusInternalServerError, msg)
+}
 
 // handleSummary writes the period totals.
 // r supplies from and to. The body is a StatsSummary.
@@ -35,7 +49,7 @@ func (s *Server) handleSummary(w http.ResponseWriter, r *http.Request) {
 		sum, err = s.cfg.Stats.Summary(r.Context(), from, to)
 	}
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "stats error")
+		writeStatsErr(w, err, "stats error")
 		return
 	}
 	s.writeStats(w, r, http.StatusOK, sum)
@@ -71,7 +85,7 @@ func (s *Server) handleTimeSeries(w http.ResponseWriter, r *http.Request) {
 		pts, err = s.cfg.Stats.TimeSeries(r.Context(), from, to, step)
 	}
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "stats error")
+		writeStatsErr(w, err, "stats error")
 		return
 	}
 	s.writeStats(w, r, http.StatusOK, pts)
@@ -115,7 +129,7 @@ func (s *Server) handleBreakdown(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, http.StatusBadRequest, "bad dimension")
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, "stats error")
+		writeStatsErr(w, err, "stats error")
 		return
 	}
 	s.writeStats(w, r, http.StatusOK, kv)
@@ -142,7 +156,7 @@ func (s *Server) handlePerformance(w http.ResponseWriter, r *http.Request) {
 		rows, err = s.cfg.Stats.Performance(r.Context(), from, to)
 	}
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "stats error")
+		writeStatsErr(w, err, "stats error")
 		return
 	}
 	if rows == nil {
@@ -255,7 +269,8 @@ func csvVals(s string) []string {
 
 // handleLogFilters returns the available log filter values for each dimension
 // over the period (for the checkbox dropdowns in the UI).
-// r supplies from and to. A dimension that fails is omitted. Missing stats yields an empty object.
+// r supplies from and to. Missing stats yields an empty object with 200.
+// ErrFieldNotReady for a dimension sets it to an empty list; any other error returns 500 "stats error".
 func (s *Server) handleLogFilters(w http.ResponseWriter, r *http.Request) {
 	out := map[string][]string{}
 	if s.cfg.Stats == nil {
@@ -280,7 +295,12 @@ func (s *Server) handleLogFilters(w http.ResponseWriter, r *http.Request) {
 			kv, err = s.cfg.Stats.Breakdown(r.Context(), from, to, dim, 1000)
 		}
 		if err != nil {
-			continue
+			if errors.Is(err, store.ErrFieldNotReady) {
+				out[dim] = []string{}
+				continue
+			}
+			writeErr(w, http.StatusInternalServerError, "stats error")
+			return
 		}
 		vals := []string{}
 		for _, x := range kv {
@@ -307,7 +327,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, total, err := s.cfg.Stats.Logs(r.Context(), f)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "logs error")
+		writeStatsErr(w, err, "logs error")
 		return
 	}
 	if rows == nil {
@@ -332,7 +352,7 @@ func (s *Server) handleLogsExport(w http.ResponseWriter, r *http.Request) {
 	f.Limit, f.Offset = exportRows, 0
 	rows, _, err := s.cfg.Stats.Logs(r.Context(), f)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "logs error")
+		writeStatsErr(w, err, "logs error")
 		return
 	}
 	header := logExportHeader()
@@ -357,7 +377,7 @@ func logExportHeader() []string {
 	h := []string{
 		"ts", "group", "stream", "country", "city", "device", "os", "browser", "brand", "bot", "uniq", "ip", "keyword", "out",
 		"region", "lang", "operator", "redirect", "referer", "useragent", "domain", "cid", "asn", "org", "timezone",
-		"page", "os_version", "browser_ver", "se", "via", "origin_campaign", "origin_campaign_id", "campaign_id", "offer_id", "landing_id", "source_id", "network_id",
+		"page", "os_version", "browser_ver", "se", "via", "origin_campaign", "origin_campaign_id", "root_cid", "campaign_id", "offer_id", "landing_id", "source_id", "network_id",
 	}
 	for i := 1; i <= config.MaxSubID; i++ {
 		h = append(h, fmt.Sprintf("sub_id_%d", i))
@@ -374,7 +394,7 @@ func logExportRecord(x store.LogRow) []string {
 		x.OS, x.Browser, x.Brand, x.Bot, strconv.Itoa(int(x.Uniq)), x.IP, x.Keyword, x.Out,
 		x.Region, x.Lang, x.Operator, x.Redirect, x.Referer, x.UserAgent, x.Domain, x.CID,
 		strconv.FormatUint(uint64(x.ASN), 10), x.Org, x.Timezone,
-		x.Page, x.OSVersion, x.BrowserVer, x.SE, x.Via, x.OriginCampaign, x.OriginCampaignID, x.CampaignID, x.OfferID, x.LandingID, x.SourceID, x.NetworkID,
+		x.Page, x.OSVersion, x.BrowserVer, x.SE, x.Via, x.OriginCampaign, x.OriginCampaignID, x.RootCID, x.CampaignID, x.OfferID, x.LandingID, x.SourceID, x.NetworkID,
 	}
 	for i := 0; i < config.MaxSubID; i++ {
 		cell := ""
@@ -468,7 +488,7 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		rows, err = s.cfg.Stats.Slice(r.Context(), from, to)
 	}
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "report error")
+		writeStatsErr(w, err, "report error")
 		return
 	}
 	if !meta {

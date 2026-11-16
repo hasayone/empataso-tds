@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
@@ -48,24 +50,94 @@ func (r *noticeRing) snapshot() []string {
 }
 
 // noticeHandler copies warnings into the ring and forwards every record.
+// attrs are the attributes bound with WithAttrs, keyed with the group path
+// that was open at that moment; groups is the open group path.
 type noticeHandler struct {
 	slog.Handler
-	ring *noticeRing
+	ring   *noticeRing
+	attrs  []slog.Attr
+	groups []string
 }
 
+// Handle stores a warning or error record as one line "message key=value ...":
+// the attributes name the list, the click or the error, so two records with
+// the same message stay distinguishable. Records below warning are only forwarded.
+// It returns the error of the wrapped handler.
 func (h *noticeHandler) Handle(ctx context.Context, rec slog.Record) error {
 	if rec.Level >= slog.LevelWarn {
-		h.ring.add(rec.Message)
+		attrs := append([]slog.Attr(nil), h.attrs...)
+		prefix := groupPrefix(h.groups)
+		rec.Attrs(func(a slog.Attr) bool {
+			attrs = append(attrs, slog.Attr{Key: prefix + a.Key, Value: a.Value})
+			return true
+		})
+		h.ring.add(noticeLine(rec.Message, attrs))
 	}
 	return h.Handler.Handle(ctx, rec)
 }
 
+// WithAttrs returns a handler that also carries a, qualified by the open groups.
 func (h *noticeHandler) WithAttrs(a []slog.Attr) slog.Handler {
-	return &noticeHandler{Handler: h.Handler.WithAttrs(a), ring: h.ring}
+	prefix := groupPrefix(h.groups)
+	bound := append([]slog.Attr(nil), h.attrs...)
+	for _, x := range a {
+		bound = append(bound, slog.Attr{Key: prefix + x.Key, Value: x.Value})
+	}
+	return &noticeHandler{Handler: h.Handler.WithAttrs(a), ring: h.ring, attrs: bound, groups: h.groups}
 }
 
+// WithGroup returns a handler whose later attributes are keyed under name.
+// An empty name changes nothing, as in slog.
 func (h *noticeHandler) WithGroup(name string) slog.Handler {
-	return &noticeHandler{Handler: h.Handler.WithGroup(name), ring: h.ring}
+	if name == "" {
+		return h
+	}
+	groups := append(append([]string(nil), h.groups...), name)
+	return &noticeHandler{Handler: h.Handler.WithGroup(name), ring: h.ring, attrs: h.attrs, groups: groups}
+}
+
+// groupPrefix is the key prefix of an open group path: "a.b." or "" for none.
+func groupPrefix(groups []string) string {
+	if len(groups) == 0 {
+		return ""
+	}
+	return strings.Join(groups, ".") + "."
+}
+
+// noticeLine joins msg and attrs into "msg key=value key=value".
+// A group-valued attribute is flattened into dotted keys, an attribute with an
+// empty key is skipped, and a value with a space, quote or equals sign is quoted.
+func noticeLine(msg string, attrs []slog.Attr) string {
+	var b strings.Builder
+	b.WriteString(msg)
+	var put func(key string, v slog.Value)
+	put = func(key string, v slog.Value) {
+		v = v.Resolve()
+		if v.Kind() == slog.KindGroup {
+			for _, sub := range v.Group() {
+				k := sub.Key
+				if key != "" && k != "" {
+					k = key + "." + k
+				} else if k == "" {
+					k = key
+				}
+				put(k, sub.Value)
+			}
+			return
+		}
+		if key == "" {
+			return
+		}
+		s := v.String()
+		if s == "" || strings.ContainsAny(s, " \t\r\n\"=") {
+			s = strconv.Quote(s)
+		}
+		b.WriteString(" " + key + "=" + s)
+	}
+	for _, a := range attrs {
+		put(a.Key, a.Value)
+	}
+	return b.String()
 }
 
 func serveNotices(ring *noticeRing) http.HandlerFunc {

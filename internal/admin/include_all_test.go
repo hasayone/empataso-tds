@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 func TestIncludeAllPatch(t *testing.T) {
@@ -132,7 +132,7 @@ func TestSeesBoardWideView(t *testing.T) {
 		boardOpen:    map[string]bool{config.MainBoardID: true, "seo": true},
 		boardRoles: map[string]string{
 			config.MainBoardID: config.BoardRoleEdit,
-			"seo":               config.BoardRoleCreated,
+			"seo":              config.BoardRoleCreated,
 		},
 		uid:    "u1",
 		grants: map[string]security.Grant{resCampaigns: {Mode: security.ModeFull}},

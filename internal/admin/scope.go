@@ -3,8 +3,8 @@ package admin
 import (
 	"context"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 const (
@@ -51,7 +51,7 @@ func (s *Server) viewerFrom(ctx context.Context) viewer {
 	if s.isAdmin(sess) {
 		return viewer{admin: true, boardCurrent: cur, boardsAll: allBoards, includeAll: includeAll, boardOpen: open}
 	}
-	v := viewer{uid: sess.UID, grants: map[string]security.Grant{}, hidden: map[string]bool{}, boardCurrent: cur, boardsAll: allBoards, boardRole: role, includeAll: includeAll, boardRoles: roles, boardOpen: open}
+	v := viewer{uid: sessionUID(sess), grants: map[string]security.Grant{}, hidden: map[string]bool{}, boardCurrent: cur, boardsAll: allBoards, boardRole: role, includeAll: includeAll, boardRoles: roles, boardOpen: open}
 	if u, ok := s.sessionUser(sess); ok {
 		acc := s.accessOf(u)
 		if acc.Grants != nil {
@@ -61,6 +61,9 @@ func (s *Server) viewerFrom(ctx context.Context) viewer {
 		if scopedCampaigns(v) {
 			v.hidden["origin_campaign"] = true
 			v.hidden["origin_campaign_id"] = true
+			v.hidden["root_cid"] = true
+			v.hidden["origin_stream"] = true
+			v.hidden["origin_keyword"] = true
 		}
 		v.sections = make(map[string]bool, len(acc.Sections))
 		for _, sec := range acc.Sections {

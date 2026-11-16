@@ -3,7 +3,7 @@ package admin
 import (
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 func TestLogExportCarriesDeviceModel(t *testing.T) {

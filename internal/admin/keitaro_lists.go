@@ -5,8 +5,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // importLists writes IP list files before groups are saved.
@@ -143,7 +143,7 @@ func (s *Server) extractGlobalS2S(ctx context.Context, board string, incoming []
 	}
 	var section []config.OutboundPostback
 	for _, p := range stored {
-		if config.SameBoard(p.BoardID, board) {
+		if config.SameBoard(p.BoardID, board) && !isCheckerManagedID(p.ID) {
 			section = append(section, p)
 		}
 	}

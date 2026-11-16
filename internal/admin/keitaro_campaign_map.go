@@ -4,8 +4,8 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // campaignMapScope selects which stored groups may participate in log campaign mapping.

@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/logbuf"
-	"github.com/egerkuzma/kuztds/internal/store"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // logSkipTally counts log rows skipped for empty sub_id or zero time.
@@ -108,7 +108,7 @@ func parseKeitaroTime(raw string) time.Time {
 // logImport is the window and campaign map for one log import.
 // from and to are tracker range strings. host is the tracker hostname.
 // creds is the origin and key of the run that started this import.
-// aliases maps a tracker campaign id to the kuztds group id for this run.
+// aliases maps a tracker campaign id to the emtds group id for this run.
 // groups is the groups-store snapshot
 // used to build the name index once for this import.
 type logImport struct {
@@ -121,13 +121,15 @@ type logImport struct {
 }
 
 // logPlace is the group identity available while mapping one log import.
-// aliases maps a tracker campaign id to the kuztds group id. names maps a
+// aliases maps a tracker campaign id to the emtds group id. names maps a
 // group id to the group name from the groups store. unknown collects tracker
-// campaign ids that were missing from aliases when rows were mapped.
+// campaign ids that were missing from aliases when rows were mapped. refs
+// collects the catalog ids of mapped rows for the catalog top-up; nil skips it.
 type logPlace struct {
 	aliases map[int]string
 	names   map[string]string
 	unknown *unknownCampaignTally
+	refs    catalogRefs
 }
 
 // unknownCampaignTally counts log rows tied to campaigns absent from the tracker list.
@@ -159,15 +161,33 @@ type logSpan struct {
 // importLogs writes conversions and clicks, or records that the warehouse is absent.
 // li carries the tracker range, the host, the campaign aliases and the groups snapshot.
 // The name index is built once from that snapshot and shared by both logs.
-// counts and losses are updated. It returns a tracker or warehouse error.
+// counts and losses are updated. After both logs are written, catalog records the rows
+// refer to but the catalog lacks are added by topUpKeitaroCatalog; its lines join losses.
+// It returns a tracker or warehouse error.
 func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImport, counts map[string]int, losses *[]ktimport.Loss, opts logImportOpts) (logFetchStats, error) {
+	stats, refs, err := s.importLogRows(ctx, req, li, counts, losses, opts)
+	if err != nil {
+		return stats, err
+	}
+	top := s.topUpKeitaroCatalog(ctx, li.creds, opts.manifestStore, refs)
+	*losses = append(*losses, top.losses...)
+	if n := top.total(); n > 0 {
+		counts["catalog_added"] = n
+	}
+	return stats, nil
+}
+
+// importLogRows writes conversions and clicks for importLogs.
+// It returns the fetch stats, the catalog ids of mapped rows, and a tracker or warehouse error.
+func (s *Server) importLogRows(ctx context.Context, req keitaroImportReq, li logImport, counts map[string]int, losses *[]ktimport.Loss, opts logImportOpts) (logFetchStats, catalogRefs, error) {
 	var stats logFetchStats
 	tally := &unknownCampaignTally{}
 	skip := opts.skip
 	if skip == nil {
 		skip = &logSkipTally{}
 	}
-	place := logPlace{aliases: li.aliases, names: groupNames(li.groups), unknown: tally}
+	refs := newCatalogRefs()
+	place := logPlace{aliases: li.aliases, names: groupNames(li.groups), unknown: tally, refs: refs}
 	defer noteUnknownCampaignLoss(losses, tally)
 	defer noteLogSkipLosses(losses, skip)
 	client := s.keitaroClient(li.creds)
@@ -180,7 +200,7 @@ func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImp
 			span := logSpan{from: li.from, to: li.to, host: li.host, place: place}
 			read, inserted, dups, maxTS, idx, err := s.importClicks(ctx, client, span, opts.syncMode, skip)
 			if err != nil {
-				return stats, err
+				return stats, refs, err
 			}
 			if opts.syncMode {
 				counts["clicks"] = inserted
@@ -205,7 +225,7 @@ func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImp
 			span := logSpan{from: li.from, to: li.to, host: li.host, place: place}
 			n, maxTS, odd, err := s.importConversions(ctx, client, span, clickIdx, opts.syncMode, skip)
 			if err != nil {
-				return stats, err
+				return stats, refs, err
 			}
 			counts["conversions"] = n
 			stats.maxConv = maxTS
@@ -213,7 +233,7 @@ func (s *Server) importLogs(ctx context.Context, req keitaroImportReq, li logImp
 			noteOddConversionStatuses(losses, odd)
 		}
 	}
-	return stats, nil
+	return stats, refs, nil
 }
 
 const maxLogCampaignIDsInLoss = 20
@@ -331,6 +351,7 @@ func (s *Server) importConversions(ctx context.Context, client *ktimport.Client,
 			}
 		}
 		ins := conversionInsert(row, span.host, span.place, snap)
+		span.place.refs.note(ins.OfferID, ins.LandingID, ins.NetworkID, ins.SourceID)
 		if !ins.TS.IsZero() && ins.TS.After(maxTS) {
 			maxTS = ins.TS
 		}
@@ -404,6 +425,7 @@ func (s *Server) importClicks(ctx context.Context, client *ktimport.Client, span
 			return nil
 		}
 		ev := clickEvent(row, span.host, span.place)
+		span.place.refs.note(ev.OfferID, ev.LandingID, ev.NetworkID, ev.SourceID)
 		if ev.Ts.IsZero() {
 			if skip != nil {
 				skip.clicksZero++
@@ -581,11 +603,14 @@ func clickEvent(row ktimport.ClickRow, host string, place logPlace) logbuf.Event
 		bot = "bot"
 	}
 	groupID, groupName := keitaroGroup(row.Campaign, int(row.CampaignID), place)
+	out, redirect := keitaroDest(row)
 	return logbuf.Event{
 		Ts:      parseKeitaroTime(row.Datetime),
 		GroupID: groupID, GroupName: groupName,
 		OriginID: groupID, OriginName: groupName,
 		Stream:       row.Stream,
+		Out:          out,
+		Redirect:     redirect,
 		Keyword:      row.Keyword,
 		Device:       keitaroDevice(row.DeviceType),
 		Operator:     row.Operator,
@@ -616,6 +641,20 @@ func clickEvent(row ktimport.ClickRow, host string, place logPlace) logbuf.Event
 		CreativeID:   string(row.CreativeID),
 		ExternalID:   string(row.ExternalID),
 	}
+}
+
+// keitaroDest maps the tracker destination of a click onto the events out and redirect.
+// row is the log line. A click with a landing and no address in destination
+// (the tracker writes a marker such as LP there) becomes redirect landing with
+// the landing id in out, as the engine logs its own landings. Anything else is
+// the destination as given, capped by logbuf.CapOut, with an empty redirect.
+// It returns out and redirect. It does not return an error.
+func keitaroDest(row ktimport.ClickRow) (out, redirect string) {
+	dest := strings.TrimSpace(row.Destination)
+	if landing := catalogNum(int(row.LandingID)); landing != "" && !strings.Contains(dest, "://") {
+		return landing, "landing"
+	}
+	return logbuf.CapOut(dest), ""
 }
 
 // groupNames indexes group names by id.

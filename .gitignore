@@ -1,8 +1,9 @@
 # Binaries
 /bin/
+dist/
 *.exe
-kuztds-engine
-kuztds-admin
+emtds-engine
+emtds-admin
 # command binaries built by go build ./cmd/<name> without -o
 /engine
 /admin
@@ -25,6 +26,8 @@ cron.json.*
 *.db
 *.db-wal
 *.db-shm
+# state files of the Keitaro transfer job written to the working directory
+/.keitaro-job*-result.json
 
 # Go
 /vendor/

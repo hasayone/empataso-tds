@@ -6,6 +6,32 @@ import (
 	"testing"
 )
 
+func TestEffectiveSourceOverlaysCampaignNames(t *testing.T) {
+	src := &TrafficSource{ID: "s", Parameters: map[string]string{"keyword": "target_keys", "sub_id_1": "sub1"}}
+	if got := EffectiveSource(nil, src); got != src {
+		t.Fatal("nil campaign returns the source")
+	}
+	if got := EffectiveSource(&Group{}, src); got != src {
+		t.Fatal("empty campaign parameters return the source")
+	}
+	over := EffectiveSource(&Group{Parameters: map[string]string{"keyword": "utm_term", "site": "domain"}}, src)
+	if over == src || over.Parameters["keyword"] != "utm_term" || over.Parameters["sub_id_1"] != "sub1" || over.Parameters["site"] != "domain" {
+		t.Fatalf("overlay %+v", over.Parameters)
+	}
+	if src.Parameters["keyword"] != "target_keys" {
+		t.Fatal("the source map was modified")
+	}
+	cleared := EffectiveSource(&Group{Parameters: map[string]string{"sub_id_1": ""}}, src)
+	if _, ok := cleared.Parameters["sub_id_1"]; ok || cleared.Parameters["keyword"] != "target_keys" {
+		t.Fatalf("clear %+v", cleared.Parameters)
+	}
+	only := EffectiveSource(&Group{Parameters: map[string]string{"keyword": "kw"}}, nil)
+	kw, subs := ApplySource(url.Values{"kw": {"shoes"}, "sub_id_1": {"plain"}}, only)
+	if kw != "shoes" || subs[0] != "plain" {
+		t.Fatalf("campaign without a source: keyword %q sub %q", kw, subs[0])
+	}
+}
+
 func TestApplySourceMapsPartnerName(t *testing.T) {
 	src := &TrafficSource{Parameters: map[string]string{"sub_id_1": "click_id"}}
 	_, subs := ApplySource(url.Values{"click_id": {"ZZ"}}, src)

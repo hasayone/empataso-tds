@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // TestMacroInjection_VisitorInputIsExpandedAsMacros documents second-order macro

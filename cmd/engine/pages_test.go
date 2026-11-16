@@ -11,15 +11,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func TestPagesDir(t *testing.T) {
-	if got := pagesDir("/var/lib/kuztds/pages", "/var/lib/kuztds/groups.json"); got != "/var/lib/kuztds/pages" {
+	if got := pagesDir("/var/lib/emtds/pages", "/var/lib/emtds/groups.json"); got != "/var/lib/emtds/pages" {
 		t.Fatalf("explicit: %q", got)
 	}
-	want := filepath.Join(filepath.Dir("/var/lib/kuztds/groups.json"), "pages")
-	if got := pagesDir("", "/var/lib/kuztds/groups.json"); got != want {
+	want := filepath.Join(filepath.Dir("/var/lib/emtds/groups.json"), "pages")
+	if got := pagesDir("", "/var/lib/emtds/groups.json"); got != want {
 		t.Fatalf("default: %q", got)
 	}
 	if pagesDir("", "") != "" {
@@ -190,8 +190,8 @@ func TestPageFileExpandsSubID(t *testing.T) {
 	if !regexp.MustCompile(`<h1>[0-9a-z]{12}</h1>`).MatchString(body) {
 		t.Fatalf("expanded subid missing: %q", body)
 	}
-	if rec.Header().Get("X-Kuztds-Stream") != "s" {
-		t.Fatalf("stream %q", rec.Header().Get("X-Kuztds-Stream"))
+	if rec.Header().Get("X-Emtds-Stream") != "s" {
+		t.Fatalf("stream %q", rec.Header().Get("X-Emtds-Stream"))
 	}
 }
 
@@ -208,8 +208,8 @@ func TestPageFileMissKeepsRedirect(t *testing.T) {
 	if rec.Body.String() != "" {
 		t.Fatalf("body %q", rec.Body.String())
 	}
-	if rec.Header().Get("X-Kuztds-Stream") != "s" {
-		t.Fatalf("stream %q", rec.Header().Get("X-Kuztds-Stream"))
+	if rec.Header().Get("X-Emtds-Stream") != "s" {
+		t.Fatalf("stream %q", rec.Header().Get("X-Emtds-Stream"))
 	}
 }
 

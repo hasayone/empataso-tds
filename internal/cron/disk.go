@@ -38,11 +38,11 @@ func (r *Runner) runDisk(ctx context.Context, cfg Config) (string, error) {
 		switch {
 		case pct < limit && !was:
 			part += r.notifyIfConfigured(ctx, cfg.Telegram,
-				fmt.Sprintf("⚠️ KuzTDS: low disk space on %s — %d%% free (%s), threshold %d%%.", p, pct, gib(free), limit))
+				fmt.Sprintf("⚠️ EmTDS: low disk space on %s — %d%% free (%s), threshold %d%%.", p, pct, gib(free), limit))
 			alerted = true
 		case pct >= limit && was:
 			part += r.notifyIfConfigured(ctx, cfg.Telegram,
-				fmt.Sprintf("✅ KuzTDS: disk space on %s is back to %d%% free (%s).", p, pct, gib(free)))
+				fmt.Sprintf("✅ EmTDS: disk space on %s is back to %d%% free (%s).", p, pct, gib(free)))
 		}
 		r.state(func(st *Status) {
 			if pct < limit {

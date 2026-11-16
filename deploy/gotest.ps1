@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-  Единая точка запуска тестов kuztds в Docker (лимиты CPU/RAM, слоты, кэш результатов).
+  Единая точка запуска тестов emtds в Docker (лимиты CPU/RAM, слоты, кэш результатов).
 
 .PARAMETER Run
   Команда sh внутри образа test.
@@ -12,13 +12,13 @@
   Игнорировать кэш завершённых прогонов.
 
 .PARAMETER Cleanup
-  Удалить завершённые контейнеры с label kuztds.role=test.
+  Удалить завершённые контейнеры с label emtds.role=test.
 
 .PARAMETER Status
   Занятые слоты и docker stats.
 
 .ENV
-  KUZTDS_TEST_CPUS, KUZTDS_TEST_SLOTS, KUZTDS_TEST_MEMORY, KUZTDS_TEST_GOMAXPROCS, KUZTDS_TEST_IMAGE.
+  EMTDS_TEST_CPUS, EMTDS_TEST_SLOTS, EMTDS_TEST_MEMORY, EMTDS_TEST_GOMAXPROCS, EMTDS_TEST_IMAGE.
 
 .OUTPUTS
   Exit code тестов; в логе GOTEST_EXIT и GOTEST_MEMPEAK_BYTES при наличии.
@@ -48,14 +48,27 @@ $ErrorActionPreference = 'Stop'
 
 $Script:TdsDir = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 
-$Script:StateDir = Join-Path $env:LOCALAPPDATA 'kuztds-test'
+$Script:StateDir = Join-Path $env:LOCALAPPDATA 'emtds-test'
 $Script:SlotsDir = Join-Path $Script:StateDir 'slots'
 $Script:CacheDir = Join-Path $Script:StateDir 'cache'
 $Script:InflightDir = Join-Path $Script:StateDir 'inflight'
 $Script:ResultsDir = Join-Path $Script:StateDir 'results'
 $Script:BuildLockPath = Join-Path $Script:StateDir 'build.lock'
-$Script:GoCacheVolume = 'kuztds-test-gocache'
+$Script:GoCacheVolume = 'emtds-test-gocache'
 $Script:MaxCacheEntries = 20
+
+<#
+.SYNOPSIS
+  Читает переменную окружения EMTDS_*; пустое значение берёт из того же имени с префиксом KUZTDS_.
+#>
+function Get-EnvRaw {
+    param([string]$Name)
+    $v = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($v) -and $Name.StartsWith('EMTDS_')) {
+        $v = [Environment]::GetEnvironmentVariable('KUZTDS_' + $Name.Substring(6))
+    }
+    return $v
+}
 
 <#
 .SYNOPSIS
@@ -63,7 +76,7 @@ $Script:MaxCacheEntries = 20
 #>
 function Get-EnvDouble {
     param([string]$Name, [double]$Default)
-    $v = [Environment]::GetEnvironmentVariable($Name)
+    $v = Get-EnvRaw -Name $Name
     if ([string]::IsNullOrWhiteSpace($v)) { return $Default }
     return [double]$v
 }
@@ -74,7 +87,7 @@ function Get-EnvDouble {
 #>
 function Get-EnvInt {
     param([string]$Name, [int]$Default)
-    $v = [Environment]::GetEnvironmentVariable($Name)
+    $v = Get-EnvRaw -Name $Name
     if ([string]::IsNullOrWhiteSpace($v)) { return $Default }
     return [int]$v
 }
@@ -85,7 +98,7 @@ function Get-EnvInt {
 #>
 function Get-EnvString {
     param([string]$Name, [string]$Default)
-    $v = [Environment]::GetEnvironmentVariable($Name)
+    $v = Get-EnvRaw -Name $Name
     if ([string]::IsNullOrWhiteSpace($v)) { return $Default }
     return $v
 }
@@ -173,10 +186,10 @@ function Test-LockFileHeld {
 
 <#
 .SYNOPSIS
-  Удаляет завершённые тестовые контейнеры с label kuztds.role=test.
+  Удаляет завершённые тестовые контейнеры с label emtds.role=test.
 #>
 function Invoke-CleanupTestContainers {
-    $ids = docker ps -aq --filter 'label=kuztds.role=test' 2>$null
+    $ids = docker ps -aq --filter 'label=emtds.role=test' 2>$null
     if (-not $ids) { return }
     foreach ($id in ($ids -split "`n")) {
         $id = $id.Trim()
@@ -195,18 +208,18 @@ function Invoke-CleanupTestContainers {
 function Show-Status {
     Ensure-StateDirs
     Write-Host '=== Слоты ==='
-    $maxSlots = Get-EnvInt -Name 'KUZTDS_TEST_SLOTS' -Default 2
+    $maxSlots = Get-EnvInt -Name 'EMTDS_TEST_SLOTS' -Default 2
     for ($i = 0; $i -lt $maxSlots; $i++) {
         $lp = Join-Path $Script:SlotsDir ("slot{0}.lock" -f $i)
         $held = Test-LockFileHeld -Path $lp
         Write-Host ("slot{0}: {1}" -f $i, $(if ($held) { 'занят' } else { 'свободен' }))
     }
     Write-Host ''
-    Write-Host '=== docker ps (kuztds.role=test) ==='
-    docker ps --filter 'label=kuztds.role=test' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
+    Write-Host '=== docker ps (emtds.role=test) ==='
+    docker ps --filter 'label=emtds.role=test' --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}'
     Write-Host ''
     Write-Host '=== docker stats (one-shot) ==='
-    $running = docker ps -q --filter 'label=kuztds.role=test'
+    $running = docker ps -q --filter 'label=emtds.role=test'
     if ($running) {
         docker stats --no-stream $running
     }
@@ -217,12 +230,15 @@ function Show-Status {
 
 <#
 .SYNOPSIS
-  Считает число запущенных контейнеров с label kuztds.role=test.
+  Считает число запущенных контейнеров с label emtds.role=test и старым kuztds.role=test.
 #>
 function Get-RunningTestContainerCount {
-    $out = docker ps -q --filter 'label=kuztds.role=test' 2>$null
-    if (-not $out) { return 0 }
-    return @($out -split "`n" | Where-Object { $_.Trim() }).Count
+    $n = 0
+    foreach ($label in @('label=emtds.role=test', 'label=kuztds.role=test')) {
+        $out = docker ps -q --filter $label 2>$null
+        if ($out) { $n += @($out -split "`n" | Where-Object { $_.Trim() }).Count }
+    }
+    return $n
 }
 
 <#
@@ -316,7 +332,7 @@ function Invoke-LockedBuild {
   Оставляет в кэше не более MaxCacheEntries последних результатов.
 #>
 function Trim-ResultCache {
-    $files = Get-ChildItem -Path $Script:CacheDir -Filter '*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending
+    $files = @(Get-ChildItem -Path $Script:CacheDir -Filter '*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending)
     if ($files.Count -le $Script:MaxCacheEntries) { return }
     $files | Select-Object -Skip $Script:MaxCacheEntries | ForEach-Object { Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue }
 }
@@ -411,16 +427,20 @@ function Open-InflightLock {
 
 <#
 .SYNOPSIS
-  Читает учётные данные ClickHouse из kuztds-admin в env процесса (без записи на диск).
+  Читает учётные данные ClickHouse из emtds-admin (или старого kuztds-admin) в env процесса (без записи на диск).
 #>
 function Set-IntegrationProcessEnv {
-    $user = (docker exec kuztds-admin printenv KUZTDS_CLICKHOUSE_USER 2>$null)
-    $pass = (docker exec kuztds-admin printenv KUZTDS_CLICKHOUSE_PASSWORD 2>$null)
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($user)) {
-        throw 'Не удалось прочитать KUZTDS_CLICKHOUSE_* из kuztds-admin (контейнер должен быть Up).'
+    foreach ($container in @('emtds-admin', 'kuztds-admin')) {
+        foreach ($prefix in @('EMTDS_', 'KUZTDS_')) {
+            $user = (docker exec $container printenv ($prefix + 'CLICKHOUSE_USER') 2>$null)
+            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($user)) { continue }
+            $pass = (docker exec $container printenv ($prefix + 'CLICKHOUSE_PASSWORD') 2>$null)
+            $env:EMTDS_CLICKHOUSE_USER = $user.Trim()
+            $env:EMTDS_CLICKHOUSE_PASSWORD = "$pass".Trim()
+            return
+        }
     }
-    $env:KUZTDS_CLICKHOUSE_USER = $user.Trim()
-    $env:KUZTDS_CLICKHOUSE_PASSWORD = $pass.Trim()
+    throw 'Не удалось прочитать CLICKHOUSE_USER и CLICKHOUSE_PASSWORD из emtds-admin или kuztds-admin (контейнер должен быть Up).'
 }
 
 <#
@@ -428,8 +448,8 @@ function Set-IntegrationProcessEnv {
   Удаляет временные переменные ClickHouse из env процесса.
 #>
 function Clear-IntegrationProcessEnv {
-    Remove-Item Env:KUZTDS_CLICKHOUSE_USER -ErrorAction SilentlyContinue
-    Remove-Item Env:KUZTDS_CLICKHOUSE_PASSWORD -ErrorAction SilentlyContinue
+    Remove-Item Env:EMTDS_CLICKHOUSE_USER -ErrorAction SilentlyContinue
+    Remove-Item Env:EMTDS_CLICKHOUSE_PASSWORD -ErrorAction SilentlyContinue
 }
 
 <#
@@ -454,11 +474,11 @@ if ($Status) {
 
 Ensure-StateDirs
 
-$cpus = Get-EnvDouble -Name 'KUZTDS_TEST_CPUS' -Default 1.0
-$maxSlots = Get-EnvInt -Name 'KUZTDS_TEST_SLOTS' -Default 2
-$memSpec = Get-EnvString -Name 'KUZTDS_TEST_MEMORY' -Default '4g'
-$gomax = Get-EnvInt -Name 'KUZTDS_TEST_GOMAXPROCS' -Default (Get-CeilingInt -Value $cpus)
-$buildTag = Get-EnvString -Name 'KUZTDS_TEST_IMAGE' -Default 'kuztds-src'
+$cpus = Get-EnvDouble -Name 'EMTDS_TEST_CPUS' -Default 1.0
+$maxSlots = Get-EnvInt -Name 'EMTDS_TEST_SLOTS' -Default 2
+$memSpec = Get-EnvString -Name 'EMTDS_TEST_MEMORY' -Default '4g'
+$gomax = Get-EnvInt -Name 'EMTDS_TEST_GOMAXPROCS' -Default (Get-CeilingInt -Value $cpus)
+$buildTag = Get-EnvString -Name 'EMTDS_TEST_IMAGE' -Default 'emtds-src'
 
 $runCmd = Get-ResolvedRunCommand
 $isIntegration = ($Suite -eq 'integration') -or ($runCmd -match '(?i)-tags=integration')
@@ -482,16 +502,16 @@ $exitCode = 1
 
 try {
     $slot = Open-TestSlot -MaxSlots $maxSlots
-    $containerName = ('kuztds-test-{0}-{1}' -f $slot.Index, $PID)
+    $containerName = ('emtds-test-{0}-{1}' -f $slot.Index, $PID)
 
     $wrapped = Build-WrapperShell -Inner $runCmd
     $dockerArgs = @(
         'run',
         '--rm',
         '--name', $containerName,
-        '--label', 'kuztds.role=test',
-        '--label', 'kuztds.owner=cursor-agent',
-        ('--label', ('kuztds.slot={0}' -f $slot.Index)),
+        '--label', 'emtds.role=test',
+        '--label', 'emtds.owner=cursor-agent',
+        ('--label', ('emtds.slot={0}' -f $slot.Index)),
         '--cpus', ([string]$cpus),
         '-e', ('GOMAXPROCS={0}' -f $gomax),
         '-e', ('GOFLAGS=-p={0}' -f $gomax),
@@ -507,9 +527,9 @@ try {
     if ($isIntegration) {
         Set-IntegrationProcessEnv
         $integrationEnvSet = $true
-        $dockerArgs += '-e', 'KUZTDS_CLICKHOUSE_ADDR=clickhouse:9000'
-        $dockerArgs += '-e', 'KUZTDS_CLICKHOUSE_USER'
-        $dockerArgs += '-e', 'KUZTDS_CLICKHOUSE_PASSWORD'
+        $dockerArgs += '-e', 'EMTDS_CLICKHOUSE_ADDR=clickhouse:9000'
+        $dockerArgs += '-e', 'EMTDS_CLICKHOUSE_USER'
+        $dockerArgs += '-e', 'EMTDS_CLICKHOUSE_PASSWORD'
         $dockerArgs += '--network', 'deploy_default'
     }
 
@@ -528,7 +548,7 @@ try {
     $ErrorActionPreference = $prevEap
 
     if ($exitCode -eq 137) {
-        Write-Host 'OOM: контейнер убит (exit 137). Увеличьте KUZTDS_TEST_MEMORY.' -ForegroundColor Red
+        Write-Host 'OOM: контейнер убит (exit 137). Увеличьте EMTDS_TEST_MEMORY.' -ForegroundColor Red
     }
     else {
         $fullLog = $logBuilder.ToString()

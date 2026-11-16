@@ -1,15 +1,15 @@
 **English** · [Русский](README.ru.md)
 
-# KuzTDS
+# EmTDS
 
-[![CI](https://github.com/egerkuzma/kuztds/actions/workflows/ci.yml/badge.svg)](https://github.com/egerkuzma/kuztds/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/egerkuzma/kuztds)](https://goreportcard.com/report/github.com/egerkuzma/kuztds)
-[![Go version](https://img.shields.io/github/go-mod/go-version/egerkuzma/kuztds)](go.mod)
+[![CI](https://github.com/egerkuzma/emtds/actions/workflows/ci.yml/badge.svg)](https://github.com/egerkuzma/emtds/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/egerkuzma/emtds)](https://goreportcard.com/report/github.com/egerkuzma/emtds)
+[![Go version](https://img.shields.io/github/go-mod/go-version/egerkuzma/emtds)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **A fast, secure, self-hosted Traffic Distribution System (TDS) written in Go.**
 
-KuzTDS takes an incoming visitor, decides **by rules** where to send them
+EmTDS takes an incoming visitor, decides **by rules** where to send them
 (redirect / iframe / JavaScript / inline content / stub), tells **bots apart from
 humans**, and records everything for analytics — a single long-running engine,
 an admin panel embedded in its own binary, and a small background service that
@@ -25,7 +25,7 @@ sessions go to **Redis**, and the response never waits for a log write.
 
 ## Table of contents
 
-- [Why KuzTDS](#why-kuztds)
+- [Why EmTDS](#why-emtds)
 - [Features](#features)
 - [Screenshots](#screenshots)
 - [Architecture](#architecture)
@@ -49,10 +49,10 @@ sessions go to **Redis**, and the response never waits for a log write.
 
 ---
 
-## Why KuzTDS
+## Why EmTDS
 
 A TDS sits in front of your offers and landings and routes every click to the
-right place based on who the visitor is. **KuzTDS does it like infrastructure —
+right place based on who the visitor is. **EmTDS does it like infrastructure —
 not like a script.**
 
 - ⚡ **Blazing fast** — **~30,000 req/s** through the *full* pipeline on a single
@@ -206,7 +206,7 @@ lists it is in, and the geo databases in use:
 
 ## Architecture
 
-Four binaries, shared `internal/` packages:
+Four services and two tools, shared `internal/` packages:
 
 | Binary | Port | Purpose |
 |--------|------|---------|
@@ -214,6 +214,8 @@ Four binaries, shared `internal/` packages:
 | `cmd/admin` | `:8090` | REST API + embedded admin SPA (`internal/admin/web`, `go:embed`). |
 | `cmd/cron` | — | Background jobs: list and geo database updates, VirusTotal, disk, Telegram. Talks to the others through files only. |
 | `cmd/apiclient` | `:9090` | Client to install on a landing/donor page (calls the engine via `?api=`). |
+| `cmd/mcp` | — | MCP server over stdio: gives an AI agent the admin API through an API key ([docs/wiki/mcp.md](docs/wiki/mcp.md)). Built with `make mcp`. |
+| `cmd/loadgen` | — | Click generator for test campaigns ([docs/wiki/loadgen.md](docs/wiki/loadgen.md)). |
 
 **Request lifecycle in the engine:**
 
@@ -222,7 +224,7 @@ HTTP request
   │
   ├─ postback?  (?pb=KEY&cid=&profit=) → record conversion, exit
   ├─ realip middleware  (trust XFF/CF only from trusted_proxies)
-  ├─ api mode?  (?api=base64(JSON), checks KUZTDS_API_KEY)
+  ├─ api mode?  (?api=base64(JSON), checks EMTDS_API_KEY)
   ├─ IP blacklist        → 403 if listed
   ├─ resolve group by id/alias (first path segment); none → "trash" mode
   ├─ anti-flood (Redis): N requests / IP / window
@@ -283,25 +285,25 @@ core CIDR/IP-range lookup runs in **~9 ns/op with 0 allocations**
 
 ## Benchmark vs zTDS
 
-To put those numbers in context, we ran KuzTDS **head-to-head against zTDS** — a
+To put those numbers in context, we ran EmTDS **head-to-head against zTDS** — a
 popular legacy PHP TDS — on the **same Apple M1**, through the **same request
 pipeline** (geo, search-engine IP-list checks, macro rendering, per-request
 logging) and the **same load generator**.
 
-![KuzTDS vs zTDS — head-to-head benchmark](docs/img/vs-ztds.png)
+![EmTDS vs zTDS — head-to-head benchmark](docs/img/vs-ztds.png)
 
-| | KuzTDS (Go) | zTDS (PHP) |
+| | EmTDS (Go) | zTDS (PHP) |
 |---|--:|--:|
 | Single thread | **11,352 req/s** · p50 80 µs | 84 req/s · p50 ~10 ms |
 | 8 concurrent | **23,626 req/s** · 0 errors | collapses (errors, multi-second tails) |
 | 50 concurrent | **27,800 req/s** · 0 errors | collapses (mostly errors) |
 | Scaling | flat to 400 concurrent, **0 errors** | degrades from 2 concurrent, fails by 8 |
 
-**KuzTDS wins decisively** — about **135× faster on a single thread**, and under
+**EmTDS wins decisively** — about **135× faster on a single thread**, and under
 real concurrent load the gap becomes effectively unbounded: the PHP TDS simply
-**stops serving**, while KuzTDS keeps scaling without a single error.
+**stops serving**, while EmTDS keeps scaling without a single error.
 
-Why such a blowout? It's **architecture, not micro-optimisation**. KuzTDS keeps
+Why such a blowout? It's **architecture, not micro-optimisation**. EmTDS keeps
 **everything in memory** — IP indexes, group config, signatures, geo — inside one
 long-running process, and writes logs **asynchronously** to ClickHouse, so the hot
 path never blocks. Classic PHP TDS spin up a fresh process on every request, read
@@ -310,7 +312,7 @@ single SQLite file behind a global write-lock** — which serializes all traffic
 collapses the moment real concurrency arrives.
 
 > **In short: everything in memory + async logging = a TDS that scales instead of
-> melting under load.** This is exactly where KuzTDS is built to stay fast and
+> melting under load.** This is exactly where EmTDS is built to stay fast and
 > predictable while older PHP-based systems fall over.
 
 Methodology and caveats — see [Performance](#performance) above. These are
@@ -330,8 +332,8 @@ brew install go docker
 
 ### 1. Clone & start infrastructure
 ```bash
-git clone https://github.com/egerkuzma/kuztds.git
-cd kuztds
+git clone https://github.com/egerkuzma/emtds.git emtds
+cd emtds
 make infra-up          # ClickHouse + Redis via docker compose; schema auto-applied
 ```
 
@@ -342,27 +344,27 @@ go run ./cmd/admin -hash 'my-strong-password'   # prints $argon2id$...
 
 ### 3. Run the engine (`:8080`)
 ```bash
-KUZTDS_DATA_DIR=./data \
-KUZTDS_GROUPS_FILE=configs/groups.example.json \
-KUZTDS_TRUSTED_PROXIES=127.0.0.1/32 \
-KUZTDS_POSTBACK_KEY=secret KUZTDS_API_KEY=apikey \
-KUZTDS_REDIS_ADDR=localhost:6379 \
-KUZTDS_CLICKHOUSE_ADDR=localhost:9000 KUZTDS_CLICKHOUSE_DB=kuztds \
-KUZTDS_CLICKHOUSE_USER=kuztds KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_DATA_DIR=./data \
+EMTDS_GROUPS_FILE=configs/groups.example.json \
+EMTDS_TRUSTED_PROXIES=127.0.0.1/32 \
+EMTDS_POSTBACK_KEY=secret EMTDS_API_KEY=apikey \
+EMTDS_REDIS_ADDR=localhost:6379 \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=kuztds \
+EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/engine
 ```
 
 ### 4. Run the admin panel (`:8090`)
 ```bash
-KUZTDS_ADMIN_PASSWORD_HASH='<hash-from-step-2>' \
-KUZTDS_ADMIN_PASSWORD_FILE=./admin.hash \
-KUZTDS_ADMIN_COOKIE_SECURE=false \
-KUZTDS_ENGINE_URL=http://localhost:8080 \
-KUZTDS_GROUPS_FILE=configs/groups.example.json \
-KUZTDS_DATA_DIR=./data KUZTDS_KEYS_DIR=./keys \
-KUZTDS_REDIS_ADDR=localhost:6379 \
-KUZTDS_CLICKHOUSE_ADDR=localhost:9000 KUZTDS_CLICKHOUSE_DB=kuztds \
-KUZTDS_CLICKHOUSE_USER=kuztds KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_ADMIN_PASSWORD_HASH='<hash-from-step-2>' \
+EMTDS_ADMIN_PASSWORD_FILE=./admin.hash \
+EMTDS_ADMIN_COOKIE_SECURE=false \
+EMTDS_ENGINE_URL=http://localhost:8080 \
+EMTDS_GROUPS_FILE=configs/groups.example.json \
+EMTDS_DATA_DIR=./data EMTDS_KEYS_DIR=./keys \
+EMTDS_REDIS_ADDR=localhost:6379 \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=kuztds \
+EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/admin
 ```
 
@@ -370,15 +372,16 @@ Open **http://localhost:8090** and log in with `admin` and your password.
 
 ### 5. Run the cron service (optional)
 ```bash
-KUZTDS_CRON_FILE=./cron.json \
-KUZTDS_DATA_DIR=./data KUZTDS_KEYS_DIR=./keys \
-KUZTDS_GROUPS_FILE=configs/groups.example.json \
-KUZTDS_GEO_DB=./geo/city.mmdb KUZTDS_ASN_DB=./geo/asn.mmdb \
-KUZTDS_CLICKHOUSE_ADDR=localhost:9000 KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CRON_FILE=./cron.json \
+EMTDS_DATA_DIR=./data EMTDS_KEYS_DIR=./keys \
+EMTDS_GROUPS_FILE=configs/groups.example.json \
+EMTDS_GEO_DB=./geo/city.mmdb EMTDS_ASN_DB=./geo/asn.mmdb \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/cron
 ```
-Give the engine and the admin the same `KUZTDS_GEO_DB` / `KUZTDS_ASN_DB`, and the
-admin the same `KUZTDS_CRON_FILE`; then everything it does is configured on the
+Give the engine and the admin the same `EMTDS_GEO_DB` / `EMTDS_ASN_DB` (the
+DB-IP ASN file `dbip-asn.mmdb` goes next to them, or set `EMTDS_DBIP_ASN_DB`), and the
+admin the same `EMTDS_CRON_FILE`; then everything it does is configured on the
 **Automation** page. Nothing runs until a job is switched on there.
 
 ### 6. Send a test request to the engine
@@ -388,8 +391,8 @@ curl -i 'http://localhost:8080/promo?q=hello' \
   -H 'User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) Safari/604.1' \
   -H 'CF-IPCountry: US'
 ```
-Diagnostic response headers show the decision: `X-Kuztds-Stream`, `X-Kuztds-Bot`,
-`X-Kuztds-Country`, `X-Kuztds-Device`, `X-Kuztds-Uniq`.
+Diagnostic response headers show the decision: `X-Emtds-Stream`, `X-Emtds-Bot`,
+`X-Emtds-Country`, `X-Emtds-Device`, `X-Emtds-Uniq`.
 
 > A `Makefile` is provided: `make build`, `make test`, `make bench`,
 > `make infra-up`, `make infra-down`.
@@ -398,7 +401,7 @@ Diagnostic response headers show the decision: `X-Kuztds-Stream`, `X-Kuztds-Bot`
 
 ## Install on Ubuntu
 
-The `deploy/install.sh` script performs a one-time install of KuzTDS on a clean
+The `deploy/install.sh` script performs a one-time install of EmTDS on a clean
 Ubuntu 22.04 or 24.04 host: Docker (if missing), ClickHouse, Redis, the engine,
 the admin panel, cron, and php. The local [Quick start](#quick-start) path for
 development stays the same.
@@ -414,14 +417,14 @@ clicks and conversions are kept for a year, so disk sizing follows your daily
 click volume.
 
 In `.env`, the ClickHouse password (`CLICKHOUSE_PASSWORD`) must not be empty,
-and the admin password (`KUZTDS_ADMIN_PASSWORD`) must not be empty or `admin`.
+and the admin password (`EMTDS_ADMIN_PASSWORD`) must not be empty or `admin`.
 Run the script as a file with `bash`, not as `curl | bash`.
 
 ```bash
-git clone https://github.com/egerkuzma/kuztds.git
-cd kuztds
+git clone https://github.com/egerkuzma/emtds.git emtds
+cd emtds
 cp .env.example .env
-nano .env        # CLICKHOUSE_PASSWORD and KUZTDS_ADMIN_PASSWORD
+nano .env        # CLICKHOUSE_PASSWORD and EMTDS_ADMIN_PASSWORD
 sudo bash deploy/install.sh
 ```
 
@@ -430,49 +433,65 @@ The installer:
 - checks Ubuntu, root, memory, CPU cores, and disk space;
 - installs Docker from download.docker.com only when `docker compose` is not
   available yet, and does not change an already working Docker setup;
-- builds the `kuztds:local` image;
+- builds the `emtds:local` image (the state volume is `emtds-app_emtds_state`, mounted at `/var/lib/emtds`);
 - starts ClickHouse and Redis with the `deploy` compose project, then
   `deploy/docker-compose.app.yml`;
 - picks memory limits from the host RAM and writes them to
-  `/etc/kuztds/compose.infra.yml` and `/etc/kuztds/compose.app.yml`;
+  `/etc/emtds/compose.infra.yml` and `/etc/emtds/compose.app.yml`;
 - binds ClickHouse, Redis, the admin panel, and the engine to `127.0.0.1`
-  only (via `/etc/kuztds/server.env`). On the host the engine is
+  only (via `/etc/emtds/server.env`). On the host the engine is
   `127.0.0.1:18080`; inside the container it still listens on `:8080`;
 - treats the install as successful only after the engine and admin logs show
   `clickhouse connected` and `redis connected`, and `/healthz` and
-  `/api/health` respond.
+  `/api/health` respond;
+- when nginx is installed, runs `deploy/apply-edge.sh`: the `emtds*.conf` files
+  from `deploy/nginx` (backup, `nginx -t`, rollback) and the keys
+  `EMTDS_PUBLIC_IP` / `EMTDS_TRUSTED_PROXIES` in `/etc/emtds/server.env`. They
+  use the self-signed IP certificate `/etc/emtds/tls/ip.crt` and `ip.key`; the
+  scripts do not create it. Without nginx the stack is installed without the edge;
+- enables the `emtds-watchdog.timer` watchdog ([docs/wiki/watchdog.md](docs/wiki/watchdog.md)).
 
-On success it writes the marker `/etc/kuztds/installed` and deletes
+On success it writes the marker `/etc/emtds/installed` and deletes
 `deploy/install.sh`. A second run while the marker exists does nothing.
 `git checkout` can restore the script file, but the marker blocks another run.
 If the install failed, there is no marker and the script remains: fix the error
 from the message and run again. Containers are not stopped on failure.
 
-### Restart and upgrades
+### Restart
 
 ```bash
-sudo /etc/kuztds/up.sh
+sudo /etc/emtds/up.sh
 ```
 
-This brings the same stack back with the same limits after a reboot or a manual
-stop. To upgrade the code (from the repository directory):
+This brings the same stack back with the same limits after a reboot or a manual stop.
+
+Do not run `make infra-up` or bare `docker compose` on the server without the files under `/etc/emtds`: ClickHouse and Redis would be recreated without memory limits and with ports on all interfaces, and Redis would lose in-memory data.
+
+### Updating
+
+After the first install, the update agent is set up automatically (`deploy/update.sh --install`). It checks for a new commit or release on a schedule and shows it in **Profile → Updates**.
+
+Updates are applied manually only — via the button or CLI:
 
 ```bash
-git pull
-sudo docker compose --env-file .env --env-file /etc/kuztds/server.env -f deploy/docker-compose.app.yml -f /etc/kuztds/compose.app.yml build engine
-sudo docker compose --env-file .env --env-file /etc/kuztds/server.env -f deploy/docker-compose.app.yml -f /etc/kuztds/compose.app.yml up -d --force-recreate --no-deps engine admin
+# Apply the latest version for the configured channel:
+sudo /usr/local/lib/emtds/update.sh --channel
+
+# Apply a specific tag:
+sudo /usr/local/lib/emtds/update.sh --to v1.2.3
 ```
 
-Do not run `make infra-up` or bare `docker compose` on the server without the
-files under `/etc/kuztds`: ClickHouse and Redis would be recreated without memory
-limits and with ports on all interfaces, and Redis would lose in-memory data.
+Full reference — channels, signing, rollback, manual steps, error codes: [docs/wiki/updates.md](docs/wiki/updates.md).
 
 ### Good to know
 
-- The admin panel is reachable on the server only. Log in with
-  `ssh -L 8090:127.0.0.1:8090 user@server`, then open http://localhost:8090. Do
-  not expose port 8090 to the internet: admin cookies use HTTP in this setup,
-  and ufw rules do not block Docker-published ports.
+- The admin port `8090` is bound to `127.0.0.1`. With nginx on the host the panel
+  is served at `https://<server IP>/` (self-signed certificate) and, for a domain
+  with the primary or admin role, at `https://admin.<domain>/` through Cloudflare.
+  Without nginx log in with `ssh -L 8090:127.0.0.1:8090 user@server`, then open
+  http://localhost:8090. Do not expose port 8090 to the internet: the container
+  sets the cookie without `Secure`, and ufw rules do not block Docker-published
+  ports.
 - On the server the engine is at `127.0.0.1:18080`. Host port `8080` stays free
   for other programs. An external Nginx can proxy to `127.0.0.1:18080`; the
   address inside the container does not change.
@@ -481,33 +500,42 @@ limits and with ports on all interfaces, and Redis would lose in-memory data.
 - The ClickHouse schema from `migrations/clickhouse` is applied only on an
   empty volume. On an existing volume the installer does not migrate and stops if
   the `events` table lacks a `step` column.
-- Proxy, domains, and HTTPS are configured outside the installer; it does not
-  touch them.
+- Domains and their DNS are configured in the panel (Cloudflare and Namecheap
+  integrations, [docs/wiki/namecheap.md](docs/wiki/namecheap.md)); nginx files
+  on the server are changed only through `deploy/apply-edge.sh`.
 - Do not use `docker compose down` or `make infra-down` on the server.
 
 ---
 
 ## Configuration
 
-Everything is configured via `KUZTDS_*` environment variables; **secrets are never
+Everything is configured via `EMTDS_*` environment variables; **secrets are never
 written to files in the repo**. Full reference: [`docs/USAGE.md`](docs/USAGE.md).
 
 ### Engine (most-used)
 | Variable | Purpose |
 |----------|---------|
-| `KUZTDS_LISTEN` | listen address (default `:8080`) |
-| `KUZTDS_DATA_DIR` | directory of `.dat` lists (IP, wap, signatures, separation) |
-| `KUZTDS_GROUPS_FILE` | JSON groups config (source of truth) |
-| `KUZTDS_TRUSTED_PROXIES` | trusted proxy CIDRs for `XFF`/`CF` (comma-separated) |
-| `KUZTDS_GEO_DB` | path to a MaxMind-format City or Country `.mmdb` (optional; without it the country comes from `CF-IPCountry`) |
-| `KUZTDS_ASN_DB` | path to a MaxMind-format ASN `.mmdb` (optional; enables the ASN / organization filters) |
-| `KUZTDS_RELOAD_INTERVAL` | how often changed files are re-read (default `1m`) |
-| `KUZTDS_REDIS_ADDR` / `_PASSWORD` | Redis (uniq/limit/firewall) |
-| `KUZTDS_CLICKHOUSE_ADDR` / `_DB` / `_USER` / `_PASSWORD` | ClickHouse (logs) |
-| `KUZTDS_POSTBACK_KEY` | key for the `?pb=` postback |
-| `KUZTDS_API_KEY` | key for the `?api=` client mode |
-| `KUZTDS_KEYS_DIR` | directory for collected keywords |
-| `KUZTDS_TRASH_MODE` / `_URL` | behaviour for an unknown group (0=200,1=redirect,2=403,3=404) |
+| `EMTDS_LISTEN` | listen address (default `:8080`) |
+| `EMTDS_DATA_DIR` | directory of `.dat` lists (IP, wap, signatures, separation) |
+| `EMTDS_GROUPS_FILE` | JSON groups config (source of truth) |
+| `EMTDS_TRUSTED_PROXIES` | trusted proxy CIDRs for `XFF`/`CF` (comma-separated) |
+| `EMTDS_GEO_DB` | path to a MaxMind-format City or Country `.mmdb` (optional; without it the country comes from `CF-IPCountry`) |
+| `EMTDS_ASN_DB` | path to a MaxMind-format ASN `.mmdb` (optional; enables the ASN / organization filters) |
+| `EMTDS_DBIP_ASN_DB` | path to the DB-IP ASN Lite `.mmdb` (optional; without it the file `dbip-asn.mmdb` next to `EMTDS_ASN_DB`, else next to `EMTDS_GEO_DB`). DB-IP wins over MaxMind for ASN and organization, MaxMind answers on a miss and its spelling is kept as `OrgAlt`/`ASNAlt` for the filters. Attribution: "IP to ASN data by DB-IP.com", CC BY 4.0 — [wiki/geo-databases.md](docs/wiki/geo-databases.md) |
+| `EMTDS_RELOAD_INTERVAL` | how often changed files are re-read (default `1m`) |
+| `EMTDS_REDIS_ADDR` / `_PASSWORD` | Redis (uniq/limit/firewall) |
+| `EMTDS_CLICKHOUSE_ADDR` / `_DB` / `_USER` / `_PASSWORD` | ClickHouse (logs) |
+| `EMTDS_POSTBACK_KEY` | key for the `?pb=` postback |
+| `EMTDS_API_KEY` | key for the `?api=` client mode |
+| `EMTDS_KEYS_DIR` | directory for collected keywords |
+| `EMTDS_KEYS_MAX_BYTES` | cap of one daily keyword file in bytes, default 8388608 (8 MiB); `0` disables it |
+| `EMTDS_TRASH_MODE` / `_URL` | behaviour for an unknown group (0=200,1=redirect,2=403,3=404) |
+| `EMTDS_INSTANCE` | engine instance name, `[a-z0-9-]` up to 32 characters (default `engine`). An invalid name turns the metrics file off and is logged as an error |
+| `EMTDS_METRICS_DIR` | directory of the metrics file `<EMTDS_INSTANCE>.json`, refreshed every 10 s and on shutdown (default `/var/lib/emtds/metrics`); the same data is at `GET /internal/metrics`, closed to the public in nginx |
+| `EMTDS_SPOOL_DIR` | root of the on-disk event queue (default `/var/lib/emtds-spool`, volume `emtds_spool`, mounted by the engine only). Batches that cannot be written to ClickHouse wait in `<root>/<EMTDS_INSTANCE>/events/` and are written after it recovers. When the variable is set and the directory cannot be opened the engine does not start; a second process with the same `EMTDS_INSTANCE` is refused |
+| `EMTDS_SPOOL_MAX_BYTES` | ceiling of the whole spool root in bytes (default 2147483648); beyond it events are lost with the cause `spool_full` |
+| `EMTDS_SPOOL_MIN_FREE_PCT` | percent of the spool volume that must stay free, 0 to 90 (default `10`, `0` means no floor); below it an event is lost with the cause `spool_full` |
+| `EMTDS_SPOOL_VOLUME` | name of the Docker volume that holds the spool (compose only, default `emtds-app_emtds_spool`). It is not part of the `update.sh` backup and `down -v` does not remove it; delete it only when the spool is empty. If `EMTDS_SPOOL_DIR` is not a mount point the engine starts and logs a warning: the queue would be lost when the container is recreated |
 
 ### Shutdown budget
 
@@ -538,22 +566,23 @@ TimeoutStopSec=30
 ### Admin (most-used)
 | Variable | Purpose |
 |----------|---------|
-| `KUZTDS_ADMIN_LISTEN` | address (default `:8090`) |
-| `KUZTDS_ADMIN_USER` | login (default `admin`) |
-| `KUZTDS_ADMIN_PASSWORD_HASH` | argon2id hash |
-| `KUZTDS_ADMIN_PASSWORD_FILE` | hash file (takes priority; UI password changes are written here) |
-| `KUZTDS_ENGINE_URL` | engine base URL (for group links in the UI) |
-| `KUZTDS_GROUPS_FILE` / `KUZTDS_DATA_DIR` / `KUZTDS_KEYS_DIR` | same paths as the engine |
-| `KUZTDS_GEO_DB` / `KUZTDS_ASN_DB` | same paths as the engine (IP lookup, visitor test) |
-| `KUZTDS_CRON_FILE` | the cron service's config file (enables the Automation page) |
+| `EMTDS_ADMIN_LISTEN` | address (default `:8090`) |
+| `EMTDS_ADMIN_USER` | login (default `admin`) |
+| `EMTDS_ADMIN_PASSWORD_HASH` | argon2id hash |
+| `EMTDS_ADMIN_PASSWORD_FILE` | hash file (takes priority; UI password changes are written here) |
+| `EMTDS_ENGINE_URL` | engine base URL (for group links in the UI) |
+| `EMTDS_GROUPS_FILE` / `EMTDS_DATA_DIR` / `EMTDS_KEYS_DIR` | same paths as the engine |
+| `EMTDS_GEO_DB` / `EMTDS_ASN_DB` / `EMTDS_DBIP_ASN_DB` | same paths as the engine (IP lookup, visitor test) |
+| `EMTDS_CRON_FILE` | the cron service's config file (enables the Automation page) |
 
 ### Cron service
 | Variable | Purpose |
 |----------|---------|
-| `KUZTDS_CRON_FILE` | its config (JSON, written by the admin; default `cron.json`). State is kept next to it in `<file>.status.json` |
-| `KUZTDS_DATA_DIR` / `KUZTDS_KEYS_DIR` / `KUZTDS_GROUPS_FILE` | same paths as the engine |
-| `KUZTDS_GEO_DB` / `KUZTDS_ASN_DB` | where downloaded databases are put — the config chooses what to download, never where to write |
-| `KUZTDS_CLICKHOUSE_*` | only for conversion notifications |
+| `EMTDS_CRON_FILE` | its config (JSON, written by the admin; default `cron.json`). State is kept next to it in `<file>.status.json` |
+| `EMTDS_DATA_DIR` / `EMTDS_KEYS_DIR` / `EMTDS_GROUPS_FILE` | same paths as the engine |
+| `EMTDS_GEO_DB` / `EMTDS_ASN_DB` / `EMTDS_DBIP_ASN_DB` | where downloaded databases are put — the config chooses what to download, never where to write |
+| `EMTDS_CLICKHOUSE_*` | only for conversion notifications |
+| `EMTDS_METRICS_DIR` | where the engines write their metrics files; cron reads them for the click event loss alert (Telegram and the admin banner) |
 
 ### Groups config (JSON)
 A group is reachable at `/<id>` (and at each alias). Example shape:
@@ -597,7 +626,7 @@ entry of the same file (see *Group links* below).
 
 You normally **edit groups in the admin UI** ("Flows" → open a flow → click a
 stream → "Save"). The engine notices the file changed and swaps the config in within
-`KUZTDS_RELOAD_INTERVAL` (1 min by default) — no restart. A malformed or missing
+`EMTDS_RELOAD_INTERVAL` (1 min by default) — no restart. A malformed or missing
 file leaves the running config untouched. See `configs/groups.example.json` and
 `configs/test_groups.json`.
 
@@ -702,7 +731,7 @@ The engine finds the original event by `cid` and records the conversion (visible
 under **Conversions**).
 
 **API mode.** A landing page can ask the engine for a decision without redirecting
-the visitor itself: send `?api=base64(JSON)` (authenticated with `KUZTDS_API_KEY`)
+the visitor itself: send `?api=base64(JSON)` (authenticated with `EMTDS_API_KEY`)
 containing the visitor data; the engine returns a JSON decision. `cmd/apiclient`
 is a ready-made client that collects visitor data, calls the engine, and applies
 the result (redirect or content).
@@ -711,7 +740,7 @@ the result (redirect or content).
 
 ## Admin web interface
 
-A single embedded page (light and dark theme, English UI), no build step. One
+A single embedded page (light and dark theme; English, Russian and Ukrainian), no build step. One
 **top bar** carries the navigation, the period picker, the theme toggle and the
 user menu; there are no sidebars. Every page has an address (`#/flows/promo`),
 so back/forward and links work. Whatever can be edited is compared with what
@@ -745,7 +774,12 @@ page — drafts survive moving around the panel.
   lists it is in, and the state of the geo databases.
 - **Automation** — the cron service: a card per job with its switch, interval,
   settings, last result and "Run now"; Telegram with a test message.
-- **Settings** (user menu) — change the admin password, switch the theme.
+- **Profile** (user menu) — password, company name and logo, API keys for
+  scripts and AI agents, users, boards. **Integrations** — Keitaro import,
+  Cloudflare, Namecheap.
+- **Catalogs and access** — offers, landings, affiliate networks, traffic
+  sources, domains, the report, bot protection, HTML pages, roles. All of it is
+  described in [docs/wiki/README.md](docs/wiki/README.md).
 
 ---
 
@@ -761,21 +795,31 @@ page — drafts survive moving around the panel.
   `X-Events-Lost-Detail: full=<n> queue=<n> insert=<n> late=<n>` (the intake
   channel was full / the batch queue was full / the insert failed / the event
   arrived during shutdown). The same counters are logged on exit.
+- `GET|POST /postback` — keyless conversion path ([docs/wiki/postbacks.md](docs/wiki/postbacks.md)).
+- `GET /l/<id>/…` — assets of a local landing.
 
-**Admin API** (`GET /api/health` is open; the rest is session + CSRF protected):
-`POST /api/login`, `POST /api/logout`,
-`GET /api/me`, `POST /api/password`, `GET /api/stats/{summary,timeseries,
-breakdown,performance}`, `GET /api/logs`, `GET /api/logs/filters`, `GET /api/logs/export`,
-`DELETE /api/logs`, `GET /api/postbacks`, `GET /api/keys`,
-`GET|PUT /api/groups`, `GET /api/lists`, `GET|PUT /api/lists/{name}`,
-`GET /api/lookup`, `POST /api/simulate`, `GET|PUT /api/cron`, `POST /api/cron/run`.
+**Admin API** (open without a session: `GET /api/health`, `GET /healthz`,
+`GET|POST /api/setup`, `POST /api/login`, `POST /api/recover`, `GET /api/brand`;
+the rest needs a session cookie with `X-CSRF-Token` for writes, or an
+`Api-Key` header):
+`POST /api/logout`, `GET /api/me`, `POST /api/password`,
+`GET /api/stats/{summary,timeseries,breakdown,performance,facts}`,
+`GET /api/logs`, `GET /api/logs/filters`, `GET /api/logs/export`,
+`DELETE /api/logs`, `GET /api/postbacks`, `GET /api/report`, `GET /api/keys`,
+`GET|PUT /api/groups`, `PUT|DELETE /api/groups/{id}`,
+CRUD of `/api/offers`, `/api/landings`, `/api/traffic-sources`,
+`/api/affiliate-networks`, `/api/domains`, `GET /api/lists`,
+`GET|PUT /api/lists/{name}`, `GET /api/lookup`, `POST /api/simulate`,
+`GET|PUT /api/cron`, `POST /api/cron/run`, `GET|POST|PUT|DELETE /api/api-keys…`,
+`GET /api/openapi.json` and more. The full map with sections, cookie-only
+routes and dangerous actions is in [docs/wiki/admin-api.md](docs/wiki/admin-api.md).
 
 ---
 
 ## Testing
 
 ```bash
-go test ./...                              # unit tests (16 packages)
+go test ./...                              # unit tests (22 packages)
 go test -tags=integration ./...            # + ClickHouse/Redis round-trips (needs make infra-up)
 go test -tags=uitest ./internal/admin/     # the embedded SPA: its JS parses, its value conversions hold (needs node)
 go vet ./...
@@ -803,6 +847,8 @@ cmd/
   admin/        REST API + embedded SPA
   cron/         background service
   apiclient/    landing/donor client
+  mcp/          MCP server for AI agents (stdio, admin API key)
+  loadgen/      click generator for test campaigns
 internal/
   ipindex/      CIDR index O(log n) + list manager with hot-reload
   config/       group/stream model + JSON loader (hot-reload)
@@ -819,10 +865,14 @@ internal/
   security/     argon2id, sessions, CSRF, constant-time
   server/       realip middleware (trusted proxies)
   admin/        HTTP handlers, file stores, embedded SPA (web/index.html)
+  bridge/       Keitaro import (ktimport)
 migrations/clickhouse/   schema (auto-applied by make infra-up)
-deploy/docker-compose.yml ClickHouse + Redis for local dev
+deploy/                  docker-compose.yml (ClickHouse + Redis for local dev),
+                         docker-compose.app.yml, install.sh, apply-edge.sh,
+                         migrate-emtds.sh, watchdog.sh, nginx/
 configs/                 example & test group configs
-docs/                    USAGE / ARCHITECTURE / SECURITY / STATUS (+ *.ru.md)
+docs/                    USAGE / ARCHITECTURE / SECURITY / STATUS (+ *.ru.md),
+                         wiki/ (Russian)
 ```
 
 ---

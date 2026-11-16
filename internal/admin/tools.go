@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/cron"
-	"github.com/egerkuzma/kuztds/internal/detect"
-	"github.com/egerkuzma/kuztds/internal/geo"
-	"github.com/egerkuzma/kuztds/internal/ipindex"
-	"github.com/egerkuzma/kuztds/internal/router"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/cron"
+	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/egerkuzma/emtds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/ipindex"
+	"github.com/egerkuzma/emtds/internal/router"
 )
 
 // GeoInfo is what the panel needs from the geo resolver: answers and the list
@@ -81,7 +81,9 @@ type visitorInfo struct {
 	Timezone string `json:"timezone"`
 	UTC      string `json:"utc"`
 	ASN      uint32 `json:"asn"`
+	ASNAlt   uint32 `json:"asn_alt,omitempty"` // the number the secondary ASN database gives, when it differs
 	Org      string `json:"org"`
+	OrgAlt   string `json:"org_alt,omitempty"` // the organization as the secondary ASN database spells it
 	Operator string `json:"operator"`
 	Proxy    bool   `json:"proxy"`
 	Device   string `json:"device,omitempty"`
@@ -100,35 +102,12 @@ func (s *Server) resolve(ip netip.Addr, lists *dirLists) (geo.Geo, visitorInfo) 
 	if label, ok := lists.Lookup("wap", ip); ok && label != "" {
 		op = label
 	}
-	_, proxy := lists.Lookup("ip_proxy", ip)
-	if !proxy {
-		proxy = detect.ProxyByOrg(g.Org, s.proxyOrgPatterns())
-	}
+	proxy := detect.IsProxy(lists, ip, detect.LoadProxyOrg(s.cfg.DataDir), g.Org, g.OrgAlt)
 	return g, visitorInfo{
 		IP: ip.String(), Country: g.Country, City: g.City, Region: g.Region,
-		Timezone: g.Timezone, UTC: g.UTCOffset(time.Now()), ASN: g.ASN, Org: g.Org,
+		Timezone: g.Timezone, UTC: g.UTCOffset(time.Now()), ASN: g.ASN, ASNAlt: g.ASNAlt, Org: g.Org, OrgAlt: g.OrgAlt,
 		Operator: op, Proxy: proxy,
 	}
-}
-
-// proxyOrgPatterns reads hosting and VPN name substrings for lookup and simulate.
-// The file is DataDir/proxy_org.dat. Blank lines and lines starting with # are
-// skipped. A missing or unreadable file returns detect.DefaultProxyOrg.
-// The result is the pattern list for detect.ProxyByOrg. It does not report an error.
-func (s *Server) proxyOrgPatterns() []string {
-	b, err := os.ReadFile(filepath.Join(s.cfg.DataDir, "proxy_org.dat"))
-	if err != nil {
-		return detect.DefaultProxyOrg()
-	}
-	var out []string
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		out = append(out, line)
-	}
-	return out
 }
 
 // handleLookup — what the engine would learn from an IP address: geo, network,
@@ -261,7 +240,7 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 		Device: info.Device, Operator: vi.Operator,
 		OS: info.OS, OSVersion: info.OSVersion, Browser: info.Browser, BrowserVer: info.BrowserVer, Brand: info.Brand, Model: info.Model,
 		Unique: !req.Visitor.Repeat, IP: ip, Proxy: vi.Proxy,
-		ASN: g.ASN, Org: g.Org, Timezone: g.Timezone, TZOffset: vi.UTC, Query: q, Subs: subsOf(grp),
+		ASN: g.ASN, ASNAlt: g.ASNAlt, Org: g.Org, OrgAlt: g.OrgAlt, Timezone: g.Timezone, TZOffset: vi.UTC, Query: q, Subs: subsOf(grp),
 	}
 	deps := router.Deps{IP: lists} // no Limiter: asking must not spend a limit
 	if req.Roll != nil {
@@ -338,7 +317,7 @@ func simDomain(ref string) string {
 func (s *Server) simSubs(ctx context.Context, q url.Values) func(*config.Group) [config.MaxSubID]string {
 	sources := s.simSources(ctx)
 	return func(g *config.Group) [config.MaxSubID]string {
-		_, subs := config.ApplySource(q, sources[g.SourceID])
+		_, subs := config.ApplySource(q, config.EffectiveSource(g, sources[g.SourceID]))
 		return subs
 	}
 }
@@ -412,10 +391,13 @@ type cronState struct {
 		ASN      bool `json:"asn"`
 		CityFile bool `json:"city_file"` // city database file exists and is not empty
 		ASNFile  bool `json:"asn_file"`  // asn database file exists and is not empty
+		DBIP     bool `json:"dbip"`      // a path for the DB-IP ASN database is known (Config.GeoDBIPPath)
+		DBIPFile bool `json:"dbip_file"` // DB-IP ASN database file exists and is not empty
 	} `json:"geo_paths"`
-	TelegramConfigured bool   `json:"telegram_configured"`    // stored token and chat id are both set
-	KeitaroConfigured  bool   `json:"keitaro_configured"`     // tracker origin and key are both set
-	ConfigError        string `json:"config_error,omitempty"` // Validate failure; never includes a secret
+	DBIPURL string `json:"dbip_url"` // URL template of the DB-IP ASN source, {YYYY-MM} is the month
+	TelegramConfigured bool             `json:"telegram_configured"`          // stored token and chat id are both set
+	KeitaroConfigured  bool             `json:"keitaro_configured"`           // tracker origin and key are both set
+	ConfigError        string           `json:"config_error,omitempty"`       // Validate failure; never includes a secret
 	KeitaroSyncState   *keitaroSyncFile `json:"keitaro_sync_state,omitempty"` // catch-up cursors; no secrets
 }
 
@@ -457,6 +439,8 @@ func (s *Server) handleCronGet(w http.ResponseWriter, r *http.Request) {
 }
 
 // fillCronPanel sets Telegram, config validity and geo file flags on st.
+// The DB-IP flags (geo_paths.dbip, geo_paths.dbip_file) come from Config.GeoDBIPPath;
+// dbip_url is cron.DBIPASNURL.
 // cfg is the stored cron config before secrets are masked; st.Config is left
 // unchanged. ConfigError is empty when cfg.Validate returns nil. A validator
 // message that contains a bot token, a VirusTotal key or a geo password is
@@ -469,6 +453,9 @@ func (s *Server) fillCronPanel(st *cronState, cfg cron.Config) {
 	st.GeoPaths.ASN = s.cfg.GeoASNPath != ""
 	st.GeoPaths.CityFile = nonEmptyFile(s.cfg.GeoCityPath)
 	st.GeoPaths.ASNFile = nonEmptyFile(s.cfg.GeoASNPath)
+	st.DBIPURL = cron.DBIPASNURL
+	st.GeoPaths.DBIP = s.cfg.GeoDBIPPath != ""
+	st.GeoPaths.DBIPFile = nonEmptyFile(s.cfg.GeoDBIPPath)
 }
 
 // configErrorText returns the text of cfg.Validate, or "" when cfg is usable.
@@ -513,9 +500,11 @@ func nonEmptyFile(path string) bool {
 }
 
 // handleCronSave validates and writes cron.json; absent keitaro_sync keeps the stored section.
+// The seeded keys of the stored config are kept whatever the body says, so a source
+// the user removed is not offered again.
 func (s *Server) handleCronSave(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.CronFile == "" {
-		writeErr(w, http.StatusServiceUnavailable, "cron is not configured (KUZTDS_CRON_FILE)")
+		writeErr(w, http.StatusServiceUnavailable, "cron is not configured (EMTDS_CRON_FILE)")
 		return
 	}
 	rawBody, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
@@ -538,7 +527,7 @@ func (s *Server) handleCronSave(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "cron config unreadable")
 		return
 	}
-	cfg = cfg.KeepSecrets(stored)
+	cfg = cfg.KeepSecrets(stored).KeepSeeded(stored)
 	if keitaroSyncSectionAbsent(raw) {
 		cfg.KeitaroSync = stored.KeitaroSync
 	}
@@ -560,7 +549,7 @@ func (s *Server) handleCronSave(w http.ResponseWriter, r *http.Request) {
 // handleCronRun triggers a cron job or admin keitaro_sync catch-up (202) via run file or kick.
 func (s *Server) handleCronRun(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.CronFile == "" {
-		writeErr(w, http.StatusServiceUnavailable, "cron is not configured (KUZTDS_CRON_FILE)")
+		writeErr(w, http.StatusServiceUnavailable, "cron is not configured (EMTDS_CRON_FILE)")
 		return
 	}
 	var body struct {
@@ -568,6 +557,10 @@ func (s *Server) handleCronRun(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if body.Job == cron.JobTelegramTest && sessionFrom(r.Context()).API {
+		writeErr(w, http.StatusForbidden, "cookie session required")
 		return
 	}
 	if body.Job == cron.JobKeitaroSync {

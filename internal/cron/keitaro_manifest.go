@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // keitaroManifestPath returns keitaro-import.json next to the groups file,

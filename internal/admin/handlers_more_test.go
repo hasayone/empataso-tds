@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
@@ -11,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 type fakeLists struct{ data map[string]string }
@@ -54,11 +55,11 @@ func (*nameErr) Error() string { return "invalid list name" }
 
 type fakeKeys struct{}
 
-func (fakeKeys) Read(group, date string, se bool) (string, error) {
+func (fakeKeys) Open(group, date string, se bool) (io.ReadCloser, int64, error) {
 	if group == "g1" {
-		return "kw1\nkw2", nil
+		return io.NopCloser(strings.NewReader("kw1\nkw2")), 7, nil
 	}
-	return "", context.Canceled
+	return nil, 0, context.Canceled
 }
 
 type denyLimiter struct{}

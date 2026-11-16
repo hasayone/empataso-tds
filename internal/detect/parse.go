@@ -21,7 +21,19 @@ type Info struct {
 // Parse parses the User-Agent: OS/browser/versions — via mileusna/useragent,
 // device category — via our Device(),
 // brand — via the brandOf() heuristic.
+// Results for recently seen User-Agents come from a bounded in-memory cache;
+// Info holds only strings, so the returned value is the caller's own copy.
 func Parse(uaStr string) Info {
+	if info, ok := parsed.get(uaStr); ok {
+		return info
+	}
+	info := parseUA(uaStr)
+	parsed.put(uaStr, info)
+	return info
+}
+
+// parseUA is the uncached parse behind Parse.
+func parseUA(uaStr string) Info {
 	p := ua.Parse(uaStr)
 	return Info{
 		OS:         p.OS,

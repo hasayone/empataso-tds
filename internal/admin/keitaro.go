@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/emtds/bridge/ktimport"
 )
 
 const (
@@ -32,6 +32,36 @@ type keitaroImportReq struct {
 	To          string `json:"to"`
 	// Board is the target panel section for this import. Empty uses the request section or main.
 	Board string `json:"board_id"`
+	// CampaignID is the Keitaro campaign id for a dosync of one campaign; 0 imports every campaign.
+	CampaignID int `json:"campaign_id"`
+	// FiltersOnly rewrites only the filters of imported streams; see forFilters.
+	FiltersOnly bool `json:"filters_only"`
+	// CampaignIDs are the Keitaro campaigns of a filters_only run.
+	CampaignIDs []int `json:"campaign_ids"`
+	// AllImported runs filters_only over every campaign in the import manifest.
+	AllImported bool `json:"all_imported"`
+	// DryRun reports filters_only changes without saving them.
+	DryRun bool `json:"dry_run"`
+}
+
+// forCampaign turns a request with campaign_id into the dosync of that one campaign.
+// The campaign comes with the offers, landings, networks, traffic source and domain it uses,
+// so every catalog flag except users is set. It returns a client message for a negative id or
+// for users, clicks or conversions in the same body, or an empty string when the request is valid.
+// A zero id leaves the request unchanged.
+func (req *keitaroImportReq) forCampaign() string {
+	if req.CampaignID == 0 {
+		return ""
+	}
+	if req.CampaignID < 0 {
+		return "campaign_id must be a positive Keitaro campaign id"
+	}
+	if req.Users || req.Clicks || req.Conversions {
+		return "campaign_id does not combine with users, clicks or conversions"
+	}
+	req.Campaigns, req.Offers, req.Landings = true, true, true
+	req.Networks, req.Sources, req.Domains = true, true, true
+	return ""
 }
 
 // handleKeitaroStatus reports whether a tracker origin and key are set.
@@ -45,7 +75,9 @@ func (s *Server) handleKeitaroStatus(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleKeitaroCheck counts campaigns on the tracker.
+// handleKeitaroCheck checks the tracker key and counts campaigns with one-row page requests,
+// so the campaign list is not downloaded (see keitaroCountCampaigns). The count found is
+// remembered per tracker origin and speeds up the next check.
 // It returns 503 when the origin or key is empty.
 // On success it returns ok, the campaign count, api "v1" and an empty product_version.
 // A tracker error is 502. Error bodies omit api and product_version.
@@ -58,20 +90,22 @@ func (s *Server) handleKeitaroCheck(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), keitaroCheckTimeout)
 	defer cancel()
-	n, err := s.keitaroClient(creds).CountCampaigns(ctx)
+	base := strings.TrimRight(strings.TrimSpace(creds.Base), "/")
+	n, err := keitaroCountCampaigns(ctx, s.keitaroClient(creds).Get, s.ktCount.get(base))
 	if err != nil {
 		writeErr(w, http.StatusBadGateway, sanitize(err, creds.Key))
 		return
 	}
+	s.ktCount.set(base, n)
 	writeJSON(w, http.StatusOK, map[string]any{
 		"ok": true, "campaigns": n, "api": "v1", "product_version": "",
 	})
 }
 
 // needsTracker reports whether the request has to call the tracker.
-// It returns true when any catalog, campaign, click or conversion flag is set.
+// It returns true when any catalog, campaign, click, conversion or filters_only flag is set.
 func (req keitaroImportReq) needsTracker() bool {
-	return req.catalog() || req.Conversions || req.Clicks
+	return req.catalog() || req.Conversions || req.Clicks || req.FiltersOnly
 }
 
 // catalog reports whether a snapshot must be fetched.
@@ -91,6 +125,7 @@ func (req keitaroImportReq) selection() ktimport.Selection {
 		Sources:   req.Sources,
 		Campaigns: req.Campaigns,
 		Users:     req.Users,
+		Campaign:  req.CampaignID,
 	}
 }
 
@@ -98,11 +133,15 @@ func (req keitaroImportReq) selection() ktimport.Selection {
 // creds is the copy a job took at its start. The key is sent as a header and is not placed in the URL.
 // Progress updates the running import. Reports while no import is running are ignored.
 // The HTTP client does not follow a redirect to another host and has no own deadline; the caller context does.
+// With a GET budget in creds every GET of the client counts against it.
 func (s *Server) keitaroClient(creds ktCreds) *ktimport.Client {
 	c := &ktimport.Client{
 		Base: strings.TrimRight(strings.TrimSpace(creds.Base), "/"),
 		Key:  creds.Key,
 		HTTP: keitaroHTTP,
+	}
+	if creds.gets != nil {
+		c.HTTP = creds.gets.client(keitaroHTTP)
 	}
 	if s.ktJob != nil {
 		c.Progress = s.ktJob.progress
@@ -118,7 +157,7 @@ func (s *Server) keitaroStoreMissing(req keitaroImportReq) string {
 		(req.Domains && s.cfg.Domains == nil) ||
 		(req.Landings && s.cfg.Landings == nil) ||
 		(req.Offers && s.cfg.Offers == nil) ||
-		(req.Campaigns && s.cfg.Groups == nil) ||
+		((req.Campaigns || req.FiltersOnly) && s.cfg.Groups == nil) ||
 		(req.Users && !s.usersEnabled())
 	if missing {
 		return "store unavailable"
@@ -370,8 +409,11 @@ func withOwner[T any](item T, uid string) T {
 // mergeCatalog validates incoming rows, merges them by id and saves the list.
 // incoming is the mapper output. cm carries the store, validators, manifest filter and owner.
 // The count is how many incoming rows passed validation. Losses are rejections and id conflicts.
+// The read, the merge and the save run under the store lock that catalog writes also take,
+// so a concurrent create, replace or delete is not lost; callers must not hold that lock.
 // An error means the file could not be read or saved.
 func mergeCatalog[B any, T any](ctx context.Context, incoming []B, cm catalogMerge[T]) (int, []ktimport.Loss, error) {
+	defer cm.store.lock()()
 	existing, err := cm.store.List(ctx)
 	if err != nil {
 		return 0, nil, err

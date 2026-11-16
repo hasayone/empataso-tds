@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/server"
+	"github.com/egerkuzma/emtds/internal/server"
 )
 
 // fakeTDS spins up a fake engine, decodes ?api= and calls reply to build the
@@ -228,7 +228,7 @@ func TestExtraParamsClient(t *testing.T) {
 }
 
 func TestGetenvAndProxies(t *testing.T) {
-	if getenv("KUZTDS_NONEXISTENT_ABC", "def") != "def" {
+	if getenv("EMTDS_NONEXISTENT_ABC", "def") != "def" {
 		t.Error("getenv default")
 	}
 	if tp := trustedProxies(); len(tp) == 0 {

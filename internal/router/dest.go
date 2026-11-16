@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // Catalogs are the offer and landing records a destination can point at.

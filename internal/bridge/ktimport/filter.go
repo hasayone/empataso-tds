@@ -2,20 +2,25 @@ package ktimport
 
 import (
 	"encoding/json"
+	"reflect"
 	"strconv"
 	"strings"
 )
 
-// mapFilters переводит фильтры потока в правила kuztds.
+// mapFilters переводит фильтры потока в правила emtds.
 //
 // Параметры: filters — фильтры Keitaro; lists — файлы списков IP, которые собрал этот прогон;
 // or — поток Keitaro работает по ИЛИ.
-// Результат: правила, true если поток можно оставить включённым, причина выключения и строки отчёта.
+// Результат: правила, true если поток можно оставить включённым, причина выключения, строки отчёта
+// и имена пропущенных фильтров без повторов в порядке потока.
 // Ошибки: нет. Неизвестное имя пропускается. Фильтр, который нельзя склеить с прежним без смены
-// смысла, пропускается с записью в отчёте. Поток выключается только когда ни один фильтр не перенёсся.
-func mapFilters(filters []KFilter, lists *listBag, or bool) (Rules, bool, string, []Loss) {
+// смысла, пропускается с записью в отчёте. Фильтр, который не дал ни одного правила, тоже
+// пропускается: иначе поток из одних таких фильтров остался бы включённым без условий и ловил бы всех.
+// Поток выключается только когда ни один фильтр не перенёсся.
+func mapFilters(filters []KFilter, lists *listBag, or bool) (Rules, bool, string, []Loss, []string) {
 	var rules Rules
 	var losses []Loss
+	var skipped []string
 	named, mapped := 0, 0
 	for _, f := range filters {
 		name := strings.ToLower(strings.TrimSpace(f.Name))
@@ -24,15 +29,20 @@ func mapFilters(filters []KFilter, lists *listBag, or bool) (Rules, bool, string
 		}
 		named++
 		part, ok, approx, why := oneFilter(f, lists)
+		if ok && reflect.ValueOf(part).IsZero() {
+			ok, why = false, "фильтр "+name+" пуст и не ограничивает поток, не переносится"
+		}
 		if !ok {
 			if why == "" {
 				why = "фильтр " + name + " не переносится"
 			}
 			losses = append(losses, Loss{Kind: "skipped", Detail: why})
+			skipped = appendOnce(skipped, name)
 			continue
 		}
 		if conflict := mergeConflict(rules, part, or); conflict != "" {
 			losses = append(losses, Loss{Kind: "skipped", Detail: conflict})
+			skipped = appendOnce(skipped, name)
 			continue
 		}
 		mapped++
@@ -49,12 +59,26 @@ func mapFilters(filters []KFilter, lists *listBag, or bool) (Rules, bool, string
 		rules = mergeRules(rules, part)
 	}
 	if named > 0 && mapped == 0 {
-		return rules, false, "нет переносимых фильтров, поток совпал бы со всеми", losses
+		return rules, false, "нет переносимых фильтров, поток совпал бы со всеми", losses, skipped
 	}
-	return rules, true, "", losses
+	return rules, true, "", losses, skipped
 }
 
-// oneFilter переводит один фильтр Keitaro в правила kuztds.
+// appendOnce дописывает строку, если её ещё нет в списке.
+//
+// Параметры: list — список; s — строка.
+// Результат: список с s в конце или прежний список, если s уже есть.
+// Ошибки: нет.
+func appendOnce(list []string, s string) []string {
+	for _, v := range list {
+		if v == s {
+			return list
+		}
+	}
+	return append(list, s)
+}
+
+// oneFilter переводит один фильтр Keitaro в правила emtds.
 //
 // Параметры: f — фильтр; lists — файлы списков IP этого прогона.
 // Результат: правила, true если фильтр поддержан, true если значение угадано, и пояснение.
@@ -107,6 +131,8 @@ func oneFilter(f KFilter, lists *listBag) (Rules, bool, bool, string) {
 		return uniqueFilter(f)
 	case "bot", "is_bot":
 		return botFilter(f)
+	case "empty_referrer", "empty_referer":
+		return emptyRefererFilter(f)
 	case "ip":
 		return ipFilter(f, lists)
 	case "isp":
@@ -114,7 +140,7 @@ func oneFilter(f KFilter, lists *listBag) (Rules, bool, bool, string) {
 	case "asn":
 		return asnFilter(name, f)
 	case "proxy":
-		return triFilter(f, "proxy", func(n int) Rules { return Rules{Proxy: n} })
+		return presenceFilter(f, "proxy", func(n int) Rules { return Rules{Proxy: n} })
 	case "":
 		return Rules{}, true, false, ""
 	default:
@@ -243,7 +269,16 @@ func inexactMode(mode string) bool {
 	return false
 }
 
+// ispFilterNote поясняет в отчёте, почему перенос фильтра isp приближённый.
+const ispFilterNote = "фильтр isp перенесён приближённо: Keitaro сравнивает провайдера из своей базы ISP целиком, " +
+	"движок ищет имя как подстроку в организации из базы ASN, и названия в двух базах могут не совпасть"
+
 // ispFilter кладёт имена провайдеров в фильтр организации.
+//
+// Keitaro сверяет провайдера визита со списком целиком. Движок сравнивает организацию ASN подстрокой
+// без регистра, поэтому имя Keitaro совпадает и с точным именем, и с более длинным, где оно целиком
+// входит. Это шире точного равенства только на такие длинные имена, а словарь организаций ASN всё
+// равно отличается от словаря ISP Keitaro, поэтому перенос помечается приближённым.
 //
 // Параметры: f — фильтр isp.
 // Результат: правила Org. Значения обрезаны, пустые выброшены, повторы убраны, регистр сохранён.
@@ -256,7 +291,7 @@ func ispFilter(f KFilter) (Rules, bool, bool, string) {
 	vals := unique(rules.Org.Values)
 	rules.Org.Values = vals
 	rules.Org.Raw = strings.Join(vals, ",")
-	return rules, ok, approx, why
+	return rules, ok, true, ispFilterNote
 }
 
 // listRule строит один списочный фильтр.

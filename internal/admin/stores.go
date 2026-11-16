@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // FileGroups is a GroupsStore backed by a JSON groups configuration file.
@@ -274,28 +274,8 @@ func (p *FilePages) Delete(name string) error {
 	return nil
 }
 
-// FileKeys reads collected keywords from keysDir/<group>/<date>[-se].dat.
-type FileKeys struct{ dir string }
-
-// NewFileKeys creates a keys reader in directory dir.
-func NewFileKeys(dir string) *FileKeys { return &FileKeys{dir: dir} }
-
+// safeSeg is the character set of a group id or date in a keyword list path.
 var safeSeg = regexp.MustCompile(`^[a-zA-Z0-9._-]+$`)
-
-func (k *FileKeys) Read(group, date string, se bool) (string, error) {
-	if !safeSeg.MatchString(group) || !safeSeg.MatchString(date) {
-		return "", errors.New("invalid group/date")
-	}
-	name := date
-	if se {
-		name += "-se"
-	}
-	b, err := os.ReadFile(filepath.Join(k.dir, group, name+".dat"))
-	if err != nil {
-		return "", err
-	}
-	return string(b), nil
-}
 
 // ManifestStore loads and saves the Keitaro import manifest.
 // Load returns the last saved manifest. Save replaces the file.

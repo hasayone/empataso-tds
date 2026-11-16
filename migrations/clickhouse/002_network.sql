@@ -1,6 +1,6 @@
 -- What the IP says about the network and the clock: AS number, its
 -- organization, and the visitor's time zone (from the MaxMind-format
--- databases, see KUZTDS_GEO_DB / KUZTDS_ASN_DB).
+-- databases, see EMTDS_GEO_DB / EMTDS_ASN_DB).
 --
 -- The engine and the admin run the same ALTER on start, so an existing
 -- installation is upgraded without anyone applying this file by hand; it is

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // viewsMaxBody caps a PUT /api/me/views body in bytes.
@@ -20,21 +20,24 @@ var viewsMu sync.Mutex
 
 // allowedViewPages lists the page keys a user may store; other keys are dropped.
 var allowedViewPages = map[string]bool{
-	"range":       true,
-	"dashboard":   true,
-	"flows":       true,
-	"logs":        true,
-	"conversions": true,
-	"report":      true,
-	"offers":      true,
-	"landings":    true,
-	"networks":    true,
-	"sources":     true,
-	"domains":     true,
-	"users":       true,
-	"roles":       true,
-	"keywords":    true,
-	"automation":  true,
+	"range":         true,
+	"dashboard":     true,
+	"flows":         true,
+	"logs":          true,
+	"conversions":   true,
+	"report":        true,
+	"offers":        true,
+	"landings":      true,
+	"networks":      true,
+	"sources":       true,
+	"domains":       true,
+	"users":         true,
+	"roles":         true,
+	"keywords":      true,
+	"keyword_stats": true,
+	"automation":    true,
+	"integrations":  true,
+	"rating":        true,
 }
 
 // viewsFile is the views.json document: page views keyed by user, then by page.

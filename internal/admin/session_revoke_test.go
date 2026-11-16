@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // changePassword calls POST /api/password with the given csrf token.

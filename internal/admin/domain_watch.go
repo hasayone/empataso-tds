@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 const (

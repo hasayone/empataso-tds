@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // shareGroup builds a campaign with one stream whose offer list holds the given shares.

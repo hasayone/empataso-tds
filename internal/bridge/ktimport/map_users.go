@@ -12,7 +12,7 @@ var userSectionOrder = []string{
 	"logs", "conversions", "report", "keywords", "lists", "tools", "groups",
 }
 
-// ktResourceSections сопоставляет имя resources Keitaro разделам kuztds.
+// ktResourceSections сопоставляет имя resources Keitaro разделам emtds.
 var ktResourceSections = map[string][]string{
 	"dashboard":          {"dashboard"},
 	"trends":             {"dashboard"},
@@ -220,7 +220,7 @@ func (ctx *userMapCtx) grants(acc map[string]json.RawMessage, ref string) (map[s
 	return out, losses
 }
 
-// grantIDs проверяет selected_entities и переводит id в формат kuztds.
+// grantIDs проверяет selected_entities и переводит id в формат emtds.
 //
 // Параметры: ktRes — имя ресурса Keitaro; key — Kind* для проверки; entities — id Keitaro; ref — отчёт.
 // Результат: потери и список id или alias кампании.
@@ -371,7 +371,7 @@ func accessTypeField(acc map[string]json.RawMessage, res string) string {
 	return ""
 }
 
-// mapAccessMode переводит access_type Keitaro в mode kuztds.
+// mapAccessMode переводит access_type Keitaro в mode emtds.
 //
 // Параметры: raw — access_type; ref и res — для строки отчёта при неизвестном значении.
 // Результат: mode и опциональная потеря.
@@ -437,7 +437,7 @@ func mapUserHidden(acc map[string]json.RawMessage, ref string) ([]string, []Loss
 	return out, losses
 }
 
-// mapReportMetric сопоставляет имя метрики Keitaro hidden id kuztds.
+// mapReportMetric сопоставляет имя метрики Keitaro hidden id emtds.
 //
 // Параметры: name — элемент reports[].
 // Результат: profit, cost или пустая строка.

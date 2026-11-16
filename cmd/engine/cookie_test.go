@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // cookieVisit requests path through the engine as 8.8.8.8 behind the trusted

@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // The group is taken from the first path segment, so a link dressed up as a
@@ -26,7 +26,7 @@ func TestGroupResolvedFromFirstPathSegment(t *testing.T) {
 	for _, p := range hit {
 		rec := do(t, h, p, "8.8.8.8", nil)
 		if got := rec.Body.String(); got != "HIT" {
-			t.Errorf("%s → body %q, want HIT (stream %q)", p, got, rec.Header().Get("X-Kuztds-Stream"))
+			t.Errorf("%s → body %q, want HIT (stream %q)", p, got, rec.Header().Get("X-Emtds-Stream"))
 		}
 	}
 

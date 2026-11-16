@@ -1,4 +1,4 @@
-// Command engine — the kuztds hot path (visitor traffic processing).
+// Command engine — the emtds hot path (visitor traffic processing).
 //
 // Full request pipeline:
 //
@@ -8,7 +8,7 @@
 //
 // All state (IP lists, signatures, group config) is kept in memory and
 // refreshed in the background — without reading files on every request. Stores
-// (Redis/ClickHouse) and the JSON group config are connected optionally via KUZTDS_*.
+// (Redis/ClickHouse) and the JSON group config are connected optionally via EMTDS_*.
 // See docs/ARCHITECTURE.md.
 package main
 
@@ -27,17 +27,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/detect"
-	"github.com/egerkuzma/kuztds/internal/fetch"
-	"github.com/egerkuzma/kuztds/internal/geo"
-	"github.com/egerkuzma/kuztds/internal/ipindex"
-	"github.com/egerkuzma/kuztds/internal/logbuf"
-	"github.com/egerkuzma/kuztds/internal/render"
-	"github.com/egerkuzma/kuztds/internal/router"
-	"github.com/egerkuzma/kuztds/internal/seplist"
-	"github.com/egerkuzma/kuztds/internal/server"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/egerkuzma/emtds/internal/fetch"
+	"github.com/egerkuzma/emtds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/ipindex"
+	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/render"
+	"github.com/egerkuzma/emtds/internal/router"
+	"github.com/egerkuzma/emtds/internal/seplist"
+	"github.com/egerkuzma/emtds/internal/server"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // IP lists the engine keeps in memory (names = <name>.dat files).
@@ -46,20 +46,54 @@ var ipLists = []string{
 	"ip_google", "ip_bing", "ip_yandex", "ip_yahoo", "ip_mail", "ip_baidu",
 	"ip_others",
 	"wap",      // carriers (with labels like #beeline etc.)
-	"ip_proxy", // datacenter, VPN and proxy ranges; filled by cron
+	"ip_proxy",         // datacenter, VPN and proxy ranges; filled by cron
+	"ip_private_relay", // iCloud Private Relay egress ranges, never counted as proxy; filled by cron
 }
 
 // shutdownPhase bounds each of the two sequential shutdown phases: draining
 // in-flight requests, then draining the log buffer.
 const shutdownPhase = 10 * time.Second
 
+// Engine HTTP server limits. The read limit covers headers and body of one
+// request; nginx buffers bodies before proxying, so 30s only stops a stalled
+// direct client. net/http also cancels the request context once it passes,
+// so it stays well above the longest handler wait (landing PHP, 10s). The
+// idle limit is above nginx's 60s upstream keepalive, so
+// nginx closes a pooled connection before the engine does. There is no write
+// limit: landing and [REMOTE] responses may stream for longer.
+const (
+	readHeaderTimeout  = 5 * time.Second
+	defaultReadTimeout = 30 * time.Second
+	defaultIdleTimeout = 120 * time.Second
+)
+
+// engineServer builds the engine's HTTP server on addr serving h.
+// read bounds reading one request, idle a keep-alive connection between
+// requests; a non-positive value falls back to the default above. The
+// header limit is fixed. It does not fail.
+func engineServer(addr string, h http.Handler, read, idle time.Duration) *http.Server {
+	if read <= 0 {
+		read = defaultReadTimeout
+	}
+	if idle <= 0 {
+		idle = defaultIdleTimeout
+	}
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: readHeaderTimeout,
+		ReadTimeout:       read,
+		IdleTimeout:       idle,
+	}
+}
+
 func main() {
 	notices := newNoticeRing(200)
 	log := slog.New(&noticeHandler{Handler: slog.NewJSONHandler(os.Stdout, nil), ring: notices})
 
-	dataDir := getenv("KUZTDS_DATA_DIR", "./data")
-	addr := getenv("KUZTDS_LISTEN", ":8080")
-	reload := getdur("KUZTDS_RELOAD_INTERVAL", time.Minute)
+	dataDir := getenv("EMTDS_DATA_DIR", "./data")
+	addr := getenv("EMTDS_LISTEN", ":8080")
+	reload := getdur("EMTDS_RELOAD_INTERVAL", time.Minute)
 
 	// Load all IP lists into memory (phase 1).
 	lists := ipindex.NewSet(dataDir, log)
@@ -73,12 +107,14 @@ func main() {
 	defer cancel()
 
 	// Geo (phase 2): MaxMind-format databases — City or Country in
-	// KUZTDS_GEO_DB, ASN in KUZTDS_ASN_DB. Neither set → Nop (geo filters never
-	// fire). A configured file that is not there yet is not fatal: the cron
-	// service may still be downloading it, and Watch picks it up when it lands.
+	// EMTDS_GEO_DB, MaxMind ASN in EMTDS_ASN_DB, DB-IP ASN Lite beside them
+	// (config.GeoFilePaths). None set → Nop (geo filters never fire). A
+	// configured file that is not there yet is not fatal: the cron service
+	// may still be downloading it, and Watch picks it up when it lands.
 	var geores geo.Resolver = geo.Nop{}
-	if cityDB, asnDB := os.Getenv("KUZTDS_GEO_DB"), os.Getenv("KUZTDS_ASN_DB"); cityDB != "" || asnDB != "" {
-		db, err := geo.Open(cityDB, asnDB, log)
+	if gf := config.GeoFilePaths(); gf != (config.GeoFiles{}) {
+		log.Info("geo paths", "city", gf.City, "asn", gf.ASN, "dbip_asn", gf.DBIPASN)
+		db, err := geo.OpenWith(geo.Paths(gf), log)
 		if err != nil {
 			log.Warn("geo db not loaded yet, will keep watching", "err", err)
 		}
@@ -91,29 +127,51 @@ func main() {
 	go lists.Watch(ctx, reload)
 	go sigs.Watch(ctx, reload)
 
-	// Redis counters (phase 4): uniq/firewall/limit. Optional.
+	// Redis counters (phase 4): uniq/firewall/limit. Optional. Short timeouts:
+	// every counter fails open, so a slow Redis costs a click milliseconds.
 	var counters *store.Counters
-	if a := os.Getenv("KUZTDS_REDIS_ADDR"); a != "" {
-		if rdb, err := store.OpenRedisWaiting(a, os.Getenv("KUZTDS_REDIS_PASSWORD"), 0); err != nil {
-			log.Warn("redis not connected", "err", err)
+	if a := config.Env("EMTDS_REDIS_ADDR"); a != "" {
+		rt := store.EngineRedisTimeouts()
+		password := config.Env("EMTDS_REDIS_PASSWORD")
+		rdb, err := store.OpenRedisWaiting(a, password, 0, rt)
+		late := err != nil
+		if late {
+			// The client connects by itself once Redis is there; the engine
+			// serves clicks meanwhile, every counter failing open.
+			log.Warn("redis not connected, will keep trying", "err", err)
+			rdb = store.NewRedisClient(a, password, 0, rt)
+		}
+		counters = store.NewCounters(rdb)
+		uniqMax, uerr := store.UniqMaxFromEnv()
+		if uerr != nil {
+			log.Warn("uniqueness window ceiling", "err", uerr)
+		}
+		counters.SetUniqMax(uniqMax)
+		redisUp := func() {
+			startRedisTrim(ctx, rdb, uniqMax, log)
+			log.Info("redis connected", "addr", a, "dial", rt.Dial.String(), "read", rt.Read.String(),
+				"write", rt.Write.String(), "pool", rt.Pool.String())
+		}
+		if late {
+			go awaitRedis(ctx, func(c context.Context) error { return rdb.Ping(c).Err() }, store.ConnectPause, redisUp)
 		} else {
-			counters = store.NewCounters(rdb)
-			log.Info("redis connected", "addr", a)
+			redisUp()
 		}
 	}
 
 	// trash modes for unknown/disabled groups (like trash()).
-	trashMode := getenv("KUZTDS_TRASH_MODE", "0") // 0=200,1=redirect,2=403,3=404
-	trashURL := os.Getenv("KUZTDS_TRASH_URL")
+	trashMode := getenv("EMTDS_TRASH_MODE", "0") // 0=200,1=redirect,2=403,3=404
+	trashURL := config.Env("EMTDS_TRASH_URL")
 
 	// Postback and keyword collection.
-	postbackKey := os.Getenv("KUZTDS_POSTBACK_KEY")
-	keysDir := getenv("KUZTDS_KEYS_DIR", "keys")
+	postbackKey := config.Env("EMTDS_POSTBACK_KEY")
+	pbAuth := loadPostbackAuth(log)
+	keyFiles := newKeyWriter(getenv("EMTDS_KEYS_DIR", "keys"), keysMaxBytes(log), log)
 
 	// HTTP fetcher for CURL redirect and [REMOTE] (with in-memory cache).
-	fetcher := fetch.New(getenv("KUZTDS_CURL_UA", "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:71.0) Gecko/20100101 Firefox/71.0"), log)
+	fetcher := fetch.New(getenv("EMTDS_CURL_UA", "Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:71.0) Gecko/20100101 Firefox/71.0"), log)
 	curlCacheMin := 60
-	if v := os.Getenv("KUZTDS_CURL_CACHE"); v != "" {
+	if v := config.Env("EMTDS_CURL_CACHE"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			curlCacheMin = n
 		}
@@ -121,7 +179,7 @@ func main() {
 
 	// Group config (phase 6): JSON file. Without it — the built-in demo group.
 	var groups *config.Groups
-	groupsFile := os.Getenv("KUZTDS_GROUPS_FILE")
+	groupsFile := config.Env("EMTDS_GROUPS_FILE")
 	if groupsFile != "" {
 		if gg, err := config.LoadGroups(groupsFile); err != nil {
 			log.Warn("groups file not loaded, using demo", "err", err)
@@ -153,47 +211,27 @@ func main() {
 	if groups != nil {
 		go newGroupsWatcher(groupsFile, groups, lists, seps, log, known).watch(ctx, reload)
 	}
-	// KUZTDS_API_KEY stays in the process environment. An empty key file means
+	// EMTDS_API_KEY stays in the process environment. An empty key file means
 	// only that env key can open ?api=; both empty rejects ?api=, as an empty
-	// KUZTDS_API_KEY did. The env value is not written to the key file and
+	// EMTDS_API_KEY did. The env value is not written to the key file and
 	// is not logged.
-	apiEnv := os.Getenv("KUZTDS_API_KEY")
-	keysFile := os.Getenv("KUZTDS_API_KEYS_FILE")
+	apiEnv := config.Env("EMTDS_API_KEY")
+	keysFile := config.Env("EMTDS_API_KEYS_FILE")
 	keySet := loadAPIKeys(keysFile, log)
 	if keysFile != "" {
 		go keysWatcher(ctx, keysFile, keySet, reload, log)
 	}
-	offers, landings, sources, networks := openCatalogs(groupsFile, log)
+	offers, landings, sources, networks, domains := openCatalogs(groupsFile, log)
 	s2s := openS2S(groupsFile, log)
-	botPath := os.Getenv("KUZTDS_BOT_FILE")
+	botPath := config.Env("EMTDS_BOT_FILE")
 	if botPath == "" && groupsFile != "" {
 		botPath = filepath.Join(filepath.Dir(groupsFile), "bot_protection.json")
 	}
-	pages := newPageCache(pagesDir(os.Getenv("KUZTDS_PAGES_DIR"), groupsFile), log)
-	lands := newLandingServer(landingsDir(os.Getenv("KUZTDS_LANDINGS_DIR"), groupsFile), os.Getenv("KUZTDS_PHP_URL"), func(id string) (config.Landing, bool) {
+	pages := newPageCache(pagesDir(config.Env("EMTDS_PAGES_DIR"), groupsFile), log)
+	lands := newLandingServer(landingsDir(config.Env("EMTDS_LANDINGS_DIR"), groupsFile), config.Env("EMTDS_PHP_URL"), func(id string) (config.Landing, bool) {
 		return landings.Get(id)
 	}, log)
-	go reloadCatalogs(ctx, reload, offers, landings, sources, networks, s2s)
-
-	// ClickHouse logs (phase 4): asynchronous batch writes. Optional.
-	var logs *logbuf.Buffer
-	var chConn *store.CH
-	stepMissing := false
-	if a := os.Getenv("KUZTDS_CLICKHOUSE_ADDR"); a != "" {
-		ch, err := store.OpenCHWaiting(a, getenv("KUZTDS_CLICKHOUSE_DB", "kuztds"),
-			getenv("KUZTDS_CLICKHOUSE_USER", "kuztds"), os.Getenv("KUZTDS_CLICKHOUSE_PASSWORD"))
-		if err != nil {
-			log.Warn("clickhouse not connected", "err", err)
-		} else {
-			chConn = ch
-			if stepMissing = !ch.StepReady(); stepMissing {
-				log.Warn("clickhouse: events.step is missing, the /offer step shares the first step's uniqueness; apply migrations/clickhouse/008_step.sql and restart")
-			}
-			logs = logbuf.New(ch, 10000, 1000, time.Second, log)
-			go logs.Run(ctx)
-			log.Info("clickhouse connected", "addr", a)
-		}
-	}
+	go reloadCatalogs(ctx, reload, offers, landings, sources, networks, s2s, domains)
 
 	// realip: trust XFF/CF only from configured proxies (spoofing protection).
 	realIP, err := server.NewRealIP(trustedProxies())
@@ -204,33 +242,61 @@ func main() {
 
 	d := &engineDeps{
 		log: log, lists: lists, sigs: sigs, seps: seps, geores: geores, counters: counters,
-		groups: groups, offers: offers, landings: landings, sources: sources, networks: networks, s2s: s2s,
+		groups: groups, domains: domains, offers: offers, landings: landings, sources: sources, networks: networks, s2s: s2s,
 		outbound: make(chan outboundJob, 64),
-		logs:     logs, chConn: chConn, noStepWave: stepMissing, fetcher: fetcher,
-		dataDir: dataDir, keysDir: keysDir, postbackKey: postbackKey, keys: apiKeys{env: apiEnv, set: keySet},
+		fetcher:  fetcher,
+		dataDir: dataDir, keyFiles: keyFiles, postbackKey: postbackKey, pbAuth: pbAuth, keys: apiKeys{env: apiEnv, set: keySet},
 		trashMode: trashMode, trashURL: trashURL, curlCacheMin: curlCacheMin,
 		botPath:   botPath,
-		cids:      newCIDSigner(os.Getenv("KUZTDS_CID_KEY"), cidKeyPath(os.Getenv("KUZTDS_CID_KEY_FILE"), groupsFile), log),
+		cids:      newCIDSigner(config.Env("EMTDS_CID_KEY"), cidKeyPath(config.Env("EMTDS_CID_KEY_FILE"), groupsFile), log),
 		pages:     pages,
 		landServe: lands,
 	}
-	go d.serveOutbound(ctx)
+	lands.originOn = d.withOrigin
+
+	// ClickHouse logs (phase 4): asynchronous batch writes. Optional.
+	var logs *logbuf.Buffer
+	var spool *logbuf.Spool
+	if a := config.Env("EMTDS_CLICKHOUSE_ADDR"); a != "" {
+		sp, queue, serr := openEventSpool(log)
+		if serr != nil {
+			log.Error("event spool", "err", serr)
+			os.Exit(1)
+		}
+		spool = sp
+		logs = d.startEventLog(ctx, chLink{
+			addr: a,
+			open: func(octx context.Context) (*store.CH, error) {
+				return store.OpenCHWaitingCtx(octx, a, getenv("EMTDS_CLICKHOUSE_DB", config.DefaultClickHouseDB),
+					getenv("EMTDS_CLICKHOUSE_USER", config.DefaultClickHouseUser), config.Env("EMTDS_CLICKHOUSE_PASSWORD"))
+			},
+			pause:     store.ConnectPause,
+			onConnect: func(ch *store.CH) { go ch.WatchDedup(ctx, dedupWatchEvery) },
+		}, queue)
+		d.startPostbackQueues(ctx, spool, log)
+	}
+
+	d.goBG(func() { d.serveOutbound(ctx) })
+	// The deferred Close runs after the log buffer is closed, so the last
+	// snapshot carries the final loss counters.
+	collectMetrics, metricsFile := d.startMetrics(log, time.Now())
+	defer metricsFile.Close()
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/postback", d.postback)
 	mux.HandleFunc("/internal/notices", serveNotices(notices))
+	mux.HandleFunc("/internal/metrics", serveMetrics(collectMetrics))
+	mux.HandleFunc("/internal/version", versionHandler())
 	mux.HandleFunc("/l/", d.serveLandingAsset)
 	mux.HandleFunc("/healthz", healthzHandler(logs))
 	mux.HandleFunc("/", d.root)
 
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           realIP.Middleware(mux),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	srv := engineServer(addr, realIP.Middleware(mux),
+		getdur("EMTDS_HTTP_READ_TIMEOUT", defaultReadTimeout), getdur("EMTDS_HTTP_IDLE_TIMEOUT", defaultIdleTimeout))
 
 	go func() {
-		log.Info("engine listening", "addr", addr, "lists", len(ipLists), "reload", reload.String())
+		bi := config.Build()
+		log.Info("engine listening", "addr", addr, "version", bi.Version, "commit", bi.Short(), "lists", len(ipLists), "reload", reload.String())
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("server error", "err", err)
 			os.Exit(1)
@@ -241,6 +307,10 @@ func main() {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
+	// stopBy is the end of the whole stop. The phases below keep their own
+	// budgets, and the last two (the background workers and the postback
+	// journal) get what is left, so the whole stop fits in stop_grace_period.
+	stopBy := time.Now().Add(shutdownTotal)
 	// Two budgets, not one. The phases are sequential, so a single shared
 	// deadline means the log drain gets whatever the HTTP drain left over —
 	// and a server that used all of it handed logbuf a dead context, i.e. no
@@ -264,18 +334,23 @@ func main() {
 		if err := logs.Close(lctx); err != nil {
 			log.Warn("logbuf: final flush did not finish within the shutdown deadline", "err", err)
 		}
-		cancel()
+		d.stopBackground(cancel, stopBy, log)
 		l := logs.Losses()
+		st := logs.Stats()
+		if spool != nil {
+			spool.Close()
+		}
 		log.Info("engine stopped", "events_lost", l.Total(),
 			"lost_full", l.Full, "lost_queue", l.Queue,
-			"lost_insert", l.Insert, "lost_late", l.Late)
+			"lost_insert", l.Insert, "lost_late", l.Late, "lost_spool_full", l.SpoolFull,
+			"spool_segments", st.Spool.Segments, "spool_events", st.Spool.Events)
 		return
 	}
-	cancel()
+	d.stopBackground(cancel, stopBy, log)
 	log.Info("engine stopped")
 }
 
-// demoGroup — built-in demo configuration used when KUZTDS_GROUPS_FILE is not set.
+// demoGroup — built-in demo configuration used when EMTDS_GROUPS_FILE is not set.
 var demoGroup = &config.Group{
 	ID: "demo", Name: "demo", Status: true,
 	Redirect:    "stop", // group default when no stream is selected
@@ -326,7 +401,7 @@ func cookieUniqueNamed(w http.ResponseWriter, r *http.Request, grp *config.Group
 	return true
 }
 
-// extraParams returns GET parameter values (except q) in URL order, up to 5.
+// extraParams returns GET parameter values except q and origin, in URL order, up to 5.
 func extraParams(r *http.Request) []string {
 	var out []string
 	for _, pair := range strings.Split(r.URL.RawQuery, "&") {
@@ -334,7 +409,7 @@ func extraParams(r *http.Request) []string {
 			continue
 		}
 		k, v, _ := strings.Cut(pair, "=")
-		if k == "q" {
+		if k == "q" || k == "origin" {
 			continue
 		}
 		dv, err := url.QueryUnescape(v)
@@ -489,10 +564,10 @@ func domainOf(ref string) string {
 	return "unknown"
 }
 
-// trustedProxies returns the CIDRs of trusted proxies from KUZTDS_TRUSTED_PROXIES
+// trustedProxies returns the CIDRs of trusted proxies from EMTDS_TRUSTED_PROXIES
 // (comma-separated). Defaults to localhost only (XFF from outside is not accepted).
 func trustedProxies() []string {
-	if v := os.Getenv("KUZTDS_TRUSTED_PROXIES"); v != "" {
+	if v := config.Env("EMTDS_TRUSTED_PROXIES"); v != "" {
 		return strings.Split(v, ",")
 	}
 	return []string{"127.0.0.1/32", "::1/128"}
@@ -506,14 +581,14 @@ func emptyDash(s string) string {
 }
 
 func getenv(k, def string) string {
-	if v := os.Getenv(k); v != "" {
+	if v := config.Env(k); v != "" {
 		return v
 	}
 	return def
 }
 
 func getdur(k string, def time.Duration) time.Duration {
-	if v := os.Getenv(k); v != "" {
+	if v := config.Env(k); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
 		}

@@ -5,13 +5,14 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +47,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		allowed, err := s.cfg.Limiter.Allow(r.Context(), ip)
 		if err != nil {
 			s.logWarn("login limiter unavailable, refusing before the password check", "ip", ip, "err", err)
-			writeErr(w, http.StatusInternalServerError, "internal error")
+			writeErr(w, http.StatusServiceUnavailable, errSessionStoreText)
 			return
 		}
 		if !allowed {
@@ -92,6 +93,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 	csrf, err := s.issueSession(w, r, uid)
 	if err != nil {
+		s.logWarn("admin login: session was not issued", "ip", ip, "err", err)
+		if errors.Is(err, errSessionStore) {
+			writeErr(w, http.StatusServiceUnavailable, errSessionStoreText)
+			return
+		}
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
@@ -114,9 +120,19 @@ func (s *Server) loginFP(login string) string {
 	return base64.RawURLEncoding.EncodeToString(m.Sum(nil)[:8])
 }
 
+// errSessionStore marks an issueSession failure caused by the session store,
+// as opposed to a missing user or a failed random source.
+var errSessionStore = errors.New("admin: session store unavailable")
+
+// errSessionStoreText is the error text of the login answer when the session
+// store refused the write; the SPA maps it to a message in the user's language.
+const errSessionStoreText = "session store unavailable"
+
 // issueSession creates a fresh session bound to the current password, sets the
 // cookie and returns the new CSRF token. uid empty selects the environment
 // administrator; otherwise the session is tied to that users.json record.
+// It returns an error that matches errSessionStore when the store did not take
+// the session, and no cookie is set in that case.
 func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, uid string) (string, error) {
 	token, err1 := security.RandomToken()
 	csrf, err2 := security.RandomToken()
@@ -143,24 +159,37 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, uid string
 		sess.PwFP = u.Fingerprint()
 	}
 	if err := s.cfg.Sessions.Create(r.Context(), token, sess, s.cfg.SessionTTL); err != nil {
-		return "", err
+		return "", fmt.Errorf("%w: %w", errSessionStore, err)
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name: cookieName, Value: token, Path: "/",
 		HttpOnly: true, Secure: s.cookieSecure(r), SameSite: http.SameSiteStrictMode,
 		Expires: time.Now().Add(s.cfg.SessionTTL),
 	})
+	if _, err := r.Cookie(legacyCookieName); err == nil {
+		s.expireCookie(w, r, legacyCookieName)
+	}
 	return csrf, nil
 }
 
-func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if c, err := r.Cookie(cookieName); err == nil {
-		_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
-	}
+// expireCookie tells the browser to drop the session cookie name.
+func (s *Server) expireCookie(w http.ResponseWriter, r *http.Request, name string) {
 	http.SetCookie(w, &http.Cookie{
-		Name: cookieName, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
+		Name: name, Value: "", Path: "/", MaxAge: -1, HttpOnly: true,
 		Secure: s.cookieSecure(r), SameSite: http.SameSiteStrictMode,
 	})
+}
+
+func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	for _, name := range []string{cookieName, legacyCookieName} {
+		if c, err := r.Cookie(name); err == nil {
+			_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
+		}
+	}
+	s.expireCookie(w, r, cookieName)
+	if _, err := r.Cookie(legacyCookieName); err == nil {
+		s.expireCookie(w, r, legacyCookieName)
+	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 
@@ -190,6 +219,9 @@ type meResponse struct {
 	DefaultID  string            `json:"default_id,omitempty"`
 	Switchable bool              `json:"switchable"`
 	Email      string            `json:"email,omitempty"`
+	// UniqMaxSeconds is the ceiling of the uniqueness window in Redis; a campaign
+	// window above it counts for this long.
+	UniqMaxSeconds int `json:"uniq_max_seconds"`
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -201,6 +233,7 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		Type:   security.UserAdmin,
 		Hidden: []string{},
 	}
+	out.UniqMaxSeconds = int(s.cfg.UniqMax / time.Second)
 	if sess.UID != "" {
 		u, ok := s.userByID(sess.UID)
 		if ok {
@@ -300,7 +333,7 @@ func (s *Server) handleUserPasswordChange(w http.ResponseWriter, r *http.Request
 		writeErr(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	if c, err := r.Cookie(cookieName); err == nil {
+	if c, err := sessionCookie(r); err == nil {
 		_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
 	}
 	csrf, err := s.issueSession(w, r, u.ID)
@@ -350,7 +383,7 @@ func (s *Server) handleRootPasswordChange(w http.ResponseWriter, r *http.Request
 	if s.cfg.PasswordFile != "" {
 		if err := writeFileAtomic(s.cfg.PasswordFile, []byte(hash), 0o600); err != nil {
 			s.logWarn("password file write failed", "err", err)
-			writeErr(w, http.StatusInternalServerError, "failed to save (check KUZTDS_ADMIN_PASSWORD_FILE)")
+			writeErr(w, http.StatusInternalServerError, "failed to save (check EMTDS_ADMIN_PASSWORD_FILE)")
 			return
 		}
 	}
@@ -363,7 +396,7 @@ func (s *Server) handleRootPasswordChange(w http.ResponseWriter, r *http.Request
 	// Every session issued under the old password is now invalid, including
 	// this one — hand the caller a fresh cookie and CSRF token so the panel
 	// keeps working, and drop the old token from the store.
-	if c, err := r.Cookie(cookieName); err == nil {
+	if c, err := sessionCookie(r); err == nil {
 		_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
 	}
 	csrf, err := s.issueSession(w, r, "")

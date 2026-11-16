@@ -284,6 +284,7 @@ func (s *Server) updateLandingEntry(ctx context.Context, id, entry string) error
 	if s.cfg.Landings == nil {
 		return nil
 	}
+	defer s.cfg.Landings.lock()()
 	list, err := s.cfg.Landings.List(ctx)
 	if err != nil {
 		return err

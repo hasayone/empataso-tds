@@ -9,12 +9,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/egerkuzma/emtds/internal/render"
 )
 
-// pageStatInterval is the minimum gap between stats of one page name.
-// A request inside the gap reuses the cached body. The file is read again
-// only when a later stat shows a different modification time or size.
-const pageStatInterval = 5 * time.Second
+// pageStatInterval is the minimum gap between stats of one page name and of
+// the bot profile file. A request inside the gap reuses the cached contents.
+// The file is read again only when a later stat shows a different
+// modification time or size. It equals the render data-file interval.
+const pageStatInterval = render.FileStatInterval
 
 // pageNameRE matches a page file name. The name ends in .html and otherwise
 // contains only letters, digits, dot, underscore and hyphen.
@@ -56,7 +59,7 @@ func newPageCache(dir string, log *slog.Logger) *pageCache {
 }
 
 // pagesDir returns the directory stream page files are read from.
-// explicit is KUZTDS_PAGES_DIR. groupsFile is KUZTDS_GROUPS_FILE.
+// explicit is EMTDS_PAGES_DIR. groupsFile is EMTDS_GROUPS_FILE.
 // An explicit path wins. Otherwise, when groupsFile is set, the directory
 // is "pages" next to that file. Both empty returns "" and no file is read.
 func pagesDir(explicit, groupsFile string) string {

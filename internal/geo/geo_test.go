@@ -57,7 +57,7 @@ func TestFromRecord(t *testing.T) {
 }
 
 func TestMMDB(t *testing.T) {
-	m, err := OpenMMDB("testdata/GeoLite2-City-Test.mmdb")
+	m, err := OpenWith(Paths{City: "testdata/GeoLite2-City-Test.mmdb"}, nil)
 	if err != nil {
 		t.Fatalf("test mmdb: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestMMDB(t *testing.T) {
 
 // City + ASN together: one answer carries both location and network.
 func TestCityAndASN(t *testing.T) {
-	d, err := Open("testdata/GeoLite2-City-Test.mmdb", "testdata/GeoLite2-ASN-Test.mmdb", nil)
+	d, err := OpenWith(Paths{City: "testdata/GeoLite2-City-Test.mmdb", ASN: "testdata/GeoLite2-ASN-Test.mmdb"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestCityAndASN(t *testing.T) {
 
 // A Country-only database answers the country and leaves the rest empty.
 func TestCountryDatabase(t *testing.T) {
-	d, err := Open("testdata/GeoLite2-Country-Test.mmdb", "", nil)
+	d, err := OpenWith(Paths{City: "testdata/GeoLite2-Country-Test.mmdb"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestCountryDatabase(t *testing.T) {
 
 // ASN alone is a valid setup: country then comes from the CDN header.
 func TestASNOnly(t *testing.T) {
-	d, err := Open("", "testdata/GeoLite2-ASN-Test.mmdb", nil)
+	d, err := OpenWith(Paths{ASN: "testdata/GeoLite2-ASN-Test.mmdb"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,18 +130,18 @@ func TestASNOnly(t *testing.T) {
 }
 
 func TestOpenErrors(t *testing.T) {
-	if _, err := Open(filepath.Join(t.TempDir(), "nope.mmdb"), "", nil); err == nil {
+	if _, err := OpenWith(Paths{City: filepath.Join(t.TempDir(), "nope.mmdb")}, nil); err == nil {
 		t.Error("a missing City database with nothing else must be an error")
 	}
 	bad := filepath.Join(t.TempDir(), "bad.mmdb")
 	if err := os.WriteFile(bad, []byte("not a database"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Open(bad, "", nil); err == nil {
+	if _, err := OpenWith(Paths{City: bad}, nil); err == nil {
 		t.Error("a corrupt database must be an error")
 	}
 	// City missing but ASN present: start with what there is.
-	d, err := Open(filepath.Join(t.TempDir(), "later.mmdb"), "testdata/GeoLite2-ASN-Test.mmdb", nil)
+	d, err := OpenWith(Paths{City: filepath.Join(t.TempDir(), "later.mmdb"), ASN: "testdata/GeoLite2-ASN-Test.mmdb"}, nil)
 	if err != nil {
 		t.Fatalf("ASN present, City not yet downloaded: %v", err)
 	}
@@ -178,7 +178,7 @@ func TestReload(t *testing.T) {
 	london := netip.MustParseAddr("81.2.69.142")
 
 	cp("testdata/GeoLite2-Country-Test.mmdb")
-	d, err := Open(path, "", slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d, err := OpenWith(Paths{City: path}, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}

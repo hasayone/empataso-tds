@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 func lookupPublic(context.Context, string) ([]net.IPAddr, error) {
@@ -77,8 +77,8 @@ func probeClient(t *testing.T, ts *httptest.Server) *http.Client {
 func TestCheckDomainHTTPS(t *testing.T) {
 	t.Run("ok", func(t *testing.T) {
 		ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Kuztds-Probe", r.URL.Query().Get("probe"))
-			w.Header().Set("X-Kuztds-Host", r.Host)
+			w.Header().Set("X-Emtds-Probe", r.URL.Query().Get("probe"))
+			w.Header().Set("X-Emtds-Host", r.Host)
 			w.WriteHeader(http.StatusOK)
 			_, _ = io.WriteString(w, "nope")
 		}))
@@ -476,9 +476,9 @@ func probeTarget(t *testing.T, live *atomic.Bool) *http.Client {
 	t.Helper()
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if live.Load() {
-			w.Header().Set("X-Kuztds-Probe", r.URL.Query().Get("probe"))
-			w.Header().Set("X-Kuztds-Host", r.Host)
-			w.Header().Set("X-Kuztds-Service", "engine")
+			w.Header().Set("X-Emtds-Probe", r.URL.Query().Get("probe"))
+			w.Header().Set("X-Emtds-Host", r.Host)
+			w.Header().Set("X-Emtds-Service", "engine")
 		}
 		w.WriteHeader(http.StatusOK)
 	}))

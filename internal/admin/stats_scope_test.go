@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 type recStats struct {
@@ -83,11 +83,11 @@ func (r *recStats) Values(_ context.Context, q store.ValuesQuery) ([]store.KV, e
 
 type scopeKeys struct{}
 
-func (scopeKeys) Read(group, _ string, _ bool) (string, error) {
+func (scopeKeys) Open(group, _ string, _ bool) (io.ReadCloser, int64, error) {
 	if group == "c1" {
-		return "kw\n", nil
+		return io.NopCloser(strings.NewReader("kw\n")), 3, nil
 	}
-	return "", nil
+	return io.NopCloser(strings.NewReader("")), 0, nil
 }
 
 func scopeCampaigns() []config.Group {
@@ -402,5 +402,16 @@ func TestLogValuesAndKeysScope(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK || out.Content != "kw\n" {
 		t.Fatalf("keys c1 %d content %q", resp.StatusCode, out.Content)
+	}
+	resp, _ = sel.Get(srv.URL + "/api/keys/download?group=c2&date=2026-01-01")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("keys download c2 %d", resp.StatusCode)
+	}
+	resp, _ = sel.Get(srv.URL + "/api/keys/download?group=c1&date=2026-01-01")
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || string(body) != "kw\n" {
+		t.Fatalf("keys download c1 %d body %q", resp.StatusCode, body)
 	}
 }

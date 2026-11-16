@@ -15,8 +15,9 @@ import (
 )
 
 // DB — a resolver backed by MaxMind-format databases: one City (or Country)
-// file for location, and optionally one ASN file for the network. Either may
-// be absent; what is missing simply stays empty in the answer.
+// file for location, and optionally two ASN files for the network: MaxMind
+// GeoLite2-ASN and DB-IP ASN Lite. Any of them may be absent; what is missing
+// simply stays empty in the answer.
 //
 // Files are read into memory and swapped atomically when they change on disk
 // (Watch), so a fresh database dropped in by the updater goes live without a
@@ -26,7 +27,16 @@ import (
 type DB struct {
 	city source
 	asn  source
+	dbip source
 	log  *slog.Logger
+}
+
+// Paths names the database files of a resolver. An empty path means "no
+// such database".
+type Paths struct {
+	City    string // GeoLite2/GeoIP2 City or Country
+	ASN     string // MaxMind GeoLite2-ASN
+	DBIPASN string // DB-IP ASN Lite (same schema as GeoLite2-ASN)
 }
 
 type source struct {
@@ -40,31 +50,34 @@ type fileStamp struct {
 	size int64
 }
 
-// Open builds a resolver from the given files. An empty path means "no such
-// database". A configured file that cannot be read is an error only if it is
-// the City database and no ASN database loaded either — otherwise the
+// OpenWith builds a resolver from the given files. An empty path means "no
+// such database". A configured file that cannot be read is an error only if
+// no database loaded at all (the first failure is returned) — otherwise the
 // resolver starts with what it has and Watch picks the rest up when it
-// appears (the updater may not have downloaded it yet).
-func Open(cityPath, asnPath string, log *slog.Logger) (*DB, error) {
+// appears (the updater may not have downloaded it yet). The returned DB is
+// usable even alongside an error, so the caller may keep it for Watch.
+func OpenWith(p Paths, log *slog.Logger) (*DB, error) {
 	if log == nil {
 		log = slog.Default()
 	}
 	d := &DB{log: log}
-	d.city.path, d.asn.path = cityPath, asnPath
-	errCity := d.city.load()
-	errASN := d.asn.load()
-	if d.city.r.Load() == nil && d.asn.r.Load() == nil {
-		if errCity != nil {
-			return d, errCity
+	d.city.path, d.asn.path, d.dbip.path = p.City, p.ASN, p.DBIPASN
+	var first error
+	loaded := false
+	for _, s := range d.sources() {
+		if err := s.load(); err != nil && first == nil {
+			first = err
 		}
-		return d, errASN
+		loaded = loaded || s.r.Load() != nil
+	}
+	if !loaded {
+		return d, first
 	}
 	return d, nil
 }
 
-// OpenMMDB opens a single City/Country database (kept for callers that only
-// need location).
-func OpenMMDB(path string) (*DB, error) { return Open(path, "", nil) }
+// sources lists the databases in a fixed order: City, MaxMind ASN, DB-IP ASN.
+func (d *DB) sources() []*source { return []*source{&d.city, &d.asn, &d.dbip} }
 
 // load reads the file if it is configured and has changed since the last
 // successful load. The previous reader stays in place on any failure: a
@@ -96,7 +109,7 @@ func (s *source) load() error {
 
 // Reload re-reads the files that changed on disk and reports which did.
 func (d *DB) Reload() (changed []string) {
-	for _, s := range []*source{&d.city, &d.asn} {
+	for _, s := range d.sources() {
 		before := s.st.Load()
 		if err := s.load(); err != nil {
 			// A missing file is the normal state before the first download;
@@ -133,6 +146,12 @@ func (d *DB) Watch(ctx context.Context, interval time.Duration) {
 }
 
 // Resolve determines geo by IP. On an invalid IP or a miss, returns empty values.
+//
+// The network comes from DB-IP ASN Lite first and from MaxMind GeoLite2-ASN
+// as a fallback (see mergeASN): filters migrated from Keitaro are written
+// with DB-IP organization names ("Google LLC"), MaxMind says "GOOGLE", and
+// Geo.ASNAlt and Geo.OrgAlt keep the MaxMind number and spelling so older
+// filters still match.
 func (d *DB) Resolve(ip netip.Addr) Geo {
 	g := None()
 	if d == nil || !ip.IsValid() {
@@ -145,13 +164,25 @@ func (d *DB) Resolve(ip netip.Addr) Geo {
 			g = fromRecord(rec)
 		}
 	}
-	if r := d.asn.r.Load(); r != nil {
-		var rec asnRecord
-		if err := r.Lookup(nip, &rec); err == nil {
-			g.ASN, g.Org = rec.Number, keep(rec.Org)
-		}
+	rd, rm := d.dbip.r.Load(), d.asn.r.Load()
+	if rd == nil && rm == nil {
+		return g
 	}
+	g.ASN, g.ASNAlt, g.Org, g.OrgAlt = mergeASN(lookupASN(rd, nip), lookupASN(rm, nip))
 	return g
+}
+
+// lookupASN reads the ASN record of ip from r. A nil reader, a lookup error
+// and a miss all return the zero record (Number == 0).
+func lookupASN(r *maxminddb.Reader, ip net.IP) asnRecord {
+	if r == nil {
+		return asnRecord{}
+	}
+	var rec asnRecord
+	if err := r.Lookup(ip, &rec); err != nil {
+		return asnRecord{}
+	}
+	return rec
 }
 
 // Info describes a loaded database, for the admin panel.
@@ -168,7 +199,7 @@ func (d *DB) Databases() []Info {
 		return nil
 	}
 	var out []Info
-	for _, s := range []*source{&d.city, &d.asn} {
+	for _, s := range d.sources() {
 		if s.path == "" {
 			continue
 		}
@@ -183,6 +214,7 @@ func (d *DB) Databases() []Info {
 	return out
 }
 
-// Close is kept for symmetry with file-backed resources; the readers hold
-// plain memory and need no release.
+// Close releases the database. The readers hold plain memory owned by the
+// garbage collector, so there is nothing to free and it always returns nil;
+// it exists so DB satisfies io.Closer for callers that close what they open.
 func (d *DB) Close() error { return nil }

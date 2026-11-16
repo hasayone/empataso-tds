@@ -133,3 +133,48 @@ func TestGzipFlushDeliversChunks(t *testing.T) {
 		t.Fatalf("body %q", got)
 	}
 }
+
+func TestGzipSkipsEventStreams(t *testing.T) {
+	h := gzipMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte(": open\n\n"))
+		w.(http.Flusher).Flush()
+	}))
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req.Header.Set("Accept-Encoding", "gzip")
+	req.Header.Set("Accept", "text/event-stream")
+	h.ServeHTTP(rec, req)
+	if rec.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("content-encoding %q", rec.Header().Get("Content-Encoding"))
+	}
+	if rec.Body.String() != ": open\n\n" {
+		t.Fatalf("body %q", rec.Body.String())
+	}
+	if !rec.Flushed {
+		t.Fatal("the chunk was not flushed through")
+	}
+}
+
+func TestGzipEligible(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		headers map[string]string
+		want    bool
+	}{
+		{"gzip", map[string]string{"Accept-Encoding": "gzip"}, true},
+		{"no gzip", nil, false},
+		{"upgrade", map[string]string{"Accept-Encoding": "gzip", "Upgrade": "websocket"}, false},
+		{"event stream", map[string]string{"Accept-Encoding": "gzip", "Accept": "text/event-stream"}, false},
+		{"event stream among others", map[string]string{"Accept-Encoding": "gzip", "Accept": "application/json, Text/Event-Stream"}, false},
+		{"json", map[string]string{"Accept-Encoding": "gzip", "Accept": "application/json"}, true},
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		for k, v := range c.headers {
+			req.Header.Set(k, v)
+		}
+		if got := gzipEligible(req); got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+}

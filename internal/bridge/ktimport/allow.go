@@ -1,4 +1,4 @@
-// Package ktimport переносит конфигурацию Keitaro в группы и каталоги kuztds.
+// Package ktimport переносит конфигурацию Keitaro в группы и каталоги emtds.
 // Журналы кликов и конверсий читаются только двумя POST-путями.
 // Архив локального лендинга читается GET /admin_api/v1/landing_pages/{id}/download.
 package ktimport

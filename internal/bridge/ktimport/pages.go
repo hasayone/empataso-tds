@@ -38,7 +38,7 @@ func PageName(content string) string {
 
 // pageRef заменяет длинный текст страницы ссылкой на общий файл.
 //
-// Параметры: redirect — тип выхода kuztds; content — текст после замены макросов; pages — мешок этого прогона.
+// Параметры: redirect — тип выхода emtds; content — текст после замены макросов; pages — мешок этого прогона.
 // Результат: исходный текст или @page: и имя файла. Короче 513 байт и чужой тип остаются как есть.
 // Ошибки: нет.
 func pageRef(redirect, content string, pages *pageBag) string {
@@ -52,7 +52,7 @@ func pageRef(redirect, content string, pages *pageBag) string {
 
 // textPage сообщает, что тип выхода хранит HTML или текст, а не адрес.
 //
-// Параметры: redirect — тип kuztds.
+// Параметры: redirect — тип emtds.
 // Результат: true для show_page_html, show_html_404, show_text и javascript.
 // Ошибки: нет.
 func textPage(redirect string) bool {

@@ -63,7 +63,7 @@ func SortColumnFor(info FieldsInfo, table, name string) (string, error) {
 // sort is the API field name; empty means ts DESC with a cid tie-breaker.
 // sort ts uses dir on ts only. Any other sort adds ts DESC and cid after the
 // primary key. ready selects which waves SortColumn may use. The bool is true
-// when SETTINGS max_execution_time should be set.
+// when the query runs under journalSortMaxExecution.
 func journalOrderBy(table, sort string, desc bool, ready func(w wave) bool) (string, bool, error) {
 	dir := "DESC"
 	if !desc {

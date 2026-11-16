@@ -1,58 +1,133 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/detect"
-	"github.com/egerkuzma/kuztds/internal/ipindex"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/egerkuzma/emtds/internal/ipindex"
 )
 
-var ptrResolver = &net.Resolver{}
-
-type botFileCache struct {
-	mu      sync.Mutex
-	mod     time.Time
-	known   bool
-	profile config.Bots
+// botSnapshot is the last read of the bot profile file.
+// path is the file it came from. file is the parsed profile, or the default
+// when the file is missing, unreadable or not valid JSON. proxyDefault is true
+// when file.Proxy is on only by default: the file has no ch_proxy key or there
+// is no file. relay is true when the ip_private_relay list was loaded and not
+// empty at the time of the snapshot. profile is file with the proxy check
+// resolved: a default proxy check stays off until relay is true.
+// read is true when the file contents were read, so an unchanged mtime and size
+// may reuse file. checked is when the file was last stat'ed.
+type botSnapshot struct {
+	path         string
+	file         config.Bots
+	profile      config.Bots
+	proxyDefault bool
+	relay        bool
+	read         bool
+	mtime        time.Time
+	size         int64
+	checked      time.Time
 }
 
-var botFiles botFileCache
+var (
+	// botSnap is read lock-free by every request.
+	botSnap atomic.Pointer[botSnapshot]
+	// botReload lets one request at a time re-stat the file after the interval.
+	botReload sync.Mutex
+)
 
-// botProfile reads the installation bot profile. A missing file uses the default.
-// The result is cached until the file's modification time changes.
+// fresh reports whether s is a stat of path taken less than pageStatInterval ago.
+func (s *botSnapshot) fresh(path string) bool {
+	return s != nil && s.path == path && time.Since(s.checked) < pageStatInterval
+}
+
+// relayLoaded reports whether the ip_private_relay list is loaded and not empty.
+// A nil d or a d without lists gives false; a nil index counts as empty.
+func (d *engineDeps) relayLoaded() bool {
+	return d != nil && d.lists.Len(detect.ListPrivateRelay) > 0
+}
+
+// resolveProxy returns p with a default proxy check switched off until the
+// Private Relay list is loaded. proxyDefault is true when p.Proxy is on only by
+// default; an explicit ch_proxy is never changed. relay is true when the list
+// is loaded and not empty. Without the list every iCloud Private Relay visitor
+// would be treated as a proxy.
+func resolveProxy(p config.Bots, proxyDefault, relay bool) config.Bots {
+	if proxyDefault && !relay {
+		p.Proxy = false
+	}
+	return p
+}
+
+// botProfile returns the installation bot profile. A missing or invalid file uses the default.
+// The file is stat'ed at most once per pageStatInterval and read again only when
+// its modification time or size changed, so an edit is seen within that interval.
+// A proxy check that is on only by default stays off until the Private Relay
+// list is loaded; the list is looked at when the file is stat'ed, and a change
+// of that state is logged once.
 func (d *engineDeps) botProfile() config.Bots {
 	if d == nil || d.botPath == "" {
-		return config.DefaultBotProfile()
+		return resolveProxy(config.DefaultBotProfile(), true, d.relayLoaded())
 	}
-	st, err := os.Stat(d.botPath)
-	botFiles.mu.Lock()
-	defer botFiles.mu.Unlock()
+	if s := botSnap.Load(); s.fresh(d.botPath) {
+		return s.profile
+	}
+	botReload.Lock()
+	defer botReload.Unlock()
+	prev := botSnap.Load()
+	if prev.fresh(d.botPath) {
+		return prev.profile
+	}
+	next := readBotProfile(d.botPath, prev, d.relayLoaded())
+	if next.proxyDefault && d.log != nil && (prev == nil || prev.path != next.path || !prev.proxyDefault || prev.relay != next.relay) {
+		d.log.Info("bot profile: default proxy check", "enabled", next.profile.Proxy, "private_relay_list", next.relay)
+	}
+	botSnap.Store(next)
+	return next.profile
+}
+
+// readBotProfile stats path and returns a new snapshot of it.
+// prev is the previous snapshot or nil; its parsed file is reused when it read
+// the same path with the same mtime and size. relay says whether the Private
+// Relay list is loaded and not empty. The file is parsed by
+// config.ParseBotProfileExplicit. Errors are not returned: a missing, unreadable or
+// invalid file yields the default profile.
+func readBotProfile(path string, prev *botSnapshot, relay bool) *botSnapshot {
+	next := &botSnapshot{path: path, file: config.DefaultBotProfile(), proxyDefault: true, relay: relay, checked: time.Now()}
+	defer func() { next.profile = resolveProxy(next.file, next.proxyDefault, relay) }()
+	st, err := os.Stat(path)
 	if err != nil {
-		return config.DefaultBotProfile()
+		return next
 	}
-	if botFiles.known && botFiles.mod.Equal(st.ModTime()) {
-		return botFiles.profile
+	next.mtime, next.size = st.ModTime(), st.Size()
+	if prev != nil && prev.read && prev.path == path && prev.mtime.Equal(next.mtime) && prev.size == next.size {
+		next.file, next.proxyDefault, next.read = prev.file, prev.proxyDefault, true
+		return next
 	}
-	b, err := os.ReadFile(d.botPath)
+	b, err := os.ReadFile(path)
 	if err != nil {
-		return config.DefaultBotProfile()
+		return next
 	}
-	var profile config.Bots
-	if json.Unmarshal(b, &profile) != nil {
-		return config.DefaultBotProfile()
+	next.read = true
+	if profile, proxySet, err := config.ParseBotProfileExplicit(b); err == nil {
+		next.file = profile
+		next.proxyDefault = profile.Proxy && !proxySet
 	}
-	botFiles.profile = profile
-	botFiles.mod = st.ModTime()
-	botFiles.known = true
-	return profile
+	return next
+}
+
+// sameBotChecks reports whether a and b enable the same detection toggles.
+// The serving fields Redirect, Out and Header are ignored: detectBot does not
+// read them, so equal toggles give detectBot the same answer for one visitor.
+func sameBotChecks(a, b config.Bots) bool {
+	a.Redirect, a.Out, a.Header = "", "", ""
+	b.Redirect, b.Out, b.Header = "", "", ""
+	return a == b
 }
 
 // botInput is the visitor facts detectBot classifies.
@@ -73,11 +148,27 @@ type botInput struct {
 // is the directory saveBotIP appends crawler addresses to. in carries the
 // visitor address, user agent, referer, language, proxy flag and device.
 // It returns the bot label, or detect.BotNone when no enabled check matches.
-// It does not return an error.
+// It does not return an error and never waits for DNS.
+//
+// A user agent of a verifiable search engine is checked against the address:
+// a listed address (ip_<label>) confirms it at once; otherwise the cached
+// forward-confirmed reverse DNS answer decides, and a mismatch gives the
+// detect.FakeLabel of the engine. The first request from an unknown address
+// starts the check in the background and is labelled by its user agent alone.
+// A timeout or a temporary DNS error is not a forgery: while such an answer is
+// cached the visitor is labelled as if there were no answer.
+// ch_ptr labels an address whose cached PTR name is in a crawler domain; it
+// never saves an address.
+// save_ip appends only addresses of a search-engine user agent that DNS
+// confirmed.
 func detectBot(lists *ipindex.Set, sigs *detect.Signatures, dataDir string, in botInput, b config.Bots) string {
 	bot := detect.BotNone
+	confirmed := false
 	if b.CheckUA {
-		bot = detect.BotByUA(in.UA, sigs.UA())
+		bot = detect.BotByUA(in.UA, sigs.UAMatcher())
+		if detect.Verifiable(bot) {
+			bot, confirmed = verifyCrawler(lists, in.IP, bot)
+		}
 		if bot == detect.BotNone {
 			bot = detect.BotByReferer(in.Ref, sigs.Ref())
 		}
@@ -101,22 +192,21 @@ func detectBot(lists *ipindex.Set, sigs *detect.Signatures, dataDir string, in b
 		bot = "empty_lang"
 	}
 	if bot == detect.BotNone && b.PTR && in.IP.IsValid() {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		if names, err := ptrResolver.LookupAddr(ctx, in.IP.String()); err == nil && len(names) > 0 {
-			bot = detect.BotByPTR(names[0])
+		if ent, ok := ptrNames.peek(in.IP, ptrClassPTR); ok && !ent.failed && ent.crawler != "" {
+			bot = ent.crawler
+			if !ent.confirmed {
+				bot = detect.FakeLabel(ent.crawler)
+			}
 		}
-		cancel()
 	}
 	if bot == detect.BotNone && b.ListUA && detect.InUABlacklist(in.UA, sigs.UABlacklist()) {
 		bot = detect.BotUABlacklist
 	}
-	// save_ip: append the IP of a matched search engine to its list (if not already there).
-	if bot != detect.BotNone && b.SaveIP {
+	if confirmed && b.SaveIP {
 		if _, known := lists.Lookup("ip_"+bot, in.IP); !known {
 			saveBotIP(dataDir, bot, in.IP)
 		}
 	}
-	// Detection via search-engine IP lists.
 	if bot == detect.BotNone {
 		for _, c := range []struct {
 			on   bool
@@ -136,23 +226,44 @@ func detectBot(lists *ipindex.Set, sigs *detect.Signatures, dataDir string, in b
 	return bot
 }
 
-// savedBotIPs remembers what this process already appended, keyed by
-// "<bot>|<ip>".
-//
-// The ipindex lookup in detectBot only sees IPs as of the last hot-reload (a
-// minute by default), so without this every hit from the same crawler IP within
-// that window appended another line: a busy site grew ip_<se>.dat by thousands
-// of duplicate lines per minute, forever. The set is bounded by the number of
-// distinct crawler IPs seen, which is small, and it is only an optimisation —
-// losing it on restart costs at most one redundant line per IP.
+// verifyCrawler checks that ip really belongs to the search engine label that
+// the user agent claims. lists is the IP index, ip the visitor address and
+// label a verifiable engine label.
+// It returns label with confirmed true when ip is in ip_<label> (apple has no
+// such list) or the cached DNS check confirmed it for that engine; label with
+// confirmed false while the check has not finished or ended with a timeout or
+// a temporary error; detect.FakeLabel(label) when the check gave a final
+// answer without confirmation. It does not wait for DNS.
+func verifyCrawler(lists *ipindex.Set, ip netip.Addr, label string) (string, bool) {
+	if !ip.IsValid() {
+		return label, false
+	}
+	if label != detect.BotApple {
+		if _, listed := lists.Lookup("ip_"+label, ip); listed {
+			return label, true
+		}
+	}
+	ent, ok := ptrNames.peek(ip, ptrClassCrawler)
+	switch {
+	case !ok || ent.failed:
+		return label, false
+	case ent.crawler == label && ent.confirmed:
+		return label, true
+	}
+	return detect.FakeLabel(label), false
+}
+
+// savedBotIPs holds the addresses this process already appended to ip_<se>.dat,
+// keyed by "<bot>|<ip>", so one address is written once between list reloads.
+// It grows with the number of distinct confirmed crawler addresses. After a
+// restart it is empty, which costs at most one repeated line per address.
 var savedBotIPs sync.Map
 
-// saveBotIP appends an IP to ip_<se>.dat (only for known search engines), at
-// most once per IP per process.
+// saveBotIP appends an IP to ip_<se>.dat, at most once per IP per process.
+// bot must be a verifiable search engine with an IP list; any other label,
+// including apple and the fake_ labels, is ignored.
 func saveBotIP(dataDir, bot string, ip netip.Addr) {
-	switch bot {
-	case "baidu", "bing", "google", "mail", "yahoo", "yandex":
-	default:
+	if !detect.Verifiable(bot) || bot == detect.BotApple {
 		return
 	}
 	if _, dup := savedBotIPs.LoadOrStore(bot+"|"+ip.String(), struct{}{}); dup {

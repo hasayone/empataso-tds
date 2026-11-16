@@ -1,6 +1,6 @@
 package admin
 
-import "github.com/egerkuzma/kuztds/internal/config"
+import "github.com/egerkuzma/emtds/internal/config"
 
 // maskOfferPayout clears the payout amount and currency of o when the profit group
 // is hidden for v, so the offer carries no number that gives the profit away.

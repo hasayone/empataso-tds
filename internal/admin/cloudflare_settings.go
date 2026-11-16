@@ -48,6 +48,7 @@ func (a cfAccount) ready() bool {
 // cfSettingsView is the body of GET and PUT /api/cloudflare.
 // The token is never a field; HasToken only says it is set. Configured means the token and
 // the account are both set. PublicIP is Config.PublicIP, empty when the server has none.
+// Local is set on GET when the admin runs on a local machine, see Server.localAccess.
 // Error is set on GET when cloudflare.json exists but could not be used.
 type cfSettingsView struct {
 	Error      string `json:"error,omitempty"`
@@ -55,6 +56,7 @@ type cfSettingsView struct {
 	HasToken   bool   `json:"has_token"`
 	Configured bool   `json:"configured"`
 	PublicIP   string `json:"public_ip"`
+	Local      bool   `json:"local"`
 }
 
 // cfSettingsPut is the body of PUT /api/cloudflare. An empty or masked Token keeps the stored
@@ -136,23 +138,26 @@ func (s *Server) cloudflareView(a cfAccount) cfSettingsView {
 }
 
 // registerCloudflare mounts the Cloudflare settings routes and the domain connection routes.
-// Settings, the test, the connection and the notice acknowledgement are cookie-session only.
+// Settings, the test, the connection and the notice acknowledgement carry the
+// cookie flag in routeAccess, so they are cookie-session only.
 // s is the server and mux receives the routes.
 func registerCloudflare(s *Server, mux *http.ServeMux) {
-	s.handle(mux, "GET /api/cloudflare", cookieOnly(http.HandlerFunc(s.handleCloudflareGet)))
-	s.handle(mux, "PUT /api/cloudflare", cookieOnly(http.HandlerFunc(s.handleCloudflarePut)))
-	s.handle(mux, "POST /api/cloudflare/test", cookieOnly(http.HandlerFunc(s.handleCloudflareTest)))
-	s.handle(mux, "POST /api/domains/{id}/cloudflare", cookieOnly(http.HandlerFunc(s.handleDomainCloudflare)))
-	s.handle(mux, "POST /api/domains/{id}/admin-dns", cookieOnly(http.HandlerFunc(s.handleDomainAdminDNS)))
+	s.handle(mux, "GET /api/cloudflare", http.HandlerFunc(s.handleCloudflareGet))
+	s.handle(mux, "PUT /api/cloudflare", http.HandlerFunc(s.handleCloudflarePut))
+	s.handle(mux, "POST /api/cloudflare/test", http.HandlerFunc(s.handleCloudflareTest))
+	s.handle(mux, "POST /api/domains/{id}/cloudflare", http.HandlerFunc(s.handleDomainCloudflare))
+	s.handle(mux, "POST /api/domains/{id}/admin-dns", http.HandlerFunc(s.handleDomainAdminDNS))
 	s.handle(mux, "GET /api/domains/connected", http.HandlerFunc(s.handleDomainsConnected))
-	s.handle(mux, "POST /api/domains/connected/ack", cookieOnly(http.HandlerFunc(s.handleDomainsConnectedAck)))
+	s.handle(mux, "POST /api/domains/connected/ack", http.HandlerFunc(s.handleDomainsConnectedAck))
 }
 
 // handleCloudflareGet returns the account without the token.
 // When cloudflare.json was damaged at start the body carries its reason in "error".
+// "local" is true when the admin runs on a local machine.
 func (s *Server) handleCloudflareGet(w http.ResponseWriter, r *http.Request) {
 	v := s.cloudflareView(s.cloudflareAccount())
 	v.Error = s.cloudflareLoadError()
+	v.Local = s.localAccess(r)
 	writeJSON(w, http.StatusOK, v)
 }
 

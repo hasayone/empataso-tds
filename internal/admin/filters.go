@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // maxValueLimit is the largest /api/log-values page.
@@ -16,9 +16,10 @@ const maxValueLimit = 500
 // parseConds reads repeated f=field:op:value parameters.
 // q is the query. Identical field and op pairs become one condition, in the
 // order of their first appearance. eq with several values becomes in.
-// ne with several values becomes nin. An empty value is kept.
+// ne with several values becomes nin. contains and not_contains keep each
+// value whole. An empty value is kept.
 // It returns an error when a value has fewer than three colon-separated parts
-// or the operator is not eq, ne, in or nin. It does not check field names.
+// or the operator is not in store.CondOps. It does not check field names.
 func parseConds(q url.Values) ([]store.Cond, error) {
 	if len(q["f"]) == 0 {
 		return nil, nil
@@ -32,9 +33,7 @@ func parseConds(q url.Values) ([]store.Cond, error) {
 			return nil, fmt.Errorf("expected field:op:value")
 		}
 		field, op, value := parts[0], parts[1], parts[2]
-		switch op {
-		case "eq", "ne", "in", "nin":
-		default:
+		if !store.ValidOp(op) {
 			return nil, fmt.Errorf("operator %s", op)
 		}
 		k := pair{field, op}
@@ -130,7 +129,7 @@ func (s *Server) handleLogValues(w http.ResponseWriter, r *http.Request) {
 			writeBadFilter(w, err)
 			return
 		}
-		writeErr(w, http.StatusInternalServerError, "logs error")
+		writeStatsErr(w, err, "logs error")
 		return
 	}
 	if rows == nil {

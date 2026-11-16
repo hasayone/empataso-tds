@@ -3,8 +3,8 @@ package admin
 import (
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // A re-import replaces the campaign but keeps the local sticky switch.

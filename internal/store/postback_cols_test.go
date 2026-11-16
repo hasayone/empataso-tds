@@ -8,7 +8,7 @@ import (
 )
 
 func convExtraColList(click, ext, model, origin bool) []string {
-	_, cols := convExtra(click, ext, model, origin, false, false)
+	_, cols := convExtra(click, ext, model, conversionLateWaves{origin: origin}, false, false)
 	if cols == "" {
 		return nil
 	}
@@ -178,7 +178,7 @@ func TestPostbackColumnsMatchDest(t *testing.T) {
 		model := mask&4 != 0
 		origin := mask&8 != 0
 		c := &CH{clickCols: click, extConv: ext, modelConv: model}
-		sel, extra := c.postbackColumns(origin)
+		sel, extra := c.postbackColumns(origin, false)
 		wantExtra := convExtraColList(click, ext, model, origin)
 		if len(extra) != len(wantExtra) {
 			t.Fatalf("mask %04b: extra cols %v, convExtra %v", mask, extra, wantExtra)
@@ -210,7 +210,7 @@ func TestPostbackColumnsMatchDest(t *testing.T) {
 				t.Fatalf("mask %04b: col %q at %d got %#v", mask, col, i, got)
 			}
 		}
-		stubs, _ := convExtra(click, ext, model, origin, false, false)
+		stubs, _ := convExtra(click, ext, model, conversionLateWaves{origin: origin}, false, false)
 		stubNames := stubOutputNames(stubs)
 		if len(stubNames) != len(wantExtra) {
 			t.Fatalf("mask %04b: stub count %d != col count %d", mask, len(stubNames), len(wantExtra))
@@ -248,6 +248,7 @@ func logJournalCols(c *CH, extCols []string, originEvents bool) []string {
 	} else {
 		cols = append(cols, "origin_group_name", "origin_group_id")
 	}
+	cols = append(cols, "root_cid")
 	return cols
 }
 

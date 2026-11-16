@@ -1,6 +1,6 @@
 [English](TODO.md) · **Русский**
 
-# TODO — KuzTDS
+# TODO — EmTDS
 
 ## Не сделано
 - [ ] TOTP (Google Authenticator) или captcha для логина админки

@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 func adminHostServer(t *testing.T, domains []config.Domain) *httptest.Server {
@@ -90,11 +90,11 @@ func TestHealthzAllowedAdminHost(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("status %d", resp.StatusCode)
 	}
-	if resp.Header.Get("X-Kuztds-Service") != "admin" {
-		t.Fatalf("service %q", resp.Header.Get("X-Kuztds-Service"))
+	if resp.Header.Get("X-Emtds-Service") != "admin" {
+		t.Fatalf("service %q", resp.Header.Get("X-Emtds-Service"))
 	}
-	if resp.Header.Get("X-Kuztds-Probe") != "abc123" {
-		t.Fatalf("probe %q", resp.Header.Get("X-Kuztds-Probe"))
+	if resp.Header.Get("X-Emtds-Probe") != "abc123" {
+		t.Fatalf("probe %q", resp.Header.Get("X-Emtds-Probe"))
 	}
 }
 

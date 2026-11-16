@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // wave names one generation of columns. base is the original table,
@@ -30,10 +30,12 @@ const (
 	waveOrigin wave = "origin"
 	// waveDep adds depsum to conversions. It is the deposit, not the payout.
 	waveDep wave = "dep"
+	// waveRoot adds root attribution; an empty root_cid means the click is its own root.
+	waveRoot wave = "root"
 )
 
 // allWaves lists every wave in the order probes and the fields API use.
-var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep, waveOrigin, waveDep, waveSub}
+var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep, waveOrigin, waveDep, waveSub, waveRoot}
 
 // Field is one journal column shared by filters, breakdown and the SPA.
 // Name is the API name. Events and Conv are the physical columns; an empty
@@ -58,6 +60,28 @@ type Field struct {
 	// Internal marks a column the server reads and writes but the interface and
 	// the access roles never see: StaticFields leaves it out.
 	Internal bool
+	// Text allows the substring operators contains and not_contains. markText
+	// sets it; it is false for numbers, dates, ids and fixed value sets.
+	Text bool
+}
+
+// notTextFields are string columns whose values form a fixed set or are
+// catalog ids, so a substring filter makes no sense on them.
+var notTextFields = map[string]bool{
+	"campaign": true, "campaign_id": true, "origin_campaign": true, "origin_campaign_id": true,
+	"offer_id": true, "landing_id": true, "source_id": true, "network_id": true,
+	"country": true, "device": true, "bot": true, "redirect": true, "cost_cur": true,
+	"status": true, "original_status": true, "prev_status": true,
+}
+
+// markText sets Text on every free-text column of out.
+// A column is text when its type is a string, it has no Expr, does not lower
+// its values, is not internal and is not listed in notTextFields.
+func markText(out []Field) {
+	for i := range out {
+		f := &out[i]
+		f.Text = stringType(f.Type) && f.Expr == "" && !f.Lower && !f.Internal && !notTextFields[f.Name]
+	}
 }
 
 // lc is LowCardinality(String), the usual type of a short repeated label.
@@ -110,6 +134,10 @@ func buildFields() []Field {
 		{Name: "via", Events: "via", Type: lc, EventsWave: waveNet, Dim: true},
 		{Name: "origin_campaign", Events: "origin_group_name", Conv: "origin_group_name", Type: lc, EventsWave: waveOrigin, ConvWave: waveOrigin, Dim: true, Default: "group_name"},
 		{Name: "origin_campaign_id", Events: "origin_group_id", Conv: "origin_group_id", Type: lc, EventsWave: waveOrigin, ConvWave: waveOrigin, Dim: true, Default: "group_id"},
+		// An empty root_cid means the click is its own root.
+		{Name: "root_cid", Events: "root_cid", Conv: "root_cid", Type: "String", EventsWave: waveRoot, ConvWave: waveRoot, Default: "''"},
+		{Name: "origin_stream", Conv: "origin_stream_name", Type: lc, ConvWave: waveRoot, Dim: true, Default: "''"},
+		{Name: "origin_keyword", Conv: "origin_keyword", Type: "String", ConvWave: waveRoot, Default: "''"},
 	}
 	for i := 1; i <= clickWaveSubs; i++ {
 		name := fmt.Sprintf("sub_id_%d", i)
@@ -136,6 +164,7 @@ func buildFields() []Field {
 		name := fmt.Sprintf("sub_id_%d", i)
 		out = append(out, Field{Name: name, Events: name, Conv: name, Type: "String", EventsWave: waveSub, ConvWave: waveSub, Dim: true})
 	}
+	markText(out)
 	return out
 }
 
@@ -242,12 +271,14 @@ func convStub(f Field) string {
 // FieldInfo is one field as the admin API returns it.
 // Events and Conv are true when that table has the column.
 // EventsWave and ConvWave are empty when the field has no column there.
+// Text is true when the field accepts contains and not_contains.
 type FieldInfo struct {
 	Name       string `json:"name"`
 	Type       string `json:"type"`
 	Events     bool   `json:"events"`
 	Conv       bool   `json:"conv"`
 	Dim        bool   `json:"dim"`
+	Text       bool   `json:"text"`
 	EventsWave string `json:"events_wave"`
 	ConvWave   string `json:"conv_wave"`
 }
@@ -275,6 +306,7 @@ func StaticFields() []FieldInfo {
 			Events:     f.Events != "",
 			Conv:       f.Conv != "",
 			Dim:        f.Dim,
+			Text:       f.Text,
 			EventsWave: string(f.EventsWave),
 			ConvWave:   string(f.ConvWave),
 		})

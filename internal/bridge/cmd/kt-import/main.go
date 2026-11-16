@@ -8,10 +8,10 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/emtds/bridge/ktimport"
 )
 
-// main запускает сухой прогон, живое чтение или запись в локальную kuztds.
+// main запускает сухой прогон, живое чтение или запись в локальную emtds.
 //
 // Параметры: флаги --fixture, --live, --apply.
 // Результат: JSON групп и отчёт в stdout, код 0.
@@ -31,7 +31,7 @@ func main() {
 
 // run выполняет один прогон импорта.
 //
-// Параметры: fixture — файл снимка; live — читать API; apply — писать в kuztds; envFile — путь .env.
+// Параметры: fixture — файл снимка; live — читать API; apply — писать в emtds; envFile — путь .env.
 // Результат: nil и JSON на stdout.
 // Ошибки: пустой токен, сеть, чужая форма ответа, отказ записи.
 func run(fixture string, live, apply bool, simulate, envFile string) error {

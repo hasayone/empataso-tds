@@ -28,7 +28,7 @@ func TestDevice(t *testing.T) {
 }
 
 func TestBotByUA(t *testing.T) {
-	sigs := []string{"AhrefsBot", "SemrushBot"}
+	m := buildUAMatcher([]string{"AhrefsBot", "SemrushBot"}, nil)
 	cases := []struct {
 		ua   string
 		want string
@@ -42,16 +42,63 @@ func TestBotByUA(t *testing.T) {
 		{"", BotNone},
 	}
 	for _, c := range cases {
-		if got := BotByUA(c.ua, sigs); got != c.want {
+		if got := BotByUA(c.ua, m); got != c.want {
 			t.Errorf("BotByUA(%q) = %q; want %q", c.ua, got, c.want)
 		}
 	}
 }
 
-func TestBotByPTRAndReferer(t *testing.T) {
-	if got := BotByPTR("crawl-66-249-66-1.googlebot.com"); got != BotGoogle {
-		t.Errorf("PTR google = %q", got)
+func TestCrawlerByHost(t *testing.T) {
+	cases := []struct {
+		host string
+		want string
+	}{
+		{"crawl-66-249-66-1.googlebot.com.", BotGoogle},
+		{"CRAWL-66-249-66-1.GOOGLEBOT.COM", BotGoogle},
+		{"google.evil.com", BotNone},
+		{"evilgooglebot.com", BotNone},
+		{"rate-limited-proxy-66-249-90-1.google.com", BotGoogle},
+		{"abc.googleusercontent.com", BotNone},
+		{"msnbot-1.search.msn.com", BotBing},
+		{"spider-1.yandex.ru.", BotYandex},
+		{"baiduspider-1.crawl.baidu.com", BotBaidu},
+		{"baiduspider-1.crawl.baidu.jp", BotBaidu},
+		{"h1.crawl.yahoo.net", BotYahoo},
+		{"spider-1.go.mail.ru.", BotMail},
+		{"go.mail.ru", BotMail},
+		{"fetcher1.mail.ru", BotNone},
+		{"cloud-1.hb.vkcs.cloud.mail.ru", BotNone},
+		{"evilgo.mail.ru", BotNone},
+		{"17-58-98-1.applebot.apple.com", BotApple},
+		{"apple.com", BotNone},
+		{"mail.ru.evil.com", BotNone},
+		{"", BotNone},
+		{".", BotNone},
 	}
+	for _, c := range cases {
+		if got := CrawlerByHost(c.host); got != c.want {
+			t.Errorf("CrawlerByHost(%q) = %q; want %q", c.host, got, c.want)
+		}
+	}
+}
+
+func TestFakeAndVerifiable(t *testing.T) {
+	if got := FakeLabel(BotGoogle); got != "fake_google" {
+		t.Errorf("FakeLabel = %q", got)
+	}
+	for _, l := range []string{BotGoogle, BotBing, BotYandex, BotBaidu, BotYahoo, BotMail, BotApple} {
+		if !Verifiable(l) {
+			t.Errorf("%q must be verifiable", l)
+		}
+	}
+	for _, l := range []string{BotNone, BotCrawler, BotHeadless, BotHTTPClient, BotScanner, BotSignUA, FakeLabel(BotGoogle)} {
+		if Verifiable(l) {
+			t.Errorf("%q must not be verifiable", l)
+		}
+	}
+}
+
+func TestBotByReferer(t *testing.T) {
 	if got := BotByReferer("https://spam-site.example/", []string{"spam-site.example"}); got != BotSignRef {
 		t.Errorf("referer sign = %q", got)
 	}
@@ -59,7 +106,6 @@ func TestBotByPTRAndReferer(t *testing.T) {
 		t.Errorf("clean referer = %q", got)
 	}
 }
-
 func TestInUABlacklist(t *testing.T) {
 	list := []string{"BadBot/1.0", "Evil/2.0"}
 	if !InUABlacklist("BadBot/1.0", list) {
@@ -82,10 +128,9 @@ func TestSignaturesLoadAndReload(t *testing.T) {
 	write(fileUA, "# bots\nAhrefsBot\nSemrushBot\n")
 
 	s := NewSignatures(dir, nil)
-	if got := len(s.UA()); got != 2 {
-		t.Fatalf("expected 2 UA signatures, got %d", got)
-	}
-	if BotByUA("x AhrefsBot y", s.UA()) != BotSignUA {
-		t.Error("AhrefsBot should be caught as sign_ua")
+	for _, ua := range []string{"x AhrefsBot y", "x SEMRUSHBOT y"} {
+		if got := BotByUA(ua, s.UAMatcher()); got != BotSignUA {
+			t.Errorf("BotByUA(%q) = %q; want sign_ua", ua, got)
+		}
 	}
 }

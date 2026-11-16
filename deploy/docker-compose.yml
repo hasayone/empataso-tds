@@ -5,8 +5,8 @@ services:
     image: clickhouse/clickhouse-server:24.8
     restart: unless-stopped
     ports:
-      - "${KUZTDS_CH_HTTP_PUBLISH:-8123:8123}"   # HTTP
-      - "${KUZTDS_CH_NATIVE_PUBLISH:-9000:9000}"   # native
+      - "${EMTDS_CH_HTTP_PUBLISH:-${KUZTDS_CH_HTTP_PUBLISH:-127.0.0.1:8123:8123}}"   # HTTP
+      - "${EMTDS_CH_NATIVE_PUBLISH:-${KUZTDS_CH_NATIVE_PUBLISH:-127.0.0.1:9000:9000}}"   # native
     environment:
       CLICKHOUSE_DB: kuztds
       CLICKHOUSE_USER: kuztds
@@ -22,7 +22,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     ports:
-      - "${KUZTDS_REDIS_PUBLISH:-6379:6379}"
+      - "${EMTDS_REDIS_PUBLISH:-${KUZTDS_REDIS_PUBLISH:-127.0.0.1:6379:6379}}"
 
 volumes:
   ch_data:

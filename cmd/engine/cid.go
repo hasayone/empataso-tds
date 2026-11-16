@@ -12,10 +12,12 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
+	"time"
 
-	"github.com/egerkuzma/kuztds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/atomicfile"
 )
 
 const (
@@ -32,12 +34,20 @@ const (
 	legacyCIDLen = 10
 	// cidKeyFile is the name of the generated signing key inside the state directory.
 	cidKeyFile = "cid.key"
-	// cidKeyBytes is the size of a generated signing key and the least size of KUZTDS_CID_KEY.
+	// cidKeyBytes is the size of a generated signing key and the least size of EMTDS_CID_KEY.
 	cidKeyBytes = 32
 	// originSigBytes is the MAC length kept in an origin token.
 	originSigBytes = 16
 	// originMACPrefix separates the origin MAC from other uses of the click id key.
 	originMACPrefix = "origin:"
+	// pathMACPrefix separates path-token MACs from legacy origin-token MACs.
+	pathMACPrefix = "origin2:"
+	// pathTokenTTL is the lifetime from root issuance and is not extended when re-signing.
+	pathTokenTTL = 2 * time.Hour
+	// pathTokenSkew is the accepted clock skew for a path token issued in the future.
+	pathTokenSkew = 5 * time.Minute
+	// pathTokenMaxLen bounds path-token parsing and MAC work for untrusted input.
+	pathTokenMaxLen = 256
 )
 
 // cidSigner issues and verifies click ids: nine random base36 characters and
@@ -88,7 +98,7 @@ func processKeySigner() *cidSigner {
 
 // cidKeyPath returns where the signing key file lives.
 //
-// override is KUZTDS_CID_KEY_FILE; groupsFile is KUZTDS_GROUPS_FILE. The file
+// override is EMTDS_CID_KEY_FILE; groupsFile is EMTDS_GROUPS_FILE. The file
 // sits in the state directory next to the groups file, the volume the engine
 // already writes. It returns "" when neither is set: the key then lives only in
 // the process.
@@ -104,13 +114,13 @@ func cidKeyPath(override, groupsFile string) string {
 
 // newCIDSigner builds the signer.
 //
-// env is the KUZTDS_CID_KEY value: it must be at least 32 bytes, a shorter one
+// env is the EMTDS_CID_KEY value: it must be at least 32 bytes, a shorter one
 // is ignored with a warning. path is the key file (see cidKeyPath). A missing
 // file is published atomically with mode 0600 and a fresh random key (never visible
 // half-written); a file that appears meanwhile is read instead. Any other read error, and a file that is
 // empty or not 32 hex-encoded bytes, leaves the file alone and gives a
-// process-lifetime key with a warning: ids issued before a restart then fail
-// verification, which only makes the offer step issue a new id. log may be nil.
+// process-lifetime key with an error log: ids and path tokens issued before a
+// restart then fail verification. log may be nil.
 func newCIDSigner(env, path string, log *slog.Logger) *cidSigner {
 	warn := func(msg string, args ...any) {
 		if log != nil {
@@ -121,14 +131,19 @@ func newCIDSigner(env, path string, log *slog.Logger) *cidSigner {
 		if len(env) >= cidKeyBytes {
 			return keyedSigner([]byte(env))
 		}
-		warn("cid key: KUZTDS_CID_KEY is shorter than 32 bytes, ignored", "len", len(env))
+		warn("cid key: EMTDS_CID_KEY is shorter than 32 bytes, ignored", "len", len(env))
 	}
 	if path == "" {
+		if log != nil {
+			log.Error("cid key: no persistent key configured, using a process key")
+		}
 		return processKeySigner()
 	}
 	key, err := loadCIDKey(path)
 	if err != nil {
-		warn("cid key: not usable, using a process key", "path", path, "err", err)
+		if log != nil {
+			log.Error("cid key: not usable, using a process key", "path", path, "err", err)
+		}
 		return processKeySigner()
 	}
 	return keyedSigner(key)
@@ -215,11 +230,6 @@ func (s *cidSigner) newCID() string {
 	return string(body) + s.sign(string(body))
 }
 
-// reusedCID reports whether c is a click id the offer step may keep: ten
-// lowercase hex characters (the legacy 10-hex format, accepted without an
-// expiry) or twelve base36 characters whose last three are a valid signature.
-// Any other value, imported ids included, is not reusable, so a visitor cannot
-// attach a click to a foreign id.
 // signOrigin returns a signed origin token for group gid.
 //
 // gid is the first-entry campaign id. The token is gid plus a dot plus a
@@ -234,6 +244,77 @@ func (s *cidSigner) signOrigin(gid string) string {
 	m.Write([]byte(gid))
 	sig := base64.RawURLEncoding.EncodeToString(m.Sum(nil)[:originSigBytes])
 	return gid + "." + sig
+}
+
+// signPath returns a signed path token carrying the first campaign, root click
+// id and root issue time.
+//
+// gid and rootCID identify the root click; issued is its issue time. The return
+// value is empty when either id is empty or rootCID contains a dot. It does not
+// return an error.
+func (s *cidSigner) signPath(gid, rootCID string, issued time.Time) string {
+	gid = strings.TrimSpace(gid)
+	rootCID = strings.TrimSpace(rootCID)
+	if gid == "" || rootCID == "" || strings.Contains(rootCID, ".") {
+		return ""
+	}
+	ts36 := strconv.FormatInt(issued.Unix(), 36)
+	body := gid + "." + rootCID + "." + ts36
+	m := hmac.New(sha256.New, s.signKey())
+	m.Write([]byte(pathMACPrefix))
+	m.Write([]byte(body))
+	sig := base64.RawURLEncoding.EncodeToString(m.Sum(nil)[:originSigBytes])
+	return body + "." + sig
+}
+
+// verifyPath checks a signed path token and its validity window.
+//
+// tok is the value of ?origin= and now is the verification time. It returns
+// the root campaign, root click id and issue time when the MAC and time window
+// are valid. Malformed, expired or too-far-future tokens return ok=false; no
+// error is returned.
+func (s *cidSigner) verifyPath(tok string, now time.Time) (gid, rootCID string, issued time.Time, ok bool) {
+	if len(tok) > pathTokenMaxLen {
+		return "", "", time.Time{}, false
+	}
+	tok = strings.TrimSpace(tok)
+	sigDot := strings.LastIndex(tok, ".")
+	if sigDot <= 0 || sigDot == len(tok)-1 {
+		return "", "", time.Time{}, false
+	}
+	tsDot := strings.LastIndex(tok[:sigDot], ".")
+	if tsDot <= 0 || tsDot == sigDot-1 {
+		return "", "", time.Time{}, false
+	}
+	rootDot := strings.LastIndex(tok[:tsDot], ".")
+	if rootDot <= 0 || rootDot == tsDot-1 {
+		return "", "", time.Time{}, false
+	}
+	gid, rootCID = tok[:rootDot], tok[rootDot+1:tsDot]
+	ts36, sig := tok[tsDot+1:sigDot], tok[sigDot+1:]
+	if strings.TrimSpace(gid) == "" || strings.TrimSpace(rootCID) == "" || ts36 == "" || sig == "" {
+		return "", "", time.Time{}, false
+	}
+	unix, err := strconv.ParseInt(ts36, 36, 64)
+	if err != nil || strconv.FormatInt(unix, 36) != ts36 {
+		return "", "", time.Time{}, false
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(sig)
+	if err != nil || len(raw) != originSigBytes {
+		return "", "", time.Time{}, false
+	}
+	body := tok[:sigDot]
+	m := hmac.New(sha256.New, s.signKey())
+	m.Write([]byte(pathMACPrefix))
+	m.Write([]byte(body))
+	if !hmac.Equal(raw, m.Sum(nil)[:originSigBytes]) {
+		return "", "", time.Time{}, false
+	}
+	issued = time.Unix(unix, 0)
+	if issued.After(now.Add(pathTokenSkew)) || now.After(issued.Add(pathTokenTTL)) {
+		return "", "", time.Time{}, false
+	}
+	return gid, rootCID, issued, true
 }
 
 // verifyOrigin checks an origin query token.
@@ -264,6 +345,11 @@ func (s *cidSigner) verifyOrigin(tok string) (string, bool) {
 	return gid, true
 }
 
+// reusedCID reports whether c is a click id the offer step may keep: ten
+// lowercase hex characters (the legacy 10-hex format, accepted without an
+// expiry) or twelve base36 characters whose last three are a valid signature.
+// Any other value, imported ids included, is not reusable, so a visitor cannot
+// attach a click to a foreign id.
 func (s *cidSigner) reusedCID(c string) bool {
 	switch len(c) {
 	case legacyCIDLen:
@@ -274,12 +360,23 @@ func (s *cidSigner) reusedCID(c string) bool {
 		}
 		return true
 	case cidLen:
-		for i := 0; i < len(c); i++ {
-			if strings.IndexByte(cidAlphabet, c[i]) < 0 {
-				return false
-			}
-		}
-		return hmac.Equal([]byte(c[cidRandLen:]), []byte(s.sign(c[:cidRandLen])))
+		return s.signedCID(c)
 	}
 	return false
+}
+
+// signedCID reports whether c is a click id this signer issued: twelve base36
+// characters whose last three are the signature of the first nine. It reads the
+// signature only and never issues an id. A legacy ten-hex id, an imported id and
+// any other text are not signed, so false does not mean the click is absent.
+func (s *cidSigner) signedCID(c string) bool {
+	if len(c) != cidLen {
+		return false
+	}
+	for i := 0; i < len(c); i++ {
+		if strings.IndexByte(cidAlphabet, c[i]) < 0 {
+			return false
+		}
+	}
+	return hmac.Equal([]byte(c[cidRandLen:]), []byte(s.sign(c[:cidRandLen])))
 }

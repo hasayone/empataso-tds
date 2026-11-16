@@ -6,20 +6,36 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 	"github.com/redis/go-redis/v9"
 )
 
 // Counters implements uniqueness, anti-flood, and stream limit counters on top of Redis.
 type Counters struct {
-	rdb redis.UniversalClient
-	now func() time.Time
+	rdb     redis.UniversalClient
+	now     func() time.Time
+	uniqMax time.Duration // ceiling of the lifetime of uniq:, uniqo: and st: keys
 }
 
 // NewCounters creates counters on top of a Redis connection.
+// The ceiling of the uniqueness window starts at DefaultUniqMax; see SetUniqMax.
 func NewCounters(rdb redis.UniversalClient) *Counters {
-	return &Counters{rdb: rdb, now: time.Now}
+	return &Counters{rdb: rdb, now: time.Now, uniqMax: DefaultUniqMax}
 }
+
+// SetUniqMax sets the ceiling of the lifetime of uniq:, uniqo: and st: keys.
+//
+// max is the ceiling; a non-positive value restores DefaultUniqMax. Call it once
+// at start, before the counters serve requests: it is not guarded for concurrent use.
+func (c *Counters) SetUniqMax(max time.Duration) {
+	if max <= 0 {
+		max = DefaultUniqMax
+	}
+	c.uniqMax = max
+}
+
+// UniqMax returns the ceiling of the lifetime of uniq:, uniqo: and st: keys.
+func (c *Counters) UniqMax() time.Duration { return c.uniqMax }
 
 // OpenRedis opens a connection to Redis at the given address.
 func OpenRedis(addr, password string, db int) (*redis.Client, error) {
@@ -35,30 +51,59 @@ func OpenRedis(addr, password string, db int) (*redis.Client, error) {
 
 // Unique returns true if the pair (id, ip) is seen for the first time within ttl.
 // Implemented atomically via SET NX. It is the key of the first step (landing or direct offer).
+// The visitor part is the address alone, the same string UniqIdentity returns without the agent.
 func (c *Counters) Unique(ctx context.Context, id string, ip netip.Addr, ttl time.Duration) (bool, error) {
-	return c.firstSeen(ctx, "uniq:", id, ip, ttl)
+	return c.Touch(ctx, "uniq:", id, ip.String(), ttl)
 }
 
 // UniqueOffer is Unique for the offer step: its own key, so the first move to
 // the offer inside the window is unique even though the landing step already
 // took the landing key. Arguments, result and failure behaviour match Unique.
 func (c *Counters) UniqueOffer(ctx context.Context, id string, ip netip.Addr, ttl time.Duration) (bool, error) {
-	return c.firstSeen(ctx, "uniqo:", id, ip, ttl)
+	return c.Touch(ctx, "uniqo:", id, ip.String(), ttl)
 }
 
-// firstSeen takes prefix+id+ip with SET NX for ttl; a non-positive ttl is 24h.
+// Touch is Unique for a caller-built visitor part.
+//
+// prefix is "uniq:" or "uniqo:". id is the campaign. visitor is UniqIdentity.
+// ttl is the campaign window; the stored lifetime is still min(ttl, ceiling).
 // It returns true when the key was free. On a Redis failure it returns true
 // with the error (fail-open).
-func (c *Counters) firstSeen(ctx context.Context, prefix, id string, ip netip.Addr, ttl time.Duration) (bool, error) {
-	if ttl <= 0 {
-		ttl = 24 * time.Hour
-	}
-	key := prefix + id + ":" + ip.String()
-	ok, err := c.rdb.SetNX(ctx, key, 1, ttl).Result()
+func (c *Counters) Touch(ctx context.Context, prefix, id, visitor string, ttl time.Duration) (bool, error) {
+	return c.firstSeen(ctx, prefix, id, visitor, ttl)
+}
+
+// firstSeen takes prefix+id+visitor with SET NX for min(ttl, ceiling); a non-positive
+// ttl is 24h. The ceiling is the one set by SetUniqMax. The campaign window is
+// not changed, only the lifetime of the key. visitor is the result of UniqIdentity.
+// It returns true when the key was free. On a Redis failure it returns true
+// with the error (fail-open).
+func (c *Counters) firstSeen(ctx context.Context, prefix, id, visitor string, ttl time.Duration) (bool, error) {
+	key := prefix + id + ":" + visitor
+	ok, err := c.rdb.SetNX(ctx, key, 1, capWindow(ttl, c.uniqMax)).Result()
 	if err != nil {
 		return true, err // fail-open: on failure treat as unique
 	}
 	return ok, nil
+}
+
+// TryLock takes key for ttl with SET NX.
+// key is the whole Redis key, so the caller picks the prefix. ttl must be
+// positive. It returns true when this caller now holds the key and false when
+// another holder has it. On a Redis failure it returns true with the error
+// (fail-open): the caller may continue and decides what to do without Redis.
+func (c *Counters) TryLock(ctx context.Context, key string, ttl time.Duration) (bool, error) {
+	ok, err := c.rdb.SetNX(ctx, key, 1, ttl).Result()
+	if err != nil {
+		return true, err
+	}
+	return ok, nil
+}
+
+// Unlock deletes a key taken with TryLock, so the next caller can take it.
+// A missing key is not an error. It returns the Redis error.
+func (c *Counters) Unlock(ctx context.Context, key string) error {
+	return c.rdb.Del(ctx, key).Err()
 }
 
 // Firewall allows no more than max requests from an IP within the window.

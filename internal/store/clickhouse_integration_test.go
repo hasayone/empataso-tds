@@ -2,8 +2,8 @@
 
 // Integration tests for the ClickHouse store. Each test creates its own
 // kuztds_it_* database, applies migrations/clickhouse/*.sql and drops it on
-// cleanup. Set KUZTDS_CLICKHOUSE_ADDR, KUZTDS_CLICKHOUSE_USER and
-// KUZTDS_CLICKHOUSE_PASSWORD; without them tests are skipped.
+// cleanup. Set EMTDS_CLICKHOUSE_ADDR, EMTDS_CLICKHOUSE_USER and
+// EMTDS_CLICKHOUSE_PASSWORD; without them tests are skipped.
 package store
 
 import (
@@ -19,7 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/logbuf"
 )
 
 const itDatabasePrefix = "kuztds_it_"
@@ -62,11 +63,11 @@ func assertITDatabaseName(t *testing.T, db string) {
 
 func chITEnv(t *testing.T) (addr, user, pass string) {
 	t.Helper()
-	addr = os.Getenv("KUZTDS_CLICKHOUSE_ADDR")
-	user = os.Getenv("KUZTDS_CLICKHOUSE_USER")
-	pass = os.Getenv("KUZTDS_CLICKHOUSE_PASSWORD")
+	addr = config.Env("EMTDS_CLICKHOUSE_ADDR")
+	user = config.Env("EMTDS_CLICKHOUSE_USER")
+	pass = config.Env("EMTDS_CLICKHOUSE_PASSWORD")
 	if addr == "" || user == "" || pass == "" {
-		t.Skip("KUZTDS_CLICKHOUSE_ADDR, KUZTDS_CLICKHOUSE_USER and KUZTDS_CLICKHOUSE_PASSWORD must be set — skipping integration tests")
+		t.Skip("EMTDS_CLICKHOUSE_ADDR, EMTDS_CLICKHOUSE_USER and EMTDS_CLICKHOUSE_PASSWORD must be set — skipping integration tests")
 	}
 	return addr, user, pass
 }
@@ -547,6 +548,18 @@ func TestCHCost(t *testing.T) {
 	}
 	if sum != 150 {
 		t.Fatalf("series USD = %d", sum)
+	}
+
+	slice, _, err := ch.SliceMeta(ctx, from, to, []Cond{{Field: "campaign_id", Op: "eq", Values: []string{group}}})
+	if err != nil {
+		t.Fatalf("SliceMeta: %v", err)
+	}
+	var sliceUSD int64
+	for _, r := range slice {
+		sliceUSD += r.Cost["USD"]
+	}
+	if sliceUSD != 150 {
+		t.Fatalf("report USD = %d rows=%+v", sliceUSD, slice)
 	}
 }
 

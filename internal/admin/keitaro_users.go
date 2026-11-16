@@ -4,8 +4,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/security"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // importUsers creates or updates panel users from Keitaro import output.

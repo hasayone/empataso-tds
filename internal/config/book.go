@@ -46,6 +46,20 @@ func (b *Book[T]) All() []T {
 	return out
 }
 
+// ByID returns the id-to-record map the book currently publishes, without a
+// copy. Reload replaces the whole map and never changes a published one, so
+// the snapshot stays valid and consistent while the caller reads it.
+// The caller must not write to the returned map or to its values' slices
+// and maps. A nil book yields a nil map, which reads as empty.
+func (b *Book[T]) ByID() map[string]T {
+	if b == nil {
+		return nil
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.byID
+}
+
 // Get returns the record with the given id.
 func (b *Book[T]) Get(id string) (T, bool) {
 	var zero T

@@ -11,7 +11,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // adminProfile is the environment administrator identity stored beside the password hash.
@@ -30,7 +30,7 @@ type setupView struct {
 }
 
 // adminProfilePath is admin.json in the same directory as the password file.
-// passwordFile is KUZTDS_ADMIN_PASSWORD_FILE. An empty path is an error:
+// passwordFile is EMTDS_ADMIN_PASSWORD_FILE. An empty path is an error:
 // there is nowhere to keep the identity. The returned path is not created.
 func adminProfilePath(passwordFile string) (string, error) {
 	if strings.TrimSpace(passwordFile) == "" {
@@ -218,7 +218,7 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := s.writeSetupFiles(body.Login, body.Email, hash); err != nil {
 		s.logWarn("setup files were not written", "err", err)
-		writeErr(w, http.StatusInternalServerError, "failed to save (check KUZTDS_ADMIN_PASSWORD_FILE)")
+		writeErr(w, http.StatusInternalServerError, "failed to save (check EMTDS_ADMIN_PASSWORD_FILE)")
 		return
 	}
 	if err := s.publish(hash); err != nil {

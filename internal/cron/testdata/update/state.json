@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "id": "0123456789abcdef",
+  "action": "apply",
+  "from": "aabbccddee1122334455667788990011aabbccdd",
+  "to": "bbccddee1122334455667788990011aabbccddee",
+  "started_at": "2026-01-15T10:05:00Z",
+  "finished_at": "2026-01-15T10:08:00Z",
+  "phase": "done",
+  "phases": [
+    {"name": "fetch",  "at": "2026-01-15T10:05:01Z", "ok": true},
+    {"name": "build",  "at": "2026-01-15T10:06:00Z", "ok": true},
+    {"name": "apply",  "at": "2026-01-15T10:07:30Z", "ok": true}
+  ],
+  "result": "ok",
+  "reason": "",
+  "events_lost": 0,
+  "cron_lagging": false,
+  "user": "admin"
+}

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // maxAnnounce bounds one run: a backlog after downtime becomes a summary, not
@@ -18,7 +18,7 @@ const maxAnnounce = 20
 // runConversions announces the postbacks recorded since the last run.
 func (r *Runner) runConversions(ctx context.Context, cfg Config) (string, error) {
 	if r.pb == nil {
-		return "", errors.New("no ClickHouse connection: set KUZTDS_CLICKHOUSE_ADDR for the cron service")
+		return "", errors.New("no ClickHouse connection: set EMTDS_CLICKHOUSE_ADDR for the cron service")
 	}
 	if !cfg.Telegram.Configured() {
 		return "", errors.New("telegram is not configured")

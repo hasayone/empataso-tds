@@ -112,7 +112,7 @@ func mapSettingCampaigns(camps []Campaign) ([]Group, []Loss) {
 		streams[strconv.Itoa(int(camp.ID))] = []KStream{{
 			ID: 9, Type: "regular", Name: "main", State: "active",
 			ActionType: "http", ActionPayload: "https://land.example/a",
-			Filters:    []KFilter{{Name: "unique", Mode: "accept", Payload: json.RawMessage(`["1"]`)}},
+			Filters: []KFilter{{Name: "unique", Mode: "accept", Payload: json.RawMessage(`["1"]`)}},
 		}}
 	}
 	ctx := &mapCtx{}

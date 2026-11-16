@@ -69,3 +69,48 @@ func TestSetReloadOnChange(t *testing.T) {
 		t.Errorf("an unchanged file must not be re-read, got %v", changed)
 	}
 }
+
+// TestSetLen checks the range count of a loaded, an empty, a missing and an unknown list, and that Len does not allocate.
+func TestSetLen(t *testing.T) {
+	dir := t.TempDir()
+	writeDat(t, dir, "ip_two", "10.0.0.0/8\n192.168.0.0/16\n")
+	writeDat(t, dir, "ip_empty", "")
+
+	s := NewSet(dir, nil)
+	s.Load("ip_two", "ip_empty", "ip_missing")
+
+	for name, want := range map[string]int{"ip_two": 2, "ip_empty": 0, "ip_missing": 0, "nonexistent": 0} {
+		if got := s.Len(name); got != want {
+			t.Errorf("Len(%q) = %d, want %d", name, got, want)
+		}
+	}
+	if allocs := testing.AllocsPerRun(100, func() { s.Len("ip_two"); s.Len("nonexistent") }); allocs != 0 {
+		t.Errorf("Len allocates %v times per call", allocs)
+	}
+	writeDat(t, dir, "ip_empty", "172.16.0.0/12\n")
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "ip_empty.dat"), future, future); err != nil {
+		t.Fatal(err)
+	}
+	s.Reload()
+	if got := s.Len("ip_empty"); got != 1 {
+		t.Errorf("Len after reload = %d, want 1", got)
+	}
+}
+
+// TestNilSetReadsAreEmpty checks that the reading methods of a nil Set answer as an empty set.
+func TestNilSetReadsAreEmpty(t *testing.T) {
+	var s *Set
+	if label, ok := s.Lookup("ip_google", mustAddr("66.249.66.1")); ok || label != "" {
+		t.Errorf("Lookup = %q, %v, want empty", label, ok)
+	}
+	if got := s.Len("ip_google"); got != 0 {
+		t.Errorf("Len = %d, want 0", got)
+	}
+	if got := s.Get("ip_google"); got == nil || got.Len() != 0 {
+		t.Errorf("Get = %v, want an empty index", got)
+	}
+	if changed := s.Reload(); len(changed) != 0 {
+		t.Errorf("Reload = %v, want none", changed)
+	}
+}

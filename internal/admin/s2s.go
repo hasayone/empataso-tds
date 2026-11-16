@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // handleS2SGet writes the s2s catalog of the current section.
@@ -29,7 +29,7 @@ func (s *Server) handleS2SGet(w http.ResponseWriter, r *http.Request) {
 	v := s.viewerFrom(r.Context())
 	out := make([]config.OutboundPostback, 0, len(list))
 	for _, p := range list {
-		if !v.seesBoard(p.BoardID) {
+		if isCheckerManagedID(p.ID) || !v.seesBoard(p.BoardID) {
 			continue
 		}
 		ref := ref{id: p.ID, board: p.BoardID}
@@ -46,6 +46,8 @@ func (s *Server) handleS2SGet(w http.ResponseWriter, r *http.Request) {
 // A template of a hidden section stays. The body is at most 1 MiB.
 // A nil store is 503. A bad body is 400. A template still used by a campaign is 400. A save error is 500.
 // Success writes 200 and the accepted rows with their stored section ids.
+// The templates of the checker integration (ids that start with "checker-") are never part of
+// the body: a body row with such an id is 400, and the stored ones are kept as they are.
 func (s *Server) handleS2SPut(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.S2S == nil {
 		writeErr(w, http.StatusServiceUnavailable, "s2s store unavailable")
@@ -62,22 +64,30 @@ func (s *Server) handleS2SPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	for _, p := range list {
+		if isCheckerManagedID(p.ID) {
+			writeErr(w, http.StatusBadRequest, msgCheckerManaged)
+			return
+		}
+	}
 	if msg := prepareS2S(list); msg != "" {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	s.groupsMu.Lock()
 	defer s.groupsMu.Unlock()
-	stored, err := s.cfg.S2S.List(r.Context())
+	all, err := s.cfg.S2S.List(r.Context())
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "read error")
 		return
 	}
+	stored, managed := splitCheckerManaged(all)
 	merged, response := mergeS2SList(v, stored, list)
 	if !v.admin && !s2sWriteAllowed(v, stored, response) {
 		writeErr(w, http.StatusForbidden, "forbidden")
 		return
 	}
+	merged = append(merged, managed...)
 	if msg, code := s.removedS2SUse(r.Context(), merged); code != 0 {
 		writeErr(w, code, msg)
 		return

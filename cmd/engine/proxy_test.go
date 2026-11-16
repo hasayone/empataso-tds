@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/geo"
 )
 
 func TestProxyOrgSelectsStream(t *testing.T) {

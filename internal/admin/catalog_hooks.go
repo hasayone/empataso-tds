@@ -8,7 +8,7 @@ import (
 
 // catalogHooks assigns a number and tidies the list around one catalog.
 // A nil hooks value means no numbering: an empty id is rejected by valid.
-// onDelete runs after the record is removed and the file is saved.
+// onDelete runs after the record is removed, the file is saved and the write lock is released.
 // view, when set, shapes the GET list response.
 type catalogHooks[T any] struct {
 	seq      *idSeq
@@ -37,13 +37,13 @@ type catalogHooks[T any] struct {
 	// answered the request itself. Nil leaves every DELETE to the common path.
 	preDelete func(w http.ResponseWriter, r *http.Request) bool
 	// label and owner feed grant checks. setOwner writes CreatedBy on create.
-	label     func(T) string
-	owner     func(T) string
-	setOwner  func(*T, string)
+	label    func(T) string
+	owner    func(T) string
+	setOwner func(*T, string)
 	// boardID reads the section id of a row. When set, list/get/insert are scoped to the current section.
 	boardID func(T) string
 	// setBoard writes the section id on create. Nil leaves board_id as sent.
-	setBoard func(*T, string)
+	setBoard  func(*T, string)
 	userLimit func(*T, *T) string
 	// userCheck runs for a non-admin caller on create (old is nil) and replace, after
 	// userLimit. A non-empty message refuses the write with 400. Nil allows it.
@@ -60,6 +60,10 @@ type catalogHooks[T any] struct {
 	// keepIn runs on a non-admin write: it puts the stored value back into item for
 	// every field the caller may not see, or the zero value when old is nil. Nil keeps the body.
 	keepIn func(v viewer, item *T, old *T)
+	// restoreCheck runs when a deleted record is put back, under the write lock, and may read
+	// other stores. A non-empty message means a record the item links to is gone; the restore
+	// is refused with ai_conflict. Nil accepts every record.
+	restoreCheck func(ctx context.Context, item T) string
 }
 
 // crudCatalog holds shared state for one JSON catalog's HTTP handlers.
@@ -114,7 +118,6 @@ func visibleCatalog[T any](v viewer, hooks *catalogHooks[T], idOf func(T) string
 	}
 	return out
 }
-
 
 // maskedItem returns item after hooks.maskOut for v. item is a copy, so the stored
 // record is not touched. An administrator gets item as it is.

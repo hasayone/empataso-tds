@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // promoCampaign is the shape of the local promo flow: the public path is
@@ -63,13 +63,13 @@ func TestCampaignLinkFromLocalhostIsCounted(t *testing.T) {
 			if got := rec.Header().Get("Location"); got != "https://example.com/b" {
 				t.Fatalf("location = %q", got)
 			}
-			if got := rec.Header().Get("X-Kuztds-Stream"); got != "desktop" {
+			if got := rec.Header().Get("X-Emtds-Stream"); got != "desktop" {
 				t.Fatalf("stream = %q", got)
 			}
-			if got := rec.Header().Get("X-Kuztds-Bot"); got != "-" {
+			if got := rec.Header().Get("X-Emtds-Bot"); got != "-" {
 				t.Fatalf("bot = %q, a browser opening the link must stay a click", got)
 			}
-			if got := rec.Header().Get("X-Kuztds-Uniq"); got != "yes" {
+			if got := rec.Header().Get("X-Emtds-Uniq"); got != "yes" {
 				t.Fatalf("uniq = %q", got)
 			}
 			if len(ins.events) != 1 {

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // adminHostMiddleware rejects requests to admin.* hosts that are not allowed parked domains.

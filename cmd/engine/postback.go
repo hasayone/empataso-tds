@@ -10,9 +10,11 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/server"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // postbackOriginalMax is the stored length of the raw postback status.
@@ -145,11 +147,23 @@ func postbackResult(cid string, hasStore bool, recErr error) (code int, outcome,
 	return http.StatusServiceUnavailable, "store_error", "store unavailable"
 }
 
-// postback handles GET and POST /postback. It does not require the pixel key.
-// The body is JSON: {"status":"success"} or {"status":"error","error":"..."}.
-// A repeat of the same click id and status is stored again but does not queue
-// a second outbound request. The network postback URL is never called.
-func (d *engineDeps) postback(w http.ResponseWriter, r *http.Request) {
+// handlePostback is the internal implementation called by both /postback and
+// the Keitaro /{key}/postback path in root. pathKey is the key extracted from
+// the URL path segment; it overrides the "key" query or form parameter when
+// non-empty. The auth outcome bad_key is counted in stats but the rejected
+// request is not written to the postback journal.
+//
+// The whole handler is bounded by postbackHandlerTimeout, and the store call in
+// it by postbackStoreTimeout; the writes to the disk queue are not cancellable
+// and wait for the disk. When the store fails, times out or is not connected, or
+// when the click is not there yet and the click id is signed, the postback is
+// written to the disk queue with its arrival time and the network gets 200:
+// outcome queued for the first case, retry for the second. A queue that cannot
+// take it leaves the answer as postbackResult gives it; when the cause is a full
+// quota the outcome counted is queue_full (store failure) or retry_overflow
+// (missing click) in place of the one postbackResult gave, and the answer is
+// the same. An unsigned click id without a click is a final 404.
+func (d *engineDeps) handlePostback(w http.ResponseWriter, r *http.Request, pathKey string) {
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
 		writePostback(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -161,79 +175,166 @@ func (d *engineDeps) postback(w http.ResponseWriter, r *http.Request) {
 			q = r.Form
 		}
 	}
+	// Auth check: key is taken from the URL path segment first, then from the
+	// query or POST form. A rejected key is counted in stats as bad_key but
+	// is not written to the postback journal.
+	if d != nil {
+		authKey := pathKey
+		if authKey == "" {
+			authKey = q.Get("key")
+		}
+		switch d.pbAuth.check(authKey, d.log) {
+		case authDenyBadKey:
+			d.stats.postbacks.note("bad_key")
+			writePostback(w, http.StatusForbidden, "bad key")
+			return
+		case authDenyNoSecret:
+			d.stats.postbacks.note("bad_key")
+			writePostback(w, http.StatusForbidden, "postback secret not set")
+			return
+		}
+	}
 	in := parsePostback(q)
 	if !in.ok {
+		if d != nil {
+			d.stats.postbacks.note("invalid")
+		}
 		writePostback(w, http.StatusBadRequest, "invalid payout")
 		return
 	}
+	at := time.Now()
+	ctx, cancelAll := context.WithTimeout(r.Context(), postbackHandlerTimeout)
+	defer cancelAll()
+	cs := d.convStore()
 	var recErr error
-	hasStore := d != nil && d.chConn != nil
-	if in.cid != "" && hasStore {
-		var gid string
-		gid, recErr = d.chConn.RecordConversion(r.Context(), store.PostbackIn{
+	if in.cid != "" && cs != nil {
+		var res store.ConversionResult
+		sctx, cancel := context.WithTimeout(ctx, postbackStoreTimeout)
+		res, recErr = cs.RecordConversion(sctx, store.PostbackIn{
 			CID: in.cid, Profit: in.profit, DepSum: in.depSum, Status: in.status,
-			Original: in.original, TID: in.tid,
+			Original: in.original, TID: in.tid, At: at,
 		})
+		cancel()
 		if recErr != nil {
 			if d.log != nil {
 				d.log.Warn("postback failed", "cid", in.cid, "err", recErr)
 			}
 		} else {
-			d.queueOutbound(gid, in.cid, in.profit, in.status, q)
+			_, subs := config.ApplySource(q, nil)
+			d.queueOutboundCtx(ctx, res, in.cid, in.profit, in.status, subs)
 		}
 	}
-	code, outcome, errMsg := postbackResult(in.cid, hasStore, recErr)
+	code, outcome, errMsg := postbackResult(in.cid, cs != nil, recErr)
+	if parked, ok := d.parkPostback(r, in, q, at, outcome); ok {
+		code, outcome, errMsg = http.StatusOK, parked, ""
+	} else {
+		outcome = parked
+	}
 	if d != nil {
+		d.stats.postbacks.note(outcome)
 		d.notePostback(in.cid, in.status, outcome, "in", in.profit)
 	}
 	writePostback(w, code, errMsg)
 }
 
+// parkPostback puts a postback that could not be settled now into the disk
+// queue. outcome is what postbackResult decided. It returns the outcome to
+// count and whether the postback was queued. When it was, the outcome is queued
+// (the store failed, with a signed click id or within the small quota of
+// unsigned ones) or retry (a signed click not found yet) and the network gets
+// 200. When it was not, the answer stays as postbackResult gave it and the
+// outcome is the one passed in, except for a full quota: queue_full for a store
+// failure and retry_overflow for a missing click replace it, so the request is
+// counted once. Not queued also means there is no queue, the click id is empty,
+// the outcome is not one a queue can cure, the click id is not signed and its
+// click is missing (final), or the disk refused the segment.
+func (d *engineDeps) parkPostback(r *http.Request, in postbackIn, q url.Values, at time.Time, outcome string) (string, bool) {
+	if d == nil || d.pbq == nil || in.cid == "" {
+		return outcome, false
+	}
+	e := newSpooledPostback(in, q, at)
+	var err error
+	switch outcome {
+	case "no_store", "store_error":
+		kind := kindStore
+		if !d.signedCID(in.cid) {
+			kind = kindUnsigned
+		}
+		if err = d.pbq.accept(e, kind, senderOf(r)); err == nil {
+			return "queued", true
+		}
+		if errors.Is(err, errStoreFull) {
+			return "queue_full", false
+		}
+	case "click_not_found":
+		if !d.signedCID(in.cid) {
+			return outcome, false
+		}
+		if err = d.pbq.accept(e, kindRetry, senderOf(r)); err == nil {
+			return "retry", true
+		}
+		if errors.Is(err, errRetryFull) {
+			return "retry_overflow", false
+		}
+	default:
+		return outcome, false
+	}
+	if d.log != nil {
+		d.log.Warn("postback queue refused a postback", "cid", in.cid, "err", err)
+	}
+	return outcome, false
+}
+
+// senderOf returns the address that sent the request, or "unknown" when the
+// middleware did not set one.
+func senderOf(r *http.Request) string {
+	if ip := server.ClientIP(r.Context()); ip.IsValid() {
+		return ip.String()
+	}
+	return "unknown"
+}
+
 // queueOutbound sends the campaign templates once for this click and status.
-// A full queue removes the mark so a later pixel can try again.
-func (d *engineDeps) queueOutbound(groupID, cid string, profit float64, status string, q url.Values) {
-	if d == nil || !d.markOutbound(cid, status) {
+// res is what the store reported for the conversion: the campaign and whether
+// the pair is new. Only a new pair queues anything, so a repeat of the postback
+// never sends a second outbound request; the lock of the pair covers repeats
+// that arrive at the same time. A campaign whose templates were all dropped
+// is counted in outbound.dropped and frees the lock, but a later repeat is not
+// new and sends nothing: a dropped job is lost, not retried. It is
+// queueOutboundCtx without a deadline.
+func (d *engineDeps) queueOutbound(res store.ConversionResult, cid string, profit float64, status string, subs [config.MaxSubID]string) {
+	d.queueOutboundCtx(context.Background(), res, cid, profit, status, subs)
+}
+
+// queueOutboundCtx is queueOutbound with ctx bounding the Redis lock; an
+// expired ctx makes the lock fall back to memory at once. The write of the job
+// to the disk queue is not cancellable.
+func (d *engineDeps) queueOutboundCtx(ctx context.Context, res store.ConversionResult, cid string, profit float64, status string, subs [config.MaxSubID]string) {
+	if d == nil || !res.Fresh || !d.takeOutbound(ctx, cid, status) {
 		return
 	}
-	if !d.fireOutbound(groupID, cid, profit, status, q) {
-		d.unmarkOutbound(cid, status)
+	if !d.fireOutbound(res.GroupID, cid, res.RootCID, profit, status, subs) {
+		d.releaseOutbound(ctx, cid, status)
 	}
 }
 
-// markOutbound reports whether this click id and status may queue an outbound
-// postback. The first call wins; a later call with the same pair returns false.
-func (d *engineDeps) markOutbound(cid, status string) bool {
-	if d == nil {
-		return false
-	}
-	key := cid + "\x00" + status
-	d.sentMu.Lock()
-	defer d.sentMu.Unlock()
-	if d.sent == nil {
-		d.sent = map[string]struct{}{}
-	}
-	if _, ok := d.sent[key]; ok {
-		return false
-	}
-	d.sent[key] = struct{}{}
-	return true
+// postback handles GET and POST /postback. It delegates to handlePostback with
+// an empty path key: the authentication key is taken from the "key" query or
+// form parameter.
+func (d *engineDeps) postback(w http.ResponseWriter, r *http.Request) {
+	d.handlePostback(w, r, "")
 }
 
-// unmarkOutbound forgets a click and status whose jobs were all dropped.
-func (d *engineDeps) unmarkOutbound(cid, status string) {
-	if d == nil {
-		return
-	}
-	d.sentMu.Lock()
-	defer d.sentMu.Unlock()
-	delete(d.sent, cid+"\x00"+status)
-}
-
-// notePostback writes one inbound or outbound line. The key and the raw query
-// are not stored. A missing store is ignored.
+// notePostback adds one inbound or outbound line to the postback journal. The
+// key and the raw query are not stored. The line is queued without waiting: the
+// journal writer inserts it in a batch or parks it on disk. Without a journal
+// writer the line is ignored.
 func (d *engineDeps) notePostback(subid, status, outcome, direction string, payout float64) {
-	if d == nil || d.chConn == nil {
+	if d == nil || d.plog == nil {
 		return
 	}
-	_ = d.chConn.WritePostbackLog(context.Background(), subid, status, outcome, direction, payout)
+	d.plog.note(store.PostbackLogRow{
+		Ts: time.Now(), Subid: subid, Status: status, Payout: payout,
+		Outcome: outcome, Direction: direction,
+	})
 }

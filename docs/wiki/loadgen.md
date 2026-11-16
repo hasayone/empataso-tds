@@ -1,17 +1,17 @@
 # Нагрузка
 
-`cmd/loadgen` шлёт клики на тестовые кампании движка и печатает сводку. В образ `kuztds:local` утилита не входит: образ собирает engine, admin и cron. Её запускают из каталога `tds` образом `kuztds-src`. Стреляют только по тестовым кампаниям.
+`cmd/loadgen` шлёт клики на тестовые кампании движка и печатает сводку. В образ `emtds:local` утилита не входит: образ собирает engine, admin и cron. Её запускают из каталога `tds` образом `emtds-src`. Стреляют только по тестовым кампаниям.
 
 Образ собирается один раз:
 
 ```bash
-docker build -f Dockerfile --target build -t kuztds-src .
+docker build -f Dockerfile --target build -t emtds-src .
 ```
 
 Запуск, сеть стенда `deploy_default`, движок по имени `engine`:
 
 ```bash
-docker run --rm --network deploy_default -v <tds>:/src -w /src kuztds-src go run ./cmd/loadgen -url http://engine:8080 -campaigns loadtest-1,loadtest-2 -n 5000 -duration 60s
+docker run --rm --network deploy_default -v <tds>:/src -w /src emtds-src go run ./cmd/loadgen -url http://engine:8080 -campaigns loadtest-1,loadtest-2 -n 5000 -duration 60s
 ```
 
 `<tds>` — путь к каталогу `tds` на хосте. В `-campaigns` подставляют id тестовых кампаний.
@@ -51,6 +51,32 @@ error <текст>
 Ответ клика не ждёт записи в ClickHouse. Число строк сверяют с `sent` по `group_id` кампании в таблице `events`. Ноль в обоих заголовках и столько же строк, сколько запросов, значит потерь нет.
 
 Уборка тестовых данных: `DELETE /api/logs?group=<id>` снимает журнал кликов этой кампании. Маршрут требует администратора; пустой `group` отвечает `400`, успех — `200` и `{"status":"deleted"}`. `DELETE /api/groups/<id>` снимает саму кампанию (раздел `flows`). Нет такого id — `404`, успех — `200` и `{"status":"deleted"}`.
+
+## Нагрузка на реальных кампаниях: `deploy/loadtest`
+
+`cmd/loadgen` стреляет по тестовым кампаниям. Для замеров на реальных кампаниях после импорта Keitaro, со сбоями и с проверкой по ClickHouse есть `deploy/loadtest/run.ps1` (только локально, Windows PowerShell). Генератор — `grafana/k6` в своём контейнере с лимитами CPU и памяти в сети `deploy_default`.
+
+| Действие | Что делает |
+|---|---|
+| `prepare` | копирует `groups.json` из engine, берёт реальные клики из ClickHouse и строит `targets.json` (`targets.mjs`) |
+| `engine-load` | пересоздаёт engine с прод-лимитами (`-EngineMem`, `-EngineCpus`, `GOMEMLIMIT`) |
+| `engine-normal` | возвращает engine к обычным локальным настройкам |
+| `engine-recreate` | пересоздаёт только engine |
+| `clicks` | прогон кликов: `-Rate` и `-Duration` или `-Stages "rate:duration,..."` |
+| `chaos` | прогон кликов со сбоем `-ChaosTarget clickhouse\|redis\|engine` через `-ChaosAt` с на `-ChaosFor` с |
+| `postbacks` | `-Count` постбеков по кликам прогона `-FromRun` с частотой `-Rate` (можно с `-ChaosTarget`) |
+| `cleanup` | удаляет тестовые строки и ключи Redis тестовых адресов |
+| `job` | состояние переноса Keitaro |
+
+Пример: `powershell -NoProfile -ExecutionPolicy Bypass -File deploy\loadtest\run.ps1 -Action chaos -Run ch60 -Rate 167 -Duration 120s -ChaosTarget clickhouse -ChaosAt 20 -ChaosFor 60`.
+
+- **Что исключено из целей.** Кампании с лендингами, ссылками на другие кампании и исходящими шаблонами постбеков. PHP-лендинги делают внешние запросы; тестовые клики не должны уходить наружу. После прогона отчёт проверяет `landings_served = 0` и `outbound_sent = 0`.
+- **Сбои** — только `docker pause` и `docker unpause` контейнеров `deploy-clickhouse-1` и `deploy-redis-1`, без `stop`, `rm` и `down`. Контейнер снимается с паузы и при ошибке, и при Ctrl+C. Пересоздание engine требует простоя переноса Keitaro (`running` и `sync_running` — `false`). ClickHouse, Redis и cron не пересоздаются.
+- **Метки.** Клики несут `sub_id_12 = lt-<прогон>-<n>`. `cleanup` удаляет `events` с `lt-` за два дня лёгким `DELETE`, конверсии и `postback_log` тестовых кликов, ключи `uniq*` и `st:` тестовых адресов.
+- **Отчёт** — JSON и Markdown в `%LOCALAPPDATA%\emtds-load\<прогон>.report.*`: отправлено, ответы по классам, записано, «ответили, но не записали», задержки, CPU и память, пики очереди и спула из `GET /internal/metrics`, приросты потерь engine.
+- **Цели устаревают.** Если перенос Keitaro удалил кампанию, engine отвечает на её адрес пустым `200` без записи, и отчёт покажет «ответили, но не записали». Перед замером повторяют `prepare`.
+
+Бенчмарки горячего пути: `cmd/engine/hotpath_bench_test.go` (`BenchmarkCatalogs`, `BenchmarkRootOfferStream`, `BenchmarkRootBotPath`), запуск через `deploy/gotest.ps1`.
 
 ## Замер 17.10.2026
 

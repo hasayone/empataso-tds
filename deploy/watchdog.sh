@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# KuzTDS watchdog: once a minute starts Docker, nginx and stopped tracker
+# EmTDS watchdog: once a minute starts Docker, nginx and stopped tracker
 # containers. It never tears the stack down, never removes volumes, never
 # recreates ClickHouse, Redis, php or cron.
+# While update.sh holds the update lock, watchdog yields its pass.
 
 set -euo pipefail
 
@@ -10,13 +11,20 @@ TDS_DIR=
 if [[ -n "$SELF" ]]; then
 	TDS_DIR=$(dirname "$(dirname "$SELF")")
 fi
-STATE_DIR="${KUZTDS_INSTALL_STATE_DIR:-/etc/kuztds}"
-SERVER_ENV="${KUZTDS_SERVER_ENV:-$STATE_DIR/server.env}"
+STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-${KUZTDS_INSTALL_STATE_DIR:-}}"
+if [[ -z "$STATE_DIR" ]]; then
+	STATE_DIR=/etc/emtds
+	if [[ ! -e /etc/emtds && -d /etc/kuztds ]]; then
+		STATE_DIR=/etc/kuztds
+	fi
+fi
+SERVER_ENV="${EMTDS_SERVER_ENV:-${KUZTDS_SERVER_ENV:-$STATE_DIR/server.env}}"
 INFRA_OVERRIDE="$STATE_DIR/compose.infra.yml"
 APP_OVERRIDE="$STATE_DIR/compose.app.yml"
-UNIT_DIR="${KUZTDS_WATCHDOG_UNIT_DIR:-/etc/systemd/system}"
-LOCK_FILE="${KUZTDS_WATCHDOG_LOCK:-/run/kuztds-watchdog.lock}"
-APP_CONTAINERS=(kuztds-engine kuztds-admin kuztds-cron kuztds-php)
+UNIT_DIR="${EMTDS_WATCHDOG_UNIT_DIR:-${KUZTDS_WATCHDOG_UNIT_DIR:-/etc/systemd/system}}"
+LOCK_FILE="${EMTDS_WATCHDOG_LOCK:-${KUZTDS_WATCHDOG_LOCK:-/run/emtds-watchdog.lock}}"
+UPDATE_LOCK_FILE="${EMTDS_UPDATE_LOCK:-/run/emtds-update.lock}"
+APP_CONTAINERS=(emtds-engine emtds-admin emtds-cron emtds-php)
 INFRA_CONTAINERS=(deploy-clickhouse-1 deploy-redis-1)
 
 # Назначение: короткое сообщение сторожа в journald.
@@ -24,7 +32,7 @@ INFRA_CONTAINERS=(deploy-clickhouse-1 deploy-redis-1)
 # Результат: строка на stdout.
 # Ошибки: нет.
 log() {
-	printf 'kuztds-watchdog: %s\n' "$*"
+	printf 'emtds-watchdog: %s\n' "$*"
 }
 
 # Назначение: последнее значение KEY= из env-файла.
@@ -46,8 +54,21 @@ env_value() {
 	printf '%s' "$val"
 }
 
+# Назначение: значение EMTDS_<имя> из env-файла, при пустом — старое KUZTDS_<имя>.
+# Параметры: $1 — путь; $2 — имя без префикса.
+# Результат: значение на stdout, может быть пустым.
+# Ошибки: нет.
+env_value_compat() {
+	local file=$1 name=$2 val
+	val=$(env_value "$file" "EMTDS_${name}")
+	if [[ -z "$val" ]]; then
+		val=$(env_value "$file" "KUZTDS_${name}")
+	fi
+	printf '%s' "$val"
+}
+
 # Назначение: хост:порт публикации из host:hostport:containerport.
-# Параметры: $1 — значение KUZTDS_*_PUBLISH; $2 — запасной хост:порт.
+# Параметры: $1 — значение EMTDS_*_PUBLISH; $2 — запасной хост:порт.
 # Результат: host:port на stdout.
 # Ошибки: нет.
 publish_listen() {
@@ -255,6 +276,10 @@ ensure_app_container() {
 		log "${name} нет, php/cron не создаём"
 		return 1
 	fi
+	if [[ "$(container_state "kuztds-${service}")" != missing ]]; then
+		log "${name} нет, есть старый kuztds-${service}: сначала deploy/migrate-emtds.sh, новый контейнер не создаём"
+		return 1
+	fi
 	log "app up -d --no-deps ${service}"
 	app_compose up -d --no-deps "$service"
 	[[ "$(container_state "$name")" == running ]]
@@ -282,19 +307,19 @@ started_ago() {
 # Ошибки: код 1.
 ensure_engine_health() {
 	local url=$1 ago
-	ensure_app_container kuztds-engine engine || return 1
+	ensure_app_container emtds-engine engine || return 1
 	if http_ok "$url"; then
 		return 0
 	fi
-	ago=$(started_ago kuztds-engine)
+	ago=$(started_ago emtds-engine)
 	if (( ago < 40 )); then
 		log "движок стартовал ${ago}s назад, ждём healthz"
 		sleep 5
 		http_ok "$url" && return 0
 		return 1
 	fi
-	log "restart kuztds-engine (healthz)"
-	timeout 30 docker restart kuztds-engine >/dev/null
+	log "restart emtds-engine (healthz)"
+	timeout 30 docker restart emtds-engine >/dev/null
 	sleep 8
 	http_ok "$url"
 }
@@ -305,12 +330,12 @@ ensure_engine_health() {
 # Ошибки: контейнер так и не running, код 1.
 ensure_admin() {
 	local url=$1
-	if [[ "$(container_state kuztds-admin)" == running ]]; then
+	if [[ "$(container_state emtds-admin)" == running ]]; then
 		http_ok "$url" && return 0
 		log "admin running, health молчит — не restart (keitaro job)"
 		return 0
 	fi
-	ensure_app_container kuztds-admin admin || return 1
+	ensure_app_container emtds-admin admin || return 1
 	http_ok "$url" && return 0
 	log "admin поднят, health ещё молчит"
 	return 0
@@ -329,11 +354,11 @@ run_check() {
 	ensure_docker || return 1
 	ensure_unit nginx.service || true
 	ensure_infra || rc=1
-	ensure_app_container kuztds-php php || true
-	ensure_app_container kuztds-cron cron || true
-	engine_url="http://$(publish_listen "$(env_value "$SERVER_ENV" KUZTDS_ENGINE_PUBLISH)" "127.0.0.1:18080")/healthz"
-	admin_url="http://$(publish_listen "$(env_value "$SERVER_ENV" KUZTDS_ADMIN_PUBLISH)" "127.0.0.1:8090")/api/health"
-	ch_url="http://$(publish_listen "$(env_value "$SERVER_ENV" KUZTDS_CH_HTTP_PUBLISH)" "127.0.0.1:8123")/ping"
+	ensure_app_container emtds-php php || true
+	ensure_app_container emtds-cron cron || true
+	engine_url="http://$(publish_listen "$(env_value_compat "$SERVER_ENV" ENGINE_PUBLISH)" "127.0.0.1:18080")/healthz"
+	admin_url="http://$(publish_listen "$(env_value_compat "$SERVER_ENV" ADMIN_PUBLISH)" "127.0.0.1:8090")/api/health"
+	ch_url="http://$(publish_listen "$(env_value_compat "$SERVER_ENV" CH_HTTP_PUBLISH)" "127.0.0.1:8123")/ping"
 	ensure_engine_health "$engine_url" || rc=1
 	ensure_admin "$admin_url" || true
 	if ! http_ok "$ch_url"; then
@@ -352,8 +377,8 @@ run_check() {
 # Результат: timer enabled.
 # Ошибки: запись юнитов, код 1.
 install_units() {
-	local service="$UNIT_DIR/kuztds-watchdog.service"
-	local timer="$UNIT_DIR/kuztds-watchdog.timer"
+	local service="$UNIT_DIR/emtds-watchdog.service"
+	local timer="$UNIT_DIR/emtds-watchdog.timer"
 	if [[ -z "$SELF" || ! -f "$SELF" ]]; then
 		log "нет пути к watchdog.sh"
 		return 1
@@ -361,7 +386,7 @@ install_units() {
 	install -d -m 0755 "$UNIT_DIR"
 	cat >"$service" <<EOF
 [Unit]
-Description=KuzTDS watchdog
+Description=EmTDS watchdog
 After=docker.service network-online.target
 Wants=docker.service
 
@@ -373,20 +398,20 @@ TimeoutStartSec=50
 EOF
 	cat >"$timer" <<EOF
 [Unit]
-Description=KuzTDS watchdog every minute
+Description=EmTDS watchdog every minute
 
 [Timer]
 OnBootSec=20s
 OnUnitActiveSec=60s
 AccuracySec=5s
 Persistent=true
-Unit=kuztds-watchdog.service
+Unit=emtds-watchdog.service
 
 [Install]
 WantedBy=timers.target
 EOF
 	chmod 0644 "$service" "$timer"
-	if [[ "${KUZTDS_WATCHDOG_SKIP_SYSTEMCTL:-}" == 1 ]]; then
+	if [[ "${EMTDS_WATCHDOG_SKIP_SYSTEMCTL:-${KUZTDS_WATCHDOG_SKIP_SYSTEMCTL:-}}" == 1 ]]; then
 		log "юниты записаны в ${UNIT_DIR}"
 		return 0
 	fi
@@ -395,8 +420,8 @@ EOF
 	if systemctl list-unit-files nginx.service --no-legend 2>/dev/null | grep -q .; then
 		systemctl enable --now nginx.service >/dev/null 2>&1 || true
 	fi
-	systemctl enable --now kuztds-watchdog.timer
-	log "timer kuztds-watchdog включён"
+	systemctl enable --now emtds-watchdog.timer
+	log "timer emtds-watchdog включён"
 }
 
 # Назначение: проверки скрипта без Docker и без systemd.
@@ -413,11 +438,11 @@ run_self_test() {
 	[[ "$pub" == 127.0.0.1:18080 ]] || { printf 'self-test FAIL: publish_listen engine\n'; exit 1; }
 	pub=$(publish_listen "" "127.0.0.1:8090")
 	[[ "$pub" == 127.0.0.1:8090 ]] || { printf 'self-test FAIL: publish_listen empty\n'; exit 1; }
-	KUZTDS_WATCHDOG_UNIT_DIR="$tmp" KUZTDS_WATCHDOG_SKIP_SYSTEMCTL=1 "$SELF" --install
-	[[ -f "$tmp/kuztds-watchdog.service" ]] || { printf 'self-test FAIL: service\n'; exit 1; }
-	[[ -f "$tmp/kuztds-watchdog.timer" ]] || { printf 'self-test FAIL: timer\n'; exit 1; }
-	grep -q 'OnUnitActiveSec=60s' "$tmp/kuztds-watchdog.timer" || { printf 'self-test FAIL: interval\n'; exit 1; }
-	grep -q "ExecStart=${SELF}" "$tmp/kuztds-watchdog.service" || { printf 'self-test FAIL: ExecStart\n'; exit 1; }
+	EMTDS_WATCHDOG_UNIT_DIR="$tmp" EMTDS_WATCHDOG_SKIP_SYSTEMCTL=1 "$SELF" --install
+	[[ -f "$tmp/emtds-watchdog.service" ]] || { printf 'self-test FAIL: service\n'; exit 1; }
+	[[ -f "$tmp/emtds-watchdog.timer" ]] || { printf 'self-test FAIL: timer\n'; exit 1; }
+	grep -q 'OnUnitActiveSec=60s' "$tmp/emtds-watchdog.timer" || { printf 'self-test FAIL: interval\n'; exit 1; }
+	grep -q "ExecStart=${SELF}" "$tmp/emtds-watchdog.service" || { printf 'self-test FAIL: ExecStart\n'; exit 1; }
 	printf 'self-test ok\n'
 }
 
@@ -434,6 +459,10 @@ main() {
 			install_units
 			;;
 		'')
+			if ! flock -n "$UPDATE_LOCK_FILE" true 2>/dev/null; then
+				log "прогон update.sh активен, пропуск прохода"
+				exit 0
+			fi
 			if [[ -e "$LOCK_FILE" || -d "$(dirname "$LOCK_FILE")" ]]; then
 				exec 9>"$LOCK_FILE"
 				if ! flock -n 9; then

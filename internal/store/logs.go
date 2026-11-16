@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/logbuf"
 )
 
 // LogFilter selects rows of the click journal. Every field is optional.
@@ -83,25 +83,27 @@ type LogRow struct {
 	Org       string `json:"org"`
 	Timezone  string `json:"timezone"`
 
-	Page         string   `json:"page,omitempty"`
-	OSVersion    string   `json:"os_version,omitempty"`
-	BrowserVer   string   `json:"browser_ver,omitempty"`
-	SE           string   `json:"se,omitempty"`
-	Via                string `json:"via,omitempty"`
-	OriginCampaign     string `json:"origin_campaign,omitempty"`
-	OriginCampaignID   string `json:"origin_campaign_id,omitempty"`
-	CampaignID         string `json:"campaign_id,omitempty"`
-	OfferID      string   `json:"offer_id,omitempty"`
-	LandingID    string   `json:"landing_id,omitempty"`
-	SourceID     string   `json:"source_id,omitempty"`
-	NetworkID    string   `json:"network_id,omitempty"`
-	Subs         []string `json:"subs,omitempty"`
-	Site         string   `json:"site,omitempty"`
-	AdCampaignID string   `json:"ad_campaign_id,omitempty"`
-	CreativeID   string   `json:"creative_id,omitempty"`
-	ExternalID   string   `json:"external_id,omitempty"`
-	XRW          string   `json:"xrw,omitempty"`
-	DeviceModel  string   `json:"device_model,omitempty"`
+	Page             string   `json:"page,omitempty"`
+	OSVersion        string   `json:"os_version,omitempty"`
+	BrowserVer       string   `json:"browser_ver,omitempty"`
+	SE               string   `json:"se,omitempty"`
+	Via              string   `json:"via,omitempty"`
+	OriginCampaign   string   `json:"origin_campaign,omitempty"`
+	OriginCampaignID string   `json:"origin_campaign_id,omitempty"`
+	CampaignID       string   `json:"campaign_id,omitempty"`
+	OfferID          string   `json:"offer_id,omitempty"`
+	LandingID        string   `json:"landing_id,omitempty"`
+	SourceID         string   `json:"source_id,omitempty"`
+	NetworkID        string   `json:"network_id,omitempty"`
+	Subs             []string `json:"subs,omitempty"`
+	Site             string   `json:"site,omitempty"`
+	AdCampaignID     string   `json:"ad_campaign_id,omitempty"`
+	CreativeID       string   `json:"creative_id,omitempty"`
+	ExternalID       string   `json:"external_id,omitempty"`
+	XRW              string   `json:"xrw,omitempty"`
+	DeviceModel      string   `json:"device_model,omitempty"`
+	// RootCID is the first click of the chain. Empty means this click is the root.
+	RootCID string `json:"root_cid,omitempty"`
 }
 
 // Logs returns the click rows that match f and the total number of matches.
@@ -110,6 +112,7 @@ type LogRow struct {
 // querying. ErrUnknownField and ErrBadCond come from the extra conditions.
 // A query error is returned as-is.
 func (c *CH) Logs(ctx context.Context, f LogFilter) ([]LogRow, int64, error) {
+	ctx = c.analyticsCtx(ctx, 0)
 	c.maybeRefreshOriginWave()
 	originEvents := c.originEvents.Load()
 	where := "ts >= ? AND ts < ?"
@@ -172,7 +175,7 @@ func (c *CH) Logs(ctx context.Context, f LogFilter) ([]LogRow, int64, error) {
 	}
 	q := "SELECT " + sel + " FROM events WHERE " + where + " ORDER BY " + order + " LIMIT ? OFFSET ?"
 	if slow {
-		q += " SETTINGS max_execution_time=20"
+		ctx = c.analyticsCtx(ctx, journalSortMaxExecution)
 	}
 	rows, err := c.conn.Query(ctx, q, append(args, limit, f.Offset)...)
 	if err != nil {
@@ -247,6 +250,11 @@ func logSelect(c *CH, extCols []string, originEvents bool) string {
 	} else {
 		cols = append(cols, "'' AS origin_group_name", "'' AS origin_group_id")
 	}
+	if c.ready("events", waveRoot) {
+		cols = append(cols, "root_cid")
+	} else {
+		cols = append(cols, "'' AS root_cid")
+	}
 	return strings.Join(cols, ", ")
 }
 
@@ -287,6 +295,7 @@ func logDest(c *CH, r *LogRow, extCols []string, originEvents bool) ([]any, []st
 		var stubName, stubID string
 		dest = append(dest, &stubName, &stubID)
 	}
+	dest = append(dest, &r.RootCID)
 	return dest, subs
 }
 
@@ -351,6 +360,9 @@ func eventColumns(c *CH, originEvents bool) []string {
 	}
 	if originEvents {
 		cols = append(cols, columnsOf("events", waveOrigin)...)
+	}
+	if c.ready("events", waveRoot) {
+		cols = append(cols, columnsOf("events", waveRoot)...)
 	}
 	return cols
 }
@@ -489,6 +501,8 @@ func eventWaveValue(e logbuf.Event, col string) any {
 			return e.OriginName
 		}
 		return e.GroupName
+	case "root_cid":
+		return e.RootCID
 	default:
 		return ""
 	}
@@ -497,22 +511,28 @@ func eventWaveValue(e logbuf.Event, col string) any {
 // InsertEvents writes events in one batch.
 // ctx bounds the request. An empty slice returns nil and does not use the
 // connection. Column names follow the waves this client has probed.
-// Returns an error when the batch cannot be prepared, appended or sent.
+// A token on ctx (logbuf.WithDedupToken) makes the insert idempotent: the
+// server drops a block it already accepted under the same token. Without a
+// token the insert is not deduplicated, so two identical batches both land.
+// Returns an error when the batch cannot be prepared, appended or sent. An
+// error that comes from the data (a value that cannot be converted, a server
+// code of badDataCodes) is marked with logbuf.BadData.
 func (c *CH) InsertEvents(ctx context.Context, events []logbuf.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
+	ctx = withInsertSettings(ctx, eventInsertSettings(logbuf.DedupToken(ctx)))
 	c.maybeRefreshOriginWave()
 	originEvents := c.originEvents.Load()
 	names := eventColumns(c, originEvents)
-	batch, err := c.conn.PrepareBatch(ctx, "INSERT INTO events ("+strings.Join(names, ", ")+")")
+	batch, err := c.conn.PrepareBatch(insertCtx(ctx), "INSERT INTO events ("+strings.Join(names, ", ")+")")
 	if err != nil {
 		return fmt.Errorf("clickhouse: prepare batch: %w", err)
 	}
 	for _, e := range events {
 		if err := batch.Append(eventValues(names, e)...); err != nil {
-			return fmt.Errorf("clickhouse: append: %w", err)
+			return logbuf.BadData(fmt.Errorf("clickhouse: append: %w", err))
 		}
 	}
-	return batch.Send()
+	return badDataOf(batch.Send())
 }

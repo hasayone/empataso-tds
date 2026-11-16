@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func registerDomains(s *Server, mux *http.ServeMux) {

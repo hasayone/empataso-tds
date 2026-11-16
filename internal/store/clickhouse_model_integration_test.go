@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/logbuf"
 )
 
 // TestCHDeviceModel writes a click with a device model, records a conversion

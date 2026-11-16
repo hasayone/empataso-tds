@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/render"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/render"
 )
 
 // resetCampaign restores the stored campaign c1 to g.
@@ -34,6 +34,41 @@ func streamCampaign(a, b string) config.Group {
 		{Name: "B", Status: true, Out: config.Output{Redirect: "http_redirect", Out: b}},
 	}
 	return g
+}
+
+func TestCampaignParameterOfHiddenFieldStaysFixed(t *testing.T) {
+	v := viewer{hidden: expandHidden([]string{"keyword"})}
+	old := config.Group{ID: "c1", SourceID: "s"}
+	next := old
+	next.Parameters = map[string]string{"keyword": "utm_term"}
+	sources := []config.TrafficSource{{ID: "s", Parameters: map[string]string{"sub_id_1": "sub1"}}}
+	if msg := validateGroupParams(v, []config.Group{old}, []config.Group{next}, sources); msg != "source parameter keyword belongs to a hidden field" {
+		t.Fatalf("hidden keyword: %q", msg)
+	}
+	visible := old
+	visible.Parameters = map[string]string{"sub_id_1": "clickid"}
+	visible.ParamTokens = map[string]string{"sub_id_1": "{click}"}
+	if msg := validateGroupParams(v, []config.Group{old}, []config.Group{visible}, sources); msg != "" {
+		t.Fatalf("visible sub id: %q", msg)
+	}
+	admin := viewer{admin: true, hidden: expandHidden([]string{"keyword"})}
+	if msg := validateGroupParams(admin, []config.Group{old}, []config.Group{next}, sources); msg != "" {
+		t.Fatalf("administrator: %q", msg)
+	}
+}
+
+func TestPrepareGroupParamsTrimsAndRejects(t *testing.T) {
+	g := config.Group{Parameters: map[string]string{"keyword": " utm "}, ParamTokens: map[string]string{"keyword": "  "}}
+	if msg := prepareGroupParams(&g); msg != "" {
+		t.Fatal(msg)
+	}
+	if g.Parameters["keyword"] != "utm" || g.ParamTokens != nil {
+		t.Fatalf("cleaned %+v %+v", g.Parameters, g.ParamTokens)
+	}
+	bad := config.Group{Parameters: map[string]string{"nope": "x"}}
+	if msg := prepareGroupParams(&bad); msg != "unknown parameter nope" {
+		t.Fatalf("unknown: %q", msg)
+	}
 }
 
 func TestCurlyMacroRefusedWhenQueryFieldHidden(t *testing.T) {
@@ -458,8 +493,8 @@ func TestLandingEntryCannotReachAMacro(t *testing.T) {
 			t.Fatalf("admin writes %s: %d", path, code)
 		}
 	}
-	adminPut("sub/admin.txt", "id=[CID] ip=[IP]")
-	adminPut("sub/clean.txt", "hello")
+	adminPut("sub/admin.html", "<p>[CID] [IP]</p>")
+	adminPut("sub/clean.html", "hello")
 	adminPut("index.php", "<?php ?>")
 	adminPut("index.html", "<p>[IP]</p>")
 	rig.setRole(t, editorAccess("cid", "ip"))
@@ -493,13 +528,13 @@ func TestLandingEntryCannotReachAMacro(t *testing.T) {
 			config.Landing{ID: "lp2", Name: name, Local: true, Status: true, Entry: entry})
 		return code, string(raw)
 	}
-	if got, raw := putLanding("sub/admin.txt", "lp"); got != http.StatusBadRequest || !strings.Contains(raw, "sub/admin.txt") {
+	if got, raw := putLanding("sub/admin.html", "lp"); got != http.StatusBadRequest || !strings.Contains(raw, "sub/admin.html") {
 		t.Errorf("entry moved to a file of the administrator with a macro: %d %s", got, raw)
 	}
-	if got, raw := putLanding("sub/clean.txt", "lp"); got != http.StatusOK {
+	if got, raw := putLanding("sub/clean.html", "lp"); got != http.StatusOK {
 		t.Errorf("entry moved to a clean file: %d %s", got, raw)
 	}
-	if got, raw := putLanding("sub/clean.txt", "renamed"); got != http.StatusOK {
+	if got, raw := putLanding("sub/clean.html", "renamed"); got != http.StatusOK {
 		t.Errorf("rename with the entry kept: %d %s", got, raw)
 	}
 	if got, raw := putLanding("", "lp"); got != http.StatusOK {
@@ -516,10 +551,10 @@ func TestLandingEntryCannotReachAMacro(t *testing.T) {
 	if got := del("index.php"); got != http.StatusBadRequest {
 		t.Errorf("removing index.php hands the entry to index.html with [IP]: %d", got)
 	}
-	if got := del("sub/clean.txt"); got != http.StatusOK {
+	if got := del("sub/clean.html"); got != http.StatusOK {
 		t.Errorf("removing another file: %d", got)
 	}
-	if code, raw := rig.adminAPI(t, http.MethodPut, "/api/landings/lp2", config.Landing{ID: "lp2", Name: "lp", Local: true, Status: true, Entry: "sub/admin.txt"}); code != http.StatusOK {
+	if code, raw := rig.adminAPI(t, http.MethodPut, "/api/landings/lp2", config.Landing{ID: "lp2", Name: "lp", Local: true, Status: true, Entry: "sub/admin.html"}); code != http.StatusOK {
 		t.Fatalf("admin sets the entry %d %s", code, raw)
 	}
 	if got := del("index.php"); got != http.StatusOK {
@@ -533,7 +568,7 @@ func TestLandingEntryCannotReachAMacro(t *testing.T) {
 	if got := put("sub/p.txt", "c=[CID]"); got != http.StatusOK {
 		t.Errorf("nothing hidden, file: %d", got)
 	}
-	if got, raw := putLanding("sub/p.txt", "lp"); got != http.StatusOK {
+	if got, raw := putLanding("sub/p.html", "lp"); got != http.StatusOK {
 		t.Errorf("nothing hidden, entry: %d %s", got, raw)
 	}
 }

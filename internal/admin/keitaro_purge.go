@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // keitaroRemoved is the body of POST /api/keitaro/purge.
@@ -225,6 +225,7 @@ func purgeCatalog[T any](ctx context.Context, store *JSONStore[T], idOf func(T) 
 	if store == nil {
 		return 0, nil
 	}
+	defer store.lock()()
 	list, err := store.List(ctx)
 	if err != nil {
 		return 0, err

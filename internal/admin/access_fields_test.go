@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // populated returns a T whose every exported field holds a distinct non-zero value.
@@ -115,6 +115,16 @@ func (richStats) ClickFacts(context.Context, time.Time, time.Time) (store.Facts,
 }
 func (r richStats) ClickFactsFiltered(ctx context.Context, from, to time.Time, _ []store.Cond) (store.Facts, error) {
 	return r.ClickFacts(ctx, from, to)
+}
+func (richStats) KeywordStats(context.Context, time.Time, time.Time, []store.Cond, store.KeywordMode) (store.KeywordStats, error) {
+	return store.KeywordStats{Rows: []store.KeywordRow{populated[store.KeywordRow]()}, Truncated: true, ConvReady: true}, nil
+}
+func (richStats) KeywordTrend(context.Context, time.Time, time.Time, []store.Cond, store.KeywordTrendParams) (store.KeywordTrend, error) {
+	return store.KeywordTrend{
+		Days:      []string{"2026-01-02"},
+		Series:    []store.KeywordSeries{populated[store.KeywordSeries]()},
+		ConvReady: true,
+	}, nil
 }
 
 // rolesRig is a server with one user whose access comes from one role.
@@ -271,7 +281,7 @@ func keysGone(field string) []string {
 	case "profit":
 		return []string{"profit", "revenue", "payout", "depsum"}
 	case "status":
-		return []string{"status", "original_status", "prev_status"}
+		return []string{"status", "original_status", "prev_status", "leads", "sales", "rejected"}
 	case "os":
 		return []string{"os", "os_version"}
 	case "browser":
@@ -361,8 +371,10 @@ func TestHiddenFieldAbsentFromJSON(t *testing.T) {
 			}
 			got := jsonKeys(t, body)
 			gone := map[string]bool{}
-			for _, k := range keysGone(f.Name) {
-				gone[k] = true
+			for _, hidden := range append([]string{f.Name}, derivedFields[f.Name]...) {
+				for _, k := range keysGone(hidden) {
+					gone[k] = true
+				}
 			}
 			if strings.HasPrefix(ep, "/api/postbacks") && f.Name == "profit" {
 				gone["total"] = true
@@ -477,13 +489,20 @@ func TestHiddenFieldOutOfListsAndKeys(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &info); err != nil {
 		t.Fatal(err)
 	}
+	hidden := expandHidden([]string{"country", "campaign", "keyword"})
 	for _, f := range info.Fields {
-		if f.Name == "country" || f.Name == "campaign" || f.Name == "keyword" {
+		if hidden[f.Name] {
 			t.Errorf("hidden field %s listed", f.Name)
 		}
 	}
-	if len(info.Fields) != len(store.StaticFields())-3 {
-		t.Errorf("fields %d of %d", len(info.Fields), len(store.StaticFields()))
+	hiddenN := 0
+	for _, f := range store.StaticFields() {
+		if hidden[f.Name] {
+			hiddenN++
+		}
+	}
+	if len(info.Fields) != len(store.StaticFields())-hiddenN {
+		t.Errorf("fields %d of %d, hidden %d", len(info.Fields), len(store.StaticFields()), hiddenN)
 	}
 	_, body = rig.get(t, rig.admin, "/api/log-fields")
 	if err := json.Unmarshal([]byte(body), &info); err != nil || len(info.Fields) != len(store.StaticFields()) {
@@ -509,6 +528,9 @@ func TestHiddenFieldOutOfListsAndKeys(t *testing.T) {
 	}
 	if code, _ := rig.get(t, rig.admin, "/api/keys?group=c1"); code != http.StatusOK {
 		t.Errorf("admin keys: %d", code)
+	}
+	if code, _ := rig.get(t, rig.user, "/api/keys/download?group=c1&date=2026-06-07"); code != http.StatusForbidden {
+		t.Errorf("keys download with keyword hidden: %d", code)
 	}
 }
 
@@ -637,9 +659,14 @@ func TestEveryResponseKeyIsClassified(t *testing.T) {
 		}
 	}
 	// Keys that are not a journal field: counters, wrappers and row markers.
+	// The checker status answer is switches and a masked postback, not a click column.
 	plain := map[string]bool{
 		"hits": true, "conv": true, "n": true, "forwarded": true, "total": true, "count": true,
 		"rows": true, "clicks": true, "ready": true, "subs": true, "key": true, "content": true,
+		"truncated": true, "conv_ready": true, "days": true, "series": true,
+		"lines": true, "size": true, "max_lines": true,
+		"enabled": true, "create_apps": true, "postback": true,
+		"url_masked": true, "available": true, "method": true,
 	}
 	for ep, keys := range adminJSONRoutes(t, newRolesRig(t, "")) {
 		for k := range keys {

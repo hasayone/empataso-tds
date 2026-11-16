@@ -8,8 +8,9 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 const landingTextLimit = 2 << 20
@@ -34,9 +35,11 @@ var (
 
 // FileInfo is one file inside a landing directory.
 // Path is relative and uses forward slashes. Size is the length in bytes.
+// Modified is the last write time in UTC, to the second, read from disk on every List.
 type FileInfo struct {
-	Path string `json:"path"`
-	Size int64  `json:"size"`
+	Path     string    `json:"path"`
+	Size     int64     `json:"size"`
+	Modified time.Time `json:"modified"`
 }
 
 // LandingFiles stores the files of one local landing.
@@ -168,7 +171,7 @@ func (f *FileLandings) List(id string) ([]FileInfo, error) {
 		if err != nil {
 			return err
 		}
-		out = append(out, FileInfo{Path: rel, Size: info.Size()})
+		out = append(out, FileInfo{Path: rel, Size: info.Size(), Modified: info.ModTime().UTC().Truncate(time.Second)})
 		return nil
 	})
 	if err != nil {

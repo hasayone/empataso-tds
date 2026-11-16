@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // Before the counter and its expiry were one script, a lost EXPIRE left an

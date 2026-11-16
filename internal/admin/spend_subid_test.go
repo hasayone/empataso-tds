@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func groupWithSubIDs(m map[string]config.SubIDFilter) []config.Group {

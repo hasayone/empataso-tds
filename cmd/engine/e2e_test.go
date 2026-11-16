@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,14 +12,13 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/detect"
-	"github.com/egerkuzma/kuztds/internal/fetch"
-	"github.com/egerkuzma/kuztds/internal/geo"
-	"github.com/egerkuzma/kuztds/internal/ipindex"
-	"github.com/egerkuzma/kuztds/internal/seplist"
-	"github.com/egerkuzma/kuztds/internal/server"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/egerkuzma/emtds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/ipindex"
+	"github.com/egerkuzma/emtds/internal/seplist"
+	"github.com/egerkuzma/emtds/internal/server"
+	"github.com/egerkuzma/emtds/internal/store"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -71,14 +71,14 @@ func newEng(t *testing.T, groups *config.Groups, h engHarness) http.Handler {
 	seps.Load(separationFiles(groups)...)
 	d := &engineDeps{
 		log: log, lists: lists, sigs: sigs, seps: seps, geores: geo.Nop{}, groups: groups,
-		dataDir: dir, keysDir: dir, postbackKey: "pb", keys: apiKeys{env: "k"},
-		fetcher: fetch.New("", nil), trashMode: h.trashMode, trashURL: h.trashURL,
+		dataDir: dir, keyFiles: newKeyWriter(dir, 0, nil), postbackKey: "pb", keys: apiKeys{env: "k"},
+		fetcher: testFetcher(), trashMode: h.trashMode, trashURL: h.trashURL,
 	}
 	if d.trashMode == "" {
 		d.trashMode = "0"
 	}
 	if h.geoMMDB {
-		if m, err := geo.OpenMMDB("../../internal/geo/testdata/GeoLite2-City-Test.mmdb"); err == nil {
+		if m, err := geo.OpenWith(geo.Paths{City: "../../internal/geo/testdata/GeoLite2-City-Test.mmdb"}, nil); err == nil {
 			d.geores = m
 		} else {
 			t.Logf("mmdb not opened (%v) — mmdb geo checks skipped", err)
@@ -105,8 +105,8 @@ func newEng(t *testing.T, groups *config.Groups, h engHarness) http.Handler {
 
 func wantStream(t *testing.T, rec *httptest.ResponseRecorder, name string) {
 	t.Helper()
-	if got := rec.Header().Get("X-Kuztds-Stream"); got != name {
-		t.Errorf("stream = %q, expected %q (bot=%s, country=%s)", got, name, rec.Header().Get("X-Kuztds-Bot"), rec.Header().Get("X-Kuztds-Country"))
+	if got := rec.Header().Get("X-Emtds-Stream"); got != name {
+		t.Errorf("stream = %q, expected %q (bot=%s, country=%s)", got, name, rec.Header().Get("X-Emtds-Bot"), rec.Header().Get("X-Emtds-Country"))
 	}
 }
 func wantCode(t *testing.T, rec *httptest.ResponseRecorder, code int) {
@@ -186,14 +186,14 @@ func TestE2E_GeoMMDBCity(t *testing.T) {
 	h := newEng(t, gg, engHarness{geoMMDB: true})
 	// 81.2.69.142 → gb/london in the test mmdb
 	rec := do(t, h, "/g", "81.2.69.142", map[string]string{"User-Agent": uaWinChrome})
-	if s := rec.Header().Get("X-Kuztds-Stream"); s != "london" && s != "rest" {
+	if s := rec.Header().Get("X-Emtds-Stream"); s != "london" && s != "rest" {
 		t.Fatalf("unexpected stream %q", s)
 	}
-	if rec.Header().Get("X-Kuztds-Stream") == "rest" {
+	if rec.Header().Get("X-Emtds-Stream") == "rest" {
 		t.Skip("mmdb unavailable — city geo skipped")
 	}
 	wantBody(t, rec, "LON")
-	wantHdr(t, rec, "X-Kuztds-Country", "gb")
+	wantHdr(t, rec, "X-Emtds-Country", "gb")
 }
 
 // ============================================================================
@@ -272,7 +272,7 @@ func TestE2E_Operators(t *testing.T) {
 	h := newEng(t, gg, engHarness{files: map[string]string{"wap.dat": "# beeline\n5.5.5.5\n# megafon\n6.6.6.6\n"}})
 	r1 := do(t, h, "/g", "5.5.5.5", map[string]string{"User-Agent": uaSamsung})
 	wantStream(t, r1, "beeline_only")
-	wantHdr(t, r1, "X-Kuztds-Stream", "beeline_only")
+	wantHdr(t, r1, "X-Emtds-Stream", "beeline_only")
 	wantStream(t, do(t, h, "/g", "6.6.6.6", map[string]string{"User-Agent": uaSamsung}), "rest")
 	wantStream(t, do(t, h, "/g", "8.8.8.8", map[string]string{"User-Agent": uaSamsung}), "rest")
 }
@@ -407,37 +407,37 @@ func TestE2E_Bots(t *testing.T) {
 	// empty UA → bot → 404, header bot=empty_ua
 	r := do(t, h, "/empty_ua", "8.8.8.8", map[string]string{"User-Agent": ""})
 	wantCode(t, r, 404)
-	wantHdr(t, r, "X-Kuztds-Bot", "empty_ua")
+	wantHdr(t, r, "X-Emtds-Bot", "empty_ua")
 	// empty referer
 	r = do(t, h, "/empty_ref", "8.8.8.8", map[string]string{"User-Agent": uaWinChrome})
 	wantCode(t, r, 403)
-	wantHdr(t, r, "X-Kuztds-Bot", "empty_ref")
+	wantHdr(t, r, "X-Emtds-Bot", "empty_ref")
 	// empty language (no Accept-Language)
 	r = do(t, h, "/empty_lang", "8.8.8.8", map[string]string{"User-Agent": uaWinChrome})
-	wantHdr(t, r, "X-Kuztds-Bot", "empty_lang")
+	wantHdr(t, r, "X-Emtds-Bot", "empty_lang")
 	// IPv6
 	r = do(t, h, "/ipv6", "2001:4860:4860::8888", map[string]string{"User-Agent": uaWinChrome, "Accept-Language": "en"})
-	wantHdr(t, r, "X-Kuztds-Bot", "ipv6")
+	wantHdr(t, r, "X-Emtds-Bot", "ipv6")
 	// UA signature
 	r = do(t, h, "/sign_ua", "8.8.8.8", map[string]string{"User-Agent": "Mozilla evilbot crawler", "Accept-Language": "en"})
-	wantHdr(t, r, "X-Kuztds-Bot", "sign_ua")
+	wantHdr(t, r, "X-Emtds-Bot", "sign_ua")
 	// referer signature
 	r = do(t, h, "/sign_ref", "8.8.8.8", map[string]string{"User-Agent": uaWinChrome, "Accept-Language": "en", "Referer": "https://spamref.io/x"})
-	wantHdr(t, r, "X-Kuztds-Bot", "sign_ref")
+	wantHdr(t, r, "X-Emtds-Bot", "sign_ref")
 	// search-engine IP
 	r = do(t, h, "/se_ip", "66.249.66.10", map[string]string{"User-Agent": uaWinChrome, "Accept-Language": "en"})
-	wantHdr(t, r, "X-Kuztds-Bot", "google")
+	wantHdr(t, r, "X-Emtds-Bot", "google")
 	// ua_blacklist (exact match)
 	r = do(t, h, "/ua_black", "8.8.8.8", map[string]string{"User-Agent": "BadUA/1.0", "Accept-Language": "en"})
-	wantHdr(t, r, "X-Kuztds-Bot", "ua_blacklist")
+	wantHdr(t, r, "X-Emtds-Bot", "ua_blacklist")
 	// skip → bot is logged, but the normal stream is served
 	r = do(t, h, "/skip_bot", "8.8.8.8", map[string]string{"User-Agent": ""})
 	wantBody(t, r, "HUMAN")
-	wantHdr(t, r, "X-Kuztds-Bot", "empty_ua")
+	wantHdr(t, r, "X-Emtds-Bot", "empty_ua")
 	// a human on any of the groups — HUMAN is served
 	r = do(t, h, "/empty_ua", "8.8.8.8", map[string]string{"User-Agent": uaWinChrome, "Accept-Language": "en"})
 	wantBody(t, r, "HUMAN")
-	wantHdr(t, r, "X-Kuztds-Bot", "-")
+	wantHdr(t, r, "X-Emtds-Bot", "-")
 }
 
 func TestE2E_SaveBotIP(t *testing.T) {
@@ -452,12 +452,21 @@ func TestE2E_SaveBotIP(t *testing.T) {
 			Bots: config.Bots{CheckUA: true, SaveIP: true, Redirect: "skip"}},
 	}})
 	d := &engineDeps{log: log, lists: lists, sigs: sigs, geores: geo.Nop{}, groups: gg,
-		dataDir: dir, keysDir: dir, fetcher: fetch.New("", nil), trashMode: "0"}
+		dataDir: dir, keyFiles: newKeyWriter(dir, 0, nil), fetcher: testFetcher(), trashMode: "0"}
 	realIP, _ := server.NewRealIP([]string{"127.0.0.1/32"})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", d.root)
 	h := realIP.Middleware(mux)
-	// googlebot by UA with a new IP → save_ip appends the IP to ip_google.dat
+	// googlebot by UA with a new IP: the first click only starts the DNS check,
+	// the next one finds it confirmed and save_ip appends the IP to ip_google.dat
+	botIP := netip.MustParseAddr("77.88.99.100")
+	c := stubPTR(t, ptrNamed("crawl-77-88-99-100.googlebot.com."), fwdTo(botIP))
+	savedBotIPs.Clear()
+	do(t, h, "/g", "77.88.99.100", map[string]string{"User-Agent": uaGoogleBot, "Accept-Language": "en"})
+	if b, _ := os.ReadFile(filepath.Join(dir, "ip_google.dat")); strings.Contains(string(b), "77.88.99.100") {
+		t.Fatalf("save_ip wrote the IP before the DNS check finished; file=%q", string(b))
+	}
+	waitPTR(t, c, botIP)
 	do(t, h, "/g", "77.88.99.100", map[string]string{"User-Agent": uaGoogleBot, "Accept-Language": "en"})
 	b, _ := os.ReadFile(filepath.Join(dir, "ip_google.dat"))
 	if !strings.Contains(string(b), "77.88.99.100") {
@@ -508,9 +517,9 @@ func TestE2E_UniqueIP(t *testing.T) {
 	gg := config.NewGroups(&config.Group{ID: "g", Status: true, Redirect: "stop", UniqMethod: "ip", UniqSeconds: 3600,
 		Streams: []config.Stream{{Name: "s", Status: true, Out: config.Output{Redirect: "show_text", Out: "X"}}}})
 	h := newEng(t, gg, engHarness{redis: true})
-	wantHdr(t, do(t, h, "/g", "8.8.8.8", map[string]string{"User-Agent": uaWinChrome}), "X-Kuztds-Uniq", "yes")
-	wantHdr(t, do(t, h, "/g", "8.8.8.8", map[string]string{"User-Agent": uaWinChrome}), "X-Kuztds-Uniq", "no")
-	wantHdr(t, do(t, h, "/g", "1.2.3.4", map[string]string{"User-Agent": uaWinChrome}), "X-Kuztds-Uniq", "yes")
+	wantHdr(t, do(t, h, "/g", "8.8.8.8", map[string]string{"User-Agent": uaWinChrome}), "X-Emtds-Uniq", "yes")
+	wantHdr(t, do(t, h, "/g", "8.8.8.8", map[string]string{"User-Agent": uaWinChrome}), "X-Emtds-Uniq", "no")
+	wantHdr(t, do(t, h, "/g", "1.2.3.4", map[string]string{"User-Agent": uaWinChrome}), "X-Emtds-Uniq", "yes")
 }
 
 func TestE2E_Firewall(t *testing.T) {
@@ -682,8 +691,8 @@ func TestE2E_TrafficMatrix(t *testing.T) {
 	}
 	for _, v := range matrix {
 		rec := do(t, h, "/mix?q=kw", v.ip, map[string]string{"User-Agent": v.ua, "CF-IPCountry": v.country, "Accept-Language": "en"})
-		if got := rec.Header().Get("X-Kuztds-Stream"); got != v.stream {
-			t.Errorf("[%s] stream=%q, expected %q (country=%s)", v.name, got, v.stream, rec.Header().Get("X-Kuztds-Country"))
+		if got := rec.Header().Get("X-Emtds-Stream"); got != v.stream {
+			t.Errorf("[%s] stream=%q, expected %q (country=%s)", v.name, got, v.stream, rec.Header().Get("X-Emtds-Country"))
 		}
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/egerkuzma/emtds/internal/security"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -92,6 +93,10 @@ type Limits struct {
 	// carries no deadline of its own. Callers on the hot path are expected to
 	// set a tighter one; this only keeps a forgotten call from hanging forever.
 	Backstop time.Duration
+	// AllowPrivate disables the GuardDial check so the client can connect to
+	// loopback and other private addresses. For use in tests only; no env
+	// variable or config field sets this.
+	AllowPrivate bool
 }
 
 // Defaults for Limits. The shape is deliberate; the numbers are a starting
@@ -138,9 +143,13 @@ func NewWithLimits(ua string, log *slog.Logger, l Limits) *Client {
 	if l.Backstop <= 0 {
 		l.Backstop = defaultBackstop
 	}
+	dialer := &net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}
+	if !l.AllowPrivate {
+		dialer.Control = security.GuardDial
+	}
 	tr := &http.Transport{
-		Proxy:                 http.ProxyFromEnvironment,
-		DialContext:           (&net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}).DialContext,
+		Proxy:                 nil,
+		DialContext:           dialer.DialContext,
 		MaxConnsPerHost:       l.MaxConnsPerHost,
 		MaxIdleConnsPerHost:   l.MaxIdleConnsPerHost,
 		MaxIdleConns:          l.MaxIdleConnsPerHost * 8,

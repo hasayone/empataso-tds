@@ -8,13 +8,13 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/detect"
-	"github.com/egerkuzma/kuztds/internal/ipindex"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/egerkuzma/emtds/internal/fetch"
+	"github.com/egerkuzma/emtds/internal/ipindex"
 )
 
 func TestParseSEKeyword(t *testing.T) {
@@ -34,28 +34,6 @@ func TestParseSEKeyword(t *testing.T) {
 		if got := parseSEKeyword(ref); got != want {
 			t.Errorf("parseSEKeyword(%q) = %q, want %q", ref, got, want)
 		}
-	}
-}
-
-func TestAppendKey(t *testing.T) {
-	dir := t.TempDir()
-	appendKey(dir, "g1", "hello", false)
-	appendKey(dir, "g1", "world", false)
-	appendKey(dir, "g1", "fromse", true)
-	// empty/invalid — ignored
-	appendKey(dir, "g1", "", false)
-	appendKey("", "g1", "x", false)
-
-	date := time.Now().Format("2006-01-02")
-	b, err := os.ReadFile(filepath.Join(dir, "g1", date+".dat"))
-	if err != nil {
-		t.Fatalf("read keys: %v", err)
-	}
-	if got := strings.TrimSpace(string(b)); got != "hello\nworld" {
-		t.Errorf("keys file = %q", got)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "g1", date+"-se.dat")); err != nil {
-		t.Errorf("se keys file missing: %v", err)
 	}
 }
 
@@ -227,10 +205,10 @@ func TestDetectBotEmptyToggles(t *testing.T) {
 	}
 }
 
-func TestDefaultBotProfileProxyOff(t *testing.T) {
+func TestDefaultBotProfileProxyOn(t *testing.T) {
 	p := config.DefaultBotProfile()
-	if p.Proxy || p.NonMobile {
-		t.Errorf("DefaultBotProfile Proxy=%v NonMobile=%v, want both false", p.Proxy, p.NonMobile)
+	if !p.Proxy || p.NonMobile {
+		t.Errorf("DefaultBotProfile Proxy=%v NonMobile=%v, want Proxy on and NonMobile off", p.Proxy, p.NonMobile)
 	}
 }
 
@@ -247,19 +225,25 @@ func TestHelperFns(t *testing.T) {
 	if secs(5) != 5*time.Second {
 		t.Error("secs")
 	}
-	if getenv("KUZTDS_NONEXISTENT_VAR_XYZ", "def") != "def" {
+	if getenv("EMTDS_NONEXISTENT_VAR_XYZ", "def") != "def" {
 		t.Error("getenv default")
 	}
-	os.Setenv("KUZTDS_TEST_DUR", "2s")
-	defer os.Unsetenv("KUZTDS_TEST_DUR")
-	if getdur("KUZTDS_TEST_DUR", time.Minute) != 2*time.Second {
+	os.Setenv("EMTDS_TEST_DUR", "2s")
+	defer os.Unsetenv("EMTDS_TEST_DUR")
+	if getdur("EMTDS_TEST_DUR", time.Minute) != 2*time.Second {
 		t.Error("getdur parse")
 	}
-	if getdur("KUZTDS_NONEXISTENT_DUR", time.Minute) != time.Minute {
+	if getdur("EMTDS_NONEXISTENT_DUR", time.Minute) != time.Minute {
 		t.Error("getdur default")
 	}
 }
 
 func discardLog() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// testFetcher returns a fetch client with private address access allowed,
+// for use in tests that connect to httptest servers on 127.0.0.1.
+func testFetcher() *fetch.Client {
+	return fetch.NewWithLimits("", nil, fetch.Limits{AllowPrivate: true})
 }

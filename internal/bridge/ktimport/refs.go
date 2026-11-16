@@ -54,7 +54,7 @@ type shareItem struct {
 // collapseShares оставляет первую ссылку на каждый непустой URL и складывает доли.
 //
 // Параметры: streamID — id потока Keitaro; label — слово для отчёта; items — ссылки; losses — отчёт.
-// Результат: доли kuztds. Повтор пишет одну строку approximated со списком id. Ссылка отчёта — stream и id потока.
+// Результат: доли emtds. Повтор пишет одну строку approximated со списком id. Ссылка отчёта — stream и id потока.
 // Ошибки: нет.
 func collapseShares(streamID int, label string, items []shareItem, losses *[]Loss) []ShareRef {
 	var out []ShareRef

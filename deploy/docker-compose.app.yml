@@ -1,42 +1,64 @@
-# Локальные процессы KuzTDS: engine (:8080), admin (:8090) и cron.
+# Локальные процессы EmTDS: engine (:8080), admin (:8090) и cron.
 # ClickHouse и Redis поднимает deploy/docker-compose.yml, это другой проект.
 # Запуск из каталога tds, когда инфраструктура уже работает:
 #   docker compose -f deploy/docker-compose.app.yml up -d --build
-name: kuztds-app
+# Переменные EMTDS_* при пустом значении берутся из старых KUZTDS_*.
+name: emtds-app
 
 services:
   engine:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: kuztds:local
-    container_name: kuztds-engine
+      args:
+        EMTDS_VERSION: ${EMTDS_VERSION:-}
+        EMTDS_COMMIT: ${EMTDS_COMMIT:-}
+        EMTDS_COMMIT_DATE: ${EMTDS_COMMIT_DATE:-}
+        EMTDS_CHANNEL: ${EMTDS_CHANNEL:-}
+        EMTDS_GOFLAGS: ${EMTDS_GOFLAGS:-}
+    image: emtds:local
+    container_name: emtds-engine
     command: ["engine"]
     ports:
-      - "${KUZTDS_ENGINE_PUBLISH:-8080:8080}"
+      - "${EMTDS_ENGINE_PUBLISH:-${KUZTDS_ENGINE_PUBLISH:-127.0.0.1:8080:8080}}"
     stop_grace_period: 30s
     restart: unless-stopped
     environment:
-      KUZTDS_LISTEN: ":8080"
-      KUZTDS_DATA_DIR: /var/lib/kuztds/data
-      KUZTDS_KEYS_DIR: /var/lib/kuztds/keys
-      KUZTDS_GROUPS_FILE: /var/lib/kuztds/groups.json
-      KUZTDS_API_KEYS_FILE: /var/lib/kuztds/api_keys.json
-      KUZTDS_PAGES_DIR: /var/lib/kuztds/pages
-      KUZTDS_LANDINGS_DIR: /var/lib/kuztds/landings
-      KUZTDS_PHP_URL: http://php:80
-      KUZTDS_CRON_FILE: /var/lib/kuztds/cron.json
-      KUZTDS_GEO_DB: /var/lib/kuztds/geo/city.mmdb
-      KUZTDS_ASN_DB: /var/lib/kuztds/geo/asn.mmdb
-      KUZTDS_REDIS_ADDR: redis:6379
-      KUZTDS_REDIS_PASSWORD: ""
-      KUZTDS_CLICKHOUSE_ADDR: clickhouse:9000
-      KUZTDS_CLICKHOUSE_DB: kuztds
-      KUZTDS_CLICKHOUSE_USER: kuztds
-      KUZTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
-      KUZTDS_TRUSTED_PROXIES: ${KUZTDS_TRUSTED_PROXIES:-}
+      EMTDS_LISTEN: ":8080"
+      EMTDS_DATA_DIR: /var/lib/emtds/data
+      EMTDS_KEYS_DIR: /var/lib/emtds/keys
+      EMTDS_GROUPS_FILE: /var/lib/emtds/groups.json
+      EMTDS_API_KEYS_FILE: /var/lib/emtds/api_keys.json
+      EMTDS_PAGES_DIR: /var/lib/emtds/pages
+      EMTDS_LANDINGS_DIR: /var/lib/emtds/landings
+      EMTDS_PHP_URL: http://php:80
+      EMTDS_CRON_FILE: /var/lib/emtds/cron.json
+      EMTDS_GEO_DB: /var/lib/emtds/geo/city.mmdb
+      EMTDS_ASN_DB: /var/lib/emtds/geo/asn.mmdb
+      EMTDS_REDIS_ADDR: redis:6379
+      EMTDS_REDIS_PASSWORD: ""
+      EMTDS_UNIQ_MAX_SECONDS: ${EMTDS_UNIQ_MAX_SECONDS:-86400}
+      EMTDS_CLICKHOUSE_ADDR: clickhouse:9000
+      EMTDS_CLICKHOUSE_DB: kuztds
+      EMTDS_CLICKHOUSE_USER: kuztds
+      EMTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      EMTDS_TRUSTED_PROXIES: ${EMTDS_TRUSTED_PROXIES:-${KUZTDS_TRUSTED_PROXIES:-}}
+      # Имя экземпляра и каталог файлов метрик; их читает cron для тревоги о потерях.
+      EMTDS_INSTANCE: engine
+      EMTDS_METRICS_DIR: /var/lib/emtds/metrics
+      # Очередь событий на диске при сбое ClickHouse: каталог тома emtds_spool, потолок объёма в байтах.
+      # Каталог экземпляра <EMTDS_SPOOL_DIR>/<EMTDS_INSTANCE> закрыт замком, второй engine с тем же именем не запустится.
+      EMTDS_SPOOL_DIR: /var/lib/emtds-spool
+      EMTDS_SPOOL_MAX_BYTES: ${EMTDS_SPOOL_MAX_BYTES:-2147483648}
+      # Мягкий лимит кучи Go, около 90% mem_limit. Пусто — без лимита; на сервере значение даёт compose.app.yml.
+      GOMEMLIMIT: ${EMTDS_GOMEMLIMIT:-}
+      # Ключ входящих постбеков /postback и путь /{секрет}/postback; режим compat|require; не путать с EMTDS_POSTBACK_KEY старого пикселя.
+      EMTDS_POSTBACK_SECRET: ${EMTDS_POSTBACK_SECRET:-}
+      EMTDS_POSTBACK_AUTH: ${EMTDS_POSTBACK_AUTH:-}
     volumes:
-      - kuztds_state:/var/lib/kuztds
+      - emtds_state:/var/lib/emtds
+      # Только engine: в спуле сырые адреса, запросы и токены. php, admin и cron том не монтируют.
+      - emtds_spool:/var/lib/emtds-spool
     networks:
       - tdsnet
     healthcheck:
@@ -46,52 +68,66 @@ services:
       retries: 8
       start_period: 15s
 
+  # Монтируем только landings: php не должен читать ключи, данные и метрики движка.
   php:
     image: php:8.3-apache
-    container_name: kuztds-php
+    container_name: emtds-php
     restart: unless-stopped
     networks:
       - tdsnet
     volumes:
-      - kuztds_state:/var/lib/kuztds:ro
-    command: ["sh","-c","sed -ri 's#/var/www/html#/var/lib/kuztds/landings#g' /etc/apache2/sites-available/000-default.conf /etc/apache2/apache2.conf && sed -ri '/<Directory \\/var\\/www\\/>/,/<\\/Directory>/{s#/var/www/#/var/lib/kuztds/landings/#;s#Options Indexes FollowSymLinks#Options -Indexes +FollowSymLinks#}' /etc/apache2/apache2.conf && exec apache2-foreground"]
+      - type: volume
+        source: emtds_state
+        target: /var/lib/emtds/landings
+        read_only: true
+        volume:
+          subpath: landings
+    depends_on:
+      engine:
+        condition: service_healthy
+    command: ["sh","-c","sed -ri 's#/var/www/html#/var/lib/emtds/landings#g' /etc/apache2/sites-available/000-default.conf /etc/apache2/apache2.conf && sed -ri '/<Directory \\/var\\/www\\/>/,/<\\/Directory>/{s#/var/www/#/var/lib/emtds/landings/#;s#Options Indexes FollowSymLinks#Options -Indexes +FollowSymLinks#}' /etc/apache2/apache2.conf && sed -ri 's/^ServerTokens .*/ServerTokens Prod/' /etc/apache2/conf-enabled/security.conf && sed -ri 's/^ServerSignature .*/ServerSignature Off/' /etc/apache2/conf-enabled/security.conf && exec apache2-foreground"]
 
   admin:
-    image: kuztds:local
-    container_name: kuztds-admin
+    image: emtds:local
+    container_name: emtds-admin
     command: ["admin"]
     ports:
-      - "${KUZTDS_ADMIN_PUBLISH:-8090:8090}"
+      - "${EMTDS_ADMIN_PUBLISH:-${KUZTDS_ADMIN_PUBLISH:-127.0.0.1:8090:8090}}"
     stop_grace_period: 15s
     restart: unless-stopped
     environment:
-      KUZTDS_ADMIN_LISTEN: ":8090"
-      KUZTDS_ADMIN_USER: ${KUZTDS_ADMIN_USER:-admin}
-      KUZTDS_ADMIN_PASSWORD: ${KUZTDS_ADMIN_PASSWORD:-}
-      KUZTDS_ADMIN_COOKIE_SECURE: "false"
-      KUZTDS_ADMIN_PASSWORD_FILE: /var/lib/kuztds/admin.hash
-      KUZTDS_ENGINE_URL: http://engine:8080
-      KUZTDS_DATA_DIR: /var/lib/kuztds/data
-      KUZTDS_KEYS_DIR: /var/lib/kuztds/keys
-      KUZTDS_GROUPS_FILE: /var/lib/kuztds/groups.json
-      KUZTDS_API_KEYS_FILE: /var/lib/kuztds/api_keys.json
-      KUZTDS_PAGES_DIR: /var/lib/kuztds/pages
-      KUZTDS_LANDINGS_DIR: /var/lib/kuztds/landings
-      KUZTDS_CRON_FILE: /var/lib/kuztds/cron.json
-      KUZTDS_GEO_DB: /var/lib/kuztds/geo/city.mmdb
-      KUZTDS_ASN_DB: /var/lib/kuztds/geo/asn.mmdb
-      KUZTDS_REDIS_ADDR: redis:6379
-      KUZTDS_REDIS_PASSWORD: ""
-      KUZTDS_CLICKHOUSE_ADDR: clickhouse:9000
-      KUZTDS_CLICKHOUSE_DB: kuztds
-      KUZTDS_CLICKHOUSE_USER: kuztds
-      KUZTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      EMTDS_ADMIN_LISTEN: ":8090"
+      EMTDS_ADMIN_USER: ${EMTDS_ADMIN_USER:-${KUZTDS_ADMIN_USER:-admin}}
+      EMTDS_ADMIN_PASSWORD: ${EMTDS_ADMIN_PASSWORD:-${KUZTDS_ADMIN_PASSWORD:-}}
+      EMTDS_ADMIN_COOKIE_SECURE: "false"
+      EMTDS_ADMIN_PASSWORD_FILE: /var/lib/emtds/admin.hash
+      EMTDS_ENGINE_URL: http://engine:8080
+      EMTDS_DATA_DIR: /var/lib/emtds/data
+      EMTDS_KEYS_DIR: /var/lib/emtds/keys
+      EMTDS_GROUPS_FILE: /var/lib/emtds/groups.json
+      EMTDS_API_KEYS_FILE: /var/lib/emtds/api_keys.json
+      EMTDS_PAGES_DIR: /var/lib/emtds/pages
+      EMTDS_LANDINGS_DIR: /var/lib/emtds/landings
+      EMTDS_CRON_FILE: /var/lib/emtds/cron.json
+      EMTDS_GEO_DB: /var/lib/emtds/geo/city.mmdb
+      EMTDS_ASN_DB: /var/lib/emtds/geo/asn.mmdb
+      EMTDS_REDIS_ADDR: redis:6379
+      EMTDS_REDIS_PASSWORD: ""
+      EMTDS_UNIQ_MAX_SECONDS: ${EMTDS_UNIQ_MAX_SECONDS:-86400}
+      EMTDS_CLICKHOUSE_ADDR: clickhouse:9000
+      EMTDS_CLICKHOUSE_DB: kuztds
+      EMTDS_CLICKHOUSE_USER: kuztds
+      EMTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       KEITARO_BASE_URL: ${KEITARO_BASE_URL:-}
       KEITARO_API_KEY: ${KEITARO_API_KEY:-}
-      KUZTDS_PUBLIC_IP: ${KUZTDS_PUBLIC_IP:-}
-      KUZTDS_ADMIN_TRUSTED_PROXIES: ${KUZTDS_ADMIN_TRUSTED_PROXIES:-}
+      EMTDS_PUBLIC_IP: ${EMTDS_PUBLIC_IP:-${KUZTDS_PUBLIC_IP:-}}
+      EMTDS_ADMIN_TRUSTED_PROXIES: ${EMTDS_ADMIN_TRUSTED_PROXIES:-${KUZTDS_ADMIN_TRUSTED_PROXIES:-}}
+      GOMEMLIMIT: ${EMTDS_GOMEMLIMIT:-}
+      EMTDS_UPDATE_INBOX_DIR: /var/lib/emtds/update-inbox
     volumes:
-      - kuztds_state:/var/lib/kuztds
+      - emtds_state:/var/lib/emtds
+      # Каталог запросов кнопки обновления; его читает хостовый updater.
+      - ${EMTDS_UPDATE_INBOX:-/var/lib/emtds-update/inbox}:/var/lib/emtds/update-inbox
     networks:
       - tdsnet
     depends_on:
@@ -105,23 +141,29 @@ services:
       start_period: 40s
 
   cron:
-    image: kuztds:local
-    container_name: kuztds-cron
+    image: emtds:local
+    container_name: emtds-cron
     command: ["cron"]
     restart: unless-stopped
     environment:
-      KUZTDS_DATA_DIR: /var/lib/kuztds/data
-      KUZTDS_KEYS_DIR: /var/lib/kuztds/keys
-      KUZTDS_GROUPS_FILE: /var/lib/kuztds/groups.json
-      KUZTDS_CRON_FILE: /var/lib/kuztds/cron.json
-      KUZTDS_GEO_DB: /var/lib/kuztds/geo/city.mmdb
-      KUZTDS_ASN_DB: /var/lib/kuztds/geo/asn.mmdb
-      KUZTDS_CLICKHOUSE_ADDR: clickhouse:9000
-      KUZTDS_CLICKHOUSE_DB: kuztds
-      KUZTDS_CLICKHOUSE_USER: kuztds
-      KUZTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      EMTDS_DATA_DIR: /var/lib/emtds/data
+      EMTDS_KEYS_DIR: /var/lib/emtds/keys
+      EMTDS_GROUPS_FILE: /var/lib/emtds/groups.json
+      EMTDS_CRON_FILE: /var/lib/emtds/cron.json
+      EMTDS_GEO_DB: /var/lib/emtds/geo/city.mmdb
+      EMTDS_ASN_DB: /var/lib/emtds/geo/asn.mmdb
+      EMTDS_CLICKHOUSE_ADDR: clickhouse:9000
+      EMTDS_CLICKHOUSE_DB: kuztds
+      EMTDS_CLICKHOUSE_USER: kuztds
+      EMTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      # Только для алерта о памяти Redis: Telegram шлёт один cron.
+      EMTDS_REDIS_ADDR: redis:6379
+      EMTDS_REDIS_PASSWORD: ""
+      EMTDS_ALERT_LANG: ${EMTDS_ALERT_LANG:-}
+      # Файлы метрик engine для тревоги о потерях событий.
+      EMTDS_METRICS_DIR: /var/lib/emtds/metrics
     volumes:
-      - kuztds_state:/var/lib/kuztds
+      - emtds_state:/var/lib/emtds
     networks:
       - tdsnet
     depends_on:
@@ -134,4 +176,11 @@ networks:
     name: deploy_default
 
 volumes:
-  kuztds_state:
+  # Имя тома не зависит от имени проекта. EMTDS_STATE_VOLUME=kuztds-app_kuztds_state
+  # оставляет приложение на старом томе без копирования (откат и запасной путь).
+  emtds_state:
+    name: ${EMTDS_STATE_VOLUME:-emtds-app_emtds_state}
+  # Очередь событий на диске, только у engine. Том не входит в бэкап update.sh и
+  # не удаляется при down -v: удалять его можно только при пустом спуле.
+  emtds_spool:
+    name: ${EMTDS_SPOOL_VOLUME:-emtds-app_emtds_spool}

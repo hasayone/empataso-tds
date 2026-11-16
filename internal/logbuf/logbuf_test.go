@@ -2,10 +2,27 @@ package logbuf
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+// TestCapOut — a short value is kept, a long one is cut to MaxOut bytes without splitting a rune.
+func TestCapOut(t *testing.T) {
+	if got := CapOut("https://x.example/"); got != "https://x.example/" {
+		t.Fatalf("short %q", got)
+	}
+	ascii := strings.Repeat("a", MaxOut+10)
+	if got := CapOut(ascii); got != ascii[:MaxOut] {
+		t.Fatalf("ascii len %d", len(got))
+	}
+	cyr := "a" + strings.Repeat("ж", MaxOut)
+	got := CapOut(cyr)
+	if len(got) != MaxOut-1 || !strings.HasPrefix(cyr, got) {
+		t.Fatalf("rune cut len %d", len(got))
+	}
+}
 
 // fakeInserter accumulates batches for verification.
 type fakeInserter struct {

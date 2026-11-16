@@ -1,6 +1,6 @@
-# Перенос конфигурации Keitaro в kuztds
+# Перенос конфигурации Keitaro в emtds
 
-Один запуск читает конфигурацию и пишет группы и каталоги в локальную kuztds. Маппер не распаковывает файлы лендингов. Архив локального лендинга читается отдельно: GET `/admin_api/v1/landing_pages/{id}/download`, тело до 64 МБ, без разбора JSON. На Keitaro уходят GET из allowlist и, если их вызывают отдельно, два POST журнала: `/admin_api/v1/clicks/log` и `/admin_api/v1/conversions/log`. `report/build` и любой другой POST остаются запрещены. Живое чтение включается флагом `--live`.
+Один запуск читает конфигурацию и пишет группы и каталоги в локальную emtds. Маппер не распаковывает файлы лендингов. Архив локального лендинга читается отдельно: GET `/admin_api/v1/landing_pages/{id}/download`, тело до 64 МБ, без разбора JSON. На Keitaro уходят GET из allowlist и, если их вызывают отдельно, два POST журнала: `/admin_api/v1/clicks/log` и `/admin_api/v1/conversions/log`. `report/build` и любой другой POST остаются запрещены. Живое чтение включается флагом `--live`.
 
 ## Вход
 
@@ -10,9 +10,9 @@
 
 - `KEITARO_BASE_URL` — адрес трекера без `/admin_api`
 - `KEITARO_API_KEY` — ключ Admin API
-- `KUZTDS_ADMIN_URL` — локальная админка, по умолчанию `http://127.0.0.1:8090`
-- `KUZTDS_ADMIN_USER` — логин локальной админки
-- `KUZTDS_ADMIN_PASSWORD` — пароль локальной админки
+- `EMTDS_ADMIN_URL` — локальная админка, по умолчанию `http://127.0.0.1:8090`
+- `EMTDS_ADMIN_USER` — логин локальной админки
+- `EMTDS_ADMIN_PASSWORD` — пароль локальной админки
 
 Пустой ключ или адрес останавливает `--live` до сети.
 

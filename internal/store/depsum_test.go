@@ -78,11 +78,11 @@ func TestDepSumSQL(t *testing.T) {
 	if got := postbackSumSelect(true); got != "sum(profit), sum(depsum), count()" {
 		t.Fatalf("open totals %q", got)
 	}
-	closed := conversionUnion(true, true, true, true, true, false)
+	closed := conversionUnion(true, true, true, conversionLateWaves{origin: true}, true, false)
 	if strings.Contains(closed, "depsum") {
 		t.Fatalf("union names depsum while the wave is closed:\n%s", closed)
 	}
-	open := conversionUnion(false, false, false, false, false, true)
+	open := conversionUnion(false, false, false, conversionLateWaves{}, false, true)
 	if !strings.Contains(open, "toFloat64(0) AS depsum") || !strings.Contains(open, ", depsum FROM conversions") {
 		t.Fatalf("open union:\n%s", open)
 	}
@@ -98,7 +98,7 @@ func TestDepSumSQL(t *testing.T) {
 		t.Fatalf("open slice: %s", on)
 	}
 	c := &CH{depsumConv: true}
-	sel, extra := c.postbackColumns(false)
+	sel, extra := c.postbackColumns(false, false)
 	if len(extra) != 1 || extra[0] != "depsum" || !strings.HasSuffix(sel, ", depsum") {
 		t.Fatalf("journal select %q %v", sel, extra)
 	}

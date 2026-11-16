@@ -5,13 +5,12 @@ package render
 import (
 	"math/rand"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // MacroDeps — data for expanding output macros.
@@ -32,6 +31,7 @@ type MacroDeps struct {
 	Domain    string   // [DOMAIN]
 	UserAgent string   // [USERAGENT]
 	CID       string   // [CID] and {subid}
+	RootCID   string   // {root_subid}; empty when the current click is the chain root
 	Origin    string   // {origin} — signed first-entry campaign token, url-encoded when expanded
 	Pars      []string // [PAR-1]..[PAR-5]
 	SubIDs    [config.MaxSubID]string
@@ -173,11 +173,11 @@ func (d MacroDeps) scalars() []scalarMacro {
 // are not a macro, and there is no error return. The closing brace must sit
 // at index 24 or earlier, the same window as before.
 //
-// subid, country, keyword, status, payout, offer and sub_id_1..sub_id_30 are
-// filled from MacroDeps and are never read from the click query. Any other name of
-// [A-Za-z0-9_-] is looked up in Query. A nil Query, a missing parameter, or a
-// name outside that set (a dot, sub_id_31, an HTML brace like {color}) is
-// left untouched.
+// subid, root_subid, country, keyword, status, payout, offer and
+// sub_id_1..sub_id_30 are filled from MacroDeps and are never read from the click
+// query. Any other name of [A-Za-z0-9_-] is looked up in Query. A nil Query, a
+// missing parameter, or a name outside that set (a dot, sub_id_31, an HTML brace
+// like {color}) is left untouched.
 func (d MacroDeps) curlyAt(s string) (val string, n int) {
 	end := strings.IndexByte(s, '}')
 	if end <= 1 || end > 24 {
@@ -187,6 +187,12 @@ func (d MacroDeps) curlyAt(s string) (val string, n int) {
 	switch name {
 	case "subid":
 		return url.QueryEscape(d.CID), end + 1
+	case "root_subid":
+		rootCID := d.RootCID
+		if rootCID == "" {
+			rootCID = d.CID
+		}
+		return url.QueryEscape(rootCID), end + 1
 	case "country":
 		return d.Country, end + 1
 	case "keyword":
@@ -323,7 +329,7 @@ func (d MacroDeps) randLine(file, countRaw string, unique bool) string {
 	if !ok {
 		return ""
 	}
-	return pickLines(readLines(path), count, unique, d.Rng)
+	return pickLines(lineFiles.get(path), count, unique, d.Rng)
 }
 
 // [RANDDFL-(dir)-count(/u)] → picks a random file in DataDir/dir and takes
@@ -331,24 +337,14 @@ func (d MacroDeps) randLine(file, countRaw string, unique bool) string {
 func (d MacroDeps) randDfl(sub, countRaw string, unique bool) string {
 	count, _ := strconv.Atoi(countRaw)
 	dir, ok := underDir(d.DataDir, sub)
-	if !ok {
+	if !ok || count <= 0 {
 		return ""
 	}
-	entries, err := os.ReadDir(dir)
-	if err != nil || count <= 0 {
-		return ""
-	}
-	var files []string
-	for _, e := range entries {
-		n := e.Name()
-		if !e.IsDir() && n != "randdfl.dat" && n != ".htaccess" {
-			files = append(files, n)
-		}
-	}
+	files := poolDirs.get(dir)
 	if len(files) == 0 {
 		return ""
 	}
-	return pickLines(readLines(filepath.Join(dir, files[intn(d.Rng, len(files))])), count, unique, d.Rng)
+	return pickLines(lineFiles.get(filepath.Join(dir, files[intn(d.Rng, len(files))])), count, unique, d.Rng)
 }
 
 // pickLines takes count random lines joined by ';' (no repeats when unique).
@@ -396,18 +392,4 @@ func underDir(base, rel string) (string, bool) {
 		return "", false
 	}
 	return p, true
-}
-
-func readLines(path string) []string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return nil
-	}
-	var out []string
-	for _, ln := range strings.Split(string(b), "\n") {
-		if ln = strings.TrimSpace(ln); ln != "" {
-			out = append(out, ln)
-		}
-	}
-	return out
 }

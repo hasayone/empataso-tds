@@ -1,0 +1,99 @@
+[
+  {
+    "id": 43041,
+    "type": "forced",
+    "name": "Bot Protection",
+    "position": 1,
+    "weight": 100,
+    "state": "active",
+    "schema": "action",
+    "action_type": "status404",
+    "action_payload": "",
+    "filter_or": false,
+    "filters": [
+      {"id": 130983, "stream_id": 43041, "name": "bot", "mode": "accept", "payload": null, "oid": 130983}
+    ],
+    "landings": [],
+    "offers": []
+  },
+  {
+    "id": 66267,
+    "type": "forced",
+    "name": "Bot Protection guard",
+    "position": 1,
+    "weight": 100,
+    "state": "active",
+    "schema": "action",
+    "action_type": "status404",
+    "action_payload": "",
+    "filter_or": true,
+    "filters": [
+      {"name": "sub_id_3", "mode": "accept", "payload": ["V2439", "sdk_gphone64_arm64", "Pixel 9a"]},
+      {"name": "isp", "mode": "accept", "payload": ["Google LLC", "Google Global Cache"]},
+      {"name": "user_agent", "mode": "accept", "payload": ["sdk_gphone", "emulator", "Android.*wv"]},
+      {"name": "ip", "mode": "accept", "payload": ["192.0.2.10", "198.51.100.0/24"]},
+      {"name": "device_type", "mode": "reject", "payload": ["mobile", "tablet"]},
+      {"name": "bot", "mode": "accept", "payload": null}
+    ],
+    "landings": [],
+    "offers": []
+  },
+  {
+    "id": 66266,
+    "type": "regular",
+    "name": "Middleware",
+    "position": 2,
+    "weight": 100,
+    "state": "active",
+    "schema": "redirect",
+    "action_type": "http",
+    "action_payload": "https://offer.example/",
+    "filter_or": false,
+    "filters": [
+      {"name": "bot", "mode": "reject", "payload": null},
+      {"name": "country", "mode": "accept", "payload": ["AE", "DE", "PL"]},
+      {"name": "device_type", "mode": "accept", "payload": ["mobile", "tablet"]}
+    ],
+    "landings": [],
+    "offers": []
+  },
+  {
+    "id": 66264,
+    "type": "regular",
+    "name": "Developer",
+    "position": 3,
+    "weight": 100,
+    "state": "active",
+    "schema": "redirect",
+    "action_type": "http",
+    "action_payload": "https://dev.example/",
+    "filter_or": false,
+    "filters": [
+      {"name": "country", "mode": "reject", "payload": ["UA", "PL"]}
+    ],
+    "landings": [],
+    "offers": []
+  },
+  {
+    "id": 70001,
+    "type": "regular",
+    "name": "Flags",
+    "position": 4,
+    "weight": 100,
+    "state": "active",
+    "schema": "redirect",
+    "action_type": "http",
+    "action_payload": "https://flags.example/",
+    "filter_or": false,
+    "filters": [
+      {"name": "proxy", "mode": "reject", "payload": null},
+      {"name": "empty_referrer", "mode": "accept", "payload": null},
+      {"name": "ipv_6", "mode": "reject", "payload": null},
+      {"name": "uniqueness", "mode": "accept", "payload": "stream"},
+      {"name": "connection_type", "mode": "accept", "payload": ["wifi"]},
+      {"name": "operator", "mode": "reject", "payload": ["Vodafone"]}
+    ],
+    "landings": [],
+    "offers": []
+  }
+]

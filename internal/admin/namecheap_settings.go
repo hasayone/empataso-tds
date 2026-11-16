@@ -156,9 +156,11 @@ func (a ncAccount) creds() ncCreds {
 
 // ncSettingsView is the body of GET and PUT /api/registrars/namecheap.
 // The key and the contacts are never fields; HasKey and HasContacts only say they are set.
+// Local is set on GET when the admin runs on a local machine, see Server.localAccess.
 // Error is set on GET when namecheap.json exists but could not be used.
 type ncSettingsView struct {
 	Error       string `json:"error,omitempty"`
+	Local       bool   `json:"local"`
 	Configured  bool   `json:"configured"`
 	Name        string `json:"name"`
 	APIUser     string `json:"api_user"`
@@ -339,22 +341,25 @@ func namecheapView(a ncAccount) ncSettingsView {
 }
 
 // registerNamecheap mounts the registrar routes and the domain NS route.
-// Settings, the connection test, registration and NS changes are cookie-session only.
+// Settings, the connection test, registration and NS changes carry the cookie
+// flag in routeAccess, so they are cookie-session only.
 // s is the server and mux receives the routes.
 func registerNamecheap(s *Server, mux *http.ServeMux) {
-	s.handle(mux, "GET /api/registrars/namecheap", cookieOnly(http.HandlerFunc(s.handleNamecheapGet)))
-	s.handle(mux, "PUT /api/registrars/namecheap", cookieOnly(http.HandlerFunc(s.handleNamecheapPut)))
-	s.handle(mux, "POST /api/registrars/namecheap/test", cookieOnly(http.HandlerFunc(s.handleNamecheapTest)))
+	s.handle(mux, "GET /api/registrars/namecheap", http.HandlerFunc(s.handleNamecheapGet))
+	s.handle(mux, "PUT /api/registrars/namecheap", http.HandlerFunc(s.handleNamecheapPut))
+	s.handle(mux, "POST /api/registrars/namecheap/test", http.HandlerFunc(s.handleNamecheapTest))
 	s.handle(mux, "POST /api/registrars/namecheap/check", http.HandlerFunc(s.handleNamecheapCheck))
-	s.handle(mux, "POST /api/registrars/namecheap/register", cookieOnly(http.HandlerFunc(s.handleNamecheapRegister)))
-	s.handle(mux, "POST /api/domains/{id}/ns", cookieOnly(http.HandlerFunc(s.handleDomainNS)))
+	s.handle(mux, "POST /api/registrars/namecheap/register", http.HandlerFunc(s.handleNamecheapRegister))
+	s.handle(mux, "POST /api/domains/{id}/ns", http.HandlerFunc(s.handleDomainNS))
 }
 
 // handleNamecheapGet returns the account without the key and the contacts.
 // When namecheap.json was damaged at start the body carries its reason in "error".
+// "local" is true when the admin runs on a local machine.
 func (s *Server) handleNamecheapGet(w http.ResponseWriter, r *http.Request) {
 	v := namecheapView(s.namecheapAccount())
 	v.Error = s.namecheapLoadError()
+	v.Local = s.localAccess(r)
 	writeJSON(w, http.StatusOK, v)
 }
 

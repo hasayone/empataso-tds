@@ -49,6 +49,21 @@ func LoadEnv(path string) error {
 	return nil
 }
 
+// Env читает переменную окружения EMTDS_*, а при пустом значении — то же имя с префиксом KUZTDS_.
+//
+// Параметры: key — полное имя, например EMTDS_ADMIN_URL.
+// Результат: значение или пустая строка; имена без префикса EMTDS_ читаются как есть.
+// Ошибки: нет.
+func Env(key string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	if rest, ok := strings.CutPrefix(key, "EMTDS_"); ok {
+		return os.Getenv("KUZTDS_" + rest)
+	}
+	return ""
+}
+
 // RequireLiveEnv проверяет адрес и ключ до любого сетевого вызова.
 //
 // Параметры: нет. Читает KEITARO_BASE_URL и KEITARO_API_KEY.

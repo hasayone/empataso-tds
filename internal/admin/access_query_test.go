@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/render"
-	"github.com/egerkuzma/kuztds/internal/security"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/render"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // extraMacros are the curly macros of the extra click fields: render reads them from
@@ -213,6 +213,9 @@ func TestParameterCannotReadHiddenQueryName(t *testing.T) {
 	if got := rig.putSource(t, "u", "src", map[string]string{"sub_id_1": "q"}); got != http.StatusBadRequest {
 		t.Errorf("sub_id_1 mapped onto q, the plain keyword parameter: %d, want 400", got)
 	}
+	if got := rig.putSource(t, "u", "src", map[string]string{"sub_id_1": "utm_term", "site": "keyword"}); got != http.StatusOK {
+		t.Errorf("fields mapped onto the aliases the engine skips then: %d, want 200", got)
+	}
 	if got := rig.putSource(t, "k", "src", map[string]string{"keyword": "utm_term", "sub_id_1": "p9"}); got != http.StatusOK {
 		t.Errorf("sub_id_1 mapped to another name: %d", got)
 	}
@@ -245,6 +248,9 @@ func TestCampaignSourceSwitchRefusedForUnstoredSubID(t *testing.T) {
 	rig.seedSource(t, "m14", map[string]string{"sub_id_14": "zone"})
 	rig.seedSource(t, "msite", map[string]string{"site": "zone"})
 	rig.seedSource(t, "clean", map[string]string{"sub_id_1": "p1"})
+	rig.seedSource(t, "bykeyword", map[string]string{"sub_id_1": "keyword"})
+	rig.seedSource(t, "byq", map[string]string{"sub_id_1": "q"})
+	rig.seedSource(t, "byutm", map[string]string{"sub_id_1": "utm_term"})
 	base := plainCampaign("https://a.example/")
 
 	for _, c := range []struct {
@@ -256,6 +262,10 @@ func TestCampaignSourceSwitchRefusedForUnstoredSubID(t *testing.T) {
 		{[]string{"site"}, "msite", http.StatusBadRequest},
 		{[]string{"keyword"}, "msite", http.StatusOK},
 		{[]string{"keyword"}, "clean", http.StatusOK},
+		{[]string{"keyword"}, "bykeyword", http.StatusOK},
+		{[]string{"keyword"}, "byq", http.StatusBadRequest},
+		{[]string{"keyword"}, "byutm", http.StatusOK},
+		{nil, "byutm", http.StatusOK},
 		{[]string{"ip"}, "m14", http.StatusOK},
 		{nil, "m14", http.StatusOK},
 	} {
@@ -277,6 +287,9 @@ func TestExpandHiddenAddsDerivedFields(t *testing.T) {
 		"brand":   {"device_model"},
 		"device":  {"device_model"},
 		"profit":  {"depsum"},
+		"keyword": {"origin_keyword"},
+		"stream":  {"origin_stream"},
+		"cid":     {"root_cid"},
 	}
 	for parent, children := range cases {
 		hidden := expandHidden([]string{parent})
@@ -495,5 +508,138 @@ func TestNormalizeAccessDropsListsOfCreatedMode(t *testing.T) {
 	}
 	if g := out.Grants[resCampaigns]; g.IDs != nil {
 		t.Errorf("full: %+v", g)
+	}
+}
+
+// TestHiddenKeywordIsReadUnderItsMappedName checks that, with the keyword hidden, a visible
+// field cannot be bound to the name the source maps the keyword under, nor to q, which the
+// engine always reads as the keyword. The aliases keyword and utm_term a field is bound to
+// are not read as the keyword by the engine, so that binding stays allowed, as it does
+// while the keyword is visible.
+func TestHiddenKeywordIsReadUnderItsMappedName(t *testing.T) {
+	rig := newRolesRig(t, "")
+	rig.seedSource(t, "plain", map[string]string{"sub_id_1": "p1"})
+	rig.seedSource(t, "mapped", map[string]string{"keyword": "kw", "sub_id_1": "p1"})
+
+	rig.setRole(t, editorAccess("keyword"))
+	for _, field := range []string{"sub_id_1", "sub_id_2", "site"} {
+		if got := rig.putSource(t, "mapped", "src", map[string]string{"keyword": "kw", "sub_id_1": "p1", field: "kw"}); got != http.StatusBadRequest {
+			t.Errorf("%s mapped onto the keyword's name with the keyword hidden: %d, want 400", field, got)
+		}
+	}
+	for _, id := range []string{"plain", "mapped"} {
+		before := map[string]string{"sub_id_1": "p1"}
+		if id == "mapped" {
+			before["keyword"] = "kw"
+		}
+		for _, alias := range config.KeywordParams {
+			for _, field := range []string{"sub_id_1", "sub_id_2", "site"} {
+				params := map[string]string{field: alias}
+				for k, v := range before {
+					if k != field {
+						params[k] = v
+					}
+				}
+				want := http.StatusOK
+				if alias == config.LegacyKeywordParam {
+					want = http.StatusBadRequest
+				}
+				if got := rig.putSource(t, id, "src", params); got != want {
+					t.Errorf("source %s: %s mapped onto %s with the keyword hidden: %d, want %d", id, field, alias, got, want)
+				}
+			}
+		}
+		if got := rig.putSource(t, id, "src", map[string]string{"sub_id_1": "p9", "keyword": before["keyword"]}); got != http.StatusOK {
+			t.Errorf("source %s: an unrelated name: %d", id, got)
+		}
+	}
+
+	rig.setRole(t, editorAccess("ip"))
+	for _, alias := range config.KeywordParams {
+		if got := rig.putSource(t, "plain", "src", map[string]string{"sub_id_1": alias}); got != http.StatusOK {
+			t.Errorf("sub_id_1 mapped onto %s with the keyword visible: %d", alias, got)
+		}
+	}
+}
+
+// TestFieldReadNamesOfKeyword checks the keyword is listed under its mapped name and every
+// engine alias once, and that other fields are unchanged.
+func TestFieldReadNamesOfKeyword(t *testing.T) {
+	if got := fieldReadNames(nil, "keyword", nil); !slices.Equal(got, config.KeywordParams[:]) {
+		t.Errorf("unmapped keyword reads %v, want %v", got, config.KeywordParams)
+	}
+	if got := fieldReadNames(map[string]string{"keyword": " kw "}, "keyword", nil); !slices.Equal(got, append([]string{"kw"}, config.KeywordParams[:]...)) {
+		t.Errorf("mapped keyword reads %v", got)
+	}
+	if got := fieldReadNames(map[string]string{"keyword": "utm_term"}, "keyword", nil); !slices.Equal(got, []string{"utm_term", "keyword", "q"}) {
+		t.Errorf("keyword mapped onto an alias reads %v, want the name once", got)
+	}
+	if got := fieldReadNames(map[string]string{"sub_id_1": "p1"}, "sub_id_1", nil); !slices.Equal(got, []string{"p1"}) {
+		t.Errorf("sub_id_1 reads %v", got)
+	}
+	if got := fieldReadNames(nil, "site", nil); !slices.Equal(got, []string{"site"}) {
+		t.Errorf("site reads %v", got)
+	}
+}
+
+// TestFieldReadNamesOfKeywordSkipsTakenNames checks the fallback names of the keyword leave
+// out a name another parameter of the source or the skip set owns, and keep the mapped name.
+func TestFieldReadNamesOfKeywordSkipsTakenNames(t *testing.T) {
+	cases := []struct {
+		name   string
+		params map[string]string
+		skip   map[string]bool
+		want   []string
+	}{
+		{"sub_id_1 on utm_term", map[string]string{"sub_id_1": "utm_term"}, nil, []string{"keyword", "q"}},
+		{"site on keyword", map[string]string{"site": " keyword "}, nil, []string{"q", "utm_term"}},
+		{"every alias taken, q stays", map[string]string{"sub_id_1": "keyword", "sub_id_2": "q", "sub_id_3": "utm_term"}, nil, []string{"q"}},
+		{"q bound to a sub id is still read", map[string]string{"sub_id_1": "q"}, nil, []string{"keyword", "q", "utm_term"}},
+		{"mapped name stays though taken", map[string]string{"keyword": "q", "sub_id_1": "q"}, nil, []string{"q", "keyword", "utm_term"}},
+		{"alias in skip", nil, map[string]bool{"utm_term": true}, []string{"keyword", "q"}},
+		{"q in skip stays", nil, map[string]bool{"q": true}, []string{"keyword", "q", "utm_term"}},
+		{"mapped name stays though in skip", map[string]string{"keyword": "q"}, map[string]bool{"q": true}, []string{"q", "keyword", "utm_term"}},
+	}
+	for _, c := range cases {
+		if got := fieldReadNames(c.params, "keyword", c.skip); !slices.Equal(got, c.want) {
+			t.Errorf("%s: reads %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// TestKeywordFallbackNamesBoundElsewhereAreNotReads covers the checks of a source edit when
+// a field is bound to an alias of the keyword (keyword, utm_term): no hidden value reaches
+// a visible field there, so it is not a new hidden read, while a real read stays one, q
+// included.
+func TestKeywordFallbackNamesBoundElsewhereAreNotReads(t *testing.T) {
+	keywordHidden := viewer{hidden: expandHidden([]string{"keyword"})}
+	subHidden := viewer{hidden: expandHidden([]string{"sub_id_1"})}
+	costHidden := viewer{hidden: expandHidden([]string{"cost"})}
+	cases := []struct {
+		name   string
+		v      viewer
+		params map[string]string
+		prices map[string]bool
+		want   string
+	}{
+		{"hidden keyword, sub_id_1 and site on utm_term", keywordHidden, map[string]string{"sub_id_1": "utm_term", "site": "utm_term"}, nil, ""},
+		{"hidden keyword, sub_id_1 on its mapped name", keywordHidden, map[string]string{"keyword": "kw", "sub_id_1": "kw"}, nil, "sub_id_1"},
+		{"hidden sub_id_1 on utm_term, keyword visible", subHidden, map[string]string{"sub_id_1": "utm_term"}, nil, ""},
+		{"hidden sub_id_1 on utm_term, keyword mapped there too", subHidden, map[string]string{"sub_id_1": "utm_term", "keyword": "utm_term"}, nil, "keyword"},
+		{"hidden sub_id_1 on p1, site on p1", subHidden, map[string]string{"sub_id_1": "p1", "site": "p1"}, nil, "site"},
+		{"hidden price named utm_term, keyword visible", costHidden, nil, map[string]bool{"utm_term": true}, ""},
+		{"hidden keyword, sub_id_1 on q", keywordHidden, map[string]string{"sub_id_1": "q"}, nil, "sub_id_1"},
+		{"hidden price named q, sub_id_1 on q", costHidden, map[string]string{"sub_id_1": "q"}, map[string]bool{"q": true}, "sub_id_1"},
+	}
+	for _, c := range cases {
+		if got := newHiddenRead(c.v, c.params, nil, c.prices); got != c.want {
+			t.Errorf("%s: new hidden read %q, want %q", c.name, got, c.want)
+		}
+	}
+	if got := hiddenReads(costHidden, nil, map[string]bool{"q": true}); !got["keyword"] {
+		t.Errorf("a visible keyword does not read the price name q, which it always reads: %v", got)
+	}
+	if got := hiddenReads(costHidden, nil, map[string]bool{"utm_term": true}); got["keyword"] {
+		t.Errorf("a visible keyword reads the price name utm_term: %v", got)
 	}
 }

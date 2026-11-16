@@ -1,6 +1,6 @@
 **English** · [Русский](SECURITY.ru.md)
 
-# KuzTDS security model
+# EmTDS security model
 
 A normative document: requirements + what's already done (✅) and what's planned
 (⏳). Up to date as of 2026-09-07. The rest — in `TODO.md`.
@@ -9,7 +9,7 @@ A normative document: requirements + what's already done (✅) and what's planne
 - ✅ **No deserialization of untrusted data** — JSON only (`encoding/json`),
   decoded into a fixed struct.
 - ✅ Input IPs go through `netip.ParseAddr`; invalid ones never reach queries.
-- ✅ `?api=` mode — base64(**JSON**), access by the `KUZTDS_API_KEY` key. The
+- ✅ `?api=` mode — base64(**JSON**), access by the `EMTDS_API_KEY` key. The
   key is compared in constant time (`security.EqualTokens`), like every other
   secret here.
 - ✅ Values the engine wrote but the client hands back are re-validated, not
@@ -21,7 +21,7 @@ A normative document: requirements + what's already done (✅) and what's planne
 
 ## 2. Trusted proxies and client IP
 - ✅ `server.RealIP`: trusts `X-Forwarded-For`/`CF-Connecting-IP` only if
-  `RemoteAddr` is in `KUZTDS_TRUSTED_PROXIES` (CIDR); takes the rightmost
+  `RemoteAddr` is in `EMTDS_TRUSTED_PROXIES` (CIDR); takes the rightmost
   untrusted address from XFF (CF-Connecting-IP has priority). Otherwise —
   `RemoteAddr`.
 - ✅ `CF-IPCountry` is a country source **only when the request came through a
@@ -35,10 +35,16 @@ A normative document: requirements + what's already done (✅) and what's planne
 ## 3. Admin authentication
 - ✅ Passwords: `argon2id` (`golang.org/x/crypto/argon2`).
 - ✅ Password change in the UI (`POST /api/password`), hash in
-  `KUZTDS_ADMIN_PASSWORD_FILE`.
+  `EMTDS_ADMIN_PASSWORD_FILE`.
 - ✅ Sessions: 256-bit token (`crypto/rand`), stored in Redis (TTL) or in-memory.
 - ✅ Cookie: `HttpOnly`, `Secure` (configurable), `SameSite=Strict`, limited TTL.
-- ✅ CSRF: double-submit token on unsafe methods (POST/PUT/DELETE).
+- ✅ API keys (`Api-Key`, prefix `em_`; keys issued before `em_` start with `kz_` and keep working) for scripts and AI agents: type USER or
+  ADMIN, limited to sections or a role; dangerous actions (Keitaro import, log
+  purge, group replace, cron, boards, landing files) must be granted to the key
+  explicitly, while key, user and integration management is cookie-session only.
+  A key is rate-limited (10 req/s, burst 30, 2 heavy requests at once) and every
+  call is written to `audit/admin-YYYY-MM.jsonl` (kept 6 months). Errors are
+  `{error, code}`. Details: [wiki/admin-api.md](wiki/admin-api.md) (in Russian).
 - ✅ Login rate-limit: Redis, **fixed window** per IP (10/min), no blocking
   `sleep`. Counter and expiry are one Lua script (`INCR` + `PEXPIRE`), so a lost
   round-trip cannot leave an immortal key — that used to lock the administrator
@@ -51,8 +57,8 @@ A normative document: requirements + what's already done (✅) and what's planne
   fingerprint no longer matches the current hash.
   **The binding is to the hash, not to the password.** argon2id salts randomly,
   so a hash regenerated from the *same* password is a different hash and a
-  different fingerprint. Replacing `KUZTDS_ADMIN_PASSWORD_HASH` (or the
-  contents of `KUZTDS_ADMIN_PASSWORD_FILE`) therefore logs everyone out — even
+  different fingerprint. Replacing `EMTDS_ADMIN_PASSWORD_HASH` (or the
+  contents of `EMTDS_ADMIN_PASSWORD_FILE`) therefore logs everyone out — even
   when the password itself has not changed. Expect a re-login after any
   redeploy that regenerates the hash.
 - ✅ Storage failure is checked **before** the password is compared: the
@@ -79,7 +85,7 @@ A normative document: requirements + what's already done (✅) and what's planne
   password that landed in the name field (#23).
 - ✅ The hash file is written via tmp-file + rename (0600), so a crash or a full
   disk cannot leave it empty or torn (#22, `internal/admin/atomicwrite.go`). At
-  start an absent file falls back to `KUZTDS_ADMIN_PASSWORD_HASH`; an unreadable
+  start an absent file falls back to `EMTDS_ADMIN_PASSWORD_HASH`; an unreadable
   or empty one is an error — the old silent fallback restored the previous
   password.
 - ⏳ Forced change of the default password on first start.
@@ -102,12 +108,12 @@ A normative document: requirements + what's already done (✅) and what's planne
   spreadsheet would otherwise run them as formulas.
 
 ## 5. Secrets and data
-- ✅ Secrets — via `KUZTDS_*` environment variables, not in code/VCS.
+- ✅ Secrets — via `EMTDS_*` environment variables, not in code/VCS.
 - ✅ `.gitignore` excludes `*.local.yaml`, `*.env`, `secrets/`, `*.mmdb`, `.dat`
   (exception — the test `internal/geo/testdata/*.mmdb`).
-- The groups config is a JSON file `KUZTDS_GROUPS_FILE` (not yaml); example —
+- The groups config is a JSON file `EMTDS_GROUPS_FILE` (not yaml); example —
   `configs/*.json`.
-- ✅ The cron config (`KUZTDS_CRON_FILE`) holds the Telegram token and API keys:
+- ✅ The cron config (`EMTDS_CRON_FILE`) holds the Telegram token and API keys:
   it is written `0600` through a temp file and a rename, and `cron.json*` is
   git-ignored. The bot token never reaches a log or the status file — it is
   part of the request URL, and transport errors are rebuilt without the URL.
@@ -142,10 +148,10 @@ A normative document: requirements + what's already done (✅) and what's planne
   is spliced in **after** expansion for the same reason — a partner returning
   `[RANDLINE-(secret.dat)-1]` used to make the engine read that file and serve
   it (#18). The `[RANDLINE]`/`[RANDDFL]` file reads that remain are confined to
-  `KUZTDS_DATA_DIR` by `underDir`, which is load-bearing, not belt-and-braces.
+  `EMTDS_DATA_DIR` by `underDir`, which is load-bearing, not belt-and-braces.
 - ✅ The cron service writes only to fixed places. An IP-list target is a list
-  name (`^[a-z0-9_]{1,64}$`) inside `KUZTDS_DATA_DIR`; a geo database goes to
-  the path in `KUZTDS_GEO_DB` / `KUZTDS_ASN_DB`, which the config cannot
+  name (`^[a-z0-9_]{1,64}$`) inside `EMTDS_DATA_DIR`; a geo database goes to
+  the path in `EMTDS_GEO_DB` / `EMTDS_ASN_DB`, which the config cannot
   change — the panel decides what is downloaded, never where it is written.
   Downloads are size-capped and validated before the rename: no addresses → the
   list is left alone; not a database of the expected kind → the old database

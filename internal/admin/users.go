@@ -3,11 +3,12 @@ package admin
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 const userBodyLimit = 64 << 10
@@ -16,13 +17,13 @@ var errSelfDisable = errors.New("cannot disable yourself")
 
 // registerUsers mounts CRUD routes for users.json behind cookie sessions.
 func registerUsers(s *Server, mux *http.ServeMux) {
-	s.handle(mux, "GET /api/users", cookieOnly(http.HandlerFunc(s.handleUsersList)))
-	s.handle(mux, "POST /api/users", cookieOnly(http.HandlerFunc(s.handleUsersCreate)))
-	s.handle(mux, "GET /api/users/{id}", cookieOnly(http.HandlerFunc(s.handleUsersGet)))
-	s.handle(mux, "PUT /api/users/{id}", cookieOnly(http.HandlerFunc(s.handleUsersUpdate)))
-	s.handle(mux, "DELETE /api/users/{id}", cookieOnly(http.HandlerFunc(s.handleUsersDelete)))
-	s.handle(mux, "PUT /api/users/{id}/password", cookieOnly(http.HandlerFunc(s.handleUsersPassword)))
-	s.handle(mux, "PUT /api/users/{id}/access", cookieOnly(http.HandlerFunc(s.handleUsersAccess)))
+	s.handle(mux, "GET /api/users", http.HandlerFunc(s.handleUsersList))
+	s.handle(mux, "POST /api/users", http.HandlerFunc(s.handleUsersCreate))
+	s.handle(mux, "GET /api/users/{id}", http.HandlerFunc(s.handleUsersGet))
+	s.handle(mux, "PUT /api/users/{id}", http.HandlerFunc(s.handleUsersUpdate))
+	s.handle(mux, "DELETE /api/users/{id}", http.HandlerFunc(s.handleUsersDelete))
+	s.handle(mux, "PUT /api/users/{id}/password", http.HandlerFunc(s.handleUsersPassword))
+	s.handle(mux, "PUT /api/users/{id}/access", http.HandlerFunc(s.handleUsersAccess))
 }
 
 // envAdminRow returns the virtual list entry for the environment administrator (AdminUser).
@@ -222,6 +223,9 @@ func (s *Server) handleUsersDelete(w http.ResponseWriter, r *http.Request) {
 	if err := s.deleteUser(id); err != nil {
 		writeUserUpdateErr(w, err)
 		return
+	}
+	if err := s.aiChatRemoveUser(id); err != nil {
+		s.logWarn("assistant chats of a deleted user not removed", "error_type", fmt.Sprintf("%T", err))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

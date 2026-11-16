@@ -1,14 +1,21 @@
 package main
 
 import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func TestNewCIDFormat(t *testing.T) {
@@ -154,6 +161,30 @@ func TestNewCIDSignerUnreadablePath(t *testing.T) {
 	}
 }
 
+func TestNewCIDSignerFallbackLogsError(t *testing.T) {
+	path := filepath.Join(t.TempDir(), cidKeyFile)
+	if err := os.Mkdir(path, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&out, nil))
+	newCIDSigner("", path, log)
+	if got := out.String(); !strings.Contains(got, `"level":"ERROR"`) ||
+		!strings.Contains(got, "using a process key") {
+		t.Fatalf("fallback log = %q, want ERROR", got)
+	}
+}
+
+func TestNewCIDSignerWithoutPathLogsError(t *testing.T) {
+	var out bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&out, nil))
+	newCIDSigner("", "", log)
+	if got := out.String(); !strings.Contains(got, `"level":"ERROR"`) ||
+		!strings.Contains(got, "using a process key") {
+		t.Fatalf("fallback log = %q, want ERROR", got)
+	}
+}
+
 // Engines starting together share one key: only one creates the file and the
 // others read it.
 func TestLoadCIDKeyConcurrent(t *testing.T) {
@@ -244,6 +275,180 @@ func TestOriginTokenNotCIDAndCIDNotOrigin(t *testing.T) {
 	cid := s.newCID()
 	if _, ok := s.verifyOrigin(cid); ok {
 		t.Fatal("cid must not verify as origin")
+	}
+}
+
+func TestSignVerifyPath(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("p", cidKeyBytes), "", discardLog())
+	now := time.Unix(1_800_000_000, 0)
+	tok := s.signPath("camp-a", "root-cid", now)
+	gid, rootCID, issued, ok := s.verifyPath(tok, now)
+	if !ok || gid != "camp-a" || rootCID != "root-cid" || !issued.Equal(now) {
+		t.Fatalf("verify %q → %q %q %v %v", tok, gid, rootCID, issued, ok)
+	}
+}
+
+func TestPathRejectsTamperedFields(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("q", cidKeyBytes), "", discardLog())
+	now := time.Unix(1_800_000_000, 0)
+	parts := strings.Split(s.signPath("camp-a", "root-cid", now), ".")
+	if len(parts) != 4 {
+		t.Fatalf("token parts = %q", parts)
+	}
+	tamperedSig := "A" + parts[3][1:]
+	if tamperedSig == parts[3] {
+		tamperedSig = "B" + parts[3][1:]
+	}
+	cases := map[string][]string{
+		"gid":  {"camp-b", parts[1], parts[2], parts[3]},
+		"cid":  {parts[0], "other-cid", parts[2], parts[3]},
+		"time": {parts[0], parts[1], strconv.FormatInt(now.Add(-time.Second).Unix(), 36), parts[3]},
+		"sig":  {parts[0], parts[1], parts[2], tamperedSig},
+	}
+	for name, changed := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, _, _, ok := s.verifyPath(strings.Join(changed, "."), now); ok {
+				t.Fatal("tampered token accepted")
+			}
+		})
+	}
+}
+
+func TestPathValidityWindow(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("r", cidKeyBytes), "", discardLog())
+	now := time.Unix(1_800_000_000, 0)
+	cases := []struct {
+		name   string
+		issued time.Time
+		ok     bool
+	}{
+		{"expired", now.Add(-pathTokenTTL - time.Second), false},
+		{"ttl boundary", now.Add(-pathTokenTTL), true},
+		{"future within skew", now.Add(pathTokenSkew), true},
+		{"future beyond skew", now.Add(pathTokenSkew + time.Second), false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tok := s.signPath("camp-a", "root-cid", tc.issued)
+			if _, _, _, ok := s.verifyPath(tok, now); ok != tc.ok {
+				t.Fatalf("verify issued %v = %v, want %v", tc.issued, ok, tc.ok)
+			}
+		})
+	}
+}
+
+func TestPathDottedGroupID(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("s", cidKeyBytes), "", discardLog())
+	now := time.Unix(1_800_000_000, 0)
+	tok := s.signPath("camp.region.v1", "root-cid", now)
+	gid, rootCID, _, ok := s.verifyPath(tok, now)
+	if !ok || gid != "camp.region.v1" || rootCID != "root-cid" {
+		t.Fatalf("verify dotted gid → %q %q %v", gid, rootCID, ok)
+	}
+}
+
+func TestPathRejectsEmptyAndMalformedFields(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("t", cidKeyBytes), "", discardLog())
+	now := time.Unix(1_800_000_000, 0)
+	if got := s.signPath("", "root-cid", now); got != "" {
+		t.Fatalf("empty gid signed as %q", got)
+	}
+	if got := s.signPath("camp-a", "", now); got != "" {
+		t.Fatalf("empty cid signed as %q", got)
+	}
+	if got := s.signPath("camp-a", "root.cid", now); got != "" {
+		t.Fatalf("dotted cid signed as %q", got)
+	}
+	valid := s.signPath("camp-a", "root-cid", now)
+	for _, tok := range []string{
+		"",
+		"camp-a",
+		"camp-a.root-cid",
+		"camp-a.root-cid.time",
+		".root-cid.time.sig",
+		"camp-a..time.sig",
+		"camp-a.root-cid..sig",
+		"camp-a.root-cid.time.",
+		valid + ".extra",
+	} {
+		if _, _, _, ok := s.verifyPath(tok, now); ok {
+			t.Errorf("malformed token accepted: %q", tok)
+		}
+	}
+}
+
+func TestPathRejectsOversizedToken(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("x", cidKeyBytes), "", discardLog())
+	now := time.Unix(1_800_000_000, 0)
+	gid := strings.Repeat("g", pathTokenMaxLen)
+	tok := s.signPath(gid, "root-cid", now)
+	if len(tok) <= pathTokenMaxLen {
+		t.Fatalf("token length = %d, want over %d", len(tok), pathTokenMaxLen)
+	}
+	if _, _, _, ok := s.verifyPath(tok, now); ok {
+		t.Fatal("oversized token accepted")
+	}
+}
+
+func TestPathRejectsNonCanonicalTimestamp(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("y", cidKeyBytes), "", discardLog())
+	now := time.Unix(1_800_000_000, 0)
+	tokenWithTS := func(ts36 string) string {
+		body := "camp-a.root-cid." + ts36
+		m := hmac.New(sha256.New, s.signKey())
+		m.Write([]byte(pathMACPrefix))
+		m.Write([]byte(body))
+		sig := base64.RawURLEncoding.EncodeToString(m.Sum(nil)[:originSigBytes])
+		return body + "." + sig
+	}
+	validTS := strconv.FormatInt(now.Unix(), 36)
+	for name, ts36 := range map[string]string{
+		"negative":     "-1",
+		"plus":         "+1",
+		"uppercase":    strings.ToUpper(validTS),
+		"leading zero": "0" + validTS,
+		"overflow":     "1y2p0ij32e8e8",
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, _, _, ok := s.verifyPath(tokenWithTS(ts36), now); ok {
+				t.Fatalf("timestamp %q accepted", ts36)
+			}
+		})
+	}
+}
+
+func TestOriginAndPathFormatsAreDistinct(t *testing.T) {
+	s := newCIDSigner(strings.Repeat("u", cidKeyBytes), "", discardLog())
+	now := time.Unix(1_800_000_000, 0)
+	origin := s.signOrigin("camp.v1")
+	path := s.signPath("camp.v1", "root-cid", now)
+	if gid, ok := s.verifyOrigin(origin); !ok || gid != "camp.v1" {
+		t.Fatalf("legacy origin rejected: %q %v", gid, ok)
+	}
+	if _, ok := s.verifyOrigin(path); ok {
+		t.Fatal("path token accepted as legacy origin")
+	}
+	if _, _, _, ok := s.verifyPath(origin, now); ok {
+		t.Fatal("legacy origin accepted as path token")
+	}
+}
+
+func TestNilSignerPathToken(t *testing.T) {
+	var s *cidSigner
+	now := time.Unix(1_800_000_000, 0)
+	tok := s.signPath("camp-a", "root-cid", now)
+	gid, rootCID, issued, ok := s.verifyPath(tok, now)
+	if !ok || gid != "camp-a" || rootCID != "root-cid" || !issued.Equal(now) {
+		t.Fatalf("nil signer verify → %q %q %v %v", gid, rootCID, issued, ok)
+	}
+}
+
+func TestPathTokenRejectsDifferentKey(t *testing.T) {
+	a := newCIDSigner(strings.Repeat("v", cidKeyBytes), "", discardLog())
+	b := newCIDSigner(strings.Repeat("w", cidKeyBytes), "", discardLog())
+	now := time.Unix(1_800_000_000, 0)
+	if _, _, _, ok := b.verifyPath(a.signPath("camp-a", "root-cid", now), now); ok {
+		t.Fatal("token from another key accepted")
 	}
 }
 

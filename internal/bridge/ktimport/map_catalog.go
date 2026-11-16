@@ -111,7 +111,7 @@ func splitOfferParam(raw string) (param, query string) {
 	return "", strings.TrimSpace(strings.TrimLeft(raw, "?&"))
 }
 
-// canonParam приводит ключ параметра к имени, которое принимает kuztds.
+// canonParam приводит ключ параметра к имени, которое принимает emtds.
 //
 // Параметры: key — ключ из Keitaro.
 // Результат: каноническое имя и true для keyword, site, ad_campaign_id,

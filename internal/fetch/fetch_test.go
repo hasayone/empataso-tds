@@ -18,13 +18,41 @@ func TestGetOK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New("TestUA", nil)
+	c := NewWithLimits("TestUA", nil, Limits{AllowPrivate: true})
 	got, err := c.Get(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 	if got != "hello body" {
 		t.Errorf("body = %q", got)
+	}
+}
+
+// TestDefaultClientBlocksPrivate verifies that fetch.New rejects connections to
+// loopback and other private addresses by default.
+func TestDefaultClientBlocksPrivate(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	c := New("", nil)
+	if _, err := c.Get(context.Background(), srv.URL); err == nil {
+		t.Fatal("expected error connecting to 127.0.0.1 with default client, got nil")
+	}
+}
+
+// TestAllowPrivateBypassesGuard verifies that Limits.AllowPrivate permits connections
+// to private addresses. Intended only for tests that point at httptest servers.
+func TestAllowPrivateBypassesGuard(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	}))
+	defer srv.Close()
+
+	c := NewWithLimits("", nil, Limits{AllowPrivate: true})
+	if _, err := c.Get(context.Background(), srv.URL); err != nil {
+		t.Fatalf("AllowPrivate should allow 127.0.0.1: %v", err)
 	}
 }
 
@@ -35,7 +63,7 @@ func TestGetNon2xxReturnsError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New("", nil)
+	c := NewWithLimits("", nil, Limits{AllowPrivate: true})
 	body, err := c.Get(context.Background(), srv.URL)
 	if err == nil {
 		t.Fatal("expected error on 404")
@@ -62,7 +90,7 @@ func TestGetContextCancelled(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := New("", nil)
+	c := NewWithLimits("", nil, Limits{AllowPrivate: true})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
 	if _, err := c.Get(ctx, srv.URL); err == nil {

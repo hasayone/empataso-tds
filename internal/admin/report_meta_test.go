@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // metaStats answers the report with one row and a chosen truncated flag.

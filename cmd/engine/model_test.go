@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // modelEvent serves one request to the stop group g1 and returns the logged model.

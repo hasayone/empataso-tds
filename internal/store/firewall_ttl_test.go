@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // A counter key without a TTL never resets, which turns a rate limit into a

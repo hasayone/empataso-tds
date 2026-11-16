@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 func TestParseCondsGroups(t *testing.T) {

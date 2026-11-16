@@ -6,14 +6,17 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/atomicfile"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // Paths — the files the service reads and writes.
@@ -24,6 +27,7 @@ type Paths struct {
 	Groups  string // groups config (for VirusTotal: hosts to check, streams to disable)
 	CityDB  string // target of geo source "city"
 	ASNDB   string // target of geo source "asn"
+	DBIPASN string // target of geo source "dbip_asn"
 }
 
 // StatusPath is where the service keeps its state, next to the config.
@@ -59,6 +63,17 @@ type Status struct {
 	// geo: kind → what the source said about the file last downloaded
 	GeoSeen      map[string]GeoSeen `json:"geo_seen,omitempty"`
 	DisabledByVT []string           `json:"disabled_by_vt,omitempty"` // "group/stream" switched off by the last check
+	// Redis is the last Redis memory check; nil until the first one.
+	Redis *RedisMemState `json:"redis_memory,omitempty"`
+	// Loss is the last event loss check over the engine metrics files; nil until the first one.
+	Loss *LossState `json:"event_loss,omitempty"`
+	// Spool is the last check of the engines' disk queues; nil until the first one.
+	Spool *SpoolState `json:"event_spool,omitempty"`
+
+	// Version and Commit are the build metadata of the running binary.
+	// Written on every save so the updater can read them via -probe.
+	Version string `json:"version,omitempty"`
+	Commit  string `json:"commit,omitempty"`
 }
 
 // GeoSeen remembers a download well enough to ask "anything newer?" next time.
@@ -128,6 +143,11 @@ type Runner struct {
 	now          func() time.Time
 	disk         func(path string) (free, total uint64, err error)
 
+	// Geo database download rules, replaceable in tests.
+	dbipAllowed func(*url.URL) bool // addresses a dbip_asn source may use, redirects included
+	dbipLimit   int64               // size cap of a dbip_asn download and of its unpacked database
+	probeIP     net.IP              // address every downloaded ASN database must be able to answer for
+
 	cfgErr string // the config problem last reported (Tick runs on one goroutine)
 
 	mu              sync.Mutex
@@ -139,6 +159,19 @@ type Runner struct {
 	manifestMod     time.Time // cached keitaro-import.json mod time
 	manifestHost    string    // host from manifest at manifestMod
 	manifestWarnMod time.Time // last mod time a manifest read warning referred to
+
+	redisSrc   RedisMemSource // nil: no Redis memory check
+	redisAlert RedisAlert
+	redisNext  time.Time // next Redis check (under mu)
+	redisBusy  bool      // a Redis check is running (under mu)
+
+	lossOn    bool // the event loss check is on
+	lossAlert LossAlert
+	lossNext  time.Time // next event loss check (under mu)
+	lossBusy  bool      // an event loss check is running (under mu)
+
+	updateNext time.Time // next update-notification check (under mu)
+	updateBusy bool      // an update-notification check is running (under mu)
 }
 
 // New builds a runner. pb may be nil.
@@ -160,6 +193,9 @@ func New(paths Paths, pb PostbackSource, log *slog.Logger) *Runner {
 		vtPause:        16 * time.Second, // the public API allows 4 requests a minute
 		now:            time.Now,
 		disk:           diskFree,
+		dbipAllowed:    dbipURLAllowed,
+		dbipLimit:      dbipMaxBytes,
+		probeIP:        net.IPv4(8, 8, 8, 8),
 		st:             st,
 		running:        map[string]bool{},
 		scheduleRepair: scheduleRepair,
@@ -275,6 +311,9 @@ func (r *Runner) Tick(ctx context.Context) {
 	if requested[JobTelegramTest] {
 		r.start(ctx, cfg, JobTelegramTest)
 	}
+	r.maybeCheckRedis(ctx, cfg.Telegram)
+	r.maybeCheckLoss(ctx, cfg.Telegram)
+	r.maybeCheckUpdates(ctx, cfg.Telegram)
 	r.heartbeat()
 }
 
@@ -383,7 +422,7 @@ func (r *Runner) exec(ctx context.Context, cfg Config, job string) (msg string, 
 		if !cfg.Telegram.Configured() {
 			return "", errors.New("telegram is not configured: set the bot token and the chat id")
 		}
-		return "test message sent", r.notify(ctx, cfg.Telegram, "✅ KuzTDS: Telegram notifications work.")
+		return "test message sent", r.notify(ctx, cfg.Telegram, "✅ EmTDS: Telegram notifications work.")
 	}
 	return "", fmt.Errorf("unknown job %q", job)
 }
@@ -412,6 +451,8 @@ func (r *Runner) save() {
 	r.saveMu.Lock()
 	defer r.saveMu.Unlock()
 	r.mu.Lock()
+	bi := config.Build()
+	r.st.Version, r.st.Commit = bi.Version, bi.Commit
 	b, err := json.MarshalIndent(r.st, "", "  ")
 	r.mu.Unlock()
 	if err == nil {

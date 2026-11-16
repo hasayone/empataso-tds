@@ -3,7 +3,7 @@ package admin
 import (
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func TestKeepLocalFieldsDomain(t *testing.T) {

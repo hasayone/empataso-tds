@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // watchBase is the clock of the watch tests.
@@ -34,8 +34,8 @@ func newWatchEnv(t *testing.T) watchEnv {
 	var offset atomic.Int64
 	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if live.Load() {
-			w.Header().Set("X-Kuztds-Probe", r.URL.Query().Get("probe"))
-			w.Header().Set("X-Kuztds-Host", r.Host)
+			w.Header().Set("X-Emtds-Probe", r.URL.Query().Get("probe"))
+			w.Header().Set("X-Emtds-Host", r.Host)
 		}
 		w.WriteHeader(http.StatusOK)
 	}))

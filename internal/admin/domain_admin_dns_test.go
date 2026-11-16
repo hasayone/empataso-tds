@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func TestPrepDomainDefaultRoleLinks(t *testing.T) {
@@ -243,12 +243,12 @@ func adminProbeClient(t *testing.T, live *atomic.Bool) *http.Client {
 			w.WriteHeader(http.StatusOK)
 			return
 		}
-		w.Header().Set("X-Kuztds-Probe", r.URL.Query().Get("probe"))
-		w.Header().Set("X-Kuztds-Host", r.Host)
+		w.Header().Set("X-Emtds-Probe", r.URL.Query().Get("probe"))
+		w.Header().Set("X-Emtds-Host", r.Host)
 		if strings.HasPrefix(r.Host, "admin.") {
-			w.Header().Set("X-Kuztds-Service", "admin")
+			w.Header().Set("X-Emtds-Service", "admin")
 		} else {
-			w.Header().Set("X-Kuztds-Service", "engine")
+			w.Header().Set("X-Emtds-Service", "engine")
 		}
 		w.WriteHeader(http.StatusOK)
 	}))

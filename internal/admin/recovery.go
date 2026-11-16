@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 const recoveryTTL = 15 * time.Minute
@@ -31,7 +31,7 @@ type recoveryRecord struct {
 }
 
 // recoveryPath is the one-time code file next to the password hash.
-// passwordFile is KUZTDS_ADMIN_PASSWORD_FILE. An empty path or a path with no
+// passwordFile is EMTDS_ADMIN_PASSWORD_FILE. An empty path or a path with no
 // directory returns an error and no location.
 func recoveryPath(passwordFile string) (string, error) {
 	if strings.TrimSpace(passwordFile) == "" {

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 func accessTestServer(t *testing.T) *Server {
@@ -97,18 +97,53 @@ var cookieOnlyRoutes = map[string]bool{
 	"DELETE /api/roles/{id}":         true,
 	"GET /api/keitaro/settings":      true,
 	"PUT /api/keitaro/settings":      true,
+	"POST /api/keitaro/check":        true,
 
-	"GET /api/registrars/namecheap":           true,
-	"PUT /api/registrars/namecheap":           true,
-	"POST /api/registrars/namecheap/test":     true,
-	"POST /api/registrars/namecheap/register": true,
+	"GET /api/registrars/namecheap":               true,
+	"PUT /api/registrars/namecheap":               true,
+	"POST /api/registrars/namecheap/test":         true,
+	"POST /api/registrars/namecheap/check":        true,
+	"POST /api/registrars/namecheap/register":     true,
 	"POST /api/domains/{id}/ns":               true,
 	"GET /api/cloudflare":                     true,
 	"PUT /api/cloudflare":                     true,
 	"POST /api/cloudflare/test":               true,
+	"GET /api/checker/settings":               true,
+	"PUT /api/checker/settings":               true,
+	"POST /api/checker/test":                  true,
+	"GET /api/checker/keywords/preview":       true,
+	"POST /api/checker/keywords/fill":         true,
+	"GET /api/checker/status":                 true,
+	"GET /api/checker/consoles":               true,
+	"GET /api/checker/apps/{group}":           true,
+	"PUT /api/checker/apps/{group}":           true,
+	"POST /api/checker/apps/{group}/create":   true,
+	"POST /api/checker/apps/{group}/refresh":  true,
+	"GET /api/docs/settings":                  true,
+	"PUT /api/docs/settings":                  true,
 	"POST /api/domains/{id}/cloudflare":       true,
 	"POST /api/domains/{id}/admin-dns":        true,
 	"POST /api/domains/connected/ack":         true,
+
+	"GET /api/ai/settings":                      true,
+	"PUT /api/ai/settings":                      true,
+	"POST /api/ai/test":                         true,
+	"GET /api/ai/models":                        true,
+	"GET /api/ai/status":                        true,
+	"GET /api/ai/chats":                         true,
+	"POST /api/ai/chats":                        true,
+	"GET /api/ai/chats/{id}":                    true,
+	"DELETE /api/ai/chats/{id}":                 true,
+	"POST /api/ai/chats/{id}/messages":          true,
+	"POST /api/ai/chats/{id}/revert":            true,
+	"GET /api/ai/changes":                       true,
+	"POST /api/ai/changes/{id}/apply":           true,
+	"POST /api/ai/changes/{id}/reject":          true,
+	"POST /api/ai/changes/{id}/revert":          true,
+	"POST /api/ai/messages/{message_id}/revert": true,
+	"POST /api/update/apply":                    true,
+	"POST /api/update/rollback":                 true,
+	"POST /api/update/check":                    true,
 }
 
 var expect401Routes = map[string]bool{
@@ -133,9 +168,13 @@ var skipAllowed = map[string]string{
 }
 
 type matrixRole struct {
-	name    string
-	cookie  bool
-	apiKey  string
+	name   string
+	cookie bool
+	apiKey string
+	// allActions is set for an API key that holds every dangerous action.
+	allActions bool
+	// userKey is set for an API key of type USER with every user section and no grants.
+	userKey bool
 	login   string
 	pass    string
 	isRoot  bool
@@ -146,6 +185,7 @@ type matrixRole struct {
 
 func TestRouteMatrix(t *testing.T) {
 	s := accessTestServer(t)
+	s.keyLim = newUnthrottledLimiter()
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
 
@@ -175,6 +215,23 @@ func TestRouteMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s.keyMu.Lock()
+	rawAllKey, _, err := s.keys.GenerateWith("all", []string{security.ScopeAdmin}, security.KeyAccess{
+		Type: security.KeyTypeAdmin, Actions: security.AllActions(),
+	})
+	s.keyMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.keyMu.Lock()
+	rawUserKey, _, err := s.keys.GenerateWith("user", []string{security.ScopeAdmin}, security.KeyAccess{
+		Type: security.KeyTypeUser, Access: &security.Access{Sections: allSecs, Grants: map[string]security.Grant{}},
+	})
+	s.keyMu.Unlock()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	patterns := make([]string, 0, len(routeAccess))
 	for p := range routeAccess {
@@ -198,6 +255,8 @@ func TestRouteMatrix(t *testing.T) {
 		{name: "fullUser", cookie: true, login: "full", pass: "secret1", isFull: true},
 		{name: "emptyUser", cookie: true, login: "empty", pass: "secret1", isEmpty: true},
 		{name: "apiKey", apiKey: rawKey, isAdmin: true},
+		{name: "apiKeyAllActions", apiKey: rawAllKey, isAdmin: true, allActions: true},
+		{name: "apiKeyUser", apiKey: rawUserKey, isFull: true, userKey: true},
 	}
 
 	for _, ro := range roles {
@@ -299,7 +358,10 @@ func expectForbidden(ro matrixRole, pattern string, rule routeRule) bool {
 		return false
 	}
 	if ro.apiKey != "" {
-		return cookieOnlyRoutes[pattern]
+		if rule.cookie || (rule.action != "" && !ro.allActions) {
+			return true
+		}
+		return ro.userKey && (rule.admin || catalogCreateRoutes[pattern])
 	}
 	if ro.isEmpty {
 		return rule.admin || rule.sec != secAny
@@ -421,5 +483,65 @@ func TestUserPages(t *testing.T) {
 	pages := userPages(u, u.Access)
 	if len(pages) != 2 || pages[0] != "dashboard" || pages[1] != "tools" {
 		t.Fatalf("user pages order: %v", pages)
+	}
+}
+
+func TestAccessInnerHandlerPerRoute(t *testing.T) {
+	s := accessTestServer(t)
+	for _, p := range s.routes {
+		if s.inner[p] == nil {
+			t.Errorf("inner handler of %q missing", p)
+		}
+	}
+	if len(s.inner) != len(s.routes) {
+		t.Errorf("inner %d, routes %d", len(s.inner), len(s.routes))
+	}
+}
+
+func TestAccessAssistantSectionIsAdminOnlyInBeta(t *testing.T) {
+	if !aiAdminOnly {
+		t.Skip("assistant is open to users")
+	}
+	if isUserSection(secAssistant) || isAdminSection(secAssistant) {
+		t.Fatal("assistant must be in neither section list during the beta")
+	}
+	if _, err := normalizeAccess(security.Access{Sections: []string{string(secAssistant)}}); !isAccessErr(err) {
+		t.Fatalf("role granting assistant: %v", err)
+	}
+	for _, sec := range allSections {
+		if sec == secAssistant {
+			t.Fatal("assistant listed in allSections")
+		}
+	}
+}
+
+func TestAIAllowedOnlyForAdministrators(t *testing.T) {
+	s := newRolesServer(t, t.TempDir())
+	s.Handler()
+	admin, err := s.createUser(userDraft{Login: "boss", Password: "secret1", Type: security.UserAdmin, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	user, err := s.createUser(userDraft{Login: "ops", Password: "secret1", Type: security.UserRegular, Enabled: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name string
+		sess security.Session
+		want bool
+	}{
+		{"environment administrator", security.Session{}, true},
+		{"administrator account", security.Session{UID: admin.ID}, true},
+		{"regular account", security.Session{UID: user.ID}, false},
+		{"unknown account", security.Session{UID: "nobody"}, false},
+		{"admin key", security.Session{API: true, KeyType: security.KeyTypeAdmin}, false},
+		{"admin key without a type", security.Session{API: true}, false},
+		{"user key", security.Session{API: true, KeyType: security.KeyTypeUser, KeyID: "k1"}, false},
+	}
+	for _, c := range cases {
+		if got := s.aiAllowed(c.sess); got != c.want {
+			t.Errorf("%s: aiAllowed = %v, want %v", c.name, got, c.want)
+		}
 	}
 }

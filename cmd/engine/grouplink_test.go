@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func linked(groups ...*config.Group) *config.Groups { return config.NewGroups(groups...) }
@@ -38,8 +38,8 @@ func TestGroupLink(t *testing.T) {
 	}
 	for _, c := range cases {
 		rec := do(t, h, "/entry", "8.8.8.8", map[string]string{"User-Agent": c.ua})
-		if rec.Body.String() != c.body || rec.Header().Get("X-Kuztds-Stream") != c.stream {
-			t.Errorf("%.30s… → %q (stream %q); want %q (%q)", c.ua, rec.Body.String(), rec.Header().Get("X-Kuztds-Stream"), c.body, c.stream)
+		if rec.Body.String() != c.body || rec.Header().Get("X-Emtds-Stream") != c.stream {
+			t.Errorf("%.30s… → %q (stream %q); want %q (%q)", c.ua, rec.Body.String(), rec.Header().Get("X-Emtds-Stream"), c.body, c.stream)
 		}
 	}
 }

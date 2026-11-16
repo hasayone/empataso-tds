@@ -66,14 +66,19 @@ func RetryWithin(budget, pause time.Duration, fn func() error) error {
 	}
 }
 
+// redisStartupDial bounds one connect when RedisTimeouts.Dial is zero.
+const redisStartupDial = 2 * time.Second
+
 // OpenRedisWaiting dials Redis until it answers or the startup wait is over.
-// addr, password and db select the server. On success the client is returned.
-// On failure the last dial error is returned and no client is left open.
-func OpenRedisWaiting(addr, password string, db int) (*redis.Client, error) {
+// addr, password and db select the server. t bounds the client's network
+// waits for its whole life; a zero RedisTimeouts keeps the go-redis defaults
+// and a 2s connect. On success the client is returned. On failure the last
+// dial error is returned and no client is left open.
+func OpenRedisWaiting(addr, password string, db int, t RedisTimeouts) (*redis.Client, error) {
 	var c *redis.Client
 	err := RetryWithin(ConnectBudget, ConnectPause, func() error {
 		var dial error
-		c, dial = openRedisStartup(addr, password, db)
+		c, dial = openRedisStartup(redisOptions(addr, password, db, t))
 		return dial
 	})
 	if err != nil {
@@ -82,21 +87,45 @@ func OpenRedisWaiting(addr, password string, db int) (*redis.Client, error) {
 	return c, nil
 }
 
-// openRedisStartup dials once. MaxRetries is -1 so the startup loop is the
-// only retry: the default client repeats a failed dial several times and one
-// attempt then outlasts ConnectBudget.
-func openRedisStartup(addr, password string, db int) (*redis.Client, error) {
-	c := redis.NewClient(&redis.Options{
-		Addr:        addr,
-		Password:    password,
-		DB:          db,
-		DialTimeout: 2 * time.Second,
-		MaxRetries:  -1,
+// NewRedisClient returns a client for addr without dialling or pinging it:
+// go-redis connects on the first command and again after every failure, so the
+// client is usable as soon as the server is. addr, password, db and t are as in
+// OpenRedisWaiting. The caller closes the client.
+func NewRedisClient(addr, password string, db int, t RedisTimeouts) *redis.Client {
+	return redis.NewClient(redisOptions(addr, password, db, t))
+}
+
+// redisOptions builds the client options for addr, password and db with the
+// waits from t. MaxRetries is -1 so the startup loop is the only retry: the
+// default client repeats a failed dial several times and one attempt then
+// outlasts ConnectBudget. A zero t.Dial means a 2s connect; other zero fields,
+// including DialRetries, stay at the go-redis default. It does not fail.
+func redisOptions(addr, password string, db int, t RedisTimeouts) *redis.Options {
+	dial := t.Dial
+	if dial <= 0 {
+		dial = redisStartupDial
+	}
+	return &redis.Options{
+		Addr:          addr,
+		Password:      password,
+		DB:            db,
+		DialTimeout:   dial,
+		ReadTimeout:   t.Read,
+		WriteTimeout:  t.Write,
+		PoolTimeout:   t.Pool,
+		DialerRetries: t.DialRetries,
+		MaxRetries:    -1,
 		Dialer: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			return (&net.Dialer{Timeout: 2 * time.Second}).DialContext(ctx, network, addr)
+			return (&net.Dialer{Timeout: dial}).DialContext(ctx, network, addr)
 		},
-	})
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	}
+}
+
+// openRedisStartup dials once with opts and pings within 2s.
+// On a failed ping the client is closed and the error returned.
+func openRedisStartup(opts *redis.Options) (*redis.Client, error) {
+	c := redis.NewClient(opts)
+	ctx, cancel := context.WithTimeout(context.Background(), redisStartupDial)
 	defer cancel()
 	if err := c.Ping(ctx).Err(); err != nil {
 		_ = c.Close()
@@ -110,14 +139,34 @@ func openRedisStartup(addr, password string, db int) (*redis.Client, error) {
 // client is returned. On failure the last dial error is returned and no
 // connection is left open.
 func OpenCHWaiting(addr, database, username, password string) (*CH, error) {
-	var ch *CH
-	err := RetryWithin(ConnectBudget, ConnectPause, func() error {
-		var dial error
-		ch, dial = OpenCH(addr, database, username, password)
-		return dial
-	})
-	if err != nil {
-		return nil, err
+	return OpenCHWaitingCtx(context.Background(), addr, database, username, password)
+}
+
+// OpenCHWaitingCtx is OpenCHWaiting that also stops when ctx ends: no new dial
+// starts after that and the pause between dials is cut short. A dial already in
+// progress finishes on its own timeout. It returns ctx.Err() when ctx ended
+// first and the last dial error when the startup wait ran out.
+func OpenCHWaitingCtx(ctx context.Context, addr, database, username, password string) (*CH, error) {
+	deadline := time.Now().Add(ConnectBudget)
+	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		ch, err := OpenCH(addr, database, username, password)
+		if err == nil {
+			return ch, nil
+		}
+		wait := min(ConnectPause, time.Until(deadline))
+		if wait <= 0 {
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(wait):
+		}
+		if !time.Now().Before(deadline) {
+			return nil, err
+		}
 	}
-	return ch, nil
 }

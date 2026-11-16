@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // After redirect=group the keyword is read through the serving group's source:

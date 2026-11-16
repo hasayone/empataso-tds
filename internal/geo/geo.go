@@ -2,9 +2,13 @@
 // city, region, time zone, and the network it belongs to (ASN + organization).
 //
 // The resolver is abstracted by the Resolver interface: the production
-// implementation is DB (MaxMind-format .mmdb files — GeoLite2/GeoIP2 City or
-// Country plus, optionally, ASN), and Nop is used when no database is
-// configured. Values are normalized: lower case, missing = "-".
+// implementation is DB, and Nop is used when no database is configured.
+// DB reads up to three MaxMind-format .mmdb files: a City or Country
+// database (GeoLite2/GeoIP2) for location, MaxMind GeoLite2-ASN and DB-IP
+// ASN Lite for the network. Any of them may be missing. When both ASN
+// databases know an address, DB-IP wins (filters migrated from Keitaro use
+// its names and numbers) and MaxMind's answer is kept in Geo.ASNAlt and
+// Geo.OrgAlt. Values are normalized: lower case, missing = "-".
 package geo
 
 import (
@@ -33,6 +37,15 @@ type Geo struct {
 	// organization as the database spells it ("Google LLC"), or "-".
 	ASN uint32
 	Org string
+
+	// ASNAlt is the number the secondary ASN database gives the same address
+	// when it differs from ASN (MaxMind versus DB-IP), or 0.
+	ASNAlt uint32
+
+	// OrgAlt is the same organization as the secondary ASN database spells
+	// it ("GOOGLE" from MaxMind while Org came from DB-IP as "Google LLC").
+	// Empty when there is no second spelling or it equals Org.
+	OrgAlt string
 }
 
 // None is the answer for "nothing known about this address".
@@ -98,6 +111,32 @@ type names struct {
 type asnRecord struct {
 	Number uint32 `maxminddb:"autonomous_system_number"`
 	Org    string `maxminddb:"autonomous_system_organization"`
+}
+
+// mergeASN combines the answers of the DB-IP and MaxMind ASN databases.
+// A record with Number == 0 is a miss (the reader reports no error then).
+// DB-IP wins when it knows the address: filters migrated from Keitaro are
+// written with DB-IP organization names ("Google LLC") while MaxMind says
+// "GOOGLE". When MaxMind also knows the address and spells the organization
+// differently, that spelling is returned as orgAlt; when it numbers the
+// network differently, that number is returned as asnAlt (0 when equal or
+// unknown). Both alternatives let filters written for MaxMind keep matching.
+// With a DB-IP miss MaxMind is the answer and both alternatives are empty.
+// A miss in both gives (0, 0, Empty, "").
+func mergeASN(dbip, mm asnRecord) (asn, asnAlt uint32, org, orgAlt string) {
+	if dbip.Number == 0 {
+		return mm.Number, 0, keep(mm.Org), ""
+	}
+	org = keep(dbip.Org)
+	if mm.Number != 0 {
+		if mm.Number != dbip.Number {
+			asnAlt = mm.Number
+		}
+		if o := strings.TrimSpace(mm.Org); o != "" && !strings.EqualFold(o, org) {
+			orgAlt = o
+		}
+	}
+	return dbip.Number, asnAlt, org, orgAlt
 }
 
 // fromRecord converts an mmdb record into Geo (pure function, tested without a DB).

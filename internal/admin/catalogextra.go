@@ -13,18 +13,22 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // errPrivateAddr is the dial refusal for an address that is not a public IP.
-var errPrivateAddr = errors.New("private address")
+// It is the same value as security.ErrPrivateAddr so errors.Is works across both packages.
+var errPrivateAddr = security.ErrPrivateAddr
 
 // Reason codes a domain check adds to dns, private, connect and foreign.
 const (
@@ -257,28 +261,9 @@ func (s *Server) lookupIP(ctx context.Context, host string) ([]net.IPAddr, error
 	return net.DefaultResolver.LookupIPAddr(ctx, host)
 }
 
-// reservedNets lists ranges IP.IsPrivate does not cover.
-// 100.64.0.0/10 is CGNAT. 198.18.0.0/15 is benchmarking.
-var reservedNets = []net.IPNet{
-	{IP: net.IPv4(100, 64, 0, 0).To4(), Mask: net.CIDRMask(10, 32)},
-	{IP: net.IPv4(198, 18, 0, 0).To4(), Mask: net.CIDRMask(15, 32)},
-}
-
 // publicIP reports whether ip is a global unicast address that is not private.
-// A nil, loopback, link-local, unspecified, multicast or private address is false.
-// CGNAT 100.64.0.0/10 and benchmarking 198.18.0.0/15 are also false.
-// Documentation ranges such as 203.0.113.0/24 stay true.
-func publicIP(ip net.IP) bool {
-	if !ip.IsGlobalUnicast() || ip.IsPrivate() {
-		return false
-	}
-	for _, n := range reservedNets {
-		if n.Contains(ip) {
-			return false
-		}
-	}
-	return true
-}
+// It delegates to security.PublicIP; see that function for the full range list.
+func publicIP(ip net.IP) bool { return security.PublicIP(ip) }
 
 // checkAdminHost probes https://admin.<host>/healthz and expects the admin service header.
 func (s *Server) checkAdminHost(ctx context.Context, d config.Domain) (bool, string) {
@@ -291,8 +276,8 @@ func (s *Server) checkAdminHost(ctx context.Context, d config.Domain) (bool, str
 
 // probePhase requests https://host/healthz and checks the probe headers.
 // host is the full parked host, including a port when one is stored.
-// service is the expected X-Kuztds-Service value: engine allows a missing header, admin requires it.
-// It returns ok when the status is 200 and X-Kuztds-Probe and X-Kuztds-Host match.
+// service is the expected X-Emtds-Service value: engine allows a missing header, admin requires it.
+// It returns ok when the status is 200 and X-Emtds-Probe and X-Emtds-Host match.
 // reason is tls when the server certificate was refused, and connect when client.Do fails
 // for another cause (network, TLS handshake, timeout, or guardDial).
 // Any HTTP response whose status is not 200, or whose probe headers do not match, is foreign.
@@ -325,7 +310,7 @@ func (s *Server) probePhase(ctx context.Context, host, service string) (bool, st
 	if resp.StatusCode != http.StatusOK {
 		return false, "foreign"
 	}
-	if resp.Header.Get("X-Kuztds-Probe") != probe || !strings.EqualFold(resp.Header.Get("X-Kuztds-Host"), host) {
+	if healthzHeader(resp.Header, "Probe") != probe || !strings.EqualFold(healthzHeader(resp.Header, "Host"), host) {
 		return false, "foreign"
 	}
 	if !healthzServiceOK(resp.Header, service) {
@@ -334,10 +319,19 @@ func (s *Server) probePhase(ctx context.Context, host, service string) (bool, st
 	return true, ""
 }
 
+// healthzHeader returns the healthz header X-Emtds-{name}, or X-Kuztds-{name} sent by an
+// engine built before the rename when the new header is absent.
+func healthzHeader(h http.Header, name string) string {
+	if v := h.Get("X-Emtds-" + name); v != "" {
+		return v
+	}
+	return h.Get("X-Kuztds-" + name)
+}
+
 // healthzServiceOK reports whether the healthz service header matches the expectation.
 // expect engine treats a missing header as this tracker for backward compatibility.
 func healthzServiceOK(h http.Header, expect string) bool {
-	got := strings.TrimSpace(h.Get("X-Kuztds-Service"))
+	got := strings.TrimSpace(healthzHeader(h, "Service"))
 	switch expect {
 	case "engine":
 		if got == "" {
@@ -396,59 +390,93 @@ func defaultCheckClient() *http.Client {
 }
 
 // guardDial rejects a connection to a non-public address.
-// network is the dial network. address is host:port, with an IP as the host.
-// c is the raw connection and may be nil; it is not used.
-// It returns errPrivateAddr when the address is missing, not an IP, or not public.
+// network is the dial network. address is host:port with an IP as the host.
+// c is the raw connection; it is not used.
+// It delegates to security.GuardDial and returns security.ErrPrivateAddr on failure.
 func guardDial(network, address string, c syscall.RawConn) error {
-	host, _, err := net.SplitHostPort(address)
-	if err != nil || !publicIP(net.ParseIP(host)) {
-		return errPrivateAddr
+	return security.GuardDial(network, address, c)
+}
+
+// botProfileView builds the answer of GET and PUT /api/bot-protection from the
+// stored profile file content (nil when there is none).
+// The profile keys come first as config.MarshalBotProfile writes them, with the
+// effective ch_proxy: true when the file does not choose, so the checkbox has a
+// state. proxy_default is true when the file has no ch_proxy value, and
+// private_relay when the Private Relay list exists and is not empty.
+// A missing or unreadable file gives config.DefaultBotProfile.
+func (s *Server) botProfileView(stored []byte) ([]byte, error) {
+	p, proxySet, err := config.ParseBotProfileExplicit(stored)
+	if err != nil {
+		p, proxySet = config.DefaultBotProfile(), false
 	}
-	return nil
+	b, err := config.MarshalBotProfile(p)
+	if err != nil {
+		return nil, err
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal(b, &doc); err != nil {
+		return nil, err
+	}
+	relay := s.cfg.DataDir != "" && nonEmptyFile(filepath.Join(s.cfg.DataDir, detect.ListPrivateRelay+".dat"))
+	for k, v := range map[string]bool{"proxy_default": !proxySet, "private_relay": relay} {
+		raw, _ := json.Marshal(v)
+		doc[k] = raw
+	}
+	out, err := json.MarshalIndent(doc, "", "  ")
+	return append(out, '\n'), err
 }
 
+// writeBotProfile answers with botProfileView of the stored file content.
+// code is the HTTP status. An encoding failure answers 500.
+func (s *Server) writeBotProfile(w http.ResponseWriter, code int, stored []byte) {
+	b, err := s.botProfileView(stored)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "encode error")
+		return
+	}
+	writeJSONBytes(w, code, b)
+}
+
+// handleBotGet returns the installation-wide bot profile, the default one when
+// none is stored, with proxy_default and private_relay (see botProfileView).
 func (s *Server) handleBotGet(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, loadBotProfile(s.cfg.BotPath))
+	var stored []byte
+	if s.cfg.BotPath != "" {
+		stored, _ = os.ReadFile(s.cfg.BotPath)
+	}
+	s.writeBotProfile(w, http.StatusOK, stored)
 }
 
+// handleBotPut merges the body into the stored bot profile (config.MergeBotProfile)
+// and answers like GET. Keys the body does not mention keep their stored value;
+// null removes a key, and {"ch_proxy": null} returns the proxy check to its default.
+// Unknown keys and the stream-only redirect, out and header are dropped.
+// It answers 400 for a body that is not a JSON object, has a non-boolean switch
+// or exceeds 1 MiB, 503 when no profile path is configured and 500 when the file
+// cannot be written.
 func (s *Server) handleBotPut(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.BotPath == "" {
 		writeErr(w, http.StatusServiceUnavailable, "store unavailable")
 		return
 	}
-	var profile config.Bots
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&profile); err != nil {
+	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 1<<20))
+	if err != nil {
 		writeErr(w, http.StatusBadRequest, "bad json")
 		return
 	}
-	profile.Redirect, profile.Out, profile.Header = "", "", ""
-	b, err := json.MarshalIndent(profile, "", "  ")
+	stored, _ := os.ReadFile(s.cfg.BotPath)
+	merged, err := config.MergeBotProfile(stored, body)
 	if err != nil {
+		writeErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	merged = append(merged, '\n')
+	if err := writeFileAtomic(s.cfg.BotPath, merged, 0o644); err != nil {
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
 	}
-	if err := writeFileAtomic(s.cfg.BotPath, append(b, '\n'), 0o644); err != nil {
-		writeErr(w, http.StatusInternalServerError, "save error")
-		return
-	}
-	writeJSON(w, http.StatusOK, profile)
+	s.writeBotProfile(w, http.StatusOK, merged)
 }
-
-func loadBotProfile(path string) config.Bots {
-	if path == "" {
-		return config.DefaultBotProfile()
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return config.DefaultBotProfile()
-	}
-	var profile config.Bots
-	if json.Unmarshal(b, &profile) != nil {
-		return config.DefaultBotProfile()
-	}
-	return profile
-}
-
 // handleFacts writes the click and conversion breakdown of the catalog tables.
 //
 // Filters come from condsFrom. For a viewer who may not see the conversion status the
@@ -472,7 +500,7 @@ func (s *Server) handleFacts(w http.ResponseWriter, r *http.Request) {
 		facts, err = s.cfg.Stats.ClickFacts(r.Context(), from, to)
 	}
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "stats error")
+		writeStatsErr(w, err, "stats error")
 		return
 	}
 	if facts.Clicks == nil {

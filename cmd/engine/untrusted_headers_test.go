@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // CF-IPCountry is read from the raw request, not gated by the trusted-proxy
@@ -36,7 +36,7 @@ func TestCountryHeaderIsValidated(t *testing.T) {
 			hdr["CF-IPCountry"] = in
 		}
 		rec := do(t, h, "/g1", "8.8.8.8", hdr)
-		if got := rec.Header().Get("X-Kuztds-Country"); got != want {
+		if got := rec.Header().Get("X-Emtds-Country"); got != want {
 			t.Errorf("CF-IPCountry %q → country %q, want %q", in, got, want)
 		}
 		if got := rec.Body.String(); got != "c="+want {

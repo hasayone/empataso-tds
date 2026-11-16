@@ -7,8 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/fetch"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // render.Expand URL-encodes [KEY] because it is the visitor's ?q=. remoteValue
@@ -23,7 +22,7 @@ func TestRemoteURLSubstitutionsAreEscaped(t *testing.T) {
 	defer srv.Close()
 
 	rm := config.Remote{Enabled: true, URL: srv.URL + "/?k=[KEY]&c=[COUNTRY]&city=[CITY]&l=[LANG]&ip=[IP]"}
-	got := remoteValue(fetch.New("ua", nil), context.Background(), rm, "1.2.3.4", "ru", "new york", "ru", "a&admin=1")
+	got := remoteValue(testFetcher(), context.Background(), rm, "1.2.3.4", "ru", "new york", "ru", "a&admin=1")
 	if got != "ok" {
 		t.Fatalf("remote fetch failed: %q", got)
 	}

@@ -27,8 +27,8 @@ func TestGenerateAPIKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, raw := range []string{raw1, raw2} {
-		if !strings.HasPrefix(raw, "kz_") || len(raw) != 43 {
-			t.Fatalf("raw key length %d, prefix ok %v", len(raw), strings.HasPrefix(raw, "kz_"))
+		if !strings.HasPrefix(raw, "em_") || len(raw) != 43 {
+			t.Fatalf("raw key length %d, prefix ok %v", len(raw), strings.HasPrefix(raw, "em_"))
 		}
 		if _, err := hex.DecodeString(raw[3:]); err != nil {
 			t.Fatal(err)
@@ -337,7 +337,7 @@ func TestRotateAPIKey(t *testing.T) {
 	if next == "" || next == raw {
 		t.Fatal("rotated secret should be a new raw key")
 	}
-	if !strings.HasPrefix(next, "kz_") || len(next) != 43 {
+	if !strings.HasPrefix(next, "em_") || len(next) != 43 {
 		t.Fatalf("raw key length %d", len(next))
 	}
 	if got.Prefix == key.Prefix || got.Prefix != next[3:11] {

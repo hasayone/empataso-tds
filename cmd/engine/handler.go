@@ -1,52 +1,56 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"math/rand"
 	"net/http"
 	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/detect"
-	"github.com/egerkuzma/kuztds/internal/fetch"
-	"github.com/egerkuzma/kuztds/internal/geo"
-	"github.com/egerkuzma/kuztds/internal/ipindex"
-	"github.com/egerkuzma/kuztds/internal/logbuf"
-	"github.com/egerkuzma/kuztds/internal/render"
-	"github.com/egerkuzma/kuztds/internal/router"
-	"github.com/egerkuzma/kuztds/internal/seplist"
-	"github.com/egerkuzma/kuztds/internal/server"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/egerkuzma/emtds/internal/fetch"
+	"github.com/egerkuzma/emtds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/ipindex"
+	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/render"
+	"github.com/egerkuzma/emtds/internal/router"
+	"github.com/egerkuzma/emtds/internal/seplist"
+	"github.com/egerkuzma/emtds/internal/server"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // engineDeps — hot-path dependencies assembled in main() and passed to the
 // handler. Extracted from a closure so the pipeline can be exercised through
 // httptest (see handler_test.go).
 type engineDeps struct {
-	log          *slog.Logger
-	lists        *ipindex.Set
-	sigs         *detect.Signatures
-	seps         *seplist.Set
-	geores       geo.Resolver
-	counters     *store.Counters
-	groups       *config.Groups
-	offers       *config.Book[config.Offer]
-	landings     *config.Book[config.Landing]
-	sources      *config.Book[config.TrafficSource]
-	networks     *config.Book[config.AffiliateNetwork]
-	s2s          *config.Book[config.OutboundPostback]
-	outbound     chan outboundJob
-	sentMu       sync.Mutex
-	sent         map[string]struct{}
-	logs         *logbuf.Buffer
-	chConn       *store.CH
+	log      *slog.Logger
+	lists    *ipindex.Set
+	sigs     *detect.Signatures
+	seps     *seplist.Set
+	geores   geo.Resolver
+	counters *store.Counters
+	groups   *config.Groups
+	domains  *config.Book[config.Domain]
+	offers   *config.Book[config.Offer]
+	landings *config.Book[config.Landing]
+	sources  *config.Book[config.TrafficSource]
+	networks *config.Book[config.AffiliateNetwork]
+	s2s      *config.Book[config.OutboundPostback]
+	outbound chan outboundJob
+	logs     *logbuf.Buffer
+	// chConn is the ClickHouse connection; it is empty until the background
+	// connect succeeds, so every reader goes through clickhouse().
+	chConn       atomic.Pointer[store.CH]
 	fetcher      *fetch.Client
 	dataDir      string
-	keysDir      string
+	keyFiles     *keyWriter
 	postbackKey  string
 	keys         apiKeys
 	trashMode    string
@@ -56,11 +60,39 @@ type engineDeps struct {
 	cids         *cidSigner
 	pages        *pageCache
 	landServe    *landingServer
+	pbAuth       postbackAuth
 
-	// noStepWave is true when ClickHouse is connected but events has no step
-	// column. The /offer step then logs the first step's uniqueness, so a campaign
-	// with a landing does not count one visitor twice.
-	noStepWave bool
+	// stats counts postback outcomes and outbound jobs for the metrics file.
+	stats engineStats
+
+	// pbq, plog and outSpool are the disk queues of postbacks, postback journal
+	// lines and outbound jobs. They are nil without a spool, and a postback is
+	// then answered from the store alone.
+	pbq      *postbackQueue
+	plog     *postbackLog
+	outSpool *outboundSpool
+	// outLocks is the memory fallback of the Redis lock of outbound jobs.
+	outLocks outboundLocks
+	// bg counts the background goroutines the stop waits for: the postback
+	// workers, the outbound sender and the feeder. Start them with goBG.
+	bg sync.WaitGroup
+	// convOverride replaces the ClickHouse client for postbacks; tests set it.
+	convOverride conversionStore
+
+	// noStepWave is true while events may lack the step column: before
+	// ClickHouse connects, and after it connects without that column. The
+	// /offer step then logs the first step's uniqueness, so a campaign with a
+	// landing does not count one visitor twice.
+	noStepWave atomic.Bool
+}
+
+// clickhouse returns the ClickHouse connection, or nil while there is none. A
+// nil d has none.
+func (d *engineDeps) clickhouse() *store.CH {
+	if d == nil {
+		return nil
+	}
+	return d.chConn.Load()
 }
 
 // ipListFiles collects the names of .dat lists referenced by stream ip_list
@@ -114,28 +146,17 @@ func separationFiles(groups *config.Groups) []string {
 
 // isProxy reports whether the visitor looks like a proxy, VPN, or hosting network.
 // d carries the IP lists and the signature holder; either field may be nil.
-// ip is the visitor address. org is the geo organization name.
-// It returns true when ip is in ip_proxy, otherwise when org matches a pattern.
+// ip is the visitor address. org and orgAlt are the organization names from the
+// two geo databases; orgAlt may be "" or "-".
+// It returns detect.IsProxy for the lists, the organization patterns of the
+// signature holder (the built-in ones when it is nil) and the two names.
 // It does not report an error.
-func isProxy(d *engineDeps, ip netip.Addr, org string) bool {
-	if d.lists != nil {
-		if _, hit := d.lists.Lookup("ip_proxy", ip); hit {
-			return true
-		}
-	}
-	patterns := detect.DefaultProxyOrg()
-	if d.sigs != nil {
-		patterns = d.sigs.ProxyOrg()
-	}
-	return detect.ProxyByOrg(org, patterns)
+func isProxy(d *engineDeps, ip netip.Addr, org, orgAlt string) bool {
+	return detect.IsProxy(d.lists, ip, d.sigs.ProxyOrg(), org, orgAlt)
 }
 
 // hitPercent reports whether a p-percent chance fires: p <= 0 never, p >= 100
-// always, and exactly p times in 100 in between.
-//
-// Written out because "p > rand.Intn(100)+1" reads right and is not: rand+1 is
-// uniform over [1,100], so that form fires (p-1) times in 100 — prob 100 gives
-// 99% and prob 1 never fires at all.
+// always, and exactly p times in 100 in between. It does not report an error.
 func hitPercent(p int) bool {
 	if p <= 0 {
 		return false
@@ -151,18 +172,35 @@ func hitPercent(p int) bool {
 // uniqueness → router → bots → separation/remote/chance → distribution →
 // render → async log → key collection.
 func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
+	// The query is parsed once; every read below shares it.
+	query := r.URL.Query()
+
+	// Keitaro postback path: /{key}/postback — two segments, second exactly
+	// "postback". Only checked when a secret is configured. A wrong key is not
+	// a 403: it falls through to normal campaign routing so a campaign alias
+	// that happens to look like this pattern is not broken.
+	if d.pbAuth.secret != "" {
+		if seg, rest, found := strings.Cut(strings.Trim(r.URL.Path, "/"), "/"); found && rest == "postback" && d.pbAuth.matchesSecret(seg) {
+			d.handlePostback(w, r, seg)
+			return
+		}
+	}
+
 	// Postback pixel: ?pb=KEY&cid=<id;cid>&profit=X.
-	if pb := r.URL.Query().Get("pb"); pb != "" {
-		if d.postbackKey != "" && pb == d.postbackKey && d.chConn != nil {
-			cid := r.URL.Query().Get("cid")
-			profit, _ := strconv.ParseFloat(r.URL.Query().Get("profit"), 64)
-			status := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("status")))
+	if pb := query.Get("pb"); pb != "" {
+		if ch := d.clickhouse(); d.postbackKey != "" && pb == d.postbackKey && ch != nil {
+			cid := query.Get("cid")
+			profit, _ := strconv.ParseFloat(query.Get("profit"), 64)
+			status := strings.ToLower(strings.TrimSpace(query.Get("status")))
 			if cid != "" {
-				gid, err := d.chConn.RecordPostback(r.Context(), cid, profit, status)
+				sctx, cancel := context.WithTimeout(r.Context(), postbackStoreTimeout)
+				res, err := ch.RecordPostback(sctx, cid, profit, status)
+				cancel()
 				if err != nil {
 					d.log.Warn("postback failed", "cid", cid, "err", err)
 				} else {
-					d.queueOutbound(gid, cid, profit, status, r.URL.Query())
+					_, subs := config.ApplySource(query, nil)
+					d.queueOutbound(res, cid, profit, status, subs)
 				}
 			}
 		}
@@ -173,7 +211,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	// API-client mode: ?api=base64(JSON). Input is taken from the client request.
 	var apiReq *apiRequest
 	apiMode := false
-	if a := r.URL.Query().Get("api"); a != "" {
+	if a := query.Get("api"); a != "" {
 		req, ok := parseAPIRequest(a, d.keys.verify)
 		if !ok {
 			w.WriteHeader(http.StatusForbidden)
@@ -245,7 +283,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	applyModelHint(&info, r, apiMode)
 	device := info.Device
 	g := d.geores.Resolve(ip)
-	proxy := isProxy(d, ip, g.Org)
+	proxy := isProxy(d, ip, g.Org, g.OrgAlt)
 	// Country has two sources: the geo database and the CDN's header. The
 	// group says which one wins when both answer; the other is the fallback.
 	//
@@ -275,7 +313,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	cid := d.cids.newCID()
 	ownStep := false
 	if offerStep {
-		if c := r.URL.Query().Get("cid"); d.cids.reusedCID(c) {
+		if c := query.Get("cid"); d.cids.reusedCID(c) {
 			cid, ownStep = c, true
 		}
 	}
@@ -290,12 +328,13 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Input (key/lang/domain/extra params): from the api request or from HTTP.
-	key := config.LimitBytes(r.URL.Query().Get("q"), config.MaxValueBytes)
+	// The keyword itself is chosen by sourceReads, per serving group.
+	apiKey := ""
 	lang := langOf(r)
 	domain := domainOf(ref)
 	pars := extraParams(r)
 	if apiMode {
-		key, lang, domain, pars = config.LimitBytes(apiReq.Key, config.MaxValueBytes), apiReq.Lang, apiReq.Domain, apiReq.Pars
+		apiKey, lang, domain, pars = config.LimitBytes(apiReq.Key, config.MaxValueBytes), apiReq.Lang, apiReq.Domain, apiReq.Pars
 	}
 
 	// 4) Stream selection (phase 3). Operator — by the label from the wap list.
@@ -311,7 +350,6 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		UA:         ua,
 		Referer:    refOrEmpty(ref),
 		Domain:     domain,
-		Key:        key,
 		Device:     device,
 		Operator:   operator,
 		OS:         info.OS,
@@ -324,19 +362,23 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		Proxy:      proxy,
 		IP:         ip,
 		ASN:        g.ASN,
+		ASNAlt:     g.ASNAlt,
 		Org:        g.Org,
+		OrgAlt:     g.OrgAlt,
 		Timezone:   g.Timezone,
 		TZOffset:   tzOffset,
-		Query:      r.URL.Query(),
+		Query:      query,
 	}
-	subs, extras := d.sourceReads(grp, r.URL.Query(), &v, key)
+	subs, extras := d.sourceReads(grp, query, &v, apiMode, apiKey)
 	// The installation profile decides the bot flag before a stream is chosen.
 	// The selected stream still decides where a bot is sent.
 	profile := config.Bots{}
 	if d.sigs != nil && d.lists != nil {
 		profile = d.botProfile()
 	}
-	v.Bot = detectBot(d.lists, d.sigs, d.dataDir, botInput{IP: ip, UA: ua, Ref: refOrEmpty(ref), Lang: v.Lang, Proxy: proxy, Device: device}, profile) != detect.BotNone
+	botIn := botInput{IP: ip, UA: ua, Ref: refOrEmpty(ref), Lang: v.Lang, Proxy: proxy, Device: device}
+	profileBot := detectBot(d.lists, d.sigs, d.dataDir, botIn, profile)
+	v.Bot = profileBot != detect.BotNone
 	// Output defaults — from the group; the stream overrides them.
 	//
 	// A stream (or a group's default) of type "group" hands the visitor to
@@ -345,7 +387,8 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	// uniqueness, country source — belongs to the group the visitor entered
 	// through; what follows, including the log line, belongs to the group
 	// that finally served them.
-	originID, originName := d.resolveOrigin(r, grp, apiMode, apiReq)
+	now := time.Now()
+	originID, originName, chainRoot, issued := d.resolveOrigin(query, grp, apiMode, apiReq, now)
 
 	var (
 		streamName, redirect, outRaw, ctype string
@@ -390,7 +433,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			via = grp.ID + "/" + streamName
 		}
 		grp = next
-		subs, extras = d.sourceReads(grp, r.URL.Query(), &v, key) // the new group's own source
+		subs, extras = d.sourceReads(grp, query, &v, apiMode, apiKey) // the new group's own source
 	}
 
 	// 4.5) Bot detection by the selected stream's toggles (after selection).
@@ -398,7 +441,10 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	if selStream != nil {
 		botsCfg = selStream.Bots
 	}
-	bot := detectBot(d.lists, d.sigs, d.dataDir, botInput{IP: ip, UA: ua, Ref: refOrEmpty(ref), Lang: v.Lang, Proxy: proxy, Device: device}, botsCfg)
+	bot := profileBot
+	if !sameBotChecks(botsCfg, profile) {
+		bot = detectBot(d.lists, d.sigs, d.dataDir, botIn, botsCfg)
+	}
 	// Separate serving for bots (bot_redirect). "skip"/"" → normal stream (the bot is still logged).
 	botServed := false
 	if bot != detect.BotNone && selStream != nil && botsCfg.Redirect != "" && botsCfg.Redirect != "skip" {
@@ -408,6 +454,11 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			ctype = botsCfg.Header
 		}
 		botServed = true
+	}
+	// The log, the header and keyword collection see the bot that routed the visitor
+	// even when the selected stream has no bot toggles of its own.
+	if bot == detect.BotNone {
+		bot = profileBot
 	}
 
 	// separation: substitute the output by keyword (unless this is bot serving).
@@ -446,10 +497,11 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 
 	// distribution of out variants (|||): random/rotator/evenly.
 	dist := ""
+	cat := d.catalogs()
 	if selStream != nil && !botServed && (len(selStream.Out.Offers) > 0 || len(selStream.Out.Landings) > 0) {
-		redirect, outRaw = router.ResolveOut(selStream, d.catalogs(), offerStep, redirect, outRaw, nil)
+		redirect, outRaw = router.ResolveOut(selStream, cat, offerStep, redirect, outRaw, nil)
 	}
-	offerID, landingID, networkID := clickIDs(selStream, d.catalogs(), outRaw, offerStep)
+	offerID, landingID, networkID := clickIDs(selStream, cat, outRaw, offerStep)
 	if networkID != "" {
 		outRaw = appendOfferQuery(outRaw, d.offerQuery(networkID))
 	}
@@ -467,16 +519,21 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 
 	// 5) Render the output: macros, api_mac, CURL fetch, or a normal redirect.
 	q := v.Query
+	pathRoot, pathIssued := chainRoot, issued
+	if pathRoot == "" {
+		pathRoot, pathIssued = cid, now
+	}
 	originTok := ""
 	if originID != "" && d.cids != nil {
-		originTok = d.cids.signOrigin(originID)
+		originTok = d.cids.signPath(originID, pathRoot, pathIssued)
 	}
 	md := render.MacroDeps{
 		Key: v.Key, Path: r.Host, IP: ip.String(), Country: country, City: g.City,
 		Region: g.Region, Lang: v.Lang, Device: device, Operator: operator,
 		Domain: v.Domain, UserAgent: ua, CID: cid, Pars: pars, SubIDs: subs,
 		ASN: asnText(g.ASN), Org: dashEmpty(g.Org), Timezone: g.Timezone, TZOffset: tzOffset,
-		DataDir: d.dataDir, Offer: offerStepURL(gid, cid, r.URL.RawQuery), Origin: originTok,
+		DataDir: d.dataDir, Offer: offerStepURL(gid, cid, r.URL.RawQuery, originTok), Origin: originTok,
+		RootCID: chainRoot,
 		Query: func(n string) (string, bool) {
 			v, ok := q[n]
 			if !ok || len(v) == 0 {
@@ -530,10 +587,13 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		res = render.Do(redirect, out, render.Options{ContentType: ctype, Path: r.Host,
 			Country: country, City: g.City, Region: g.Region, Device: device,
 			Operator: operator, Bot: bot, Uniq: b2yn(unique), Lang: v.Lang, Mac: mac})
+		if redirect == "http_redirect" {
+			res.Location = d.withOrigin(res.Location, originTok)
+		}
 	}
 
 	// 6) Event log — asynchronous, the response does not wait for the write (phase 4).
-	costCents, costCur, costOK := config.IncomingCost(r.URL.Query(), grp.CostParam, grp.CurrencyParam)
+	costCents, costCur, costOK := config.IncomingCost(query, grp.CostParam, grp.CurrencyParam)
 	// The second step carries the landing's query, so its price is already on the
 	// landing row: the step logs no cents, and keeps the currency as the mark
 	// that a price came with the click. A click without a valid price has neither.
@@ -545,9 +605,9 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	}
 	if d.logs != nil {
 		d.logs.Push(logbuf.Event{
-			Ts: time.Now(), GroupID: grp.ID, GroupName: grp.Name,
-			OriginID: originID, OriginName: originName,
-			Stream: streamName, Out: out, Redirect: logRedirect, Device: device,
+			Ts: now, GroupID: grp.ID, GroupName: grp.Name,
+			OriginID: originID, OriginName: originName, RootCID: chainRoot,
+			Stream: streamName, Out: logbuf.CapOut(out), Redirect: logRedirect, Device: device,
 			Operator: operator, Country: country, City: g.City, Region: g.Region,
 			Lang: v.Lang, Uniq: b2u8(loggedUnique), Bot: bot, IP: ip.String(),
 			Referer: v.Referer, UserAgent: ua, Domain: v.Domain, Keyword: v.Key,
@@ -565,22 +625,22 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	// Keyword collection.
 	if bot == detect.BotNone {
 		if grp.SaveKeys && v.Key != "" {
-			appendKey(d.keysDir, grp.ID, v.Key, false)
+			d.keyFiles.add(grp.ID, v.Key, false)
 		}
 		if grp.SaveKeysSE {
 			if kse := parseSEKeyword(ref); kse != "" {
-				appendKey(d.keysDir, grp.ID, kse, true)
+				d.keyFiles.add(grp.ID, kse, true)
 			}
 		}
 	}
 
 	// Diagnostic headers (before writing the response) + render.
 	h := w.Header()
-	h.Set("X-Kuztds-Bot", emptyDash(bot))
-	h.Set("X-Kuztds-Device", device)
-	h.Set("X-Kuztds-Country", country)
-	h.Set("X-Kuztds-Stream", streamName)
-	h.Set("X-Kuztds-Uniq", b2yn(unique))
+	h.Set("X-Emtds-Bot", emptyDash(bot))
+	h.Set("X-Emtds-Device", device)
+	h.Set("X-Emtds-Country", country)
+	h.Set("X-Emtds-Stream", streamName)
+	h.Set("X-Emtds-Uniq", b2yn(unique))
 	if redirect == "landing" {
 		d.serveLocalLanding(w, r, strings.TrimSpace(outRaw), md)
 		return
@@ -667,13 +727,23 @@ func dashEmpty(s string) string {
 	return s
 }
 
-// resolveOrigin picks the first-entry campaign for this visit.
+// resolveOrigin picks the first-entry campaign and the chain root for this visit.
 //
-// r carries ?origin=. grp is the group the visitor entered. apiMode marks an
-// api request; apiReq holds its campaign id. A verified origin token naming an
-// active group wins; otherwise the entry group is used. In api mode the
-// campaign id from the request is the origin. It returns the id and display name.
-func (d *engineDeps) resolveOrigin(r *http.Request, grp *config.Group, apiMode bool, apiReq *apiRequest) (id, name string) {
+// query is the parsed request query and carries ?origin=. grp is the group the
+// visitor entered. apiMode marks an api request; apiReq holds its campaign id.
+// now is the verification time. A path token names the root click and its issue
+// time. An old origin token names only the campaign. A token that does not
+// verify is ignored. A path token whose campaign is off or missing keeps the
+// root click and uses the entry campaign. In api mode the campaign id from the
+// request is the origin and this click is the root.
+// It returns the campaign id, its display name, the root click id and the root
+// issue time. An empty root click id means this click is the root. It does not
+// fail.
+func (d *engineDeps) resolveOrigin(query url.Values, grp *config.Group, apiMode bool, apiReq *apiRequest, now time.Time) (id, name, rootCID string, issued time.Time) {
+	entryID, entryName := "", ""
+	if grp != nil {
+		entryID, entryName = grp.ID, grp.Name
+	}
 	if apiMode && apiReq != nil {
 		id = strings.TrimSpace(apiReq.ID)
 		if id != "" && d.groups != nil {
@@ -681,17 +751,22 @@ func (d *engineDeps) resolveOrigin(r *http.Request, grp *config.Group, apiMode b
 				name = g.Name
 			}
 		}
-		return id, name
+		return id, name, "", time.Time{}
 	}
-	if tok := strings.TrimSpace(r.URL.Query().Get("origin")); tok != "" && d.cids != nil {
+	if tok := strings.TrimSpace(query.Get("origin")); tok != "" && d.cids != nil {
+		if gid, rc, iss, ok := d.cids.verifyPath(tok, now); ok {
+			if d.groups != nil {
+				if g, found := d.groups.Get(gid); found && g.Status {
+					return g.ID, g.Name, rc, iss
+				}
+			}
+			return entryID, entryName, rc, iss
+		}
 		if gid, ok := d.cids.verifyOrigin(tok); ok && d.groups != nil {
-			if g, ok := d.groups.Get(gid); ok && g.Status {
-				return g.ID, g.Name
+			if g, found := d.groups.Get(gid); found && g.Status {
+				return g.ID, g.Name, "", time.Time{}
 			}
 		}
 	}
-	if grp != nil {
-		return grp.ID, grp.Name
-	}
-	return "", ""
+	return entryID, entryName, "", time.Time{}
 }

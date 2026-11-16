@@ -2,18 +2,20 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 func groupAPIServer(t *testing.T) *httptest.Server {
@@ -375,5 +377,42 @@ func TestReplaceGroupMergeCreated(t *testing.T) {
 	}
 	if _, ok := dropGroup(stored, "missing"); ok {
 		t.Fatal("missing drop")
+	}
+}
+
+func TestGroupPutWithNetworksStore(t *testing.T) {
+	hash, err := security.HashPassword("p@ss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	networks := NewJSONStore[config.AffiliateNetwork](filepath.Join(t.TempDir(), "networks.json"))
+	if err := networks.Save(context.Background(), []config.AffiliateNetwork{{ID: "net1"}}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{
+		AdminUser:    "admin",
+		PasswordHash: hash,
+		Sessions:     security.NewMemoryStore(),
+		Stats:        fakeStats{},
+		Groups:       &memGroups{},
+		Networks:     networks,
+		Limiter:      allowAll{},
+		SessionTTL:   time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+
+	resp := csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups", csrf, []config.Group{{ID: "a", Name: "A"}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put groups %d", resp.StatusCode)
+	}
+	if got := fetchGroups(t, c, srv.URL); !slices.Equal(groupIDs(got), []string{"a"}) {
+		t.Fatalf("ids: %v", groupIDs(got))
 	}
 }

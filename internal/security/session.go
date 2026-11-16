@@ -54,6 +54,14 @@ type Session struct {
 	// That session is not stored: it lives only in the request context.
 	// The json tag keeps it out of Redis, where store.RedisSessions marshals Session.
 	API bool `json:"-"`
+	// KeyID, KeyType, KeyRole, KeyAccess and KeyActions copy the access fields of
+	// the API key behind an API session (see APIKey). They are empty for a cookie
+	// session and, like API, never reach Redis.
+	KeyID      string   `json:"-"`
+	KeyType    string   `json:"-"`
+	KeyRole    string   `json:"-"`
+	KeyAccess  *Access  `json:"-"`
+	KeyActions []string `json:"-"`
 }
 
 // SessionStore stores sessions by token. Implementations: MemoryStore (here) and

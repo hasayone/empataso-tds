@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -11,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/router"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/router"
 )
 
 func TestParsePostbackRejectsNaN(t *testing.T) {
@@ -73,7 +74,7 @@ func TestLegacyPixelDoesNotReadDepSum(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(raw)
-	i := strings.Index(body, `if pb := r.URL.Query().Get("pb")`)
+	i := strings.Index(body, `if pb := query.Get("pb")`)
 	j := strings.Index(body, "API-client mode")
 	if i < 0 || j < i {
 		t.Fatal("pixel block not found")
@@ -207,12 +208,12 @@ func TestPostbackResult(t *testing.T) {
 	}
 }
 
-func TestMarkOutboundOnce(t *testing.T) {
+func TestTakeOutboundOnce(t *testing.T) {
 	d := &engineDeps{}
-	if !d.markOutbound("c", "lead") || d.markOutbound("c", "lead") {
+	if !d.takeOutbound(context.Background(), "c", "lead") || d.takeOutbound(context.Background(), "c", "lead") {
 		t.Fatal("same click and status must queue once")
 	}
-	if !d.markOutbound("c", "sale") {
+	if !d.takeOutbound(context.Background(), "c", "sale") {
 		t.Fatal("a different status is a separate row")
 	}
 }

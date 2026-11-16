@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "at": "2026-01-15T10:00:00Z",
+  "channel": "release",
+  "current": {
+    "commit": "aabbccddee1122334455667788990011aabbccdd",
+    "version": "v1.0.0"
+  },
+  "target": {
+    "commit": "bbccddee1122334455667788990011aabbccddee",
+    "tag": "v1.1.0",
+    "version": "v1.1.0",
+    "date": "2026-01-15T09:00:00Z"
+  },
+  "ahead": 3,
+  "commits": [
+    {
+      "sha": "bbccddee1122334455667788990011aabbccddee",
+      "subject": "feat: add update support",
+      "author": "Alex",
+      "date": "2026-01-15T09:00:00Z"
+    }
+  ],
+  "notes": "Release v1.1.0\n\nAdds update support.",
+  "manual_steps": [],
+  "signed": true,
+  "signer": "admin@example.com",
+  "error": ""
+}

@@ -10,9 +10,14 @@ import (
 // Each call gets its own timeout so a slow ALTER cannot consume the ping.
 const schemaTimeout = 10 * time.Second
 
-// ensureSchema adds missing columns and records which later waves are present.
-// It takes no context: every statement uses a fresh 10s background timeout.
-// ALTER, CREATE and the system.columns read log their error and continue,
+// eventsCIDIndexSQL is the events skip index for lookups by cid, the same
+// statement as migrations/clickhouse/013_events_cid_index.sql. It changes
+// metadata only: new parts carry the index, old parts are not rebuilt.
+const eventsCIDIndexSQL = `ALTER TABLE events ADD INDEX IF NOT EXISTS idx_cid cid TYPE bloom_filter(0.01) GRANULARITY 1`
+
+// ensureSchema adds missing columns, the events cid index and the events
+// deduplication window, and records which later waves are present. It takes no
+// context: every statement uses a fresh 10s background timeout. ALTER, CREATE and the system.columns read log their error and continue,
 // so a read-only user does not stop the process. A refused ALTER leaves
 // that wave's flag false and later writes omit the columns.
 // The base wave is not probed: it ships with the table, and ready reports
@@ -37,6 +42,9 @@ func (c *CH) ensureSchemaWaves(withOrigin bool) {
 	if withOrigin {
 		c.schemaAlter("events", waveOrigin)
 	}
+	c.schemaAlter("events", waveRoot)
+	c.schemaExec(eventsCIDIndexSQL)
+	c.EnsureDedup()
 	c.schemaExec(`CREATE TABLE IF NOT EXISTS conversions (
 		ts DateTime DEFAULT now(),
 		domain String,
@@ -60,6 +68,7 @@ func (c *CH) ensureSchemaWaves(withOrigin bool) {
 	if withOrigin {
 		c.schemaAlter("conversions", waveOrigin)
 	}
+	c.schemaAlter("conversions", waveRoot)
 	c.schemaAlter("conversions", waveDep)
 	c.schemaExec(`CREATE TABLE IF NOT EXISTS postback_log (
 		ts DateTime DEFAULT now(),
@@ -72,6 +81,7 @@ func (c *CH) ensureSchemaWaves(withOrigin bool) {
 	PARTITION BY toYYYYMM(ts)
 	ORDER BY ts
 	TTL ts + INTERVAL 90 DAY`)
+	c.schemaExec(postbackLogDedupSQL)
 	c.probeColumns()
 	c.netCols = c.ready("events", waveNet)
 	c.clickCols = c.ready("events", waveClick) && c.ready("conversions", waveClick)
@@ -87,6 +97,8 @@ func (c *CH) ensureSchemaWaves(withOrigin bool) {
 	if rf := c.readyFlags; rf != nil {
 		c.originEvents.Store(rf["events"][waveOrigin])
 		c.originConv.Store(rf["conversions"][waveOrigin])
+		c.rootEvents.Store(rf["events"][waveRoot])
+		c.rootConv.Store(rf["conversions"][waveRoot])
 	}
 }
 
@@ -204,6 +216,20 @@ func (c *CH) ready(table string, w wave) bool {
 			return c.originEvents.Load()
 		case "conversions":
 			return c.originConv.Load()
+		default:
+			return false
+		}
+	}
+	if w == waveRoot {
+		if c == nil {
+			return false
+		}
+		fromFlags := c.readyFlags != nil && c.readyFlags[table][w]
+		switch table {
+		case "events":
+			return fromFlags || c.rootEvents.Load()
+		case "conversions":
+			return fromFlags || c.rootConv.Load()
 		default:
 			return false
 		}

@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/admin"
+	"github.com/egerkuzma/emtds/internal/admin"
 )
 
 func TestDomainWatchInterval(t *testing.T) {
@@ -42,7 +42,7 @@ func TestViewsFileDefaultPath(t *testing.T) {
 	if cfg.ViewsPath != want {
 		t.Fatalf("default views path: got %q want %q", cfg.ViewsPath, want)
 	}
-	t.Setenv("KUZTDS_VIEWS_FILE", filepath.Join(dir, "custom-views.json"))
+	t.Setenv("EMTDS_VIEWS_FILE", filepath.Join(dir, "custom-views.json"))
 	applyDataFiles(&cfg, groups, log)
 	if cfg.ViewsPath != filepath.Join(dir, "custom-views.json") {
 		t.Fatalf("env override: %q", cfg.ViewsPath)
@@ -56,7 +56,7 @@ func TestKeitaroSyncFileDefaultPath(t *testing.T) {
 	if got := keitaroSyncFileForGroups(groups); got != want {
 		t.Fatalf("got %q want %q", got, want)
 	}
-	t.Setenv("KUZTDS_KEITARO_SYNC_FILE", filepath.Join(dir, "custom-sync.json"))
+	t.Setenv("EMTDS_KEITARO_SYNC_FILE", filepath.Join(dir, "custom-sync.json"))
 	if got := keitaroSyncFileForGroups(groups); got != filepath.Join(dir, "custom-sync.json") {
 		t.Fatalf("env override: %q", got)
 	}
@@ -73,13 +73,43 @@ func TestRunRecoveryRejectsArguments(t *testing.T) {
 }
 
 func TestRunRecoveryNeedsPasswordFile(t *testing.T) {
-	t.Setenv("KUZTDS_ADMIN_PASSWORD_FILE", "")
-	t.Setenv("KUZTDS_RECOVERY_LOGIN", "admin")
+	t.Setenv("EMTDS_ADMIN_PASSWORD_FILE", "")
+	t.Setenv("EMTDS_RECOVERY_LOGIN", "admin")
 	var buf bytes.Buffer
 	if runRecovery(&buf, nil) != 1 {
 		t.Fatal("expected failure")
 	}
 	if buf.Len() != 0 {
 		t.Fatal("failure must not print a code")
+	}
+}
+
+func TestConfigSecretValues(t *testing.T) {
+	for _, name := range secretEnvNames {
+		t.Setenv(name, "")
+	}
+	if got := secretValues(); len(got) != 0 {
+		t.Fatalf("nothing is set: %v", got)
+	}
+	t.Setenv("EMTDS_REDIS_PASSWORD", "redis-secret-1")
+	t.Setenv("KEITARO_API_KEY", "keitaro-secret-1")
+	got := secretValues()
+	if len(got) != 2 || got[0] != "redis-secret-1" || got[1] != "keitaro-secret-1" {
+		t.Fatalf("got %v", got)
+	}
+}
+
+func TestConfigCIDKeyFile(t *testing.T) {
+	groups := filepath.Join("data", "groups.json")
+	cases := []struct{ override, groups, want string }{
+		{"", "", ""},
+		{"", groups, filepath.Join("data", "cid.key")},
+		{" /vol/own.key ", groups, "/vol/own.key"},
+		{"/vol/own.key", "", "/vol/own.key"},
+	}
+	for _, c := range cases {
+		if got := cidKeyFile(c.override, c.groups); got != c.want {
+			t.Errorf("cidKeyFile(%q, %q) = %q, want %q", c.override, c.groups, got, c.want)
+		}
 	}
 }

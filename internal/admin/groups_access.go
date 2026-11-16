@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // campaignLinkKinds lists grant resources validated on campaign save links.
@@ -249,8 +249,9 @@ func clearEmpty(v reflect.Value) {
 // linkCatalog maps grant resource names to catalog id→ref rows for link checks.
 type linkCatalog map[string]map[string]ref
 
-// loadLinkCatalog reads catalog rows from disk and indexes campaigns from groups.
+// loadLinkCatalog reads rows of every campaignLinkKinds resource from disk and indexes campaigns from groups.
 // groups supplies campaign ids and aliases. Missing stores leave empty maps.
+// Affiliate networks are not campaign links and are not loaded.
 func (s *Server) loadLinkCatalog(ctx context.Context, groups []config.Group) linkCatalog {
 	cat := linkCatalog{}
 	for _, res := range campaignLinkKinds {
@@ -281,13 +282,6 @@ func (s *Server) loadLinkCatalog(ctx context.Context, groups []config.Group) lin
 		if list, err := s.cfg.Sources.List(ctx); err == nil {
 			for _, src := range list {
 				cat[resSources][src.ID] = ref{id: src.ID, label: src.Group, owner: src.CreatedBy, board: src.BoardID}
-			}
-		}
-	}
-	if s.cfg.Networks != nil {
-		if list, err := s.cfg.Networks.List(ctx); err == nil {
-			for _, n := range list {
-				cat[resNetworks][n.ID] = ref{id: n.ID, label: n.Group, owner: n.CreatedBy, board: n.BoardID}
 			}
 		}
 	}

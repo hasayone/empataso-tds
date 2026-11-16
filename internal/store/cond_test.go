@@ -17,7 +17,6 @@ func readyClient() *CH {
 	}}
 }
 
-
 func TestBuildWhereOps(t *testing.T) {
 	c := readyClient()
 	sql, args, skip, err := buildWhere(c, "events", []Cond{{Field: "country", Op: "eq", Values: []string{"PL"}}})

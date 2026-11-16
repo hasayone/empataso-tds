@@ -1,0 +1,97 @@
+[
+  {
+    "id": 14606,
+    "type": "regular",
+    "name": "CM",
+    "position": 18,
+    "weight": 100,
+    "state": "active",
+    "schema": "redirect",
+    "action_type": "http",
+    "action_payload": "https://offer.example/cm",
+    "filter_or": false,
+    "filters": [
+      {"name": "device_type", "mode": "accept", "payload": ["mobile", "tablet"]},
+      {"name": "bot", "mode": "reject", "payload": null},
+      {"name": "country", "mode": "accept", "payload": ["CM"]}
+    ],
+    "landings": [],
+    "offers": []
+  },
+  {
+    "id": 16665,
+    "type": "default",
+    "name": "Ловушка",
+    "position": 74,
+    "weight": 0,
+    "state": "active",
+    "schema": "redirect",
+    "action_type": "http",
+    "action_payload": "https://trap.example/",
+    "filter_or": false,
+    "filters": [],
+    "landings": [],
+    "offers": []
+  },
+  {
+    "id": 977,
+    "type": "forced",
+    "name": "Bot Protection ⚡️",
+    "position": 2,
+    "weight": 100,
+    "state": "active",
+    "schema": "action",
+    "action_type": "status404",
+    "action_payload": "",
+    "filter_or": true,
+    "filters": [
+      {"name": "bot", "mode": "accept", "payload": null}
+    ],
+    "landings": [],
+    "offers": []
+  },
+  {
+    "id": 12694,
+    "type": "forced",
+    "name": "Bot Protection",
+    "position": 1,
+    "weight": 0,
+    "state": "active",
+    "schema": "action",
+    "action_type": "status404",
+    "action_payload": "",
+    "filter_or": true,
+    "filters": [
+      {"name": "device_type", "mode": "reject", "payload": ["mobile", "tablet"]},
+      {"name": "isp", "mode": "accept", "payload": [
+        "Google LLC", "Google Brasil Internet Ltda", "Google Fiber Inc.", "Google Global Cache",
+        "VPN by Google", "Nextlayer Google Net", "Google Cache Yopougon", "Google - Globenet",
+        "Google Node Server", "Google Cache Servers for Sakhalin Region",
+        "Google Ireland Limited Barrow Street 1st & 2nd Floor 4 Dublin Ireland www.google.ie",
+        "Google Ireland Limited", "Google GGC", "Google Argentina SRL", "Services Google", "Google Inc.",
+        "Hyderabad-Google Cache Ap", "For Google GGC Samara N.Novgorod", "For Google",
+        "Google Global Cache in MTS", "Server Google GGC MRF UG"
+      ]},
+      {"name": "bot", "mode": "accept", "payload": null}
+    ],
+    "landings": [],
+    "offers": []
+  },
+  {
+    "id": 30001,
+    "type": "regular",
+    "name": "Empty country",
+    "position": 3,
+    "weight": 100,
+    "state": "active",
+    "schema": "redirect",
+    "action_type": "http",
+    "action_payload": "https://offer.example/empty",
+    "filter_or": false,
+    "filters": [
+      {"name": "country", "mode": "accept", "payload": []}
+    ],
+    "landings": [],
+    "offers": []
+  }
+]

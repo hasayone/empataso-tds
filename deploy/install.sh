@@ -7,19 +7,28 @@ TDS_DIR=
 if [[ -n "$SELF" ]]; then
 	TDS_DIR=$(dirname "$(dirname "$SELF")")
 fi
-STATE_DIR="${KUZTDS_INSTALL_STATE_DIR:-/etc/kuztds}"
+STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-${KUZTDS_INSTALL_STATE_DIR:-}}"
+if [[ -z "$STATE_DIR" ]]; then
+	STATE_DIR=/etc/emtds
+	if [[ ! -e /etc/emtds && -d /etc/kuztds ]]; then
+		STATE_DIR=/etc/kuztds
+	fi
+fi
 MARKER="$STATE_DIR/installed"
 SERVER_ENV="$STATE_DIR/server.env"
 INFRA_OVERRIDE="$STATE_DIR/compose.infra.yml"
 APP_OVERRIDE="$STATE_DIR/compose.app.yml"
 UP_SCRIPT="$STATE_DIR/up.sh"
 OUR_DEPLOY_DIR="${TDS_DIR}/deploy"
-export KUZTDS_SERVER_ENV="$SERVER_ENV"
+INSTALL_CHANNEL="${EMTDS_INSTALL_CHANNEL:-release}"
+INSTALL_REPO="${EMTDS_INSTALL_REPO:-}"
+export EMTDS_SERVER_ENV="$SERVER_ENV"
 if [[ -f "${OUR_DEPLOY_DIR}/apply-edge.sh" ]]; then
 	# shellcheck source=apply-edge.sh
 	source "${OUR_DEPLOY_DIR}/apply-edge.sh"
 fi
-APP_CONTAINERS=(kuztds-engine kuztds-admin kuztds-cron kuztds-php)
+APP_CONTAINERS=(emtds-engine emtds-admin emtds-cron emtds-php)
+LEGACY_APP_CONTAINERS=(kuztds-engine kuztds-admin kuztds-cron kuztds-php)
 INFRA_COMPOSE=(docker compose -p deploy --env-file "$TDS_DIR/.env" --env-file "$SERVER_ENV" -f "$TDS_DIR/deploy/docker-compose.yml" -f "$INFRA_OVERRIDE")
 APP_COMPOSE=(docker compose --env-file "$TDS_DIR/.env" --env-file "$SERVER_ENV" -f "$TDS_DIR/deploy/docker-compose.app.yml" -f "$APP_OVERRIDE")
 
@@ -28,7 +37,7 @@ APP_COMPOSE=(docker compose --env-file "$TDS_DIR/.env" --env-file "$SERVER_ENV" 
 # Результат: строка на stdout.
 # Ошибки: нет.
 msg() {
-	printf 'kuztds-install: %s\n' "$*"
+	printf 'emtds-install: %s\n' "$*"
 }
 
 # Назначение: классифицировать сервер по RAM, CPU и свободному месту.
@@ -63,29 +72,32 @@ ch_mem_limit() {
 	fi
 }
 
-# Назначение: maxmemory Redis по объёму RAM сервера.
+# Назначение: maxmemory Redis по объёму RAM сервера. Окно уникальности в Redis
+# не длиннее суток (EMTDS_UNIQ_MAX_SECONDS), около 120 байт на клик: 2gb держат
+# около 17 млн кликов в сутки (цель — 14,4 млн при 167 кликах в секунду), 1gb —
+# только около 9 млн, 512mb — около 4 млн, поэтому от 12000 MiB берётся 2gb.
 # Параметры: $1 — RAM MiB.
-# Результат: 512mb или 1gb на stdout.
+# Результат: 512mb или 2gb на stdout.
 # Ошибки: нет.
 redis_maxmemory() {
 	local mem=$1
 	if (( mem < 12000 )); then
 		printf '512mb\n'
 	else
-		printf '1gb\n'
+		printf '2gb\n'
 	fi
 }
 
-# Назначение: лимит памяти контейнера Redis.
+# Назначение: лимит памяти контейнера Redis, в полтора раза выше maxmemory.
 # Параметры: $1 — RAM MiB.
-# Результат: 768m или 1536m на stdout.
+# Результат: 768m или 3g на stdout.
 # Ошибки: нет.
 redis_mem_limit() {
 	local mem=$1
 	if (( mem < 12000 )); then
 		printf '768m\n'
 	else
-		printf '1536m\n'
+		printf '3g\n'
 	fi
 }
 
@@ -102,18 +114,30 @@ app_mem_limit() {
 	fi
 }
 
+# Назначение: мягкий лимит кучи Go (GOMEMLIMIT) для engine и admin, около 90% лимита контейнера.
+# Параметры: $1 — лимит контейнера из app_mem_limit (1g или 2g).
+# Результат: 920MiB или 1840MiB на stdout.
+# Ошибки: другой лимит — код 1 без вывода.
+app_gomemlimit() {
+	case $1 in
+	1g) printf '920MiB\n' ;;
+	2g) printf '1840MiB\n' ;;
+	*) return 1 ;;
+	esac
+}
+
 # Назначение: определить публичный IPv4 для server.env и TLS.
-# Параметры: нет (KUZTDS_PUBLIC_IP или HTTP-запрос через edge_public_ipv4).
+# Параметры: нет (EMTDS_PUBLIC_IP или HTTP-запрос через edge_public_ipv4).
 # Результат: адрес на stdout.
 # Ошибки: не удалось определить, код 1. Сообщение на stderr, адрес в него не попадает.
 detect_public_ipv4() {
 	local ip
 	if ! declare -F edge_public_ipv4 >/dev/null; then
-		msg "задайте KUZTDS_PUBLIC_IP (IPv4) в окружении перед установкой" >&2
+		msg "задайте EMTDS_PUBLIC_IP (IPv4) в окружении перед установкой" >&2
 		return 1
 	fi
 	if ! ip=$(edge_public_ipv4); then
-		msg "задайте KUZTDS_PUBLIC_IP (IPv4) в окружении перед установкой" >&2
+		msg "задайте EMTDS_PUBLIC_IP (IPv4) в окружении перед установкой" >&2
 		return 1
 	fi
 	printf '%s' "$ip"
@@ -126,12 +150,12 @@ detect_public_ipv4() {
 render_server_env() {
 	local public_ip=$1
 	cat <<EOF
-KUZTDS_CH_HTTP_PUBLISH=127.0.0.1:8123:8123
-KUZTDS_CH_NATIVE_PUBLISH=127.0.0.1:9000:9000
-KUZTDS_REDIS_PUBLISH=127.0.0.1:6379:6379
-KUZTDS_ADMIN_PUBLISH=127.0.0.1:8090:8090
-KUZTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080
-KUZTDS_PUBLIC_IP=${public_ip}
+EMTDS_CH_HTTP_PUBLISH=127.0.0.1:8123:8123
+EMTDS_CH_NATIVE_PUBLISH=127.0.0.1:9000:9000
+EMTDS_REDIS_PUBLISH=127.0.0.1:6379:6379
+EMTDS_ADMIN_PUBLISH=127.0.0.1:8090:8090
+EMTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080
+EMTDS_PUBLIC_IP=${public_ip}
 EOF
 }
 
@@ -165,18 +189,21 @@ services:
 EOF
 }
 
-# Назначение: YAML-override для приложения (лимиты и логи).
+# Назначение: YAML-override для приложения (лимиты памяти, GOMEMLIMIT и логи).
 # Параметры: $1 — RAM MiB сервера.
-# Результат: compose-override на stdout.
+# Результат: compose-override на stdout; GOMEMLIMIT переопределяется EMTDS_GOMEMLIMIT из env-файлов compose.
 # Ошибки: нет.
 render_app_override() {
 	local mem=$1
-	local app_lim
+	local app_lim go_lim
 	app_lim=$(app_mem_limit "$mem")
+	go_lim=$(app_gomemlimit "$app_lim")
 	cat <<EOF
 services:
   engine:
     mem_limit: ${app_lim}
+    environment:
+      GOMEMLIMIT: \${EMTDS_GOMEMLIMIT:-${go_lim}}
     logging:
       driver: json-file
       options:
@@ -184,6 +211,8 @@ services:
         max-file: "3"
   admin:
     mem_limit: ${app_lim}
+    environment:
+      GOMEMLIMIT: \${EMTDS_GOMEMLIMIT:-${go_lim}}
     logging:
       driver: json-file
       options:
@@ -272,21 +301,21 @@ env_value() {
 check_env() {
 	local file=$1 val
 	if [[ ! -f "$file" ]]; then
-		printf 'kuztds-install: файл .env не найден; скопируйте: cp .env.example .env\n' >&2
+		printf 'emtds-install: файл .env не найден; скопируйте: cp .env.example .env\n' >&2
 		return 1
 	fi
 	if grep -q $'\r' "$file" 2>/dev/null; then
-		printf 'kuztds-install: в .env обнаружены символы CR (Windows-перевод строки)\n' >&2
+		printf 'emtds-install: в .env обнаружены символы CR (Windows-перевод строки)\n' >&2
 		return 1
 	fi
 	val=$(env_value "$file" CLICKHOUSE_PASSWORD)
 	if [[ -z "$val" ]]; then
-		printf 'kuztds-install: задайте непустой CLICKHOUSE_PASSWORD в .env\n' >&2
+		printf 'emtds-install: задайте непустой CLICKHOUSE_PASSWORD в .env\n' >&2
 		return 1
 	fi
-	val=$(env_value "$file" KUZTDS_ADMIN_PASSWORD)
+	val=$(env_value_compat "$file" ADMIN_PASSWORD)
 	if [[ -n "$val" && "$val" == admin ]]; then
-		printf 'kuztds-install: KUZTDS_ADMIN_PASSWORD не должен быть значением admin\n' >&2
+		printf 'emtds-install: EMTDS_ADMIN_PASSWORD не должен быть значением admin\n' >&2
 		return 1
 	fi
 	return 0
@@ -350,6 +379,21 @@ can_self_delete() {
 	return 0
 }
 
+# Назначение: экспортировать build-args из git, если .git присутствует в TDS_DIR.
+# Параметры: $1 — канал установки (release|main|dev).
+# Результат: EMTDS_VERSION, EMTDS_COMMIT, EMTDS_COMMIT_DATE, EMTDS_CHANNEL экспортированы.
+# Ошибки: git недоступен или нет .git — пустые значения, не падение.
+export_build_args() {
+	local channel=${1:-release}
+	export EMTDS_VERSION= EMTDS_COMMIT= EMTDS_COMMIT_DATE=
+	export EMTDS_CHANNEL="$channel"
+	if [[ -d "${TDS_DIR}/.git" ]]; then
+		EMTDS_VERSION=$(git -c safe.directory="$TDS_DIR" -C "$TDS_DIR" describe --tags --always 2>/dev/null || true)
+		EMTDS_COMMIT=$(git -c safe.directory="$TDS_DIR" -C "$TDS_DIR" rev-parse HEAD 2>/dev/null || true)
+		EMTDS_COMMIT_DATE=$(git -c safe.directory="$TDS_DIR" -C "$TDS_DIR" show -s --format=%cI HEAD 2>/dev/null || true)
+	fi
+}
+
 # Назначение: записать содержимое stdin в файл атомарно.
 # Параметры: $1 — путь; $2 — режим chmod (например 0644).
 # Результат: файл создан или заменён.
@@ -357,7 +401,7 @@ can_self_delete() {
 write_atomic() {
 	local dest=$1 mode=$2 dir tmp
 	dir=$(dirname "$dest")
-	tmp=$(mktemp "${dir}/.kuztds-install.XXXXXX")
+	tmp=$(mktemp "${dir}/.emtds-install.XXXXXX")
 	cat >"$tmp"
 	chmod "$mode" "$tmp"
 	mv -f "$tmp" "$dest"
@@ -370,8 +414,8 @@ write_atomic() {
 diagnose() {
 	infra_compose ps 2>/dev/null || true
 	app_compose ps 2>/dev/null || true
-	docker logs --tail 40 kuztds-engine 2>/dev/null || true
-	docker logs --tail 40 kuztds-admin 2>/dev/null || true
+	docker logs --tail 40 emtds-engine 2>/dev/null || true
+	docker logs --tail 40 emtds-admin 2>/dev/null || true
 }
 
 # Назначение: прочитать RAM сервера в MiB.
@@ -467,11 +511,18 @@ check_foreign_resources() {
 		our_count=$((our_count + 1))
 	done < <(docker ps -aq --filter label=com.docker.compose.project=deploy 2>/dev/null || true)
 
+	for name in "${LEGACY_APP_CONTAINERS[@]}"; do
+		if docker container inspect "$name" >/dev/null 2>&1; then
+			msg "найден контейнер ${name} стека до переименования; запустите deploy/migrate-emtds.sh" >&2
+			exit 1
+		fi
+	done
+
 	for name in "${APP_CONTAINERS[@]}"; do
 		if docker container inspect "$name" >/dev/null 2>&1; then
 			proj=$(container_label "$name" com.docker.compose.project)
 			wd=$(container_label "$name" com.docker.compose.project.working_dir)
-			if [[ "$proj" != kuztds-app || "$wd" != "$OUR_DEPLOY_DIR" ]]; then
+			if [[ "$proj" != emtds-app || "$wd" != "$OUR_DEPLOY_DIR" ]]; then
 				msg "контейнер ${name} принадлежит другому стеку" >&2
 				exit 1
 			fi
@@ -497,20 +548,20 @@ check_foreign_resources() {
 		done
 	fi
 
-	if pgrep -x kuztds-cron >/dev/null 2>&1; then
-		if ! docker container inspect kuztds-cron >/dev/null 2>&1; then
-			msg "cron KuzTDS уже работает вне Docker" >&2
+	if pgrep -x emtds-cron >/dev/null 2>&1; then
+		if ! docker container inspect emtds-cron >/dev/null 2>&1; then
+			msg "cron EmTDS уже работает вне Docker" >&2
 			exit 1
 		fi
 	fi
 
-	if systemctl list-unit-files 'kuztds*' --no-legend 2>/dev/null | awk '{print $1}' | grep -v '^kuztds-watchdog\.' | grep -q .; then
-		msg "найдены systemd-юниты kuztds*; установка прервана" >&2
+	if systemctl list-unit-files 'emtds*' --no-legend 2>/dev/null | awk '{print $1}' | grep -Ev '^emtds-(watchdog|update)\.' | grep -q .; then
+		msg "найдены systemd-юниты emtds*; установка прервана" >&2
 		exit 1
 	fi
 
-	if docker volume inspect kuztds-app_kuztds_state >/dev/null 2>&1; then
-		msg "предупреждение: пароль админки берётся из admin.hash в томе, если он там есть; KUZTDS_ADMIN_PASSWORD из .env применяется только на новом томе"
+	if docker volume inspect emtds-app_emtds_state >/dev/null 2>&1; then
+		msg "предупреждение: пароль админки берётся из admin.hash в томе, если он там есть; EMTDS_ADMIN_PASSWORD из .env применяется только на новом томе"
 	fi
 }
 
@@ -573,12 +624,12 @@ wait_service_connections() {
 # Ошибки: провал проверки, код 1.
 verify_running_stack() {
 	local n
-	if ! wait_service_connections kuztds-engine; then
+	if ! wait_service_connections emtds-engine; then
 		msg "движок не сообщил о подключении к ClickHouse и Redis" >&2
 		diagnose
 		exit 1
 	fi
-	if ! wait_service_connections kuztds-admin; then
+	if ! wait_service_connections emtds-admin; then
 		msg "админка не сообщила о подключении к ClickHouse и Redis" >&2
 		diagnose
 		exit 1
@@ -593,14 +644,14 @@ verify_running_stack() {
 		diagnose
 		exit 1
 	fi
-	n=$(docker ps -q --filter label=com.docker.compose.project=kuztds-app --filter label=com.docker.compose.service=cron | wc -l | tr -d ' ')
+	n=$(docker ps -q --filter label=com.docker.compose.project=emtds-app --filter label=com.docker.compose.service=cron | wc -l | tr -d ' ')
 	if [[ "$n" != 1 ]]; then
-		msg "ожидался ровно один контейнер cron в проекте kuztds-app" >&2
+		msg "ожидался ровно один контейнер cron в проекте emtds-app" >&2
 		diagnose
 		exit 1
 	fi
-	if [[ "$(docker inspect -f '{{.State.Running}}' kuztds-cron 2>/dev/null || echo false)" != true ]]; then
-		msg "контейнер kuztds-cron не запущен" >&2
+	if [[ "$(docker inspect -f '{{.State.Running}}' emtds-cron 2>/dev/null || echo false)" != true ]]; then
+		msg "контейнер emtds-cron не запущен" >&2
 		diagnose
 		exit 1
 	fi
@@ -652,13 +703,18 @@ run_self_test() {
 	assert_eq "$(ch_mem_limit 28000)" 8g ch28000
 
 	assert_eq "$(redis_maxmemory 11999)" 512mb rmax11999
-	assert_eq "$(redis_maxmemory 12000)" 1gb rmax12000
+	assert_eq "$(redis_maxmemory 12000)" 2gb rmax12000
+	assert_eq "$(redis_maxmemory 27999)" 2gb rmax27999
+	assert_eq "$(redis_maxmemory 28000)" 2gb rmax28000
 	assert_eq "$(redis_mem_limit 11999)" 768m rlim11999
-	assert_eq "$(redis_mem_limit 12000)" 1536m rlim12000
+	assert_eq "$(redis_mem_limit 12000)" 3g rlim12000
+	assert_eq "$(redis_mem_limit 28000)" 3g rlim28000
 	assert_eq "$(app_mem_limit 14999)" 1g app14999
 	assert_eq "$(app_mem_limit 15000)" 2g app15000
+	assert_eq "$(app_gomemlimit 1g)" 920MiB gomem1g
+	assert_eq "$(app_gomemlimit 2g)" 1840MiB gomem2g
 
-	local infra app env_out
+	local infra app env_out big
 	infra=$(render_infra_override 8000)
 	app=$(render_app_override 8000)
 	if grep -q 'ports:' <<<"$infra"; then
@@ -671,6 +727,10 @@ run_self_test() {
 			exit 1
 		fi
 	done
+	assert_eq "$(grep -c '"512mb"' <<<"$infra")" 1 infra_small_rmax
+	big=$(render_infra_override 12000)
+	assert_eq "$(grep -c '"2gb"' <<<"$big")" 1 infra_big_rmax
+	assert_eq "$(grep -c 'mem_limit: 3g' <<<"$big")" 1 infra_big_redis_limit
 	if grep -q 'ports:' <<<"$app"; then
 		printf 'self-test FAIL: app override содержит ports:\n'
 		exit 1
@@ -679,15 +739,17 @@ run_self_test() {
 		printf 'self-test FAIL: app override содержит command:\n'
 		exit 1
 	fi
+	assert_eq "$(grep -c 'GOMEMLIMIT: ${EMTDS_GOMEMLIMIT:-920MiB}' <<<"$app")" 2 app_gomemlimit
+	assert_eq "$(grep -c 'GOMEMLIMIT: ${EMTDS_GOMEMLIMIT:-1840MiB}' <<<"$(render_app_override 16000)")" 2 app_gomemlimit_2g
 
 	env_out=$(render_server_env 203.0.113.1)
 	assert_eq "$(echo "$env_out" | wc -l | tr -d ' ')" 6 server_env_lines
-	if [[ "$env_out" != *'KUZTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080'* ]]; then
+	if [[ "$env_out" != *'EMTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080'* ]]; then
 		printf 'self-test FAIL: server.env без порта движка 18080\n'
 		exit 1
 	fi
-	if [[ "$env_out" != *'KUZTDS_PUBLIC_IP=203.0.113.1'* ]]; then
-		printf 'self-test FAIL: server.env без KUZTDS_PUBLIC_IP\n'
+	if [[ "$env_out" != *'EMTDS_PUBLIC_IP=203.0.113.1'* ]]; then
+		printf 'self-test FAIL: server.env без EMTDS_PUBLIC_IP\n'
 		exit 1
 	fi
 	if ! declare -F valid_ipv4 >/dev/null; then
@@ -697,7 +759,7 @@ run_self_test() {
 	valid_ipv4 203.0.113.1 || { printf 'self-test FAIL: valid_ipv4\n'; exit 1; }
 	valid_ipv4 999.1.1.1 && { printf 'self-test FAIL: valid_ipv4 reject\n'; exit 1; }
 	local detected
-	detected=$(KUZTDS_PUBLIC_IP=198.51.100.7 detect_public_ipv4)
+	detected=$(EMTDS_PUBLIC_IP=198.51.100.7 detect_public_ipv4)
 	assert_eq "$detected" 198.51.100.7 detect_env_ip
 
 	local f
@@ -711,23 +773,28 @@ run_self_test() {
 		printf 'self-test FAIL: check_env CRLF\n'
 		exit 1
 	fi
-	printf 'CLICKHOUSE_PASSWORD=\nKUZTDS_ADMIN_PASSWORD=secret\n' >"$f"
+	printf 'CLICKHOUSE_PASSWORD=\nEMTDS_ADMIN_PASSWORD=secret\n' >"$f"
 	if check_env "$f" 2>/dev/null; then
 		printf 'self-test FAIL: check_env empty CH\n'
 		exit 1
 	fi
-	printf 'CLICKHOUSE_PASSWORD=ch\nKUZTDS_ADMIN_PASSWORD=admin\n' >"$f"
+	printf 'CLICKHOUSE_PASSWORD=ch\nEMTDS_ADMIN_PASSWORD=admin\n' >"$f"
 	if check_env "$f" 2>/dev/null; then
 		printf 'self-test FAIL: check_env admin=admin\n'
 		exit 1
 	fi
-	printf 'CLICKHOUSE_PASSWORD=ch\nKUZTDS_ADMIN_PASSWORD=\n' >"$f"
+	printf 'CLICKHOUSE_PASSWORD=ch\nKUZTDS_ADMIN_PASSWORD=admin\n' >"$f"
+	if check_env "$f" 2>/dev/null; then
+		printf 'self-test FAIL: check_env legacy admin=admin\n'
+		exit 1
+	fi
+	printf 'CLICKHOUSE_PASSWORD=ch\nEMTDS_ADMIN_PASSWORD=\n' >"$f"
 	check_env "$f" 2>/dev/null || { printf 'self-test FAIL: check_env empty admin\n'; exit 1; }
 	printf 'CLICKHOUSE_PASSWORD=ch\n' >"$f"
 	check_env "$f" 2>/dev/null || { printf 'self-test FAIL: check_env no admin key\n'; exit 1; }
 	local box_env
 	box_env=$(render_box_env 'cafebabe')
-	if [[ "$box_env" != 'CLICKHOUSE_PASSWORD=cafebabe' || "$box_env" == *KUZTDS_ADMIN_PASSWORD* ]]; then
+	if [[ "$box_env" != 'CLICKHOUSE_PASSWORD=cafebabe' || "$box_env" == *EMTDS_ADMIN_PASSWORD* ]]; then
 		printf 'self-test FAIL: render_box_env\n'
 		exit 1
 	fi
@@ -742,9 +809,9 @@ run_self_test() {
 		printf 'self-test FAIL: ubuntu focal must be refused\n'
 		exit 1
 	fi
-	printf 'CLICKHOUSE_PASSWORD=ch\nKUZTDS_ADMIN_PASSWORD="secret"\n' >"$f"
+	printf 'CLICKHOUSE_PASSWORD=ch\nEMTDS_ADMIN_PASSWORD="secret"\n' >"$f"
 	check_env "$f" 2>/dev/null || { printf 'self-test FAIL: quoted admin\n'; exit 1; }
-	printf 'CLICKHOUSE_PASSWORD=chpass\nKUZTDS_ADMIN_PASSWORD=goodpass\n' >"$f"
+	printf 'CLICKHOUSE_PASSWORD=chpass\nEMTDS_ADMIN_PASSWORD=goodpass\n' >"$f"
 	check_env "$f" 2>/dev/null || { printf 'self-test FAIL: normal env\n'; exit 1; }
 
 	mkdir -p "$SELFTEST_TMP/deploy"
@@ -774,10 +841,21 @@ run_self_test() {
 		exit 1
 	fi
 
+	(
+		notgit="$SELFTEST_TMP/notgit"
+		mkdir -p "$notgit"
+		TDS_DIR="$notgit" export_build_args release
+		[[ "${EMTDS_CHANNEL}" == release ]] || { printf 'self-test FAIL: build-args channel release\n'; exit 1; }
+		[[ -z "${EMTDS_VERSION}" ]] || { printf 'self-test FAIL: EMTDS_VERSION без .git должен быть пустым\n'; exit 1; }
+		[[ -z "${EMTDS_COMMIT}" ]] || { printf 'self-test FAIL: EMTDS_COMMIT без .git должен быть пустым\n'; exit 1; }
+		TDS_DIR="$notgit" export_build_args main
+		[[ "${EMTDS_CHANNEL}" == main ]] || { printf 'self-test FAIL: build-args channel main\n'; exit 1; }
+	) || exit 1
+
 	printf 'self-test ok\n'
 }
 
-# Назначение: основной сценарий установки KuzTDS. Только root.
+# Назначение: основной сценарий установки EmTDS. Только root.
 # Параметры: нет.
 # Результат: маркер installed, сообщения об успехе.
 # Ошибки: любая проверка или шаг развёртывания, код 1.
@@ -788,7 +866,7 @@ run_install() {
 	fi
 
 	if [[ -f "$MARKER" ]]; then
-		msg "KuzTDS уже установлен, поднять снова: ${UP_SCRIPT}"
+		msg "EmTDS уже установлен, поднять снова: ${UP_SCRIPT}"
 		exit 0
 	fi
 
@@ -834,6 +912,7 @@ run_install() {
 	write_state_files "$mem" "$public_ip"
 
 	cd "$TDS_DIR"
+	export_build_args "${INSTALL_CHANNEL}"
 	if ! timeout 1800 "${APP_COMPOSE[@]}" build engine; then
 		msg "сборка образа не завершилась; проверьте сеть и повторите" >&2
 		diagnose
@@ -874,22 +953,38 @@ run_install() {
 
 	if [[ -f "${OUR_DEPLOY_DIR}/watchdog.sh" ]]; then
 		if ! bash "${OUR_DEPLOY_DIR}/watchdog.sh" --install; then
-			msg "не удалось включить kuztds-watchdog.timer" >&2
+			msg "не удалось включить emtds-watchdog.timer" >&2
 			exit 1
+		fi
+	fi
+
+	if [[ -f "${OUR_DEPLOY_DIR}/update.sh" ]]; then
+		if [[ ! -d "${TDS_DIR}/.git" ]]; then
+			msg "агент обновлений не установлен: нет git-дерева, см. update.sh --adopt"
+		elif command -v systemctl >/dev/null 2>&1; then
+			local update_args=(--install "--channel" "${INSTALL_CHANNEL}" "--tds-dir" "${TDS_DIR}")
+			[[ -n "${INSTALL_REPO}" ]] && update_args+=(--repo "${INSTALL_REPO}")
+			if ! bash "${OUR_DEPLOY_DIR}/update.sh" "${update_args[@]}"; then
+				msg "предупреждение: не удалось установить агент обновлений; продолжение"
+			fi
+		else
+			msg "агент обновлений не установлен: нет systemd, запустите update.sh --install вручную"
 		fi
 	fi
 
 	date -Iseconds | write_atomic "$MARKER" 0644
 
-	if can_self_delete "$SELF"; then
+	if can_self_delete "$SELF" && [[ ! -d "${TDS_DIR}/.git" ]]; then
 		rm -f -- "$SELF"
 		msg "установщик удалён; повторный запуск install.sh заблокирован маркером ${MARKER}"
+	elif [[ -d "${TDS_DIR}/.git" ]]; then
+		msg "установщик не удалён: каталог кода под git, дерево не должно быть грязным; повторный запуск заблокирован маркером ${MARKER}"
 	else
 		msg "файл установщика не удалён (ожидался deploy/install.sh); повторный запуск заблокирован маркером ${MARKER}"
 	fi
 
 	msg "готово: движок 127.0.0.1:18080, админка 127.0.0.1:8090"
-	if [[ -z "$(env_value "$TDS_DIR/.env" KUZTDS_ADMIN_PASSWORD)" ]]; then
+	if [[ -z "$(env_value_compat "$TDS_DIR/.env" ADMIN_PASSWORD)" ]]; then
 		msg "первый вход спросит логин, пароль и почту главного администратора"
 	fi
 	msg "вход: ssh -L 8090:127.0.0.1:8090 user@host"
@@ -905,21 +1000,22 @@ usage() {
 }
 
 # Назначение: точка входа установщика.
-# Параметры: аргументы командной строки.
+# Параметры: [--channel release|main] [--repo URL] | --self-test.
 # Результат: код выхода сценария.
 # Ошибки: см. run_install и run_self_test.
 main() {
-	case "${1:-}" in
-		--self-test)
-			run_self_test
-			;;
-		'')
-			run_install
-			;;
-		*)
-			usage
-			exit 2
-			;;
+	local mode=install
+	while (( $# > 0 )); do
+		case "$1" in
+			--self-test) mode=self-test; shift ;;
+			--channel)   INSTALL_CHANNEL="${2:-release}"; shift 2 ;;
+			--repo)      INSTALL_REPO="${2:-}"; shift 2 ;;
+			*)           usage; exit 2 ;;
+		esac
+	done
+	case "$mode" in
+		self-test) run_self_test ;;
+		*)         run_install ;;
 	esac
 }
 

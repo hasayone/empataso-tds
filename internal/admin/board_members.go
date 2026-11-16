@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 type boardMembersBody struct {
@@ -192,6 +192,7 @@ func (s *Server) assignCatalogOffers(ctx context.Context, target string, body bo
 	}
 	labels := stringSet(body.Groups.Offers)
 	ids := stringSet(body.IDs.Offers)
+	defer s.cfg.Offers.lock()()
 	list, err := s.cfg.Offers.List(ctx)
 	if err != nil {
 		return err
@@ -217,6 +218,7 @@ func (s *Server) assignCatalogLandings(ctx context.Context, target string, body 
 	}
 	labels := stringSet(body.Groups.Landings)
 	ids := stringSet(body.IDs.Landings)
+	defer s.cfg.Landings.lock()()
 	list, err := s.cfg.Landings.List(ctx)
 	if err != nil {
 		return err
@@ -242,6 +244,7 @@ func (s *Server) assignCatalogNetworks(ctx context.Context, target string, body 
 	}
 	labels := stringSet(body.Groups.Networks)
 	ids := stringSet(body.IDs.Networks)
+	defer s.cfg.Networks.lock()()
 	list, err := s.cfg.Networks.List(ctx)
 	if err != nil {
 		return err
@@ -267,6 +270,7 @@ func (s *Server) assignCatalogSources(ctx context.Context, target string, body b
 	}
 	labels := stringSet(body.Groups.Sources)
 	ids := stringSet(body.IDs.Sources)
+	defer s.cfg.Sources.lock()()
 	list, err := s.cfg.Sources.List(ctx)
 	if err != nil {
 		return err
@@ -297,7 +301,7 @@ func (s *Server) assignCatalogS2S(ctx context.Context, target string, wantIDs []
 	}
 	for i := range list {
 		p := &list[i]
-		if !catalogOnMainOrTarget(p.BoardID, target) {
+		if !catalogOnMainOrTarget(p.BoardID, target) || isCheckerManagedID(p.ID) {
 			continue
 		}
 		if ids[p.ID] {

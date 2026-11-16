@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // importLandingFiles downloads each local landing archive and stores its files.
@@ -71,6 +71,7 @@ func (s *Server) applyLandingEntries(ctx context.Context, entries map[string]str
 	if len(entries) == 0 || s.cfg.Landings == nil {
 		return nil
 	}
+	defer s.cfg.Landings.lock()()
 	list, err := s.cfg.Landings.List(ctx)
 	if err != nil {
 		return err

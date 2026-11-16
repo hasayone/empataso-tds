@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/geo"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // sourceServer is an admin with the MaxMind test databases and a traffic-source store.
 func sourceServer(t *testing.T, sources ...config.TrafficSource) (base string, c *http.Client, csrf string) {
 	t.Helper()
 	dir := t.TempDir()
-	db, err := geo.Open("../geo/testdata/GeoLite2-City-Test.mmdb", "../geo/testdata/GeoLite2-ASN-Test.mmdb", nil)
+	db, err := geo.OpenWith(geo.Paths{City: "../geo/testdata/GeoLite2-City-Test.mmdb", ASN: "../geo/testdata/GeoLite2-ASN-Test.mmdb"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

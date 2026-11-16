@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // moneyFields maps a money group to the journal fields it covers. Hiding the
@@ -30,7 +30,7 @@ var fieldExtraKeys = map[string][]string{
 	"profit":      {"revenue", "payout", "depsum"},
 	"cost_cents":  {"cost", "spend"},
 	"cost_cur":    {"currency"},
-	"status":      {"original_status", "prev_status"},
+	"status":      {"original_status", "prev_status", "leads", "sales", "rejected"},
 }
 
 // derivedFields maps a journal field to the fields whose value is a refinement or a
@@ -38,12 +38,17 @@ var fieldExtraKeys = map[string][]string{
 // of a brand or device. Hiding the key hides every listed field too, because the
 // derived value would give the hidden one away.
 var derivedFields = map[string][]string{
-	"status":  {"original_status", "prev_status"},
-	"os":      {"os_version"},
-	"browser": {"browser_ver"},
-	"brand":   {"device_model"},
-	"device":  {"device_model"},
-	"profit":  {"depsum"},
+	"status":             {"original_status", "prev_status"},
+	"os":                 {"os_version"},
+	"browser":            {"browser_ver"},
+	"brand":              {"device_model"},
+	"device":             {"device_model"},
+	"profit":             {"depsum"},
+	"keyword":            {"origin_keyword"},
+	"stream":             {"origin_stream"},
+	"cid":                {"root_cid"},
+	"origin_campaign":    {"root_cid", "origin_stream", "origin_keyword"},
+	"origin_campaign_id": {"root_cid", "origin_stream", "origin_keyword"},
 }
 
 // macroFields maps every macro of internal/render that inserts a click value to the
@@ -97,7 +102,8 @@ func buildMacroFields() map[string]string {
 		"[useragent]": "useragent",
 		"[cid]":       "cid", "{subid}": "cid",
 		"{status}": "status", "{payout}": "profit",
-		"{origin}": "origin_campaign_id",
+		"{origin}":     "origin_campaign_id",
+		"{root_subid}": "root_cid",
 	}
 	for n := 1; n <= config.MaxRuleSubID; n++ {
 		field := config.SubIDRuleKey(n)

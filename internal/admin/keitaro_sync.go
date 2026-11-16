@@ -6,12 +6,14 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/atomicfile"
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/cron"
+	"github.com/egerkuzma/emtds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/cron"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // Keitaro catch-up timing: ticker delays, lag behind "now", look-back windows,
@@ -43,6 +45,8 @@ type keitaroSyncPassResult struct {
 	Clicks      int
 	Conversions int
 	Skipped     int
+	// Campaigns is how many new Keitaro campaigns the pass imported.
+	Campaigns int
 }
 
 // keitaroSyncFinishIn updates persisted sync state after a pass.
@@ -75,6 +79,51 @@ type syncStreamOpts struct {
 	Clicks        bool
 	Conversions   bool
 	Skip          *logSkipTally
+	Catalog       *syncCatalogNotes
+}
+
+// syncCatalogMaxLines is how many catalog report lines one sync message keeps.
+const syncCatalogMaxLines = 3
+
+// syncCatalogNotes collects the catalog top-up outcome of one sync pass for its message.
+// added is the number of new catalog records. lines are distinct report lines in arrival order.
+type syncCatalogNotes struct {
+	added int
+	lines []string
+}
+
+// collect adds a top-up count and the catalog lines among losses. A nil receiver does nothing.
+func (n *syncCatalogNotes) collect(added int, losses []ktimport.Loss) {
+	if n == nil {
+		return
+	}
+	n.added += added
+	for _, l := range losses {
+		if l.Ref != catalogTopUpRef || slices.Contains(n.lines, l.Detail) {
+			continue
+		}
+		n.lines = append(n.lines, l.Detail)
+	}
+}
+
+// suffix returns the message tail: «, каталог +N» and up to syncCatalogMaxLines lines after «; ».
+// It returns an empty string when nothing was added or reported.
+func (n *syncCatalogNotes) suffix() string {
+	if n == nil {
+		return ""
+	}
+	out := ""
+	if n.added > 0 {
+		out = fmt.Sprintf(", каталог +%d", n.added)
+	}
+	lines := n.lines
+	if len(lines) > syncCatalogMaxLines {
+		lines = append(append([]string(nil), lines[:syncCatalogMaxLines]...), fmt.Sprintf("и ещё %d", len(n.lines)-syncCatalogMaxLines))
+	}
+	if len(lines) > 0 {
+		out += "; " + strings.Join(lines, "; ")
+	}
+	return out
 }
 
 // keitaroSyncFile is the persisted catch-up cursor and last run status.
@@ -93,6 +142,25 @@ type keitaroSyncFile struct {
 	LastClicks    int       `json:"last_clicks,omitempty"`
 	LastConverts  int       `json:"last_conversions,omitempty"`
 	Skipped       int       `json:"skipped,omitempty"`
+	// CatalogChecked is true once every catalog id stored rows of Host refer to was topped up.
+	CatalogChecked bool `json:"catalog_checked,omitempty"`
+	// DomainsChecked is true once every domain id that campaigns of the connection refer to was topped up.
+	// It is kept apart from CatalogChecked so hosts that already passed the catalog check still get domains.
+	DomainsChecked bool `json:"catalog_domains_checked,omitempty"`
+	// LastCampaigns is how many new Keitaro campaigns the last pass imported.
+	LastCampaigns int `json:"last_campaigns"`
+	// CampaignsCursor is the largest Keitaro campaign id the new-campaign step has handled.
+	CampaignsCursor int `json:"campaigns_cursor,omitempty"`
+	// CampaignsPending is how many new campaigns wait for a later pass.
+	CampaignsPending int `json:"campaigns_pending,omitempty"`
+	// CampaignsDeleted counts Keitaro campaigns skipped because their group was deleted here.
+	CampaignsDeleted int `json:"campaigns_deleted,omitempty"`
+	// CampaignsFailed are the campaigns of the last step that were handled but not imported.
+	CampaignsFailed []int `json:"campaigns_failed,omitempty"`
+	// CampaignsPausedUntil holds the step back after a tracker or store failure; zero means no pause.
+	CampaignsPausedUntil time.Time `json:"campaigns_paused_until,omitzero"`
+	// CampaignsError is the reason of the current pause.
+	CampaignsError string `json:"campaigns_error,omitempty"`
 }
 
 // WatchKeitaroSync runs the catch-up ticker until ctx ends.
@@ -402,6 +470,7 @@ func (s *Server) keitaroSyncFinishRun(in keitaroSyncFinishIn, syncPath string) {
 	st.LastClicks = res.Clicks
 	st.LastConverts = res.Conversions
 	st.Skipped = res.Skipped
+	st.LastCampaigns = res.Campaigns
 	st.LagSeconds = keitaroSyncLagSeconds(*st, s.keitaroSyncClock())
 	if res.OK {
 		s.syncFailStreak = 0
@@ -503,9 +572,11 @@ func syncWindowBounds(cursor, upper time.Time, back time.Duration) (from, to tim
 	return from, to
 }
 
-// runKeitaroSyncPass bootstraps cursors when needed, then syncs clicks and conversions.
+// runKeitaroSyncPass bootstraps cursors when needed, imports new campaigns, then syncs clicks and conversions.
+// Every GET of the pass shares one budget of keitaroSyncGETCap requests.
 func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarget, st *keitaroSyncFile, have bool) keitaroSyncPassResult {
 	s.syncPassCount.Add(1)
+	target.creds.gets = newKeitaroGETBudget(keitaroSyncGETCap)
 	creds := target.creds
 	now := s.keitaroSyncClock()
 	upper := now.Add(-keitaroSyncLag)
@@ -515,6 +586,10 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarge
 		st.Host = ""
 		st.ClicksTo = time.Time{}
 		st.ConversionsTo = time.Time{}
+		st.CatalogChecked = false
+		st.DomainsChecked = false
+		st.CampaignsCursor, st.CampaignsPending, st.CampaignsDeleted = 0, 0, 0
+		st.CampaignsFailed, st.CampaignsPausedUntil, st.CampaignsError = nil, time.Time{}, ""
 		have = false
 	}
 	if err := keitaroSyncCheckTimes(st.ClicksTo, st.ConversionsTo, now); err != nil {
@@ -534,11 +609,16 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarge
 		}
 	}
 
+	camps := s.keitaroSyncNewCampaigns(ctx, target, st)
+	if err := s.saveKeitaroSyncAt(target.syncPath, *st); err != nil {
+		return keitaroSyncPassResult{ErrText: "save error", Campaigns: camps}
+	}
 	var skip logSkipTally
+	notes := &syncCatalogNotes{}
 	base := syncStreamOpts{
 		Creds: creds, State: st, syncPath: target.syncPath,
 		mapScope:      campaignMapScope{board: target.board, allBoards: target.allBoards},
-		manifestStore: target.manifestStore, Upper: upper, Skip: &skip,
+		manifestStore: target.manifestStore, Upper: upper, Skip: &skip, Catalog: notes,
 	}
 	clickOpts := base
 	clickOpts.Cursor = &st.ClicksTo
@@ -546,7 +626,7 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarge
 	clickOpts.Clicks = true
 	clicks, err := s.runSyncStream(ctx, clickOpts)
 	if err != nil {
-		return keitaroSyncPassResult{ErrText: sanitize(err, creds.Key), Clicks: clicks, Skipped: skip.total()}
+		return keitaroSyncPassResult{ErrText: sanitize(err, creds.Key), Clicks: clicks, Skipped: skip.total(), Campaigns: camps}
 	}
 	convOpts := base
 	convOpts.Cursor = &st.ConversionsTo
@@ -554,14 +634,103 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarge
 	convOpts.Conversions = true
 	convs, err := s.runSyncStream(ctx, convOpts)
 	if err != nil {
-		return keitaroSyncPassResult{ErrText: sanitize(err, creds.Key), Clicks: clicks, Conversions: convs, Skipped: skip.total()}
+		return keitaroSyncPassResult{ErrText: sanitize(err, creds.Key), Clicks: clicks, Conversions: convs, Skipped: skip.total(), Campaigns: camps}
 	}
+	s.keitaroSyncCatalogCheck(ctx, target, st, notes)
 	sk := skip.total()
 	msg := fmt.Sprintf("clicks %d, conversions %d", clicks, convs)
 	if sk > 0 {
 		msg += fmt.Sprintf(", skipped %d", sk)
 	}
-	return keitaroSyncPassResult{OK: true, Message: msg, Clicks: clicks, Conversions: convs, Skipped: sk}
+	msg += notes.suffix()
+	return keitaroSyncPassResult{OK: true, Message: msg, Clicks: clicks, Conversions: convs, Skipped: sk, Campaigns: camps}
+}
+
+// keitaroSyncCatalogCheck tops up the catalog from every id stored rows of the tracker host refer to,
+// and the domain catalog from every domain id that campaigns of the connection refer to.
+// Each part runs until one pass finishes without a cap cut or a failure, then sets st.CatalogChecked
+// or st.DomainsChecked; a host change clears both flags. Later passes rely on the ids of fetched rows.
+// A warehouse without CatalogRefs leaves CatalogChecked unset. Failures go to notes and never fail the pass.
+// After a failure of the warehouse, the groups, the tracker or a store the check is skipped for
+// keitaroCatalogRetry; a cap cut is not a failure and the next pass continues at once.
+func (s *Server) keitaroSyncCatalogCheck(ctx context.Context, target keitaroSyncTarget, st *keitaroSyncFile, notes *syncCatalogNotes) {
+	key := catalogRetryKey(target)
+	now := s.keitaroSyncClock()
+	if s.catalogCheckPaused(key, now) {
+		return
+	}
+	failed := false
+	defer func() {
+		if failed {
+			s.pauseCatalogCheck(key, now.Add(keitaroCatalogRetry))
+		}
+	}()
+	refs := newCatalogRefs()
+	catalogRead := false
+	if !st.CatalogChecked {
+		warehouse, ok, err := s.warehouseCatalogRefs(ctx, target.creds.host())
+		switch {
+		case ok && err != nil:
+			failed = true
+			s.logWarn("keitaro catalog refs failed", "err", err)
+			notes.collect(0, []ktimport.Loss{{Ref: catalogTopUpRef, Detail: "дозагрузка каталога: clickhouse недоступен"}})
+		case ok:
+			refs, catalogRead = warehouse, true
+		}
+	}
+	domainsRead := false
+	if !st.DomainsChecked {
+		if err := s.groupDomainRefs(ctx, campaignMapScope{board: target.board, allBoards: target.allBoards}, refs); err != nil {
+			failed = true
+			s.logWarn("keitaro domain refs failed", "err", err)
+			notes.collect(0, []ktimport.Loss{{Ref: catalogTopUpRef, Detail: "дозагрузка каталога: кампании не прочитаны"}})
+		} else {
+			domainsRead = true
+		}
+	}
+	if !catalogRead && !domainsRead {
+		return
+	}
+	top := s.topUpKeitaroCatalog(ctx, target.creds, target.manifestStore, refs)
+	notes.collect(top.total(), top.losses)
+	failed = failed || top.failed
+	if catalogRead {
+		st.CatalogChecked = top.complete
+	}
+	if domainsRead {
+		st.DomainsChecked = top.complete
+	}
+}
+
+// keitaroCatalogRetry is the wait before a catalog check that failed runs again.
+const keitaroCatalogRetry = time.Hour
+
+// catalogRetryKey names the sync target and tracker host a catalog check pause belongs to.
+func catalogRetryKey(target keitaroSyncTarget) string {
+	return target.syncPath + "|" + target.creds.host()
+}
+
+// catalogCheckPaused reports whether the check under key failed less than keitaroCatalogRetry ago.
+// now is the sync clock. An expired pause is forgotten.
+func (s *Server) catalogCheckPaused(key string, now time.Time) bool {
+	s.catalogRetryMu.Lock()
+	defer s.catalogRetryMu.Unlock()
+	until, ok := s.catalogRetry[key]
+	if ok && !now.Before(until) {
+		delete(s.catalogRetry, key)
+		return false
+	}
+	return ok
+}
+
+// pauseCatalogCheck blocks the check under key until the given time.
+func (s *Server) pauseCatalogCheck(key string, until time.Time) {
+	s.catalogRetryMu.Lock()
+	defer s.catalogRetryMu.Unlock()
+	if s.catalogRetry == nil {
+		s.catalogRetry = map[string]time.Time{}
+	}
+	s.catalogRetry[key] = until
 }
 
 // runSyncStream fetches Keitaro log chunks in [cursor−back, upper] and advances cursor.
@@ -587,10 +756,11 @@ func (s *Server) runSyncStream(ctx context.Context, o syncStreamOpts) (int, erro
 			break
 		}
 		fromS, toS := formatKeitaroWindow(chunkStart, chunkEnd)
-		counts, _, stats, err := s.importLogWindow(ctx, o.Creds, fromS, toS, logImportOpts{
+		counts, losses, stats, err := s.importLogWindow(ctx, o.Creds, fromS, toS, logImportOpts{
 			clicks: o.Clicks, conversions: o.Conversions, syncMode: true, skip: o.Skip,
 			mapScope: o.mapScope, manifestStore: o.manifestStore,
 		})
+		o.Catalog.collect(counts["catalog_added"], losses)
 		if err != nil {
 			return inserted, err
 		}

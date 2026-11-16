@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 func usersServer(t *testing.T) (*Server, *httptest.Server, string) {

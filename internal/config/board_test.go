@@ -56,6 +56,26 @@ func TestSameBoard(t *testing.T) {
 	}
 }
 
+// TestBoardIconKeys checks that the list is sorted, matches the accepted set and is a fresh copy.
+func TestBoardIconKeys(t *testing.T) {
+	keys := BoardIconKeys()
+	if len(keys) != len(allowedBoardIcons) {
+		t.Fatalf("keys = %d; want %d", len(keys), len(allowedBoardIcons))
+	}
+	for i, k := range keys {
+		if ValidateBoardIcon(k) != nil {
+			t.Fatalf("%s is listed but refused", k)
+		}
+		if i > 0 && keys[i-1] >= k {
+			t.Fatalf("not sorted at %d: %s >= %s", i, keys[i-1], k)
+		}
+	}
+	keys[0] = "changed"
+	if BoardIconKeys()[0] == "changed" {
+		t.Fatal("BoardIconKeys returns shared storage")
+	}
+}
+
 func TestBoardIconValidate(t *testing.T) {
 	if err := ValidateBoardIcon(""); err != nil {
 		t.Fatalf("empty icon: %v", err)
@@ -75,6 +95,11 @@ func TestBoardIconValidate(t *testing.T) {
 	for _, name := range []string{"android", "ios", "seo"} {
 		if err := ValidateBoardIcon(name); err != nil {
 			t.Fatalf("%s: %v", name, err)
+		}
+	}
+	for _, name := range []string{"sortoff", "sortdesc", "sortasc"} {
+		if err := ValidateBoardIcon(name); err != ErrInvalidBoardIcon {
+			t.Fatalf("interface-only icon %s must be refused for a board: %v", name, err)
 		}
 	}
 	if err := ValidateBoardIconColor(""); err != nil {

@@ -31,7 +31,7 @@ func TestLogicHelpers(t *testing.T) {
 	}
 	html := spaSource()
 	var prelude strings.Builder
-	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "cpcHasSpend", "moneyCellCls", "asSortMeta", "applySort", "condsQS"} {
+	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "cpcHasSpend", "moneyCellCls", "asSortMeta", "applySort", "condsQS", "addBy", "normBy", "reportCostCur", "reportSortValue", "sortReportRows"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -355,6 +355,13 @@ eq(linksGuarded({hidden:['ip']}), true, 'a hidden field guards the links');
 eq(linksGuarded({hidden:[]}), false, 'no hidden field, no guard');
 eq(linksGuarded(null), false, 'administrators have no guard');
 
+// Campaign parameter rows: a typed name and token are stored, a source name left as it is is not, and a locked row ignores the inputs.
+eq(campaignParamDraft([{key:'keyword', name:'utm_term', base:'', token:'{kw}', tokenHint:''}]), {parameters:{keyword:'utm_term'}, tokens:{keyword:'{kw}'}}, 'a typed name and token are stored');
+eq(campaignParamDraft([{key:'keyword', name:'target_keys', base:'target_keys', token:'{keyword}', tokenHint:'{keyword}'}]), {parameters:{}, tokens:{}}, 'the source name and the outgoing mask are not stored again');
+eq(campaignParamDraft([{key:'sub_id_1', name:'', base:'sub1', token:'', tokenHint:'{sub_id_1}'}]), {parameters:{sub_id_1:''}, tokens:{}}, 'clearing a source name stores an empty override');
+eq(campaignParamDraft([{key:'keyword', name:'hack', base:'', token:'hack', tokenHint:'', locked:true, hadName:true, prevName:'keep', hadToken:true, prevToken:'{old}'}]), {parameters:{keyword:'keep'}, tokens:{keyword:'{old}'}}, 'a locked row keeps the saved values');
+eq(campaignParamDraft([{key:'site', name:'x', base:'', token:'', tokenHint:'', locked:true}]), {parameters:{}, tokens:{}}, 'a locked row without a saved override stores nothing');
+
 // Opening the editor and saving without an edit gives back the same grants; a missing grant stays missing.
 const RES=['campaigns','offers','landings','sources','networks','domains'], MODES=['full','read','selected','created'];
 const roundTrip=(acc, forRole)=>grantsFromRows(grantRows(acc, forRole, RES, MODES), forRole);
@@ -374,17 +381,30 @@ eq(grantsFromRows(edited, false), {offers:{mode:'full'}, domains:{mode:'read'}},
 
 // The report total sums uniq_first, falls back to unique for an old backend, and never sums ratios.
 const repRows=[{hits:10,unique:4,uniq_first:3,bots:1,conv:2,profit:5.5},{hits:20,unique:9,uniq_first:6,bots:0,conv:1,profit:1.25}];
-eq(reportTotals(repRows), {hits:30,unique:9,bots:1,conv:3,profit:6.75}, 'report total takes the unique of the first step');
+eq(reportTotals(repRows), {hits:30,unique:9,bots:1,conv:3,profit:6.75,depsum:0,cost:{}}, 'report total takes the unique of the first step');
+eq(reportTotals([{hits:1,depsum:12.5},{hits:1,depsum:'7.5'},{hits:1,depsum:'x'}]).depsum, 20, 'the deposit sum is summed beside revenue, bad numbers count as zero');
 eq(reportTotals([{hits:10,unique:4,conv:2},{hits:20,unique:9,conv:1}]).unique, 13, 'an old backend sums unique');
 eq(reportTotals([{hits:1,unique:5,uniq_first:0},{hits:1,unique:5}]).unique, 5, 'a zero uniq_first is a value, not a missing field');
 eq(reportTotals([{hits:1,uniq_first:2},{hits:1,unique:7}]).unique, 9, 'each row uses its own best field');
-eq(reportTotals([{hits:'x',unique:null,conv:undefined,profit:'3'}]), {hits:0,unique:0,bots:0,conv:0,profit:3}, 'bad numbers count as zero');
+eq(reportTotals([{hits:'x',unique:null,conv:undefined,profit:'3'}]), {hits:0,unique:0,bots:0,conv:0,profit:3,depsum:0,cost:{}}, 'bad numbers count as zero');
 eq(reportTotals([null,{hits:2}]).hits, 2, 'an empty row is skipped');
-eq(reportTotals([]), {hits:0,unique:0,bots:0,conv:0,profit:0}, 'no rows give zero sums');
+eq(reportTotals([]), {hits:0,unique:0,bots:0,conv:0,profit:0,depsum:0,cost:{}}, 'no rows give zero sums');
 eq(reportTotals(null).hits, 0, 'no list gives zero sums');
 const repCR=reportTotals(repRows);
 eq(repCR.conv/repCR.hits, 0.1, 'the total ratio comes from the sums, not from the row ratios');
 eq(reportTotals([{hits:1,unique:1,uniq_first:1}]).unique, 1, 'one row keeps its uniques');
+
+// The cost column sums by currency and sorts by one currency, never by a sum of currencies.
+const costRows=[{group:'a',cost:{'':300}},{group:'b',cost:{EUR:9000}},{group:'c'},{group:'d',cost:{USD:500,EUR:10}},{group:'e',cost:{'':100}}];
+eq(reportTotals(costRows).cost, {USD:900,EUR:9010}, 'cost totals stay per currency, the empty code is USD');
+eq(reportCostCur(costRows), 'EUR', 'the sort currency is the one with the largest cost');
+eq(reportCostCur([{group:'x'}]), 'USD', 'without cost the sort currency is the tracker one');
+eq(sortReportRows(costRows, {k:'cost',dir:-1}, {}).map(r=>r.group), ['b','d','a','c','e'], 'descending by EUR, rows without EUR keep their order at the end');
+eq(sortReportRows(costRows, {k:'cost',dir:1}, {}).map(r=>r.group), ['d','b','a','c','e'], 'ascending by EUR, rows without EUR still at the end');
+const usdRows=[{group:'a',cost:{'':300}},{group:'b'},{group:'c',cost:{USD:50,EUR:20}}];
+eq(sortReportRows(usdRows, {k:'cost',dir:-1}, {}).map(r=>r.group), ['a','c','b'], 'the EUR part of a row is not added to its USD');
+eq(sortReportRows(usdRows, {k:'hits',dir:-1}, {}).length, 3, 'other columns sort as before');
+eq(reportTotals([{hits:1,cost:{'':150,EUR:40}},{hits:1,cost:{USD:10}},{hits:1}]).cost, {USD:160,EUR:40}, 'the cost total adds cents per currency, an empty code is USD');
 
 // The report body is read with its truncated flag; an old bare array and junk are safe.
 eq(reportData({rows:[{hits:1}],truncated:true}), {rows:[{hits:1}],truncated:true}, 'a cut report is flagged');
@@ -469,6 +489,15 @@ eq(moneyText(10,'',2),'10.00 $','money tile without code is USD');
 eq(moneyText('x','USD',2),'0.00 $','money tile non-number');
 eq(flowCompactClass(true),'compact','flowCompactClass on');
 eq(flowCompactClass(false),'','flowCompactClass off');
+const trafHits=[5,0,12,5,null,30,'7'];
+const trafCopy=JSON.stringify(trafHits);
+eq(flowTrafficOrder(trafHits,''),[0,1,2,3,4,5,6],'traffic order off keeps the stored order');
+eq(flowTrafficOrder(trafHits,'desc'),[5,2,6,0,3,1,4],'traffic order desc: most first, ties stable, empty last');
+eq(flowTrafficOrder(trafHits,'asc'),[0,3,6,2,5,1,4],'traffic order asc: fewest first, ties stable, empty still last');
+eq(flowTrafficOrder(trafHits,'bogus'),[0,1,2,3,4,5,6],'unknown traffic order is off');
+eq(JSON.stringify(trafHits),trafCopy,'flowTrafficOrder does not change its input');
+eq(flowTrafficOrder(null,'desc'),[],'flowTrafficOrder without hits');
+eq([flowTrafficNext(''),flowTrafficNext('desc'),flowTrafficNext('asc'),flowTrafficNext('x')],['desc','asc','','desc'],'traffic toggle cycles off, desc, asc');
 eq(recentRows([{ts:1},{ts:2},{ts:3}],2).length,2,'recentRows keeps n');
 eq(recentRows(null,5).length,0,'recentRows without rows');
 eq(recentRows([{ts:1},null,{ts:2}],5).length,2,'recentRows drops empties');
@@ -553,7 +582,10 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq([put.flows.page, put.flows.view, put.flows.compact, put.logs.page, put.conversions.page, put.domains.page], [250, 'grid', true, 500, 20, 5000], 'page sizes and flow view are collected');
   const bad = applyPageViews({ flows: { page: 5001, view: 'list', compact: 'yes' }, logs: { page: 1001 }, conversions: { page: 0 }, domains: { page: 1.5 } }, def);
   eq([bad.flows.page, bad.flows.view, bad.flows.compact, bad.logs.page, bad.conversions.page, bad.domains.page], [1000, 'table', false, 100, 50, 50], 'a size out of range or a bad view falls back');
-  eq(collectPageViews({ flows: { page: '12', view: 'list', compact: 1 }, logs: { page: -3 } }).flows, { sort: { k: '', dir: -1 }, q: '', state: 'all', source: '', folder: '', view: 'table', compact: false, page: 1000 }, 'collect falls back on bad values');
+  eq(collectPageViews({ flows: { page: '12', view: 'list', compact: 1 }, logs: { page: -3 } }).flows, { sort: { k: '', dir: -1 }, q: '', state: 'all', source: '', folder: '', view: 'table', compact: false, traffic: '', page: 1000 }, 'collect falls back on bad values');
+  eq(collectPageViews(applyPageViews({ flows: { traffic: 'desc' } }, def)).flows.traffic, 'desc', 'the canvas traffic order is read and collected');
+  eq(applyPageViews({ flows: { traffic: 'up' } }, def).flows.traffic, '', 'an unknown traffic order falls back to off');
+  eq(def.flows.traffic, '', 'the traffic order is off by default');
   const legacy = JSON.parse(JSON.stringify(def)); legacy.flows.page = 25; legacy.flows.view = 'grid';
   eq(applyPageViews({ flows: { page: 100 } }, legacy).flows.page, 100, 'the account size wins over the browser one');
   eq(applyPageViews({ flows: { q: 'x' } }, legacy).flows.view, 'grid', 'a browser value stays when the account has none');
@@ -563,6 +595,14 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   const tabsPut = collectPageViews(tabs);
   eq([tabsPut.users.sort, tabsPut.roles.sort, tabsPut.keywords.sort], [{ k: 'login', dir: 1 }, { k: 'name', dir: -1 }, { k: 'key', dir: 1 }], 'users, roles and keywords sorts are collected');
   eq(collectPageViews(def).users, { sort: { k: '', dir: -1 } }, 'users view is in every body');
+
+  eq(collectPageViews(def).keyword_stats, { sort: { k: '', dir: -1 }, campaign: '', by: '', conds: [] }, 'keyword statistics view is in every body with its defaults');
+  const kw = applyPageViews({ keyword_stats: { sort: { k: 'hits', dir: 1 }, campaign: ' promo ', by: 'origin', conds: [{ f: 'country', op: 'eq', v: ['PL'] }, { f: '', op: 'eq', v: ['x'] }] }, keywords: { sort: { k: 'key', dir: -1 } } }, def);
+  eq(kw.keyword_stats, { sort: { k: 'hits', dir: 1 }, campaign: 'promo', by: 'origin', conds: [{ f: 'country', op: 'eq', v: ['PL'] }] }, 'keyword statistics sort, campaign, attribution and conditions are read');
+  eq(collectPageViews(kw).keyword_stats, kw.keyword_stats, 'keyword statistics view is collected as read');
+  eq(collectPageViews(kw).keywords, { sort: { k: 'key', dir: -1 } }, 'the API key sort keeps its own page key');
+  eq(applyPageViews({ keyword_stats: { campaign: 7, conds: 'x', sort: 'hits' } }, def).keyword_stats, def.keyword_stats, 'bad keyword statistics values fall back');
+  eq(applyPageViews({ keyword_stats: { by: 'other' } }, def).keyword_stats.by, '', 'an unknown keyword attribution falls back');
 
   eq(def.logs.pblogSort, { k: 'ts', dir: -1 }, 'S2S log default sort');
   const pb = applyPageViews({ logs: { pblogSort: { k: 'payout', dir: 1 } } }, def);
@@ -576,7 +616,7 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq(pageViewsPull('c', 'a', 'a'), 'skip', 'unsent local changes with an unchanged server copy are left to the flush');
   eq(pageViewsPull('c', 'a', 'c'), 'skip', 'a server copy equal to the local one needs no apply while the last sent differs');
   eq(pageViewsPull('', '', JSON.stringify(collectPageViews(def))), 'apply', 'a server copy against an empty last sent is applied');
-  eq(Object.keys(collectPageViews(def)).sort(), ['conversions', 'dashboard', 'domains', 'flows', 'keywords', 'landings', 'logs', 'networks', 'offers', 'range', 'report', 'roles', 'sources', 'users'], 'the body holds exactly the stored pages');
+  eq(Object.keys(collectPageViews(def)).sort(), ['conversions', 'dashboard', 'domains', 'flows', 'keyword_stats', 'keywords', 'landings', 'logs', 'networks', 'offers', 'range', 'report', 'roles', 'sources', 'users'], 'the body holds exactly the stored pages');
 }
 {
   const def = defaultPageViewState();
@@ -600,8 +640,92 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq(pageViewDashPanels(null), null, 'null panels means all visible');
   eq(pageViewDashPanels([]), [], 'empty panels list');
 }
+{
+  // Integrations the user added to the side list live on the account; the list is kept only once set.
+  const def = defaultPageViewState();
+  eq('integrations' in collectPageViews(def), false, 'nothing added means no integrations key');
+  const st = applyPageViews({ integrations: { added: ['namecheap', ' namecheap ', '', null, 'cloudflare'] } }, def);
+  eq(st.intAdded, ['namecheap', 'cloudflare'], 'added ids deduped and cleaned');
+  eq(collectPageViews(st).integrations, { added: ['namecheap', 'cloudflare'] }, 'collect added integrations');
+  eq(applyPageViews(collectPageViews(st), def).intAdded, ['namecheap', 'cloudflare'], 'round trip added integrations');
+  eq(collectPageViews(Object.assign({}, def, { intAdded: [] })).integrations, { added: [] }, 'a list emptied by the user is still sent');
+  eq(applyPageViews({ integrations: { added: 'namecheap' } }, def).intAdded, undefined, 'added that is not a list is ignored');
+
+  // The side list: configured (on, err, run) or added, in display order.
+  const ids = ['keitaro', 'namecheap', 'cloudflare'];
+  eq(integrationsShown(ids, undefined, { keitaro: 'on', namecheap: 'off', cloudflare: 'off' }), ['keitaro'], 'only the configured one');
+  eq(integrationsShown(ids, ['cloudflare'], { keitaro: 'on', namecheap: 'off', cloudflare: 'off' }), ['keitaro', 'cloudflare'], 'added joins in display order');
+  eq(integrationsShown(ids, [], { keitaro: 'run', namecheap: 'err', cloudflare: '' }), ['keitaro', 'namecheap'], 'import and error count as configured, unknown does not');
+  eq(integrationsShown(ids, ['bogus'], {}), [], 'an unknown added id is not shown');
+  eq(integrationsShown(['namecheap'], ['keitaro'], { keitaro: 'on' }), [], 'an integration the user may not open is never shown');
+
+  // Which integration a route opens.
+  eq(integrationTarget('namecheap', 'integrations', ids, ['keitaro']), 'namecheap', 'a deep link opens an integration outside the list');
+  eq(integrationTarget('', 'keitaro', ids, []), 'keitaro', 'the old keitaro page opens Keitaro');
+  eq(integrationTarget('bogus', 'integrations', ids, ['cloudflare', 'keitaro']), 'cloudflare', 'unknown id opens the first listed one');
+  eq(integrationTarget('', 'integrations', ids, []), '', 'nothing listed means the empty page');
+  eq(integrationTarget('keitaro', 'integrations', ['namecheap'], []), '', 'an integration the user may not open is not a target');
+}
+{
+  const def = defaultPageViewState();
+  eq(collectPageViews(def).dashboard.kpis, undefined, 'default body keeps no card set');
+  eq(Object.keys(DASH_SETS), ['kpis', 'blocks', 'recent'], 'three dashboard sets');
+  eq(DASH_SETS.kpis, ['visits', 'unique', 'conv', 'cost', 'revenue', 'profit', 'cr', 'roi', 'bots'], 'cards are the metrics the dashboard computes');
+  eq(pageViewDashSet('kpis', [{ id: 'cost', on: true }, { id: 'uepc', on: true }, { id: 'zzz', on: true }, { id: 'cost', on: false }, { id: 'visits', on: false }]),
+    [{ id: 'cost', on: true }, { id: 'visits', on: false }], 'a set drops unknown and repeated ids and keeps the order');
+  eq(pageViewDashSet('kpis', [{ id: 'uepc', on: true }]), null, 'a set of unknown ids is no set');
+  eq(pageViewDashSet('nope', [{ id: 'a', on: true }]), null, 'an unknown set is no set');
+  eq(pageViewDashSet('blocks', 'chart'), null, 'a set that is not a list is no set');
+
+  const hid = new Set(['cost', 'revenue', 'profit', 'roi']);
+  eq(dashSetRows('kpis', [{ id: 'cr', on: false }, { id: 'cost', on: true }, { id: 'visits', on: true }], hid),
+    [{ id: 'cr', on: false }, { id: 'visits', on: true }, { id: 'unique', on: true }, { id: 'conv', on: true }, { id: 'bots', on: true }],
+    'saved order wins, hidden cards are not offered, new ids are appended on');
+  eq(dashSetRows('blocks', undefined, new Set(['recent'])).map(r => r.id), ['chart', 'perf', 'visitors'], 'without the logs section the recent block is not offered');
+  eq(dashSetRows('blocks', [{ id: 'perf', on: false }, { id: 'chart', on: true }]).map(r => r.id + ':' + r.on),
+    ['perf:false', 'chart:true', 'visitors:true', 'recent:true'], 'a block switched off stays in the list');
+  eq(dashSetRows('recent', [{ id: 'ts', on: false }, { id: 'ip', on: false }], new Set(['os', 'browser', 'out', 'campaign'])).map(r => r.id + ':' + r.on),
+    ['ts:true', 'ip:false'], 'the recent table keeps one column on');
+  eq(dashSetRows('kpis', [{ id: 'visits', on: false }]).filter(r => r.on).length, 8, 'every card may be switched off');
+
+  eq(dashSetStored('kpis', dashSetRows('kpis', undefined)), null, 'the default rows store nothing');
+  eq(dashSetStored('kpis', dashSetRows('kpis', undefined, hid), hid), null, 'the default rows without hidden cards store nothing');
+  const moved = dashSetRows('blocks', undefined); moved.reverse();
+  eq(dashSetStored('blocks', moved).map(r => r.id), ['recent', 'visitors', 'perf', 'chart'], 'a new order is stored');
+  const off = dashSetRows('recent', undefined); off[2].on = false;
+  eq(dashSetStored('recent', off).filter(r => !r.on).map(r => r.id), ['os'], 'a switched off column is stored');
+
+  const st = applyPageViews({ dashboard: {
+    kpis: [{ id: 'bots', on: false }, { id: 'uepc', on: true }, { id: 'visits', on: true }],
+    blocks: [{ id: 'recent', on: true }, { id: 'chart', on: false }],
+    recent: [{ id: 'ip', on: true }, { id: 'ts', on: true }],
+  } }, def);
+  eq(st.dashKpis, [{ id: 'bots', on: false }, { id: 'visits', on: true }], 'cards are read without unknown ids');
+  eq(st.dashBlocks.map(r => r.id), ['recent', 'chart'], 'blocks are read in order');
+  const put = collectPageViews(st);
+  eq([put.dashboard.kpis, put.dashboard.blocks, put.dashboard.recent], [st.dashKpis, st.dashBlocks, st.dashRecent], 'the sets are collected as read');
+  eq(applyPageViews(put, def).dashRecent, [{ id: 'ip', on: true }, { id: 'ts', on: true }], 'recent columns survive a round trip');
+  eq(applyPageViews({ dashboard: { kpis: 'visits', blocks: [] } }, def).dashKpis, undefined, 'a bad set is ignored');
+}
 eq(postbackBase('admin.emasotds.online','https:','https://admin.emasotds.online','http://admin.emasotds.online:8080'), 'https://admin.emasotds.online', 'postback base drops the engine port');
 eq(postbackBase('127.0.0.1','http:','http://127.0.0.1:8090','http://127.0.0.1:8080'), 'http://127.0.0.1:8080', 'postback base on localhost stays the engine');
+['localhost','http://localhost:8080','app.localhost','127.0.0.1','127.8.9.10','https://127.0.0.1:8090/x','[::1]','http://[::1]:8080','::1','10.0.0.5','172.16.0.1','172.31.255.255','192.168.1.10','169.254.1.1','0.0.0.0','nas','box.local','svc.internal','host.lan','http://user@192.168.0.2:8080/path','100.64.0.1','fd00::1','fe80::1']
+  .forEach(h => eq(isLocalHost(h), true, 'local address: ' + h));
+['212.2.33.246','https://212.2.33.246','http://212.2.33.246:8080/p','8.8.8.8','172.15.0.1','172.32.0.1','192.169.1.1','11.0.0.1','100.63.0.1','admin.emasotds.online','https://admin.emasotds.online','localhost.example.com','2606:4700::1111','','   ',null,undefined]
+  .forEach(h => eq(isLocalHost(h), false, 'public address or nothing: ' + h));
+eq(postbackURL('https://admin.emasotds.online/'), 'https://admin.emasotds.online/postback?subid=REPLACE&status=REPLACE&payout=REPLACE', 'postback URL carries the three REPLACE placeholders');
+eq(postbackHosts('https://a.example/', [{host:'b.example'},{host:'https://a.example/'},{host:'c.example',disabled:true},{host:''},null]), ['https://a.example','https://b.example'], 'postback hosts: main first, link domains unique, disabled and empty skipped');
+eq(postbackHosts('', []), [], 'postback hosts: nothing known');
+eq(postbackDefaultHost([{host:'links.example',role:'links'},{host:'Panel.Example.',role:'admin'},{host:'two.example',role:'both'}], '127.0.0.1', ['http://127.0.0.1:8080']), 'https://admin.panel.example', 'postback default: first admin-panel domain as admin.<host>');
+eq(postbackDefaultHost([{host:'off.example',role:'admin',disabled:true},{host:'admin.x.example',role:'admin'},{host:'p.example',role:'links',primary:true}], '', []), 'https://admin.p.example', 'postback default: disabled and admin.* skipped, primary counts');
+eq(postbackDefaultHost([{host:'l.example',role:'links'}], 'trk.example', ['https://trk.example','https://l.example']), 'https://trk.example', 'postback default: public page name');
+eq(postbackDefaultHost([{host:'l.example',role:'links'}], '212.2.33.246', ['https://212.2.33.246','https://l.example']), 'https://l.example', 'postback default: bare IP page falls to the first link domain');
+eq(postbackDefaultHost([], '212.2.33.246', ['https://212.2.33.246']), 'https://212.2.33.246', 'postback default: bare IP without link domains keeps the current host');
+eq(postbackDefaultHost([], 'localhost', ['http://127.0.0.1:8080','https://l.example']), 'http://127.0.0.1:8080', 'postback default: localhost keeps the engine address');
+eq(postbackDefaultHost(null, '', null), '', 'postback default: nothing known');
+eq(postbackStatusURL('https://a.example/', 'rejected'), 'https://a.example/postback?subid={subid}&status=rejected', 'postback rejected: canonical status, no payout');
+eq(postbackStatusURL('https://a.example', 'lead'), 'https://a.example/postback?subid={subid}&status=lead', 'postback lead: no payout');
+eq(postbackStatusURL('https://a.example', 'Sale'), 'https://a.example/postback?subid={subid}&status=sale&payout={payout}', 'postback sale: payout macro');
 eq(serviceBadge('disk', {status:{jobs:{disk:{last_run:'2020-01-02T00:00:00Z', running:true, ok:false, message:'old', next_run:'2020-01-03T00:00:00Z'}}}}).key, 'Running…', 'running before stale next_run');
 eq(cronJobOutcome({last_run:'2020-01-02T00:00:00Z', running:true, ok:false, message:'old'}).badgeKey, 'Running…', 'outcome running badge');
 eq(cronJobOutcome({last_run:'2020-01-02T00:00:00Z', running:true, ok:false, message:'old'}).resultKey, null, 'outcome running hides fail');
@@ -855,6 +979,73 @@ eq(fltApplyDraft([{f:'campaign',op:'eq',v:['Away']}])[0].v, ['Away'], 'apply kee
 {const inp={value:'G1',dataset:{groupKey:'G1'}}; inp.value=''; comboClearStoredKeyOnEdit(inp,'groupKey'); eq(groupInputValue(inp), '', 'group clear empty');}
 eq(comboKeyMatchesText('UTC · UTC+0', 'UTC', z=>'UTC · UTC+0'), true, 'combo label match');
 
+// A saved id the select's catalog lacks is kept as an extra option, never dropped.
+eq(unknownPick([{id:'2'},{id:'4'}], '51'), '51', 'unknown domain id is kept');
+eq(unknownPick([{id:'2'},{id:'51'}], '51'), '', 'a listed id needs no extra option');
+eq(unknownPick([{id:51}], '51'), '', 'a numeric catalog id equals the saved string');
+eq(unknownPick([{id:'2'}], 51), '51', 'a numeric saved id is kept as text');
+eq(unknownPick(['a','b'], 'b'), '', 'plain ids are compared too');
+eq(unknownPick([{id:'2'}], ''), '', 'an empty value means no choice');
+eq(unknownPick([{id:'2'}], null), '', 'a missing value means no choice');
+eq(unknownPick([], '849'), '849', 'an empty catalog still keeps the id');
+eq(unknownPick(null, '849'), '', 'an unloaded catalog adds nothing');
+eq(unknownPick(undefined, '849'), '', 'an undefined catalog adds nothing');
+eq(unknownPick([null,{id:'1'}], '1'), '', 'broken rows are skipped');
+
+// When the header section button is shown.
+eq(boardChromeVisible(null), false, 'no section state hides the button');
+eq(boardChromeVisible({loaded:false, switchable:true, items:[{id:''},{id:'fin'}]}), false, 'hidden until the list is loaded');
+eq(boardChromeVisible({loaded:true, switchable:false, items:[{id:''}]}), false, 'only the default section hides the button');
+eq(boardChromeVisible({loaded:true, switchable:true, items:[{id:''}]}), false, 'a stale switchable flag with one row stays hidden');
+eq(boardChromeVisible({loaded:true, switchable:true, items:[{id:'main'},{id:''}]}), false, 'two spellings of the default section are not a second section');
+eq(boardChromeVisible({loaded:true, switchable:true, items:[{id:''},{id:'fin'}]}), true, 'one extra section shows the button');
+eq(boardChromeVisible({loaded:true, switchable:true, items:[{id:'fin'},{id:'seo'}]}), true, 'two extra sections without the default one show the button');
+eq(boardChromeVisible({loaded:true, switchable:false, items:[{id:'fin'}]}), false, 'a single extra section has nothing to switch to');
+eq(boardChromeVisible({loaded:true, switchable:true, items:[null,{id:''}]}), false, 'broken rows are not sections');
+
+// When the rating card is shown and what is stored for it.
+{
+  const owner = {user:'admin', type:'ADMIN'}, hour = RATE_LIMIT_MS;
+  eq(RATE_LIMIT_MS, 3600000, 'the card waits for one hour of active time');
+  eq(ratingOwner(owner), true, 'the main administrator has no users.json id');
+  eq(ratingOwner({user:'bob', uid:'u1', type:'ADMIN'}), false, 'another administrator is not the main one');
+  eq(ratingOwner({user:'ann', uid:'u2', type:'USER'}), false, 'a user is not the main administrator');
+  eq(ratingOwner({user:'x', type:'USER'}), false, 'no id without the administrator type is not enough');
+  eq(ratingOwner(null), false, 'no session');
+  eq(ratingDue({active:hour}, 0, owner, hour), true, 'an hour of active time shows the card');
+  eq(ratingDue({active:hour-1}, 0, owner, hour), false, 'one millisecond short');
+  eq(ratingDue({active:hour-60000}, hour, owner, hour), true, 'time the tabs counted but did not write yet counts');
+  eq(ratingDue({active:hour}, 1000, owner, hour), true, 'a smaller shared value does not lower the stored one');
+  eq(ratingDue(undefined, hour, owner, hour), true, 'a first count without a stored state');
+  eq(ratingDue({active:hour, closed:true}, 0, owner, hour), false, 'a closed card never comes back');
+  eq(ratingDue({active:hour, score:4}, 0, owner, hour), false, 'a rated card never comes back');
+  eq(ratingDue({active:hour*5}, 0, {user:'bob', uid:'u1', type:'ADMIN'}, hour), false, 'only the main administrator is asked');
+  eq(ratingDue({active:hour}, -hour, owner, hour), true, 'a negative shared time is ignored');
+  eq(ratingTabActive('visible', true), true, 'a shown tab in focus counts');
+  eq(ratingTabActive('visible', false), false, 'a shown tab out of focus does not count');
+  eq(ratingTabActive('hidden', true), false, 'a hidden tab does not count');
+  eq(ratingStep(15000, ratingTabActive('visible', true), 1000), 15000, 'the tab in focus with recent input counts');
+  eq(ratingStep(15000, ratingTabActive('visible', false), 1000), 0, 'a background window adds nothing');
+  eq(ratingStep(15000, false, 1000), 0, 'a hidden tab does not count');
+  eq(ratingTotal(60000, 0, 15000), 75000, 'the step grows the stored time');
+  eq(ratingTotal(60000, 120000, 15000), 135000, 'the larger shared time of another tab wins');
+  eq(ratingTotal(120000, 60000, 15000), 135000, 'a stale shared time does not lower the stored one');
+  eq(ratingTotal('x', -5, 15000), 15000, 'bad values count as zero');
+  eq(ratingTotal(60000, 60000, 0), 60000, 'no step keeps the time');
+  eq(ratingStep(15000, true, RATE_IDLE_MS+1), 0, 'more than five minutes without input does not count');
+  eq(ratingStep(15000, true, RATE_IDLE_MS), 15000, 'exactly five minutes still counts');
+  eq(ratingStep(3600000, true, 0), RATE_STEP_MAX, 'a computer that slept adds one step only');
+  eq(ratingStep(-5000, true, 0), 0, 'a clock that went back adds nothing');
+  eq(pageViewRating({active:'12.7', closed:'yes', score:9, at:'x'}), {active:12, closed:false, score:0, at:''}, 'bad values are dropped');
+  eq(pageViewRating({active:-1, score:3, at:'2026-11-16T12:00:00Z', closed:true}), {active:0, closed:true, score:3, at:'2026-11-16T12:00:00Z'}, 'a score with its time');
+  eq(pageViewRating({score:2.5}).score, 0, 'a score is a whole star');
+  const def = defaultPageViewState();
+  eq('rating' in collectPageViews(def), false, 'nothing counted means no rating key');
+  const st = applyPageViews({rating:{active:120000, closed:false, score:0, at:''}}, def);
+  eq(collectPageViews(st).rating, {active:120000, closed:false, score:0, at:''}, 'rating round trip');
+  eq(applyPageViews({rating:'x'}, def).rating, undefined, 'a rating that is not an object is ignored');
+}
+
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `
 
@@ -946,7 +1137,7 @@ func TestMoneyDisplay(t *testing.T) {
 	}
 	html := spaSource()
 	var b strings.Builder
-	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "csvMoney", "plainMoney", "cellRatio", "normBy", "moneyMap", "costCode", "costCodesList", "spendBasis", "profitList", "roiPct", "metricROI", "roiCls", "cpcCell", "cpcHasSpend", "moneyOf", "profitOf", "clickCostBy", "addBy", "pct", "periodSpendBy", "campaignCostOnly", "spendShare", "overlapShare", "rangeBounds", "sumClicks", "foldStatus", "packMetrics", "factsIndex", "campaignMetrics", "pointSpendBy", "pointMoney", "nameSortKey", "nameCollator", "nameIconRank", "nameScript", "nameKey", "compareNameKeys", "asSortMeta", "applySort", "fltCommit", "logSortField"} {
+	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "csvMoney", "plainMoney", "cellRatio", "normBy", "moneyMap", "costCode", "costCodesList", "spendBasis", "profitList", "roiPct", "metricROI", "roiCls", "cpcCell", "cpcHasSpend", "moneyCellCls", "moneyOf", "profitOf", "clickCostBy", "addBy", "pct", "periodSpendBy", "campaignCostOnly", "spendShare", "overlapShare", "rangeBounds", "sumClicks", "foldStatus", "packMetrics", "factsIndex", "campaignMetrics", "pointSpendBy", "pointMoney", "nameSortKey", "nameCollator", "nameIconRank", "nameScript", "nameKey", "compareNameKeys", "asSortMeta", "applySort", "fltOpMulti", "fltCommit", "logSortField", "reportCellText", "reportHasCost", "reportSortValue"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -1111,5 +1302,597 @@ eq(moneyCellCls('rev', {amount: 12, ready: true}), 'c-rev', 'nonzero revenue has
 eq(moneyCellCls('cost', {costBy: {}}), '', 'empty spend map has no cost class');
 eq(moneyCellCls('cost', {costBy: {USD: 100}}), 'c-cost', 'nonzero spend has c-cost');
 
+eq(reportHasCost([{hits: 1}, {hits: 2, cost: {'': 0}}]), false, 'report rows without a positive cost have no cost column');
+eq(reportHasCost([{hits: 1}, {hits: 2, cost: {'': 150}}]), true, 'one priced report row shows the cost column');
+eq(reportCellText({cost: {'': 150}}, 'cost', false), moneyText(1.5, 'USD', 2), 'a report cost without a code is USD');
+eq(reportCellText({cost: {'': 150}}, 'cost', true), '1.50', 'a CSV cost of one currency is a plain number');
+eq(reportCellText({cost: {USD: 150, EUR: 40}}, 'cost', true), moneyMap({USD: 150, EUR: 40}), 'a CSV cost in two currencies lists them');
+eq(reportCellText({}, 'cost', false), moneyText(0, 'USD', 2), 'a row without cost shows zero');
+eq(reportSortValue({cost: {'': 150, EUR: 40}}, 'cost'), 150, 'the cost sorts by the cents of the tracker currency');
+eq(reportSortValue({cost: {'': 150, EUR: 40}}, 'cost', 'EUR'), 40, 'the cost sorts by the cents of the chosen currency only');
+
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `
+
+// saveBarEntryChecks are the assertions of TestSaveBarEntries: the save bar names campaigns by
+// number and name; the route is the slug, never the number.
+const saveBarEntryChecks = `
+let failed = 0;
+const eq = (got, want, what) => {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g !== w) { failed++; console.log('FAIL ' + what + '\n  got  ' + g + '\n  want ' + w); }
+};
+eq(dirtyEntries([{id:'promo',num:12,name:'Spring'}]), [{kind:'flow',ref:'12',name:'Spring',route:'flows/promo'}], 'campaign item: number, name, slug route');
+eq(dirtyEntries([{id:'promo',num:12,name:''}])[0].name, 'promo', 'nameless campaign shows its slug');
+eq(dirtyEntries([{id:'promo',name:' x '}]), [{kind:'flow',ref:'promo',name:'x',route:'flows/promo'}], 'no number: the slug is the reference');
+eq(dirtyEntries([{id:'a b/c',num:3}])[0].route, 'flows/a%20b%2Fc', 'slug is escaped in the route');
+eq(dirtyEntries([{id:'',num:3}])[0].route, '', 'no slug, nowhere to go');
+eq(dirtyEntries([{id:'7',num:3}])[0].route, 'flows/7', 'the route carries the slug even when it looks like a number');
+{const g={id:'x',num:1}; eq(dirtyEntries([g],{draft:g}).length, 1, 'a draft owner already listed is not repeated');}
+eq(dirtyEntries([],{draft:{id:'d',num:2}})[0].ref, '2', 'a campaign with an unsaved list file is listed');
+eq(dirtyEntries([null,'x',{id:'a',num:1}]).length, 1, 'non-objects are skipped');
+eq(dirtyEntries([{id:'a',num:1}],{removed:2,automation:true}).map(e=>e.kind), ['flow','removed','automation'], 'removed and automation items follow');
+eq(dirtyEntries([{id:'a',num:1}],{automation:true})[1].route, 'automation', 'automation opens its page');
+eq(dirtyEntries([],{removed:0}), [], 'nothing changed, nothing listed');
+eq(dirtyLabel({ref:'12',name:'Spring'}), '#12 Spring', 'label: #number name');
+eq(dirtyLabel({ref:'12',name:''}), '#12', 'label without a name');
+eq(dirtyLabel(null), '', 'label of nothing');
+
+if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
+`
+
+// TestSaveBarEntries runs dirtyEntries and dirtyLabel under node: which items the save bar lists
+// and how a campaign is labelled and routed. It skips when node is absent.
+func TestSaveBarEntries(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the save bar entry checks")
+	}
+	html := spaSource()
+	var b strings.Builder
+	for _, name := range []string{"dirtyEntries", "dirtyLabel"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		b.WriteString(fn)
+		b.WriteByte('\n')
+	}
+	b.WriteString(saveBarEntryChecks)
+	f := filepath.Join(t.TempDir(), "savebar-entries.js")
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("save bar entry checks failed:\n%s", out)
+	}
+}
+
+// TestFilterChipDrop runs condSig and dropCond under node and checks the chip wiring: a chip removes its
+// condition from the list current at click time even after the page replaced the array or reordered it.
+func TestFilterChipDrop(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the filter chip checks")
+	}
+	html := spaSource()
+	var b strings.Builder
+	for _, name := range []string{"condSig", "dropCond"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		b.WriteString(fn)
+		b.WriteByte('\n')
+	}
+	b.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g !== w) { failed++; console.log('FAIL ' + what + '\n  got  ' + g + '\n  want ' + w); }
+};
+const a = {f:'country', op:'eq', v:['US']}, b = {f:'ip', op:'in', v:['1.1.1.1','2.2.2.2']};
+const sigA = condSig(a), sigB = condSig(b);
+eq(sigA === sigB, false, 'different conditions have different signatures');
+eq(condSig({f:'country', v:['US']}), sigA, 'a missing operator is eq');
+eq(condSig({f:'country', op:'eq', v:['DE']}) === sigA, false, 'values are part of the identity');
+eq(condSig(null), '["","eq",[]]', 'no condition has an empty signature');
+// the page replaced the array after the chips were painted: the signature still finds the condition
+const live = [{f:'ip', op:'eq', v:['9.9.9.9']}, {f:'country', op:'eq', v:['US']}, {f:'ip', op:'in', v:['1.1.1.1','2.2.2.2']}];
+eq(dropCond(live, sigA), true, 'the condition is removed from the live list');
+eq(live.map(c => c.f + c.op), ['ipeq', 'ipin'], 'the others stay in order');
+eq(dropCond(live, sigA), false, 'a second removal finds nothing');
+eq(dropCond(live, sigB), true, 'the second condition is removed');
+eq(live.length, 1, 'one condition remains');
+eq(dropCond(null, sigA), false, 'no list, nothing removed');
+if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
+`)
+	f := filepath.Join(t.TempDir(), "chip-drop.js")
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("filter chip checks failed:\n%s", out)
+	}
+
+	bar := spaFunctionLine(html, "paintFilterBar")
+	must(t, bar, "dropCond(live(), b.dataset.dropCond)", "a chip removes through the live list")
+	mustNot(t, bar, "list.splice(", "a chip does not change the array captured at paint time")
+	reload := spaBetween(html, "const reloadLogs=()=>{", "q('#log-filters').onclick")
+	mustNot(t, reload, "syncLogIpFromField()", "the chip list is the truth on reload: the IP field must not put a removed IP condition back")
+	must(t, reload, "ip.value=hit&&hit.v&&hit.v[0]||''", "the IP field follows the conditions")
+	for _, call := range []string{"()=>LOGF.conds", "()=>PB.conds", "()=>REP.conds"} {
+		must(t, html, call+", ", "paintFilterBar takes "+call+" so a replaced array is still the one edited")
+	}
+}
+
+// TestLogIPFieldRepaintsChips runs syncLogIpFromField under node and checks the IP field wiring of the click
+// log: the sync reports a change only when the ip condition changed, and Enter and change go through
+// reloadLogs, the same repaint the filter modal and the chips use, so the chip and the counter follow at once.
+func TestLogIPFieldRepaintsChips(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the IP field checks")
+	}
+	html := spaSource()
+	fn := spaFunctionLine(html, "syncLogIpFromField")
+	if fn == "" {
+		t.Fatal("syncLogIpFromField not found in SPA")
+	}
+	script := `
+let failed = 0;
+const eq = (got, want, what) => {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g !== w) { failed++; console.log('FAIL ' + what + '\n  got  ' + g + '\n  want ' + w); }
+};
+let LOGF = {conds:[{f:'country', op:'eq', v:['US']}]};
+const field = {value:''};
+let present = true;
+const q = () => present ? field : null;
+` + fn + `
+field.value = ' 1.2.3.4 ';
+eq(syncLogIpFromField(), true, 'a typed IP changes the conditions');
+eq(LOGF.conds, [{f:'country', op:'eq', v:['US']}, {f:'ip', op:'eq', v:['1.2.3.4']}], 'the IP is trimmed and appended');
+eq(syncLogIpFromField(), false, 'the same IP changes nothing');
+field.value = '5.6.7.8';
+eq(syncLogIpFromField(), true, 'another IP replaces the condition');
+eq(LOGF.conds.filter(c => c.f === 'ip').length, 1, 'one ip condition');
+field.value = '';
+eq(syncLogIpFromField(), true, 'clearing the field drops the condition');
+eq(LOGF.conds, [{f:'country', op:'eq', v:['US']}], 'only the other condition remains');
+eq(syncLogIpFromField(), false, 'an empty field with no condition changes nothing');
+LOGF = {conds:[{f:'ip', op:'in', v:['9.9.9.9']}]};
+field.value = '';
+eq(syncLogIpFromField(), false, 'an in condition on ip is not the field condition');
+eq(LOGF.conds.length, 1, 'the in condition stays');
+present = false;
+eq(syncLogIpFromField(), false, 'no field, no change');
+if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
+`
+	f := filepath.Join(t.TempDir(), "log-ip.js")
+	if err := os.WriteFile(f, []byte(script), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("log IP field checks failed:\n%s", out)
+	}
+
+	wire := spaBetween(html, "const applyIp=force=>", "paintFilterBar('events'")
+	must(t, wire, "if(syncLogIpFromField()||force) reloadLogs()", "applying the IP repaints through reloadLogs")
+	must(t, wire, "ipEl.onchange=()=>applyIp(false)", "leaving the field applies the IP")
+	must(t, wire, "applyIp(true)", "Enter applies the IP")
+	mustNot(t, wire, "ipEl.onblur", "blur must not sync the field before change reports it")
+	if regexp.MustCompile(`(^|[^A-Za-z])loadLogs\(`).MatchString(wire) {
+		t.Error("the IP handlers must reload only through reloadLogs")
+	}
+}
+
+// TestKeepUnknownFlowLogic runs flowPickOpts under node: a "send to campaign" select keeps a saved
+// campaign id the list lacks as its one selected option, so the form reads back the same id and
+// the campaign settles clean.
+func TestKeepUnknownFlowLogic(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the campaign picker checks")
+	}
+	html := spaSource()
+	var src strings.Builder
+	src.WriteString("const esc=s=>String(s); const opt=(v,l,cur)=>`<option value=\"${esc(v)}\"${String(cur)===String(v)?' selected':''}>${esc(l)}</option>`; const trFill=(k,p)=>k+':'+p.id;\n")
+	for _, name := range []string{"unknownPick", "missingOpt", "flowPickOpts", "flowOpt"} {
+		fn := spaFunctionLine(html, name)
+		end := strings.Index(fn, "\n}\n")
+		if end < 0 {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		src.WriteString(fn[:end+2] + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAIL ' + what + ': got ' + got + ', want ' + want); } };
+const picked = h => (h.match(/<option value="([^"]*)"[^>]* selected/g) || []).map(s => s.match(/value="([^"]*)"/)[1]);
+const rows = [{id: 'a', name: 'A'}, {id: 'b'}];
+let h = flowPickOpts(rows, ' gone ');
+eq(picked(h).join(','), 'gone', 'a missing campaign is the one selected option');
+eq(h.includes('class="miss"') && h.includes('pick.missing.flow:gone'), true, 'it is labelled as not found');
+h = flowPickOpts(rows, 'b');
+eq(picked(h).join(','), 'b', 'a listed campaign is selected as is');
+eq(h.includes('class="miss"'), false, 'a listed campaign adds no extra option');
+eq(flowPickOpts(rows, '').includes('selected'), false, 'no target selects nothing');
+eq(flowPickOpts(rows, null).includes('selected'), false, 'an unset target selects nothing');
+eq(picked(flowPickOpts([], '849')).join(','), '849', 'an empty list still keeps the id');
+eq(h.includes('>a — A</option>'), true, 'listed campaigns show id and name');
+if (failed) process.exit(1);
+`)
+	f := filepath.Join(t.TempDir(), "flowpick.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("campaign picker checks failed:\n%s", out)
+	}
+}
+
+// TestSaveBarSettleLogic runs markDirty and settleGroups under node: an untouched campaign that an
+// editor rewrites (defaults) stays clean, a real edit marks it, and putting the value back clears it.
+func TestSaveBarSettleLogic(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the save bar checks")
+	}
+	html := spaSource()
+	var src strings.Builder
+	src.WriteString("const SNAP=new Map(), DIRTY=new Set(); let synced=0; function syncSaveBar(){synced++}\n")
+	for _, name := range []string{"markDirty", "settleGroups"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAIL ' + what + ': got ' + got + ', want ' + want); } };
+const load = (g) => { SNAP.set(g, {id: g.id, json: JSON.stringify(g)}); return g; };
+
+const g = load({id: 'a', name: 'n'});
+g.firewall = {enabled: false};
+settleGroups(g);
+eq(DIRTY.has(g), false, 'form normalisation of an untouched campaign is not a change');
+g.name = 'edited';
+markDirty(g);
+eq(DIRTY.has(g), true, 'an edit marks the campaign');
+g.name = 'n';
+markDirty(g);
+eq(DIRTY.has(g), false, 'putting the value back clears the mark');
+
+const h = load({id: 'b', name: 'x'});
+h.name = 'y';
+markDirty(h);
+h.extra = 1;
+settleGroups(h);
+eq(DIRTY.has(h), true, 'a changed campaign stays changed when settled');
+
+const fresh = {id: 'c'};
+settleGroups(fresh);
+eq(DIRTY.has(fresh), true, 'a never-saved campaign is dirty');
+settleGroups(undefined);
+settleGroups([null, 5]);
+eq(synced > 0, true, 'the bar is refreshed');
+if (failed) process.exit(1);
+`)
+	f := filepath.Join(t.TempDir(), "savebar.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("save bar checks failed:\n%s", out)
+	}
+}
+
+// TestEnsureNumsBaseline runs ensureNums under node: numbering old campaigns on the list page does
+// not mark them changed, a create or copy saves the numbers it builds on, and nothing is renumbered.
+func TestEnsureNumsBaseline(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the numbering checks")
+	}
+	html := spaSource()
+	var src strings.Builder
+	src.WriteString("const SNAP=new Map(), DIRTY=new Set(); let GROUPS=null; let synced=0; function syncSaveBar(){synced++}\n")
+	for _, name := range []string{"markDirty", "settleGroups", "nextNum", "ensureNums"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAIL ' + what + ': got ' + got + ', want ' + want); } };
+const load = (g) => { SNAP.set(g, {id: g.id, json: JSON.stringify(g)}); return g; };
+const reset = () => { SNAP.clear(); DIRTY.clear(); };
+
+reset();
+const a = load({id: 'a', num: 7}), b = load({id: 'b'}), c = load({id: 'c'});
+GROUPS = [a, b, c];
+ensureNums();
+eq(b.num, 8, 'the first old campaign gets the next number');
+eq(c.num, 9, 'the next one follows');
+eq(a.num, 7, 'a numbered campaign keeps its number');
+eq(DIRTY.size, 0, 'numbering on the list page is not an edit');
+b.name = 'edited';
+markDirty(b);
+eq(DIRTY.has(b), true, 'a real edit after numbering still marks the campaign');
+b.name = undefined; delete b.name;
+markDirty(b);
+eq(DIRTY.has(b), false, 'reverting the edit clears the mark against the numbered baseline');
+
+reset();
+const d = load({id: 'd'}), e = load({id: 'e', num: 3});
+GROUPS = [d, e];
+ensureNums(true);
+eq(d.num, 4, 'a create numbers the old campaign first');
+eq(DIRTY.has(d), true, 'the numbers a create builds on are saved');
+eq(DIRTY.has(e), false, 'a numbered campaign is left alone');
+
+reset();
+const f = {id: 'f'};
+GROUPS = [f];
+ensureNums();
+eq(f.num, 1, 'a never-saved campaign is numbered');
+eq(DIRTY.has(f), true, 'a never-saved campaign stays unsaved');
+GROUPS = null;
+ensureNums();
+if (failed) process.exit(1);
+`)
+	f := filepath.Join(t.TempDir(), "ensure-nums.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("numbering checks failed:\n%s", out)
+	}
+}
+
+// TestDestinationEscapeLogic runs recentDest and destHTML under node with hostile values: the
+// destination, the landing id and a campaign name with markup or quotes are escaped, and no
+// address of the click ever becomes a link, so a javascript: destination stays plain text.
+func TestDestinationEscapeLogic(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the destination checks")
+	}
+	html := spaSource()
+	var src strings.Builder
+	src.WriteString(spaBetween(html, "const esc=(s)=>", "\n") + "\n")
+	src.WriteString("const tr=k=>k; const pageAllowed=()=>true; let ME={}, OFFERS=[], NETS=[], SOURCES=[], LANDINGS=[], GROUPS=[];\n")
+	src.WriteString("const NOOUT=new Set(['stop','landing']); const typeLabel=t=>'type:'+(t||'-');\n")
+	src.WriteString("const groupById=(id)=>(GROUPS||[]).find(g=>g.id===id||(g.aliases||[]).includes(id))||null;\n")
+	for _, name := range []string{"nameOf", "campaignLabel", "idLabel", "entityRow", "entityHTML", "recentDest", "destHTML"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAIL ' + what + '\n  got  ' + got + '\n  want ' + want); } };
+const evil = '<script>alert("x")</script>';
+const clean = (h, what) => { eq(h.includes('<script'), false, what + ': no raw script tag'); eq(h.includes('<img'), false, what + ': no raw img tag'); };
+
+LANDINGS = [{id: 'lp"1', name: evil}];
+GROUPS = [{id: '7', name: evil}];
+let h = destHTML({redirect: 'landing', landing_id: 'lp"1'});
+clean(h, 'landing name');
+eq(h.includes('&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;'), true, 'landing name is escaped text');
+eq(h.includes('href="#/landings/lp%221"'), true, 'landing link is an in-app address with the id encoded');
+eq(h.includes('title="lp&quot;1"'), true, 'landing id in the tooltip is escaped');
+eq(recentDest({redirect: 'landing', landing_id: 'lp"1'}), 'LP · ' + evil, 'recentDest keeps plain text for the caller to escape');
+
+h = destHTML({redirect: 'landing', landing_id: '"><img src=x onerror=alert(1)>'});
+eq(h, 'LP', 'a landing outside the catalog shows only LP, never its id');
+
+h = destHTML({redirect: 'landing', out: '"><img src=x>'});
+eq(h, 'LP', 'a landing id taken from out is not echoed either');
+
+h = destHTML({redirect: 'group', out: '7'});
+clean(h, 'campaign name');
+eq(h.includes('href="#/flows/7"'), true, 'campaign link keeps the slug address');
+eq(h.includes('&lt;script&gt;'), true, 'campaign name is escaped text');
+eq(recentDest({redirect: 'group', out: '7'}), evil, 'recentDest gives the campaign name as plain text');
+
+h = destHTML({redirect: 'group', out: '<img src=x onerror=1>'});
+clean(h, 'unknown campaign target');
+eq(h, '<span title="&lt;img src=x onerror=1&gt;">&lt;img src=x onerror=1&gt;</span>', 'an unknown campaign target is escaped text, not a link');
+
+h = destHTML({redirect: 'http_redirect', out: 'javascript:alert(1)'});
+eq(h.includes('<a '), false, 'a javascript: destination is not a link');
+eq(h.includes('href'), false, 'a javascript: destination has no href');
+eq(h, '<span title="javascript:alert(1)">javascript:alert(1)</span>', 'a javascript: destination is plain text');
+
+h = destHTML({redirect: 'http_redirect', out: 'https://a.example/?q="x" onmouseover="y"'});
+eq((h.match(/"/g) || []).length, 2, 'quotes in the destination cannot leave the title attribute');
+eq(h.includes('&quot;x&quot; onmouseover=&quot;y&quot;'), true, 'quotes in the destination are escaped');
+eq(h.includes('<a '), false, 'an http destination is text too');
+
+h = destHTML({redirect: 'show_text', out: evil});
+clean(h, 'destination with markup');
+eq(h, '<span title="type:show_text">type:show_text</span>', 'a body with markup shows the type label');
+eq(recentDest({redirect: 'http_redirect', out: 'line\nbreak'}), 'type:http_redirect', 'a multi-line destination shows the type label');
+eq(recentDest({redirect: 'stop', out: 'x'}), 'type:stop', 'a type without an address shows the type label');
+eq(recentDest({redirect: '', out: ''}), 'type:-', 'a row with no type and no address shows the placeholder');
+if (failed) process.exit(1);
+`)
+	f := filepath.Join(t.TempDir(), "destination.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("destination checks failed:\n%s", out)
+	}
+}
+
+// TestKeywordStatsLogic runs csvTable, the keyword cell, the sparkline and the totals of the keyword
+// statistics under node: a cell that starts like a formula gets an apostrophe, a hostile keyword is
+// escaped in the cell and its tooltip, the empty keyword is captioned, and the ratio of the totals
+// comes from the sums. It skips when node is absent.
+func TestKeywordStatsLogic(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the keyword statistics checks")
+	}
+	html := spaSource()
+	var src strings.Builder
+	src.WriteString(spaBetween(html, "const esc=(s)=>", "\n") + "\n")
+	src.WriteString("const tr=k=>k==='kws.tr.of'?'Trend: {key}':k; let KWS_DATA=null, KWS_TREND=new Map(), KWS_TREND_READY=true, ME=null, KWS={campaign: 'promo', conds: []}, KWS_Q='';\n")
+	src.WriteString("const trFill=(k,m)=>{let s=tr(k); Object.keys(m||{}).forEach(n=>{s=s.split('{'+n+'}').join(String(m[n]))}); return s};\n")
+	src.WriteString(spaBetween(html, "const KWS_NEEDS_CONV=", "\n") + "\n")
+	src.WriteString(spaBetween(html, "const KWS_COLS=", "\n") + "\n")
+	src.WriteString("const rangeQS=()=>'from=A&to=B'; const condsQS=conds=>{const qs=new URLSearchParams(); conds.forEach(c=>(c.v||['']).forEach(v=>qs.append('f',c.f+':'+c.op+':'+v))); return qs};\n")
+	src.WriteString("const fmt=n=>String(+n||0); const csvNum=n=>String(+n||0); const csvMoney=n=>(+n||0).toFixed(2); const moneyText=(n)=>(+n||0).toFixed(2)+' $';\n")
+	src.WriteString("const cellRatio=(n,d)=>+d?((n/d)*100).toFixed(2)+'%':'0.00%';\n")
+	for _, name := range []string{"csvSafe", "csvTable", "kwsKeyCell", "kwsCellText", "kwsSpark", "kwsSum", "kwsTrendCell", "kwsTotals", "kwsTrendMap", "hiddenFields", "hiddenCols", "kwsCols", "kwsCampaign", "kwsOriginAllowed", "kwsMode", "kwsPruneConds", "kwsQS", "kwsSortValue"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAIL ' + what + '\n  got  ' + JSON.stringify(got) + '\n  want ' + JSON.stringify(want)); } };
+
+eq(csvTable(['a'], [['=1+1'], ['@x'], ['+1'], ['-1+1'], ['\r'], ['\tx'], ['plain text'], ['']]),
+  "a\n'=1+1\n'@x\n'+1\n'-1+1\n\"'\r\"\n'\tx\nplain text\n", 'formula cells get an apostrophe, plain text and empty cells stay');
+eq(csvSafe('-'), '-', 'a lone dash stays');
+eq(csvSafe('-5'), '-5', 'a string that is a whole decimal number stays as it is');
+eq(csvSafe('-5.00'), '-5.00', 'a money string with a minus stays as it is');
+eq(csvSafe('-35.20%'), '-35.20%', 'a negative percent stays as it is');
+eq(csvSafe('-1,234.50 $'), '-1,234.50 $', 'a negative formatted amount with a dollar sign stays as it is');
+eq(csvSafe('-12.00 USD'), '-12.00 USD', 'a negative amount with a currency code stays as it is');
+eq(csvSafe('-5 EUR'), '-5 EUR', 'a negative whole amount with a currency code stays as it is');
+eq(csvSafe('1,234.50 $'), '1,234.50 $', 'a positive formatted amount is never touched');
+eq(csvSafe('-1,234.50 $, 5 EUR'), "'-1,234.50 $, 5 EUR", 'a list of amounts is not one number and is escaped');
+eq(csvSafe('-1+1%'), "'-1+1%", 'a formula that ends with a percent sign is escaped');
+eq(csvSafe('-1\tUSD'), "'-1\tUSD", 'a tab inside is not a space and the cell is escaped');
+eq(csvSafe('-'), '-', 'a lone dash stays');
+eq(csvSafe('12.50'), '12.50', 'a money string keeps its zeros');
+eq(csvSafe('-1+1'), "'-1+1", 'a minus before a formula is escaped');
+eq(csvSafe('+1'), "'+1", 'a plus sign is escaped: only the minus is allowed');
+eq(csvSafe('-.5'), "'-.5", 'a fraction without a leading digit is escaped');
+eq(csvSafe('-5.'), "'-5.", 'a trailing dot is escaped');
+eq(csvSafe('=1+1'), "'=1+1", 'an equals sign is escaped');
+eq(csvSafe('@x'), "'@x", 'an at sign is escaped');
+eq(csvSafe('\tx'), "'\tx", 'a tab is escaped');
+eq(csvSafe(-5), '-5', 'a number -5 stays as it is');
+eq(csvSafe(-0.5), '-0.5', 'a negative fraction stays as it is');
+eq(csvSafe(NaN), 'NaN', 'a number that is not finite is still text');
+eq(csvSafe(-Infinity), "'-Infinity", 'an infinite negative number is escaped as text');
+eq(csvTable(['n', 's'], [[-5, '-5'], [12.5, '=1+1']]), "n,s\n-5,-5\n12.5,'=1+1", 'numbers and decimal strings pass, formulas are escaped in one table');
+eq(csvSafe(0), '0', 'a number zero is text 0');
+eq(csvSafe(null), '', 'null is an empty cell');
+eq(csvTable(['x,y', 'q"r'], [['a,b', 'line\nbreak', 'cr\rbreak']]), '"x,y","q""r"\n"a,b","line\nbreak","cr\rbreak"', 'comma, quote, new line and carriage return are quoted');
+
+const evil = '<img src=x onerror=alert(1)>';
+let h = kwsKeyCell({keyword: evil});
+eq(h.includes('<img'), false, 'a hostile keyword leaves no raw tag');
+eq(h, '<span title="&lt;img src=x onerror=alert(1)&gt;">&lt;img src=x onerror=alert(1)&gt;</span>', 'the keyword is escaped in the text and in the tooltip');
+h = kwsKeyCell({keyword: '"><script>x</script>'});
+eq(h.includes('<script'), false, 'quotes and tags in a keyword are escaped');
+eq((h.match(/"/g) || []).length, 2, 'a quote in a keyword cannot leave the title attribute');
+eq(kwsKeyCell({keyword: ''}), '<span class="subtle">kws.nokey</span>', 'the empty keyword is captioned');
+eq(kwsCellText({keyword: ''}, 'keyword', false), 'kws.nokey', 'the empty keyword is captioned in the export too');
+
+KWS_DATA = {rows: [], truncated: false, ready: false};
+eq(kwsCellText({conv: 3, hits: 10}, 'conv', false), '—', 'conversions are a dash while they are not ready');
+eq(kwsCellText({conv: 3, hits: 10}, 'cr', true), '', 'a CSV cell is empty while conversions are not ready');
+eq(kwsCellText({hits: 10}, 'hits', false), '10', 'clicks show without conversions');
+KWS_DATA = {rows: [], truncated: false, ready: true};
+eq(kwsCellText({conv: 3, hits: 10, unique: 7, rejected: 1, profit: 12.5}, 'cr', false), '30.00%', 'CR from conversions and clicks');
+eq(kwsCellText({conv: 3, hits: 0}, 'cr', false), '—', 'CR without clicks is a dash');
+eq(kwsCellText({conv: 3, hits: 0}, 'cr', true), '', 'CR without clicks is an empty CSV cell');
+eq(kwsCellText(kwsTotals([{hits: 0, conv: 2}, {hits: 0, conv: 1}]), 'cr', false), '—', 'the total CR is a dash while the clicks add up to zero');
+eq(kwsCellText({unique: 7}, 'uniq', false), '7', 'unique reads the unique field');
+eq(kwsCellText({rejected: 1}, 'rej', false), '1', 'rejected reads the rejected field');
+eq(kwsCellText({profit: -5}, 'revenue', true), '-5.00', 'a negative amount keeps its sign in the machine text');
+eq(kwsCellText({profit: 12.5}, 'revenue', false), '12.50 $', 'the revenue column reads the profit field of the row');
+eq(kwsSortValue({profit: 7}, 'revenue'), 7, 'the revenue column sorts by the profit field');
+eq(KWS_NEEDS_CONV.has('revenue') && !KWS_NEEDS_CONV.has('profit'), true, 'revenue needs the conversions, the old profit id is gone');
+
+const colIds = me => { ME = me; return kwsCols().map(c => c.id).join(','); };
+eq(colIds(null), 'keyword,hits,uniq,conv,leads,sales,rej,cr,revenue,depsum,trend', 'a full role sees every column');
+eq(colIds({hidden: ['cost']}), 'keyword,hits,uniq,conv,leads,sales,rej,cr,revenue,depsum,trend', 'a hidden cost keeps the revenue column');
+eq(colIds({hidden: ['profit']}), 'keyword,hits,uniq,conv,leads,sales,rej,cr,trend', 'a hidden profit removes revenue and DepSum');
+eq(colIds({hidden: ['status']}), 'keyword,hits,uniq,conv,cr,revenue,depsum,trend', 'a hidden status removes leads, sales and rejected');
+
+ME = null;
+eq(kwsCampaign(), 'promo', 'the saved campaign is used');
+eq(kwsQS().includes('f=campaign_id%3Aeq%3Apromo'), true, 'the campaign goes to the query as a campaign_id filter');
+ME = {hidden: ['campaign_id']};
+eq(kwsCampaign(), '', 'a role without campaign_id ignores the saved campaign');
+eq(kwsQS().includes('campaign_id'), false, 'a role without campaign_id sends no campaign_id filter');
+KWS.conds = [{f: 'campaign_id', op: 'eq', v: ['x']}, {f: 'country', op: 'eq', v: ['PL']}];
+kwsPruneConds();
+eq(JSON.stringify(KWS.conds.map(c => c.f)), '["country"]', 'a saved condition on a hidden field is dropped from the list the chips are drawn from');
+eq(kwsQS().includes('campaign_id'), false, 'the query has no condition on a hidden field');
+eq(kwsQS().includes('country'), true, 'other saved conditions stay');
+ME = null; KWS.conds = [{f: 'country', op: 'eq', v: ['PL']}]; kwsPruneConds();
+eq(KWS.conds.length, 1, 'a full role keeps every condition');
+ME = {hidden: ['campaign_id']};
+KWS_Q = 'buy';
+eq(kwsQS().includes('f=keyword%3Acontains%3Abuy'), true, 'the search goes to the query as a keyword filter');
+ME = null; KWS.conds = []; KWS_Q = '';
+eq(kwsMode(), '', 'last click is the default attribution');
+eq(kwsQS().includes('by=origin'), false, 'the default query does not ask for origin attribution');
+KWS.by = 'origin';
+eq(kwsMode(), 'origin', 'origin attribution is active for a full role');
+eq(kwsQS().includes('by=origin'), true, 'origin attribution goes to the query');
+ME = {hidden: ['origin_campaign_id']};
+eq(kwsMode(), '', 'a role without the origin campaign cannot select origin attribution');
+eq(kwsQS().includes('by=origin'), false, 'a hidden origin campaign sends no by=origin');
+ME = null; KWS.by = '';
+
+const tot = kwsTotals([{hits: 10, conv: 5, profit: 1}, {hits: 90, conv: 5, profit: 2.5}]);
+eq(JSON.stringify([tot.hits, tot.conv, tot.profit]), '[100,10,3.5]', 'totals are sums');
+eq(kwsCellText(tot, 'cr', false), '10.00%', 'the total ratio comes from the sums, not from the row ratios');
+
+const sp = kwsSpark([1, 3, 2]);
+eq(sp.startsWith('<svg class="kws-spark"') && sp.includes('<path d="M'), true, 'a series draws a line');
+eq(kwsSpark([4]).includes('<circle'), true, 'a single day draws a dot');
+eq(kwsSpark([0, 0, 0]).includes('NaN'), false, 'an all-zero series has no NaN');
+eq(kwsSpark([]), '', 'an empty series draws nothing');
+eq(kwsSum([1, 2, 3]) + kwsSum(null), 6, 'series sum');
+
+const m = kwsTrendMap({days: ['2026-10-01', '2026-10-02'], series: [{keyword: evil, hits: [4, 6], conv: null}, {keyword: 'b', hits: [1, 1], conv: [0, 1], profit: [0, 2.5]}, {keyword: 'no-hits'}]});
+eq(m.size, 2, 'a series without clicks is skipped');
+eq(m.get(evil).conv, null, 'a missing conv array stays null');
+KWS_DATA = {rows: [], truncated: false, ready: true};
+KWS_TREND = m;
+h = kwsTrendCell({keyword: evil}, new Set());
+eq(h.includes('<img'), false, 'the trend cell has no raw tag');
+eq(h.startsWith('<button type="button" class="kws-trend" data-kwtrend="&lt;img src=x onerror=alert(1)&gt;"'), true, 'the trend cell is a button that names its keyword, escaped');
+eq(h.includes(' title="kws.col.hits: 10'), true, 'the trend button carries the sums tooltip');
+eq(h.includes('aria-label="Trend: &lt;img src=x onerror=alert(1)&gt;"'), true, 'the trend button is labelled with the keyword, escaped');
+eq(h.includes('aria-haspopup="dialog"'), true, 'the trend button says it opens a dialog');
+KWS_TREND.set('', {hits: [1], conv: null, profit: null});
+eq(kwsTrendCell({keyword: ''}, new Set()).includes('aria-label="Trend: kws.nokey"'), true, 'the empty keyword is captioned in the button label');
+KWS_TREND.delete('');
+eq(h.includes('kws.col.hits: 10'), true, 'the tooltip sum equals the clicks of the series');
+eq(h.includes('kws.col.conv: —'), true, 'a missing conv series is a dash');
+eq(kwsTrendCell({keyword: 'b'}, hiddenCols({hidden: ['profit']})).includes('col.revenue'), false, 'a hidden profit removes the revenue from the tooltip');
+eq(kwsTrendCell({keyword: 'b'}, hiddenCols({hidden: ['cost']})).includes('col.revenue: 2.50 $'), true, 'a hidden cost keeps the revenue in the tooltip');
+eq(kwsTrendCell({keyword: 'b'}, new Set()).includes('col.revenue: 2.50 $'), true, 'revenue sum in the tooltip');
+eq(kwsTrendCell({keyword: 'other'}, new Set()), '', 'a keyword outside the leading rows has an empty trend cell');
+KWS_DATA.ready = false;
+eq(kwsTrendCell({keyword: 'b'}, new Set()).includes('kws.col.conv: —'), true, 'conversions are a dash in the tooltip while not ready');
+if (failed) process.exit(1);
+`)
+	f := filepath.Join(t.TempDir(), "keywords.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("keyword statistics checks failed:\n%s", out)
+	}
+}

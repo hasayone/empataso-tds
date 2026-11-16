@@ -19,7 +19,7 @@ var macroMap = map[string]string{
 	"{sub_id_5}": "[PAR-5]",
 }
 
-// Map строит каталоги, группы kuztds и отчёт потерь.
+// Map строит каталоги, группы emtds и отчёт потерь.
 //
 // Параметры: src — снимок конфигурации; sel — какие каталоги и кампании писать в результат.
 // Результат: выбранные сущности в стабильном порядке и строки отчёта.
@@ -64,7 +64,7 @@ func Map(src Snapshot, sel Selection) Result {
 		losses = append(losses, extra...)
 	}
 	if sel.Campaigns {
-		ctx := &mapCtx{offers: offers, landings: landings, groups: groups, lists: &lists, pages: &pages}
+		ctx := &mapCtx{offers: offers, landings: landings, groups: groups, lists: &lists, pages: &pages, only: sel.Campaign}
 		res.Groups, losses = ctx.mapCampaigns(src, losses)
 		losses = append(losses, applyCatalogMacros(&res, src.Campaigns)...)
 		if sel.Sources {
@@ -129,7 +129,7 @@ func fillResult(res Result, losses []Loss) Result {
 	return attachManifest(res)
 }
 
-// numID переводит числовой id Keitaro в id каталога kuztds.
+// numID переводит числовой id Keitaro в id каталога emtds.
 //
 // Параметры: n — id Keitaro.
 // Результат: десятичная строка без префикса.
@@ -192,7 +192,7 @@ func sameKind(got, want string) bool {
 	return g != "" && g == w
 }
 
-// activeState переводит state Keitaro в статус kuztds.
+// activeState переводит state Keitaro в статус emtds.
 //
 // Параметры: state — поле state.
 // Результат: true для пустого, active и enabled.

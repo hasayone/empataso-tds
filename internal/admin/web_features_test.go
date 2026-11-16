@@ -1,11 +1,15 @@
 package admin
 
 import (
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // TestSpaKeepsUnknownRules checks that saving a stream copies the rule keys the editor
@@ -129,7 +133,7 @@ func TestKeitaroSettingsUI(t *testing.T) {
 // the pending row actions and the name server change.
 func TestNamecheapUI(t *testing.T) {
 	html := spaSource()
-	must(t, spaFunctionLine(html, "integrations"), `id="int-namecheap"`, "Namecheap card on the integrations page")
+	mustIntegration(t, html, "namecheap", "namecheapPanel")
 	panel := spaFunctionLine(html, "namecheapPanel")
 	for _, needle := range []string{
 		"/api/registrars/namecheap",
@@ -267,7 +271,13 @@ func TestSpaReportUniqTotal(t *testing.T) {
 	paint := spaFunctionLine(html, "paintReport")
 	must(t, paint, "reportTotalCells(rows,cols,false,cut)", "the table has a total row")
 	must(t, paint, "reportTotalCells(rows,cols,true,cut)", "the CSV has a total row")
-	must(t, paint, "id=\"rep-cut\"", "a cut report says so")
+	must(t, paint, "id:'rep-cut'", "a cut report says so")
+	must(t, paint, "c.id!=='cost'||priced", "the cost column needs a priced row")
+	must(t, paint, "rows=sortReportRows(rows, REP_SORT, repMeta)", "the table sorts cost by one currency")
+	must(t, paint, "trFill('rep.cost.sort',{cur:reportCostCur(rows)})", "the cost header names its sort currency")
+	mustNot(t, paint, "applySort(", "every report sort goes through sortReportRows")
+	must(t, paint, "c.on&&(c.id!=='cost'||priced)", "the cost column shows only when a row has a price")
+	must(t, total, "'cost'", "the cost column has a total")
 	must(t, total, "if(cut||!rows.length) return []", "a cut report has no total row")
 	must(t, spaFunctionLine(html, "reportQS"), "qs.set('meta','1')", "the page asks for the truncated flag")
 	must(t, spaFunctionLine(html, "setReport"), "reportData(body)", "the answer is read through reportData")
@@ -453,7 +463,16 @@ func TestSpaGuardedLinks(t *testing.T) {
 	must(t, camp, "priceParamLocked(ME)", "price and currency parameters are locked with cost hidden")
 	must(t, camp, "'{'+k+'}'", "a filled sub id shows the outgoing mask")
 	must(t, camp, "sub_id_", "the mask is the sub id slot")
+	must(t, camp, "data-src-param=", "the name in the link is an input")
+	must(t, camp, "data-src-token=", "the token is an input")
+	must(t, camp, "sourceKeyLocked(ME,k)", "a hidden field disables its campaign parameter")
+	mustNot(t, camp, `<input value="${esc(map[k]||'')}" readonly>`, "the name in the link is not read-only")
+	mustNot(t, camp, `<input value="${esc(mask(k))}" readonly>`, "the token is not read-only")
 	flow := spaFunctionLine(html, "collectFlow")
+	must(t, flow, "campaignParamDraft(rows)", "save reads the parameter rows")
+	must(t, flow, "g.parameters=draft.parameters", "the name in the link is stored on the campaign")
+	must(t, flow, "g.param_tokens=draft.tokens", "the token is stored on the campaign")
+	must(t, flow, "el.disabled", "a locked parameter is not read back")
 	must(t, flow, "!v('g_cost_param').disabled", "a locked price parameter is not read back")
 	must(t, flow, "!v('g_currency_param').disabled", "a locked currency parameter is not read back")
 	must(t, spaFunctionLine(html, "openStream"), "${guardHint()}", "the stream editor warns")
@@ -533,7 +552,8 @@ func TestSpaHiddenForRole(t *testing.T) {
 	must(t, html, "if(!payHidden){", "payout is sent only when it was shown")
 	mustNot(t, html, "payout:payRaw>0?payRaw:0, payout_currency:q('#ocur',box).value, payout_param", "payout is not part of the fixed body")
 	must(t, spaFunctionLine(html, "renderPerf"), "shown('revenue'", "the performance table drops a hidden revenue column")
-	must(t, spaFunctionLine(html, "recentRowHTML"), "hiddenFields(ME)", "recent clicks drop hidden fields")
+	must(t, spaFunctionLine(html, "recentRowHTML"), "dashRows('recent')", "recent clicks take their columns from the dashboard set")
+	must(t, spaFunctionLine(html, "dashSetHidden"), "hiddenFields(ME)", "recent clicks drop hidden fields")
 	must(t, spaFunctionLine(html, "paintMetricSum"), "hs('sales'", "the flows summary drops hidden metrics")
 	tip := spaFunctionLine(html, "chartTip")
 	must(t, tip, "pointMoney(p, money, cur, ready)", "the tip takes the spend of the point")
@@ -702,13 +722,12 @@ func TestSpaRevenueAlwaysUSD(t *testing.T) {
 // token field that is never filled in, the public IP hint and the check result.
 func TestCloudflareCardUI(t *testing.T) {
 	html := spaSource()
-	must(t, spaFunctionLine(html, "integrations"), `id="int-cloudflare"`, "Cloudflare card on the integrations page")
-	must(t, spaFunctionLine(html, "integrations"), "cloudflarePanel(", "the card is painted with the others")
+	mustIntegration(t, html, "cloudflare", "cloudflarePanel")
 	panel := spaFunctionLine(html, "cloudflarePanel")
 	for _, needle := range []string{
 		"get('/api/cloudflare'", "call('PUT','/api/cloudflare'", "call('POST','/api/cloudflare/test'",
 		`id="cf-token"`, `type="password"`, `autocomplete="new-password"`, "cur.has_token", `id="cf-account"`,
-		`id="cf-ip"`, " readonly", "cur.public_ip", "tr('cf.ip.empty')", `id="cf-save"`, `id="cf-test"`,
+		`id="cf-ip"`, " readonly", "cur.public_ip", "'cf.ip.empty'", `id="cf-save"`, `id="cf-test"`,
 		"trFill('cf.test.ok',{n:r.zones})", "r.zones", "r.error",
 	} {
 		must(t, panel, needle, "Cloudflare card")
@@ -844,7 +863,7 @@ func TestSpaAutomationLayout(t *testing.T) {
 	must(t, html, `id="cron-arrange"`, "arrange settings control")
 	must(t, html, "hd-act", "job header actions wrapper")
 	must(t, html, "function cronCardOrder(", "cron card order helper")
-	must(t, html, "kuztds-cron-order", "cron order storage key")
+	must(t, html, "emtds-cron-order", "cron order storage key")
 	for _, key := range []string{"cron.arrange", "cron.arrange.done", "cron.arrange.reset", "cron.arrange.hint"} {
 		for _, lang := range []string{"en", "ru", "uk"} {
 			if !trKeyDefined(html, lang, key) {
@@ -864,6 +883,8 @@ func TestSpaKeitaroCron(t *testing.T) {
 		"cron.ktsync.title", "cron.ktsync.hint", "cron.ktsync.off", "cron.ktsync.needkt",
 		"cron.ktsync.needimport", "cron.ktsync.noconv", "cron.ktsync.cursor.clicks", "cron.ktsync.cursor.convs",
 		"cron.ktsync.lag", "cron.ktsync.last", "kt.sync.requested", "kt.sync.busy",
+		"cron.ktsync.newcamps", "cron.ktsync.camps.pending", "cron.ktsync.camps.deleted",
+		"cron.ktsync.camps.failed", "cron.ktsync.camps.paused",
 	} {
 		for _, lang := range []string{"en", "ru", "uk"} {
 			if !trKeyDefined(html, lang, key) {
@@ -872,6 +893,8 @@ func TestSpaKeitaroCron(t *testing.T) {
 		}
 	}
 	must(t, html, "keitaro_sync:['cron.ktsync.title','cron.ktsync.hint']", "JOBINFO keitaro_sync")
+	must(t, html, "'cron.ktsync.hint':'Догружает клики, конверсии и новые кампании", "ru hint names new campaigns")
+	must(t, spaFunctionLine(html, "paintCronStatus"), "keitaroSyncCampaignsText(st)", "last run shows new campaigns")
 	must(t, spaFunctionLine(html, "cronJobDisabled"), "job==='keitaro_sync'", "keitaro toggle guard")
 	must(t, spaFunctionLine(html, "cronJobDisabled"), "job==='conversions'", "conversions toggle guard")
 	must(t, spaFunctionLine(html, "cronFloor"), "CRONST.floors", "interval floor from API")
@@ -985,14 +1008,39 @@ func TestNetworkErrorMapping(t *testing.T) {
 	must(t, html, `'err.network':'Нет связи с сервером. Проверьте соединение и повторите.'`, "ru text")
 }
 
+// TestSpaBoardChromeIcon checks that the header section button shows the current section icon and tint.
+func TestSpaBoardChromeIcon(t *testing.T) {
+	html := spaSource()
+	chrome := spaFunctionLine(html, "paintBoardChrome")
+	must(t, chrome, "boardRowById()", "current section row")
+	must(t, chrome, "boardRowIcon(row)", "icon with the board fallback from the section list")
+	must(t, chrome, "boardIconTone(row||{id:boardEffectiveId()})", "tint matches the section menu, default section stays green")
+	must(t, chrome, "glyph.outerHTML=face", "header glyph is replaced in place")
+	must(t, chrome, "b.hidden=!boardChromeVisible(BOARDS)", "button shows only with a section besides the default one")
+	must(t, html, "[hidden]{display:none!important}", "a hidden button leaves no gap in the header")
+	for _, fn := range []string{"boardsPage", "deleteBoardRow", "patchBoard", "paintChrome"} {
+		must(t, spaFunctionLine(html, fn), "paintBoardChrome()", fn+" repaints the button visibility")
+	}
+	must(t, spaFunctionLine(html, "deleteBoardRow"), "boardSaveId(''); resetBoardCaches();", "deleting the open section returns the tab to the default one")
+	must(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "go('settings/boards')", "the first section is created from the profile menu")
+	must(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "if(!multi&&!admin) return;", "admins keep the sections entry with only the default section")
+	must(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "const multi=boardChromeVisible(BOARDS);", "profile menu lists sections under the header button rule")
+	must(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "if(multi) items.push(...boardSwitchRows());", "section rows only when there is something to switch to")
+	mustNot(t, chrome, "iconToneClass(", "no separate tint rule on the header button")
+	must(t, spaFunctionLine(html, "boardName"), "boardRowById(s)", "name and icon read the same row")
+	must(t, spaFunctionLine(html, "switchBoard"), "paintBoardChrome()", "switch repaints the header")
+	must(t, spaFunctionLine(html, "patchBoard"), "paintBoardChrome()", "icon edit repaints the header")
+	must(t, html, ".ic.tone-clicks{color:var(--chart-clicks)}", "tints use theme variables")
+}
+
 // TestSpaBoardPanel checks the section switcher: API header, sessionStorage, cache reset and UI hooks.
 func TestSpaBoardPanel(t *testing.T) {
 	html := spaSource()
-	must(t, html, "const BOARD_KEY='kuztds_board'", "sessionStorage key")
+	must(t, html, "const BOARD_KEY='emtds_board'", "sessionStorage key")
 	must(t, html, `id="board"`, "header section button")
-	must(t, spaFunctionLine(html, "call"), "boardApplyHeaders(o.headers, path, opts.board)", "call sends X-Kuztds-Board")
-	must(t, spaFunctionLine(html, "callRaw"), "boardApplyHeaders(o.headers, path, opts.board)", "callRaw sends X-Kuztds-Board")
-	must(t, spaFunctionLine(html, "boardApplyHeaders"), "headers['X-Kuztds-Board']", "header name")
+	must(t, spaFunctionLine(html, "call"), "boardApplyHeaders(o.headers, path, opts.board)", "call sends X-Emtds-Board")
+	must(t, spaFunctionLine(html, "callRaw"), "boardApplyHeaders(o.headers, path, opts.board)", "callRaw sends X-Emtds-Board")
+	must(t, spaFunctionLine(html, "boardApplyHeaders"), "headers['X-Emtds-Board']", "header name")
 	must(t, spaFunctionLine(html, "boardApplyHeaders"), "path==='/api/login'", "login is excluded")
 	must(t, spaFunctionLine(html, "boardSwitchRows"), "boardIconTone(row)", "section row uses the saved tint")
 	must(t, spaFunctionLine(html, "boardIconTone"), "return 'ok'", "default section without a tint stays green")
@@ -1002,7 +1050,7 @@ func TestSpaBoardPanel(t *testing.T) {
 	must(t, spaFunctionLine(html, "openBoardIconColorPop"), "board-icon-colors", "tint popup shows the ten colors")
 	must(t, html, "if(BOARD_ICON_COLOR_POP){ closeBoardIconColorPop(); return; }", "escape closes the tint popup first")
 	must(t, spaFunctionLine(html, "iconRecentPush"), "ICON_RECENT_KEY", "recent icons are a shared browser list")
-	must(t, html, "const ICON_RECENT_KEY='kuztds_icon_recent'", "recent list storage key")
+	must(t, html, "const ICON_RECENT_KEY='emtds_icon_recent'", "recent list storage key")
 	must(t, html, "const ICON_COLORS=['clicks','uniq','conv','rev','profit','cost','bots','roi','cr','warn']", "ten icon tints")
 	must(t, html, ".menu svg.ic.ok{color:var(--ok)", "green icon in the menu")
 	must(t, spaFunctionLine(html, "boardName"), "tr('board.main')", "main section label")
@@ -1176,26 +1224,162 @@ func TestSpaBoardInclude(t *testing.T) {
 	must(t, branch, "prev.id!==g.id", "a changed id deletes the previous row")
 }
 
-// TestSpaIconKeysAreAllowed checks the picker lists at least 200 icons and the API accepts each key.
+// TestSpaIconKeysAreAllowed keeps the interface icon set (IC) and the board icon subset apart: the
+// board icon picker (boardIconKeys) offers exactly the keys the API accepts, every board icon has a
+// drawing in IC, and the interface-only icons (IC_UI_ONLY) are drawn by the SPA but refused for a board.
 func TestSpaIconKeysAreAllowed(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the board icon checks")
+	}
 	html := spaSource()
-	i := strings.Index(html, "const IC={")
-	j := strings.Index(html, "\nconst icon=")
-	if i < 0 || j < i {
-		t.Fatal("IC block missing")
+	ic := spaBetween(html, "const IC={", "\n};")
+	ui := spaBetween(html, "const IC_UI_ONLY=", "\n")
+	pick := spaBetween(html, "function boardIconKeys(", "\n}\n")
+	if ic == "" || ui == "" || pick == "" {
+		t.Fatal("IC, IC_UI_ONLY or boardIconKeys missing in the SPA")
 	}
-	re := regexp.MustCompile(`(?m)^\s*(?:'([^']+)'|([A-Za-z][A-Za-z0-9]*)):`)
-	ms := re.FindAllStringSubmatch(html[i:j], -1)
-	if len(ms) < 200 {
-		t.Fatalf("picker icons = %d; want at least 200", len(ms))
+	src := ic + "\n};\n" + ui + "\n" + pick + "\n}\n" +
+		"console.log(JSON.stringify({ic:Object.keys(IC), ui:[...IC_UI_ONLY], board:boardIconKeys()}));\n"
+	f := filepath.Join(t.TempDir(), "icons.js")
+	if err := os.WriteFile(f, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	for _, m := range ms {
-		k := m[1]
-		if k == "" {
-			k = m[2]
+	out, err := exec.Command(node, f).CombinedOutput()
+	if err != nil {
+		t.Fatalf("icon script: %v\n%s", err, out)
+	}
+	var got struct{ IC, UI, Board []string }
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("icon script output: %v\n%s", err, out)
+	}
+	if len(got.IC) < 200 {
+		t.Fatalf("interface icons = %d; want at least 200", len(got.IC))
+	}
+	inIC := make(map[string]bool, len(got.IC))
+	for _, k := range got.IC {
+		inIC[k] = true
+	}
+	if len(got.UI) == 0 {
+		t.Fatal("IC_UI_ONLY is empty")
+	}
+	for _, k := range got.UI {
+		if !inIC[k] {
+			t.Errorf("interface-only icon %s has no drawing in IC", k)
 		}
-		if err := config.ValidateBoardIcon(k); err != nil {
-			t.Fatalf("icon %s: %v", k, err)
+		if config.ValidateBoardIcon(k) == nil {
+			t.Errorf("interface-only icon %s is accepted for a board", k)
 		}
 	}
+	allowed := config.BoardIconKeys()
+	for _, k := range allowed {
+		if !inIC[k] {
+			t.Errorf("board icon %s has no drawing in IC", k)
+		}
+	}
+	if strings.Join(got.Board, ",") != strings.Join(allowed, ",") {
+		t.Errorf("board icon picker offers %d icons, the API accepts %d; the sets must match", len(got.Board), len(allowed))
+		for _, k := range got.Board {
+			if config.ValidateBoardIcon(k) != nil {
+				t.Errorf("picker offers %s, the API refuses it", k)
+			}
+		}
+	}
+}
+
+// TestSpaKeywordStatsUI checks the keyword statistics tab: its dictionary keys exist in all three
+// languages, the keyword reaches the markup only through esc, the routes and the saved view key
+// are wired, no foreign columns appear, and csvTable runs every cell through csvSafe.
+func TestSpaKeywordStatsUI(t *testing.T) {
+	html := spaSource()
+	keys := []string{
+		"keys.hint", "kws.tab.stats", "kws.tab.lists", "kws.search", "kws.col.keyword", "kws.col.hits", "kws.col.uniq",
+		"kws.col.conv", "kws.col.leads", "kws.col.sales", "kws.col.rej", "kws.col.cr", "kws.col.trend", "kws.nokey",
+		"kws.cut", "kws.err.heavy", "kws.err.busy", "kws.err.range", "kws.hint",
+		"kws.by.last", "kws.by.origin", "kws.hint.origin",
+	}
+	for _, k := range keys {
+		if n := strings.Count(html, "'"+k+"':"); n != 3 {
+			t.Errorf("dictionary key %q is defined %d time(s), want one per language", k, n)
+		}
+	}
+	hints := regexp.MustCompile(`'kws\.hint':'([^']*)'`).FindAllStringSubmatch(html, -1)
+	if len(hints) != 3 {
+		t.Fatalf("kws.hint is defined %d times, want 3", len(hints))
+	}
+	for _, h := range hints {
+		for _, alias := range []string{"keyword=", "q=", "utm_term="} {
+			if !strings.Contains(h[1], alias) {
+				t.Errorf("kws.hint %q does not name %s", h[1], alias)
+			}
+		}
+	}
+
+	block := spaBetween(html, "let KWS={campaign:''", "async function keywordLists(")
+	must(t, block, "'/api/keywords/stats?'", "the tab reads the statistics route")
+	must(t, block, "'/api/keywords/trend?'", "the tab reads the trend route")
+	must(t, spaFunctionLine(html, "kwsQS"), "qs.set('by','origin')", "origin attribution reaches both keyword requests")
+	must(t, block, "hiddenFields(ME).has('origin_campaign_id')", "the origin switch follows field access")
+	must(t, block, "data-kws-by", "the page draws the attribution switch")
+	must(t, spaFunctionLine(html, "kwsPruneConds"), "KWS_ORIGIN_FIELDS.has(c.f)", "origin mode drops filters the API refuses")
+	must(t, block, "kwsMode()==='origin'?KWS_ORIGIN_FIELDS:null", "the origin filter picker offers only supported fields")
+	must(t, spaFunctionLine(html, "syncKwsModeUI"), "classList.toggle('on',on)", "the attribution switch updates its active class")
+	must(t, spaFunctionLine(html, "syncKwsModeUI"), "setAttribute('aria-pressed'", "the attribution switch updates accessibility state")
+	must(t, block, "KWS.by=b.dataset.kwsBy==='origin'?'origin':''; syncKwsModeUI(); reload()", "clicking attribution updates the switch before reload")
+	must(t, block, "q('#kws-q').value='';\n    syncKwsModeUI();", "reset updates the attribution switch")
+	must(t, block, "filterBuilder('events', KWS.conds", "the filter builder edits KWS.conds")
+	must(t, block, "applySort(", "the table sorts through applySort")
+	must(t, block, "bindSort(", "the table binds the shared sort")
+	must(t, block, "csvTable(", "the export goes through csvTable")
+	must(t, block, "downloadHTML(", "the HTML export goes through downloadHTML")
+	must(t, block, "const my=++KWS_GEN", "a late answer is dropped by the generation counter")
+	must(t, block, "my!==KWS_GEN", "a late answer is checked against the counter")
+	must(t, block, "hiddenCols(ME)", "columns hidden by the role are not drawn")
+	must(t, block, "'kws.nokey'", "the empty keyword has a caption")
+	for _, raw := range []string{"${r.keyword}", "${x.keyword}", "${row.keyword}", "${s.keyword}"} {
+		mustNot(t, block, raw, "a keyword must not enter markup unescaped: "+raw)
+	}
+	mustNot(t, block, "innerHTML=r.keyword", "no raw keyword in innerHTML")
+	must(t, spaFunctionLine(html, "kwsKeyCell"), "esc(r.keyword)", "the keyword cell escapes the key")
+	for _, foreign := range []string{"'roi'", "'uepc'", "'spend'", "'cost'", "'epc'"} {
+		mustNot(t, spaBetween(html, "const KWS_COLS=", "\n"), foreign, "the statistics table has no foreign column "+foreign)
+	}
+	mustNot(t, block, "href=\"#/flows/", "a keyword row links nowhere")
+
+	must(t, html, "'keyword_stats'];", "keyword_stats is a sort page of the saved views")
+	must(t, spaFunctionLine(html, "defaultPageViewState"), "keyword_stats:{campaign:'', by:'', conds:[]}", "the default view holds keyword_stats")
+	must(t, spaFunctionLine(html, "pageViewFromGlobals"), "keyword_stats:{sort:sort(KWS_SORT)", "the snapshot holds keyword_stats")
+	must(t, spaFunctionLine(html, "collectPageViews"), "out.keyword_stats.campaign", "collect keeps the campaign of keyword_stats")
+	must(t, spaFunctionLine(html, "collectPageViews"), "out.keyword_stats.by", "collect keeps keyword attribution")
+	must(t, spaFunctionLine(html, "applyPageViews"), "out.keyword_stats.conds", "apply reads the conditions of keyword_stats")
+	must(t, spaFunctionLine(html, "pageViewFromGlobals"), "keywords:{sort:sort(KEY_SORT)}", "the API key sort keeps its own page key")
+
+	must(t, spaBetween(html, "const KWS_COLS=", "\n"), "['revenue','col.revenue']", "the revenue column has its own id, so a hidden cost does not remove it")
+	mustNot(t, spaBetween(html, "const KWS_COLS=", "\n"), "['profit',", "no statistics column is called profit")
+	must(t, block, "hiddenFields(ME).has('campaign_id')", "a role without campaign_id gets no campaign choice")
+	must(t, block, "const camps=noCamp?''", "the campaign select is not drawn without campaign_id")
+	must(t, block, "if(campSel) campSel.onchange", "the campaign handlers tolerate a missing select")
+	must(t, spaFunctionLine(html, "kwsCampaign"), "hiddenFields(ME).has('campaign_id')?''", "the query ignores the saved campaign without campaign_id")
+	must(t, block, "kwsPruneConds();", "the page entry prunes the hidden conditions before the chips are drawn")
+	must(t, spaFunctionLine(html, "kwsQS"), "kwsCampaign()", "the query takes the campaign from kwsCampaign")
+	must(t, spaFunctionLine(html, "applyPageViewSnapshot"), "KWS_SORT.k==='profit'", "a saved profit sort moves to revenue")
+	must(t, block, "KWS_SORT.k=''", "a saved sort on a hidden column falls back to the server order")
+	must(t, block, "new AbortController()", "a new statistics request cancels the previous one")
+	must(t, block, "e.name==='AbortError'", "a cancelled request shows no error")
+	must(t, spaFunctionLine(html, "render"), "kwsAbort()", "leaving the page cancels the requests")
+	must(t, spaFunctionLine(html, "call"), "o.signal=opts.signal", "call passes the abort signal on")
+	must(t, block, "tr('kws.prev')", "the pager has neutral back labels")
+	must(t, block, "tr('kws.next')", "the pager has neutral forward labels")
+	mustNot(t, block, "tr('Newer')", "the keyword pager does not say Newer")
+	mustNot(t, block, "tr('Older')", "the keyword pager does not say Older")
+	mustNot(t, html, "tr('from ?q=')", "the lists tab no longer names only ?q=")
+	mustNot(t, html, "'Collect keywords (?q=)'", "the collect switch no longer names only ?q=")
+	must(t, spaFunctionLine(html, "exportPerf"), "csvTable(", "the performance CSV goes through csvTable")
+	mustNot(t, spaFunctionLine(html, "exportPerf"), "join(',')", "the performance CSV is not joined by hand")
+	must(t, spaFunctionLine(html, "csvTable"), "csvSafe(v)", "csvTable makes every cell formula-safe")
+	must(t, spaFunctionLine(html, "csvSafe"), `/^[=+\-@\t\r]/`, "csvSafe covers = + - @ tab and carriage return like the server")
+	if doc := routeDocs["GET /api/keywords/stats"]; doc.RU.Summary == "" || doc.Response == nil {
+		t.Error("the API docs page has no Russian text or response sample for the keyword statistics")
+	}
+	must(t, spaFunctionLine(html, "keywords"), "arg==='lists'", "the lists tab lives at #/keywords/lists")
 }

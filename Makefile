@@ -1,10 +1,14 @@
-.PHONY: build run test bench lint vuln infra-up infra-down tidy
+.PHONY: build run test bench lint vuln infra-up infra-down tidy mcp
 
 build:
-	go build -o bin/kuztds-engine ./cmd/engine
-	go build -o bin/kuztds-admin  ./cmd/admin
-	go build -o bin/kuztds-cron   ./cmd/cron
-	go build -o bin/kuztds-apiclient ./cmd/apiclient
+	go build -o bin/emtds-engine ./cmd/engine
+	go build -o bin/emtds-admin  ./cmd/admin
+	go build -o bin/emtds-cron   ./cmd/cron
+	go build -o bin/emtds-apiclient ./cmd/apiclient
+
+# MCP server binaries for linux, windows and darwin (amd64, arm64) into dist/mcp
+mcp:
+	docker build --target mcp-out --output type=local,dest=dist/mcp .
 
 run:
 	go run ./cmd/engine

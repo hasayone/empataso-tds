@@ -8,12 +8,16 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
+// postbackLogMaxLimit is the most rows one GET /api/postback-log answers.
+const postbackLogMaxLimit = 1000
+
 // handlePostbackLog writes the raw postback intake log.
-// r supplies from, to and limit. Missing stats yields an empty list with 200.
+// r supplies from, to and limit; limit defaults to 200 and is capped at
+// postbackLogMaxLimit. Missing stats yields an empty list with 200.
 // A query failure is 500.
 func (s *Server) handlePostbackLog(w http.ResponseWriter, r *http.Request) {
 	v := s.viewerFrom(r.Context())
@@ -26,9 +30,10 @@ func (s *Server) handlePostbackLog(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	from, to := parseRange(r)
-	rows, err := s.cfg.Stats.PostbackLog(r.Context(), from, to, atoiDef(r.URL.Query().Get("limit"), 200))
+	limit := min(atoiDef(r.URL.Query().Get("limit"), 200), postbackLogMaxLimit)
+	rows, err := s.cfg.Stats.PostbackLog(r.Context(), from, to, limit)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "postback log error")
+		writeStatsErr(w, err, "postback log error")
 		return
 	}
 	writeJSON(w, http.StatusOK, rows)
@@ -73,7 +78,7 @@ func (s *Server) handlePostbacks(w http.ResponseWriter, r *http.Request) {
 	pq.Offset = max(atoiDef(q.Get("offset"), 0), 0)
 	rows, tot, err := s.cfg.Stats.QueryPostbacks(r.Context(), pq)
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "postbacks error")
+		writeStatsErr(w, err, "postbacks error")
 		return
 	}
 	if rows == nil {
@@ -112,7 +117,7 @@ func (s *Server) handlePostbacksExport(w http.ResponseWriter, r *http.Request) {
 		return cw.Write(pickColumns(postbackExportRecord(p), keep))
 	})
 	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "postbacks error")
+		writeStatsErr(w, err, "postbacks error")
 		return
 	}
 	cw.Flush()
@@ -128,7 +133,7 @@ func postbackExportHeader() []string {
 		h = append(h, fmt.Sprintf("sub_id_%d", i))
 	}
 	return append(h,
-		"campaign_id", "origin_campaign", "origin_campaign_id", "click_ts", "original_status", "prev_status", "tid",
+		"campaign_id", "origin_campaign", "origin_campaign_id", "root_cid", "origin_stream", "origin_keyword", "click_ts", "original_status", "prev_status", "tid",
 		"ip", "region", "lang", "os", "os_version", "browser", "browser_ver", "brand",
 		"useragent", "referer", "se", "keyword", "asn", "org",
 		"site", "ad_campaign_id", "creative_id", "external_id", "xrw", "device_model", "depsum",
@@ -153,7 +158,7 @@ func postbackExportRecord(p store.PostbackRow) []string {
 		clickTS = p.ClickTS.Format(time.RFC3339)
 	}
 	rec = append(rec,
-		p.CampaignID, p.OriginCampaign, p.OriginCampaignID, clickTS, p.OriginalStatus, p.PrevStatus, p.TID,
+		p.CampaignID, p.OriginCampaign, p.OriginCampaignID, p.RootCID, p.OriginStream, p.OriginKeyword, clickTS, p.OriginalStatus, p.PrevStatus, p.TID,
 		p.IP, p.Region, p.Lang, p.OS, p.OSVersion, p.Browser, p.BrowserVer, p.Brand,
 		p.UserAgent, p.Referer, p.SE, p.Keyword,
 		strconv.FormatUint(uint64(p.ASN), 10), p.Org,

@@ -4,8 +4,9 @@ package ktimport
 //
 // offers и landings — URL по id Keitaro. groups — папки по id группы.
 // aliases — id кампании → id группы. seen — уже выданные id групп.
-// swaps — placeholder текущей кампании → маска kuztds. lists и pages — файлы этого прогона.
+// swaps — placeholder текущей кампании → маска emtds. lists и pages — файлы этого прогона.
 // losses — отчёт текущей кампании, пока собираются её потоки.
+// only — id кампании Keitaro, которую надо перенести, или 0 для всех.
 type mapCtx struct {
 	offers   map[int]Offer
 	landings map[int]Landing
@@ -16,4 +17,5 @@ type mapCtx struct {
 	lists    *listBag
 	pages    *pageBag
 	losses   *[]Loss
+	only     int
 }

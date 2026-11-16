@@ -3,7 +3,7 @@ package router
 import (
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 func subRules(m map[string]config.SubIDFilter) config.Rules {

@@ -9,11 +9,10 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
-	"os"
 	"strings"
 )
 
-// Admin пишет группы только в локальную kuztds.
+// Admin пишет группы только в локальную emtds.
 type Admin struct {
 	Base string
 	User string
@@ -54,7 +53,7 @@ func (a *Admin) Apply(ctx context.Context, incoming Result) (Result, []Loss, err
 //
 // Параметры: ctx — отмена; incoming — каталоги маппера.
 // Результат: nil, если каждая запись принята.
-// Ошибки: чтение списка или отказ POST/PUT. Пути — CRUD админки kuztds.
+// Ошибки: чтение списка или отказ POST/PUT. Пути — CRUD админки emtds.
 func (a *Admin) writeCatalogs(ctx context.Context, incoming Result) error {
 	m := incoming.Manifest
 	if err := applyCatalog(a, ctx, "/api/affiliate-networks", incoming.Networks, func(v CatNetwork) string { return v.ID }, m.Imported(KindNetworks)); err != nil {
@@ -122,17 +121,17 @@ func getCatalog[T any](a *Admin, ctx context.Context, path string) ([]T, error) 
 	defer res.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(res.Body, MaxBody+1))
 	if err != nil {
-		return nil, fmt.Errorf("kuztds: чтение %s", path)
+		return nil, fmt.Errorf("emtds: чтение %s", path)
 	}
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("kuztds: GET %s вернул %d", path, res.StatusCode)
+		return nil, fmt.Errorf("emtds: GET %s вернул %d", path, res.StatusCode)
 	}
 	if len(bytes.TrimSpace(raw)) == 0 || string(bytes.TrimSpace(raw)) == "null" {
 		return []T{}, nil
 	}
 	var list []T
 	if err := json.Unmarshal(raw, &list); err != nil {
-		return nil, fmt.Errorf("kuztds: %s не JSON", path)
+		return nil, fmt.Errorf("emtds: %s не JSON", path)
 	}
 	if list == nil {
 		list = []T{}
@@ -148,7 +147,7 @@ func getCatalog[T any](a *Admin, ctx context.Context, path string) ([]T, error) 
 func (a *Admin) writeItem(ctx context.Context, method, path string, item any) error {
 	body, err := json.Marshal(item)
 	if err != nil {
-		return fmt.Errorf("kuztds: тело не собрано")
+		return fmt.Errorf("emtds: тело не собрано")
 	}
 	res, err := a.do(ctx, method, path, body, a.csrf())
 	if err != nil {
@@ -157,7 +156,7 @@ func (a *Admin) writeItem(ctx context.Context, method, path string, item any) er
 	defer res.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusCreated {
-		return fmt.Errorf("kuztds: %s %s вернул %d", method, path, res.StatusCode)
+		return fmt.Errorf("emtds: %s %s вернул %d", method, path, res.StatusCode)
 	}
 	return nil
 }
@@ -169,7 +168,7 @@ func (a *Admin) writeItem(ctx context.Context, method, path string, item any) er
 // Ошибки: пустой пароль, сеть, статус не 200.
 func (a *Admin) login(ctx context.Context) error {
 	if strings.TrimSpace(a.Pass) == "" {
-		return fmt.Errorf("kuztds: пустой пароль админки")
+		return fmt.Errorf("emtds: пустой пароль админки")
 	}
 	body, _ := json.Marshal(map[string]string{"login": a.User, "password": a.Pass})
 	res, err := a.do(ctx, http.MethodPost, "/api/login", body, "")
@@ -178,7 +177,7 @@ func (a *Admin) login(ctx context.Context) error {
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("kuztds: логин вернул %d", res.StatusCode)
+		return fmt.Errorf("emtds: логин вернул %d", res.StatusCode)
 	}
 	return nil
 }
@@ -195,11 +194,11 @@ func (a *Admin) getGroups(ctx context.Context) ([]Group, error) {
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("kuztds: GET /api/groups вернул %d", res.StatusCode)
+		return nil, fmt.Errorf("emtds: GET /api/groups вернул %d", res.StatusCode)
 	}
 	var groups []Group
 	if err := json.NewDecoder(res.Body).Decode(&groups); err != nil {
-		return nil, fmt.Errorf("kuztds: группы не JSON")
+		return nil, fmt.Errorf("emtds: группы не JSON")
 	}
 	if groups == nil {
 		groups = []Group{}
@@ -223,7 +222,7 @@ func (a *Admin) putGroups(ctx context.Context, groups []Group) error {
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("kuztds: PUT /api/groups вернул %d", res.StatusCode)
+		return fmt.Errorf("emtds: PUT /api/groups вернул %d", res.StatusCode)
 	}
 	return nil
 }
@@ -241,7 +240,7 @@ func (a *Admin) PutList(ctx context.Context, name, content string) error {
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return fmt.Errorf("kuztds: PUT /api/lists/%s вернул %d", name, res.StatusCode)
+		return fmt.Errorf("emtds: PUT /api/lists/%s вернул %d", name, res.StatusCode)
 	}
 	return nil
 }
@@ -274,7 +273,7 @@ func (a *Admin) Simulate(ctx context.Context, groups []Group, groupID, country s
 	defer res.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(res.Body, 1<<20))
 	if res.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("kuztds: simulate вернул %d", res.StatusCode)
+		return "", "", fmt.Errorf("emtds: simulate вернул %d", res.StatusCode)
 	}
 	var parsed struct {
 		Path []struct {
@@ -283,7 +282,7 @@ func (a *Admin) Simulate(ctx context.Context, groups []Group, groupID, country s
 		} `json:"path"`
 	}
 	if err := json.Unmarshal(raw, &parsed); err != nil || len(parsed.Path) == 0 {
-		return "", "", fmt.Errorf("kuztds: simulate без path")
+		return "", "", fmt.Errorf("emtds: simulate без path")
 	}
 	last := parsed.Path[len(parsed.Path)-1]
 	return last.Selected, last.Out, nil
@@ -305,7 +304,7 @@ func (a *Admin) csrf() string {
 // Ошибки: клиент не задан или сеть.
 func (a *Admin) do(ctx context.Context, method, path string, body []byte, csrf string) (*http.Response, error) {
 	if a.HTTP == nil {
-		return nil, fmt.Errorf("kuztds: HTTP-клиент не задан")
+		return nil, fmt.Errorf("emtds: HTTP-клиент не задан")
 	}
 	var r io.Reader
 	if body != nil {
@@ -313,7 +312,7 @@ func (a *Admin) do(ctx context.Context, method, path string, body []byte, csrf s
 	}
 	req, err := http.NewRequestWithContext(ctx, method, strings.TrimRight(a.Base, "/")+path, r)
 	if err != nil {
-		return nil, fmt.Errorf("kuztds: запрос не собран")
+		return nil, fmt.Errorf("emtds: запрос не собран")
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
@@ -323,7 +322,7 @@ func (a *Admin) do(ctx context.Context, method, path string, body []byte, csrf s
 	}
 	res, err := a.HTTP.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("kuztds: %s %s не выполнен", method, path)
+		return nil, fmt.Errorf("emtds: %s %s не выполнен", method, path)
 	}
 	if path == "/api/login" && res.StatusCode == http.StatusOK {
 		var box struct {
@@ -376,15 +375,15 @@ func NewAdmin(base, user, pass string) *Admin {
 // Результат: клиент локальной админки.
 // Ошибки: пустой пароль.
 func AdminFromEnv() (*Admin, error) {
-	pass := os.Getenv("KUZTDS_ADMIN_PASSWORD")
+	pass := Env("EMTDS_ADMIN_PASSWORD")
 	if strings.TrimSpace(pass) == "" {
-		return nil, fmt.Errorf("kuztds: пустой KUZTDS_ADMIN_PASSWORD")
+		return nil, fmt.Errorf("emtds: пустой EMTDS_ADMIN_PASSWORD")
 	}
-	base := os.Getenv("KUZTDS_ADMIN_URL")
+	base := Env("EMTDS_ADMIN_URL")
 	if base == "" {
 		base = "http://127.0.0.1:8090"
 	}
-	user := os.Getenv("KUZTDS_ADMIN_USER")
+	user := Env("EMTDS_ADMIN_USER")
 	if user == "" {
 		user = "admin"
 	}

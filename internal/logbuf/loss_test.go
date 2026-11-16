@@ -248,6 +248,9 @@ func TestBuffer_CloseWaitsForTheWriter(t *testing.T) {
 	for i := 0; i < n; i++ {
 		b.Push(Event{Stream: "s"})
 	}
+	// Run must hold all of them before the stop: a stop that races the reads
+	// leaves part of the input to Close and splits the batch.
+	waitFor(t, func() bool { return b.Stats().InputLen == 0 })
 	cancel()
 	select {
 	case <-done:

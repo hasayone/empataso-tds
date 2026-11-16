@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 type boardPickBody struct {
@@ -186,6 +186,10 @@ func boardTransferCreateAccess(v viewer, body boardPickBody) string {
 	return ""
 }
 
+// runBoardImport copies the picked records from board from onto board to.
+// ctx bounds the catalog reads. v is the caller. owner is written on a copy that has none.
+// The source records stay. Each copy gets a new id. Checker-managed postback templates are skipped.
+// It returns the copy map, an HTTP status and a client message. A zero status means success.
 func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, body boardPickBody, owner string) (boardImportResponse, int, string) {
 	var out boardImportResponse
 	out.Map = boardIDMaps{
@@ -232,6 +236,7 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			}
 			if targetNetworkIDs[n.ID] {
 				dropped = append(dropped, boardDropped{Kind: resNetworks, ID: n.ID, Reason: "already exists"})
+				next = append(next, n)
 				continue
 			}
 			copyN, err := cloneJSON(n)
@@ -250,7 +255,7 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			prepNetwork(&copyN)
 			out.Map.Networks[n.ID] = newID
 			out.Copied.Networks++
-			next = append(next, copyN)
+			next = append(next, n, copyN)
 			targetNetworkIDs[newID] = true
 		}
 		if err := s.cfg.Networks.Save(ctx, next); err != nil {
@@ -274,6 +279,7 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			}
 			if targetSourceIDs[src.ID] {
 				dropped = append(dropped, boardDropped{Kind: resSources, ID: src.ID, Reason: "already exists"})
+				next = append(next, src)
 				continue
 			}
 			copyS, err := cloneJSON(src)
@@ -292,7 +298,7 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			prepSource(&copyS)
 			out.Map.Sources[src.ID] = newID
 			out.Copied.Sources++
-			next = append(next, copyS)
+			next = append(next, src, copyS)
 			targetSourceIDs[newID] = true
 		}
 		if err := s.cfg.Sources.Save(ctx, next); err != nil {
@@ -316,6 +322,7 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			}
 			if targetOfferIDs[o.ID] {
 				dropped = append(dropped, boardDropped{Kind: resOffers, ID: o.ID, Reason: "already exists"})
+				next = append(next, o)
 				continue
 			}
 			copyO, err := cloneJSON(o)
@@ -337,7 +344,7 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			prepOffer(&copyO)
 			out.Map.Offers[o.ID] = newID
 			out.Copied.Offers++
-			next = append(next, copyO)
+			next = append(next, o, copyO)
 			targetOfferIDs[newID] = true
 		}
 		if err := s.cfg.Offers.Save(ctx, next); err != nil {
@@ -361,6 +368,7 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			}
 			if targetLandingIDs[l.ID] {
 				dropped = append(dropped, boardDropped{Kind: resLandings, ID: l.ID, Reason: "already exists"})
+				next = append(next, l)
 				continue
 			}
 			copyL, err := cloneJSON(l)
@@ -382,7 +390,7 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			}
 			out.Map.Landings[l.ID] = newID
 			out.Copied.Landings++
-			next = append(next, copyL)
+			next = append(next, l, copyL)
 			targetLandingIDs[newID] = true
 		}
 		if err := s.cfg.Landings.Save(ctx, next); err != nil {
@@ -398,12 +406,13 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 		usedIDs := s2sIDSet(list)
 		var next []config.OutboundPostback
 		for _, p := range list {
-			if !config.SameBoard(p.BoardID, from) || !wantS2S[p.ID] {
+			if !config.SameBoard(p.BoardID, from) || !wantS2S[p.ID] || isCheckerManagedID(p.ID) {
 				next = append(next, p)
 				continue
 			}
 			if targetS2SIDs[p.ID] {
 				dropped = append(dropped, boardDropped{Kind: "s2s", ID: p.ID, Reason: "already exists"})
+				next = append(next, p)
 				continue
 			}
 			copyP, err := cloneJSON(p)
@@ -415,7 +424,7 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			usedIDs[copyP.ID] = struct{}{}
 			out.Map.S2S[p.ID] = copyP.ID
 			out.Copied.S2S++
-			next = append(next, copyP)
+			next = append(next, p, copyP)
 		}
 		if err := s.cfg.S2S.Save(ctx, next); err != nil {
 			return out, http.StatusInternalServerError, "save error"
@@ -590,7 +599,7 @@ func (s *Server) runBoardMove(ctx context.Context, v viewer, from, to string, bo
 		}
 		for i := range list {
 			p := &list[i]
-			if !config.SameBoard(p.BoardID, from) || !wantS2S[p.ID] {
+			if !config.SameBoard(p.BoardID, from) || !wantS2S[p.ID] || isCheckerManagedID(p.ID) {
 				continue
 			}
 			p.BoardID = to

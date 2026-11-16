@@ -65,8 +65,11 @@ func (s *Set) Load(names ...string) {
 	}
 }
 
-// Get returns the current index of a list (nil-safe: empty for an unknown name).
+// Get returns the current index of a list: empty for an unknown name and for a nil Set.
 func (s *Set) Get(name string) *Index {
+	if s == nil {
+		return &Index{}
+	}
 	s.mu.RLock()
 	h := s.holders[name]
 	s.mu.RUnlock()
@@ -76,14 +79,33 @@ func (s *Set) Get(name string) *Index {
 	return h.Load()
 }
 
-// Lookup — look up an ip in the named list.
+// Lookup looks up an ip in the named list. A nil Set or an unknown list gives "", false.
 func (s *Set) Lookup(name string, ip netip.Addr) (label string, ok bool) {
 	return s.Get(name).Lookup(ip)
 }
 
+// Len returns the number of ranges in the named list, or 0 for a list that is
+// not loaded or is empty; a nil Set gives 0. It does not allocate and is safe
+// for concurrent use.
+func (s *Set) Len(name string) int {
+	if s == nil {
+		return 0
+	}
+	s.mu.RLock()
+	h := s.holders[name]
+	s.mu.RUnlock()
+	if h == nil {
+		return 0
+	}
+	return h.Load().Len()
+}
+
 // Reload re-reads all lists whose file changed and atomically swaps the index.
-// Returns the names of the lists that were actually updated.
+// Returns the names of the lists that were actually updated; a nil Set has none.
 func (s *Set) Reload() (changed []string) {
+	if s == nil {
+		return nil
+	}
 	s.mu.RLock()
 	names := make([]string, 0, len(s.holders))
 	for name := range s.holders {

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // TestTakeLimitUnderConcurrency pins the race the LimitAllowed/RecordServe pair

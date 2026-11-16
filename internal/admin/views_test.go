@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 func viewsServer(t *testing.T, viewsPath string) (*httptest.Server, string) {
@@ -167,6 +167,66 @@ func TestViewsAutomationPageAccepted(t *testing.T) {
 	}
 	if !strings.Contains(string(got["automation"]), `"telegram"`) {
 		t.Fatalf("automation order lost: %s", got["automation"])
+	}
+}
+
+// TestViewsIntegrationsPageAccepted checks that the integrations the user added to the side list are kept on the account.
+// t is the test handle. It returns nothing and fails when the integrations page key is dropped.
+func TestViewsIntegrationsPageAccepted(t *testing.T) {
+	_, base := viewsServer(t, filepath.Join(t.TempDir(), "views.json"))
+	c, csrf := authedClient(t, base)
+
+	code, _ := viewsPut(t, c, base, csrf, map[string]any{
+		"integrations": map[string]any{"added": []string{"namecheap"}},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("PUT: %d", code)
+	}
+	code, got := viewsGet(t, c, base, csrf)
+	if code != http.StatusOK || !strings.Contains(string(got["integrations"]), `"namecheap"`) {
+		t.Fatalf("integrations page must be stored: %d %+v", code, got)
+	}
+}
+
+// TestViewsRatingAccepted checks that the rating window state is kept on the account,
+// so the active time, the closed flag and the score survive a new browser.
+// t is the test handle. It returns nothing and fails when the rating key is dropped.
+func TestViewsRatingAccepted(t *testing.T) {
+	_, base := viewsServer(t, filepath.Join(t.TempDir(), "views.json"))
+	c, csrf := authedClient(t, base)
+
+	code, _ := viewsPut(t, c, base, csrf, map[string]any{
+		"rating": map[string]any{"active": 3600000, "closed": true, "score": 5, "at": "2026-11-16T12:00:00Z"},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("PUT: %d", code)
+	}
+	code, got := viewsGet(t, c, base, csrf)
+	raw := string(got["rating"])
+	if code != http.StatusOK || !strings.Contains(raw, `"closed":true`) || !strings.Contains(raw, `"score":5`) || !strings.Contains(raw, `3600000`) {
+		t.Fatalf("rating must be stored: %d %+v", code, got)
+	}
+}
+
+// TestViewsKeywordStatsPageAccepted checks the keyword statistics view is stored on the account
+// next to the keywords key, which keeps the API-key table sort.
+func TestViewsKeywordStatsPageAccepted(t *testing.T) {
+	_, base := viewsServer(t, filepath.Join(t.TempDir(), "views.json"))
+	c, csrf := authedClient(t, base)
+
+	code, _ := viewsPut(t, c, base, csrf, map[string]any{
+		"keyword_stats": map[string]any{"sort": map[string]any{"k": "profit", "dir": -1}, "campaign": "c1"},
+		"keywords":      map[string]any{"sort": map[string]any{"k": "key", "dir": 1}},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("PUT: %d", code)
+	}
+	code, got := viewsGet(t, c, base, csrf)
+	if code != http.StatusOK || !strings.Contains(string(got["keyword_stats"]), `"profit"`) || !strings.Contains(string(got["keyword_stats"]), `"c1"`) {
+		t.Fatalf("keyword_stats page must be stored: %d %+v", code, got)
+	}
+	if !strings.Contains(string(got["keywords"]), `"key"`) {
+		t.Fatalf("keywords page lost: %+v", got)
 	}
 }
 

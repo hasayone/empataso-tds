@@ -5,13 +5,15 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 )
 
 // spaSource returns the embedded SPA with LF line endings for substring checks.
-func spaSource() string {
+// The text is built once per test binary, so every caller shares one string.
+var spaSource = sync.OnceValue(func() string {
 	return strings.ReplaceAll(string(indexHTML), "\r\n", "\n")
-}
+})
 
 // TestServeUIServesSPA — the embedded SPA is served at the root without auth,
 // with the correct Content-Type and a non-empty body.
@@ -69,7 +71,7 @@ func TestSPAStructure(t *testing.T) {
 	must(t, html, `data-theme-btn`, "theme toggle")
 	must(t, html, `:root[data-theme="dark"]`, "dark theme tokens")
 	must(t, html, `prefers-color-scheme: dark`, "system theme preference")
-	must(t, html, `localStorage.getItem('kuztds-theme')`, "remembered theme")
+	must(t, html, `localStorage.getItem('emtds-theme')`, "remembered theme")
 
 	// Dashboard: the performance table by flow and stream.
 	must(t, html, `/api/stats/performance`, "performance request")
@@ -78,7 +80,7 @@ func TestSPAStructure(t *testing.T) {
 	// Flows: table by default, cards on demand, then a canvas per flow.
 	must(t, html, `id="fgrid"`, "flow list")
 	must(t, html, `FLOW_VIEW='table'`, "flows table by default")
-	must(t, html, `kuztds-flows-view`, "remembered flows layout")
+	must(t, html, `emtds-flows-view`, "remembered flows layout")
 	must(t, html, `data-flow-view="grid"`, "cards layout switch")
 	must(t, html, `id="canvas"`, "flow canvas")
 	must(t, html, `id="wires"`, "wires layer")
@@ -239,6 +241,11 @@ func TestDashboardRecentClicks(t *testing.T) {
 	must(t, dash, "idLabel('landing_id'", "landing destination shows the catalog name")
 	must(t, dash, "NOOUT.has(red)", "types without an address show the type label")
 	must(t, dash, "ensureLandings()", "recent clicks load the landing catalog")
+	must(t, dash, "function destHTML(", "destination cell helper")
+	must(t, dash, "'LP · '+name", "landing destination caption is LP with the name")
+	must(t, dash, "entityHTML('landing_id', id)", "landing destination links the landing")
+	must(t, dash, "${destHTML(x)}</td>", "recent clicks render the destination cell")
+	must(t, html, "if(id==='out') return destHTML(x);", "click log renders the destination cell")
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
 	must(t, pure, "function recentRows(", "recentRows in pure block")
 	must(t, html, `'dash.recent':'Последние клики'`, "ru recent clicks")
@@ -431,6 +438,16 @@ func spaFunctionLine(html, name string) string {
 	return rest[:end]
 }
 
+// TestCalloutRowGap checks that a button row right under a callout with no bottom margin gets a gap,
+// and that the postbacks popup puts its lead and sale buttons in such a row.
+func TestCalloutRowGap(t *testing.T) {
+	html := spaSource()
+	must(t, html, ".callout.mt{margin:14px 0 0}", "the tail callout has no bottom margin")
+	must(t, html, ".callout.mt+.row{margin-top:14px}", "a row under that callout is spaced")
+	pop := spaBetween(html, "async function openPostbacks(", "let PB_DOCS_BACK")
+	must(t, pop, "{cls:'mt'})}\n    <div class=\"row wrap\" style=\"gap:8px;margin-bottom:12px\"><button type=\"button\" id=\"pb-pop-lead\">", "lead and sale buttons follow the callout directly and keep a gap above the footer")
+}
+
 // TestSettingsMasonry — settings cards keep content height in two columns.
 func TestSettingsMasonry(t *testing.T) {
 	html := spaSource()
@@ -533,6 +550,32 @@ func TestFlowsFolderField(t *testing.T) {
 	mustNot(t, line, "'folder'", "FLOW_METRIC does not list folder")
 }
 
+// TestGroupCreateButton checks that every group field shares one plus control in the same row as the field.
+// html is the SPA source. The test fails when the plus, its label, or a translation is missing.
+func TestGroupCreateButton(t *testing.T) {
+	html := spaSource()
+	block := spaFunctionLine(html, "groupFieldBlock")
+	if block == "" {
+		t.Fatal("groupFieldBlock not found in SPA")
+	}
+	must(t, block, `class="group-field-row"`, "plus sits in one row with the group field")
+	must(t, block, `class="icon grp-add"`, "shared plus class")
+	must(t, block, `data-grp-create=`, "plus still opens the create form")
+	must(t, block, `icon('plus')`, "plus glyph")
+	must(t, block, `title="${label}"`, "create-group title")
+	must(t, block, `aria-label="${label}"`, "create-group accessible name")
+	must(t, block, `tr('grp.create')`, "label goes through tr")
+	mustNot(t, block, `class="link" data-grp-create`, "text Create button is gone")
+	must(t, html, ".group-field-row{display:flex;align-items:stretch;gap:6px;min-width:0}", "row keeps the plus beside the field")
+	must(t, html, ".group-field-row>.grp-add{flex:none;width:32px;height:auto;min-height:32px;padding:0;align-self:stretch}", "plus matches the field height")
+	must(t, html, "'grp.create':'Create group'", "english create-group label")
+	must(t, html, "'grp.create':'Создать группу'", "russian create-group label")
+	must(t, html, "'grp.create':'Створити групу'", "ukrainian create-group label")
+	for _, id := range []string{"g_folder", "ogroup", "lgroup", "ngroup", "sgroup"} {
+		must(t, html, "groupFieldBlock('"+id+"'", id+" uses the shared group field")
+	}
+}
+
 // TestFlowsEPCDefault — flows columns default to EPC, the summary chip is revenue per click, and the uEPC cell formula stays rev/uniq.
 func TestFlowsEPCDefault(t *testing.T) {
 	html := spaSource()
@@ -554,7 +597,7 @@ func TestFlowsEPCDefault(t *testing.T) {
 	if cols == "" {
 		t.Fatal("loadCols not found in SPA")
 	}
-	must(t, html, "const FLOW_COLS_MIGRATED='kuztds-flow-cols-epc'", "one-time migration flag")
+	must(t, html, "const FLOW_COLS_MIGRATED='emtds-flow-cols-epc'", "one-time migration flag")
 	must(t, cols, "FLOW_COLS_MIGRATED", "migration runs once per browser")
 }
 
@@ -716,7 +759,11 @@ func TestFlowsHeaderExportMenu(t *testing.T) {
 	must(t, html, `.toolbar.bar-fit .rgt select{width:auto;max-width:min(220px,100%);field-sizing:content`, "filters follow the selected label")
 	must(t, html, `.toolbar.bar-fit .lft{flex:1 1 auto;flex-wrap:nowrap;min-width:0}`, "search stays beside create")
 	must(t, html, `.toolbar.bar-fit .lft{flex:1 1 100%}`, "search takes the row on a narrow bar")
-	must(t, html, `.toolbar.bar-fit .rgt{flex:0 0 420px`, "filter slot does not shrink the search")
+	must(t, html, `.toolbar.bar-fit .rgt{flex:0 1 auto;flex-wrap:nowrap;min-width:0`, "filters and refresh stay on one row")
+	must(t, html, `.toolbar.bar-fit .rgt>button{flex:none}`, "refresh keeps its size")
+	must(t, html, `.toolbar.bar-fit .rgt>.tags.pk,.toolbar.bar-fit .rgt>select:not(.pk-native){flex:1 1 calc(50% - 25px)`, "narrow bar leaves room for refresh beside the last filter")
+	mustNot(t, html, `.toolbar.bar-fit .rgt{flex:0 0 420px`, "filter slot is not a fixed width")
+	mustNot(t, html, `.toolbar.bar-fit{flex-wrap:nowrap}`, "filters wrap as one group")
 	cat := spaFunctionLine(html, "catalogBar")
 	must(t, cat, `class="toolbar bar-fit"`, "catalog bar uses the same fit")
 	mustNot(t, cat, `width:260px`, "catalog search is not a fixed 260px")
@@ -848,7 +895,8 @@ func TestKeitaroPage(t *testing.T) {
 	if src == "" {
 		t.Fatal("keitaro panel missing")
 	}
-	must(t, spaFunctionLine(html, "integrations"), `id="int-keitaro"`, "integrations page")
+	mustIntegration(t, html, "keitaro", "keitaroPanel")
+	must(t, html, "keitaro:integrations", "the old #/keitaro route opens the integrations page")
 	for _, needle := range []string{
 		"/api/keitaro/status",
 		"/api/keitaro/check",
@@ -858,12 +906,12 @@ func TestKeitaroPage(t *testing.T) {
 		`id="kt-progress"`,
 		`id="kt-import" hidden`,
 		`data-kttab="kt-import"`,
-		"<progress",
+		"ktJobPaint(box, job, true)",
 		`id="kt-campaigns"`,
 		`id="kt-conversions"`,
 		`id="kt-from"`,
 		"kt.col.count",
-		`id="kt-api"`,
+		`id:'kt-api'`,
 		`tr('kt.api')`,
 	} {
 		must(t, src, needle, "keitaro page")
@@ -919,6 +967,52 @@ func TestKeitaroPage(t *testing.T) {
 	}
 }
 
+// TestKeitaroProgressShared checks that the progress tab of the integrations page and the Keitaro window
+// draw the run with one card function, follow one poll of GET /api/keitaro/job and keep no old progress markup.
+func TestKeitaroProgressShared(t *testing.T) {
+	html := spaSource()
+	page := spaFunctionLine(html, "keitaroPanel")
+	if page == "" {
+		t.Fatal("keitaro panel missing")
+	}
+	paint := spaFunctionLine(html, "ktJobPaint")
+	must(t, paint, "ntcSwap(box, ktDockCard(", "shared paint builds the window card")
+	must(t, paint, "ktDockPercent(j)", "shared paint shows the counted percent")
+	must(t, spaFunctionLine(html, "ktDockPaint"), "ktJobPaint(el, j)", "window uses the shared paint")
+	must(t, page, "ktJobPaint(box, job, true)", "progress tab uses the shared paint")
+	must(t, page, `<div id="kt-progress" hidden></div>`, "progress tab is only the card host")
+	must(t, spaFunctionLine(html, "ntcHTML"), "ntBarHTML(o.bar)", "notice card draws the shared edge")
+	bar := spaFunctionLine(html, "ntBarHTML")
+	must(t, bar, `<div class="nt-bar run" aria-hidden="true"><i></i></div>`, "edge of unknown length runs")
+	must(t, bar, "Math.max(0,Math.min(100,+pct||0))", "counted edge is clamped")
+	swap := spaFunctionLine(html, "ntcSwap")
+	must(t, swap, "bar.style.width=from", "bar starts from the last width")
+	must(t, swap, "void bar.offsetWidth", "bar fills with a transition")
+	must(t, html, ".nt-bar i{display:block;height:100%;width:0;background:var(--nt);transition:width .4s ease-out}", "edge reads the tone token and fills smoothly")
+	must(t, html, ".nt-bar i{transition:none}", "reduced motion stops the fill transition")
+	card := spaFunctionLine(html, "ktDockCard")
+	must(t, card, "close:!inline", "page card has no close button")
+	must(t, card, "cls:inline?'flat':''", "page card lies flat in the panel")
+
+	follow := spaFunctionLine(html, "ktDockFollow")
+	must(t, follow, "KT_DOCK.listen=fn||null", "page registers on the window poll")
+	must(t, follow, "ktDockRun()", "following reads the job at once")
+	must(t, spaFunctionLine(html, "ktDockTick"), "KT_DOCK.listen(job)", "window poll feeds the page")
+	must(t, spaFunctionLine(html, "ktDockStop"), "KT_DOCK.listen=null", "logout forgets the page listener")
+	must(t, page, "following=ktDockFollow(pollJob)", "page follows the window poll")
+	mustNot(t, page, "setInterval(", "page has no poll of its own")
+	if n := strings.Count(page, "get('/api/keitaro/job'"); n != 1 {
+		t.Errorf("page reads the job %d times, want only the first read on open", n)
+	}
+
+	must(t, page, "calloutSet(q('#kt-job-note'), msg, 'err')", "failed run is an error callout")
+	must(t, page, "tr('kt.dock.done'):'', 'ok')", "finished run is an ok callout")
+	for _, legacy := range []string{"<progress", "kt-progress-line", `id="kt-bar"`, "progressLine", "kt-job-err", "ktDockKick"} {
+		mustNot(t, html, legacy, "old progress markup")
+	}
+	mustNot(t, html, "progress{width:100%", "old progress style")
+}
+
 // TestBreakdownLabelsAndKeitaroDock checks that wide breakdown cards keep their labels
 // and that the Keitaro progress window polls on every page with a stored position.
 func TestBreakdownLabelsAndKeitaroDock(t *testing.T) {
@@ -932,7 +1026,7 @@ func TestBreakdownLabelsAndKeitaroDock(t *testing.T) {
 	must(t, wide, ".bars .tr{flex:1 1 140px", "wide bar shrinks instead of the label")
 
 	must(t, html, `class="ktdock"`, "dock element")
-	must(t, html, "const KT_DOCK_KEY='kuztds-ktdock'", "dock position storage key")
+	must(t, html, "const KT_DOCK_KEY='emtds-ktdock'", "dock position storage key")
 	must(t, html, "const KT_DOCK_COUNTED=['streams','clicks','conversions']", "percent stages")
 	tick := spaFunctionLine(html, "ktDockTick")
 	must(t, tick, "get('/api/keitaro/job'", "dock polls the job")
@@ -947,9 +1041,68 @@ func TestBreakdownLabelsAndKeitaroDock(t *testing.T) {
 	must(t, spaFunctionLine(html, "app"), "ktDockStart(ME)", "dock starts after login")
 	must(t, spaFunctionLine(html, "loginView"), "ktDockStop()", "dock stops on logout")
 	paint := spaFunctionLine(html, "ktDockPaint")
-	must(t, paint, "tr('kt.stage.'+stage)", "dock stage name")
-	must(t, paint, "esc(msg)", "dock escapes the server error")
+	card := spaFunctionLine(html, "ktDockCard")
+	must(t, card, "tr('kt.stage.'+stage)", "dock stage name")
+	must(t, card, "esc(msg)", "dock escapes the server error")
 	must(t, paint, "KT_DOCK.seen", "dock hides runs finished before load")
+}
+
+// TestNoticeCard checks that toasts, the Keitaro window and dialogs share one notice component,
+// that the window shows every job state from GET /api/keitaro/job and never starts an import,
+// and that the notices stay accessible: live roles, Esc, no focus theft, auto-dismiss only for success.
+func TestNoticeCard(t *testing.T) {
+	html := spaSource()
+	must(t, html, ".ntc{--nt:var(--info);--nt-soft:var(--info-soft)", "notice card reads the theme tokens")
+	must(t, html, "@media (prefers-reduced-motion:reduce){.ntc.busy", "notice motion respects reduced motion")
+	must(t, html, ".toasts{position:fixed;right:20px;bottom:calc(var(--edge-b,20px) + var(--dock-lift,0px) + var(--ai-lift,0px))", "toasts stack above the window, the dock and the assistant button")
+
+	toast := spaFunctionLine(html, "toast")
+	must(t, toast, "ntcHTML({tone:err?'bad':'ok'", "toast uses the notice card")
+	must(t, toast, "el.setAttribute('role',err?'alert':'status')", "toast live role")
+	must(t, toast, "if(!err){", "only a success toast leaves by itself")
+	must(t, toast, "e.key==='Escape'", "Esc closes a toast")
+	must(t, toast, "open.length>TOAST_MAX", "toast stack is capped")
+	mustNot(t, toast, ".focus()", "toast never takes focus")
+
+	card := spaFunctionLine(html, "ktDockCard")
+	for _, part := range []string{"tone:'busy'", "tone:'bad'", "tone:'ok'", "ktDockFacts(j.counts)", "ktDockLosses(j.losses", "j.campaign_id", "when(j.finished_at)", "data-ktact=\"report\"", "data-ktact=\"hide\""} {
+		must(t, card, part, "dock card state part")
+	}
+	must(t, spaFunctionLine(html, "ktDockSpan"), "j.finished_at", "run time ends at finished_at")
+	must(t, spaFunctionLine(html, "ktDockLosses"), "trFill('kt.dock.warn'", "warnings are counted")
+	act := spaFunctionLine(html, "ktDockAct")
+	must(t, act, "go('integrations')", "report opens the integrations page")
+	mustNot(t, act, "call(", "dock buttons never post an import or a purge")
+	el := spaFunctionLine(html, "ktDockEl")
+	must(t, el, "e.key==='Escape'", "Esc hides the window")
+	mustNot(t, el, ".focus()", "window never takes focus")
+	say := spaFunctionLine(html, "ktDockSay")
+	must(t, say, "live.setAttribute('role', msg?'alert':'status')", "failed run is an alert")
+	must(t, say, "live.setAttribute('aria-live', msg?'assertive':'polite')", "failed run interrupts, a running one is polite")
+	must(t, say, "if(live.textContent!==text)", "the live line is spoken again only when its text changes")
+	mustNot(t, say, "j.done", "counted progress is not spoken")
+	mustNot(t, say, "ktDockPercent", "percent is not spoken")
+	must(t, el, `<section class="ktdock" aria-label=`, "the window itself is not a live region")
+	mustNot(t, el, `class="ktdock" role=`, "the window carries no role")
+	must(t, el, `class="sr-only" data-ktlive role="status" aria-live="polite" aria-atomic="true"`, "only the title and stage line is live")
+	must(t, spaFunctionLine(html, "ktDockPaint"), "ktDockSay(el, j, stage, msg)", "paint speaks through the live line")
+	must(t, spaFunctionLine(html, "ktDockPaint"), "ktJobPaint(el, j)", "dock paints through the shared job card")
+	must(t, spaFunctionLine(html, "ntcSwap"), "qa(':scope>.ntc',box).forEach(n=>n.remove())", "paint swaps only the card, the live line stays")
+	must(t, html, ".sr-only{position:absolute;width:1px;height:1px", "visually hidden helper")
+	must(t, html, `<div class="nt-bar run" aria-hidden="true">`, "running progress edge is decorative")
+	must(t, html, `<div class="nt-bar" aria-hidden="true">`, "counted progress edge is decorative")
+	must(t, html, `<div class="toasts" id="toasts" aria-live="polite" aria-relevant="additions">`, "toast stack is a polite live region")
+	must(t, toast, "el.addEventListener('focusin',hold)", "focus inside a toast pauses its timer")
+	must(t, toast, "el.addEventListener('focusout'", "leaving focus restarts the timer")
+	must(t, toast, "el.addEventListener('mouseenter',hold)", "hover pauses the toast timer")
+	must(t, toast, "el.matches(':focus-within')", "the pointer leaving keeps the timer paused while focus is inside")
+	must(t, spaFunctionLine(html, "ask"), "ntcHead(title,danger?'bad':'')", "confirm dialog heading")
+	must(t, spaFunctionLine(html, "connShow"), "ntcHead(", "connected domains dialog heading")
+	for _, key := range []string{"kt.dock.hide", "kt.dock.report", "kt.dock.retry", "kt.dock.warn", "kt.dock.took", "kt.kind.conflict"} {
+		if n := strings.Count(html, "'"+key+"':"); n != 3 {
+			t.Errorf("%s is in %d dictionaries, want en, ru and uk", key, n)
+		}
+	}
 }
 
 // TestStreamThen checks the Then mode tabs, share rows and shared S2S templates.
@@ -976,6 +1129,35 @@ func TestSPAFlowCompact(t *testing.T) {
 	must(t, html, "'flow.compact'", "flow.compact i18n")
 	must(t, html, "flowCompactClass(", "flowCompactClass helper")
 	must(t, html, `class="k" title="${esc(label)}"`, "breakdown title shows label")
+}
+
+// TestSPAFlowTrafficOrder checks the canvas order-by-traffic toggle: the button sits next to the compact
+// toggle, the order is a page-view setting, and switching it never marks the campaign dirty or reaches
+// the saved stream order.
+func TestSPAFlowTrafficOrder(t *testing.T) {
+	html := spaSource()
+	must(t, html, `id="ftraffic"`, "traffic order button")
+	must(t, html, "canvas-traffic", "traffic order button style")
+	must(t, html, "${flowTrafficButton()}", "traffic order button on the canvas")
+	must(t, html, "tb.onclick=toggleFlowTraffic", "traffic order button wired")
+	for _, key := range []string{"flow.traffic.off", "flow.traffic.desc", "flow.traffic.asc", "flow.traffic.lock"} {
+		if n := strings.Count(html, "'"+key+"':"); n != 3 {
+			t.Errorf("%s: %d dictionary entries, want one per language", key, n)
+		}
+	}
+	toggle := spaFunctionLine(html, "toggleFlowTraffic")
+	must(t, toggle, "touchPageViews()", "traffic order kept in page views")
+	for _, bad := range []string{"markDirty", "syncSaveBar", "moveStream", ".streams"} {
+		mustNot(t, toggle, bad, "traffic order toggle touches the campaign: "+bad)
+	}
+	for _, name := range []string{"collectFlow", "moveStream", "markDirty"} {
+		mustNot(t, spaFunctionLine(html, name), "FLOW_TRAFFIC", name+" ignores the traffic order")
+	}
+	render := spaFunctionLine(html, "renderFlow")
+	must(t, render, "flowTrafficOrder(", "rows drawn in traffic order")
+	must(t, render, `class="grip lock"`, "grip locked while ordered by traffic")
+	must(t, render, `<span class="no">${i+1}</span>`, "stream number stays the stored position")
+	must(t, html, "traffic:FLOW_TRAFFIC", "traffic order in the page-view snapshot")
 }
 
 // TestSPAUsersPage checks the users tab, access helpers, Keitaro users import,
@@ -1058,6 +1240,36 @@ func TestLandingTextAndDeleteConfirm(t *testing.T) {
 	must(t, land, "(ID '+id+')?", "landings delete confirm shows name and id")
 }
 
+// TestLandingModalRereadsFiles checks that the landing modal reads the file list from
+// the server after an archive upload, after an editor save and on the reload button,
+// and that its labels are translated.
+func TestLandingModalRereadsFiles(t *testing.T) {
+	html := spaSource()
+	land := spaBetween(html, "const openLand=(id)=>{", "const landingRows=()=>")
+	if land == "" {
+		t.Fatal("openLand not found")
+	}
+	must(t, land, "call('GET','/api/landings/'+encodeURIComponent(lid)+'/files')", "file list is read from the server")
+	must(t, land, "openLandingFile(lid, row.dataset.lpath, loadFiles)", "an editor save reads the list again")
+	must(t, land, "await loadFiles();", "an upload reads the list again")
+	must(t, land, "q('#lfiles-reload',m).onclick=()=>busy(q('#lfiles-reload',m), loadFiles)", "reload button")
+	must(t, land, "uploadRaw('/api/landings/'+encodeURIComponent(lid)+'/archive', file, 'application/zip', setProgress)", "upload reports progress")
+	must(t, land, "bindFilePick(q('#ldrop',m))", "archive drop zone")
+	must(t, land, "bindGroupInlineCreate(m, 'lgroup', rows)", "group create link")
+	must(t, land, "q('#lopen',m).onclick", "open button")
+	mustNot(t, land, "Array.isArray(res.files)", "the archive answer is a count, not a list")
+	mustNot(t, land, "label:'Size'", "untranslated size header")
+	editor := spaBetween(html, "async function openLandingFile", "\nasync function landings")
+	must(t, editor, "if(typeof onSaved==='function') onSaved();", "editor reports a save")
+	for _, k := range []string{"land.new", "land.sec.main", "land.sec.source", "land.on", "land.drop", "land.drop.hint", "land.uploading",
+		"land.unpacking", "land.size", "land.modified", "land.entry.mark", "land.entry.auto", "land.reload", "land.nofiles", "land.edit",
+		"land.zip.only", "land.unit.b", "land.unit.kb", "land.unit.mb", "land.unit.gb"} {
+		if n := strings.Count(html, "'"+k+"':"); n != 3 {
+			t.Errorf("dictionary key %q is defined %d time(s), want one per language", k, n)
+		}
+	}
+}
+
 // TestSPASettingsPickers — country and timezone search boxes and the settings
 // postback card are gone. The lead URL in the postback popup has no payout,
 // the timezone letter buffer resets after 3 seconds, and the theme-pick
@@ -1076,21 +1288,9 @@ func TestSPASettingsPickers(t *testing.T) {
 	}
 	must(t, pb, "postbackOrigin()", "popup postback uses the public origin")
 	must(t, html, "function postbackBase(", "postback base helper")
-	must(t, pb, "status=lead", "lead postback in the popup")
-	leadOK := false
-	for _, line := range strings.Split(pb, "\n") {
-		if !strings.Contains(line, "status=lead") {
-			continue
-		}
-		leadOK = true
-		if strings.Contains(line, "payout") {
-			t.Errorf("lead url must not include payout: %s", line)
-		}
-	}
-	if !leadOK {
-		t.Error("lead url line not found")
-	}
-	must(t, pb, "status=sale&payout={payout}", "sale postback keeps payout")
+	must(t, pb, "postbackStatusURL(o,'lead')", "lead postback in the popup")
+	must(t, pb, "postbackStatusURL(o,'sale')", "sale postback in the popup")
+	must(t, spaFunctionLine(html, "postbackStatusURL"), "&payout={payout}", "sale postback keeps payout")
 	menuLine := spaFunctionLine(html, "userMenuItems")
 	if menuLine == "" {
 		t.Fatal("user menu missing")
@@ -1117,6 +1317,48 @@ func TestSPASettingsPickers(t *testing.T) {
 	mustNot(t, frag, "toggleTheme", "theme pick must not call toggleTheme")
 }
 
+// TestSPAPostbackPopup — the Postbacks popup shows a read-only URL with REPLACE
+// placeholders, a copy button, a host selector and a Documentation button that
+// opens the in-app page; the page and every new i18n key exist in en, ru and uk.
+func TestSPAPostbackPopup(t *testing.T) {
+	html := spaSource()
+	pb := spaFunctionLine(html, "openPostbacks")
+	if pb == "" {
+		t.Fatal("openPostbacks missing")
+	}
+	must(t, pb, `id="pb-url"`, "postback URL field")
+	must(t, pb, "readonly", "postback URL field is read-only")
+	must(t, pb, `id="pb-copy"`, "copy button for the URL")
+	must(t, pb, `id="pb-docs"`, "documentation button")
+	must(t, pb, `id="pb-host"`, "host selector")
+	must(t, pb, "postbackHosts(postbackOrigin(), linkDomains())", "hosts come from the page and link domains")
+	must(t, pb, "postbackDefaultHost(DOMAINS, location.hostname, known)", "default host comes from the admin-panel domain or the page")
+	must(t, pb, "h===def?' selected':''", "default host is selected in the list, not only shown as a placeholder")
+	must(t, pb, `id="pb-pop-sale">${tr('pb.sale')}</button><button type="button" id="pb-pop-rejected">${tr('pb.rejected')}</button>`, "rejected button sits right of sale")
+	must(t, pb, "postbackStatusURL(o,'rejected')", "rejected button uses the canonical status")
+	must(t, pb, "q('#pb-pop-rejected',m).onclick", "rejected button copies its URL")
+	must(t, pb, "'\\nrejected: '+rejected(o)", "copy all includes rejected")
+	must(t, pb, "go('settings/pbdocs')", "documentation opens the in-app page")
+	must(t, html, "function postbackURL(", "URL builder")
+	must(t, html, "/postback?subid=REPLACE&status=REPLACE&payout=REPLACE", "URL template")
+	must(t, html, "function postbackDocs(", "documentation page")
+	must(t, html, "postbackDocs(); return;", "profile routes settings/pbdocs to the page")
+	docs := spaFunctionLine(html, "postbackDocs")
+	for _, k := range []string{"pbd.fmt.t", "pbd.par.t", "pbd.st.t", "pbd.money.t", "pbd.cid.t", "pbd.ex.t", "pbd.res.t", "pbd.tr.t"} {
+		must(t, docs, "'"+k+"'", "documentation card "+k)
+	}
+	mustNot(t, pb+docs, "?pb=", "the old pixel is not advertised")
+	keys := []string{"pb.docs", "pb.url", "pb.host", "pb.copy.url", "pb.lead", "pb.sale", "pb.rejected", "pb.nokey", "pb.local", "pbd.title", "pbd.back",
+		"pbd.c.p", "pbd.c.a", "pbd.c.m", "pbd.fmt.t", "pbd.fmt.b", "pbd.fmt.b2", "pbd.par.t", "pbd.p.subid", "pbd.p.status",
+		"pbd.p.payout", "pbd.p.depsum", "pbd.p.tid", "pbd.st.t", "pbd.st.b", "pbd.money.t", "pbd.money.b",
+		"pbd.cid.t", "pbd.cid.b", "pbd.cid.b2", "pbd.ex.t", "pbd.ex.b", "pbd.res.t", "pbd.res.b", "pbd.tr.t", "pbd.tr.b"}
+	for _, k := range keys {
+		if n := strings.Count(html, "'"+k+"':'"); n != 3 {
+			t.Errorf("i18n key %s defined %d times, want 3 (en, ru, uk)", k, n)
+		}
+	}
+}
+
 // TestNavIconTooltips checks nav tooltips only while icon mode hides labels.
 func TestNavIconTooltips(t *testing.T) {
 	html := spaSource()
@@ -1139,7 +1381,7 @@ func TestNavIconTooltips(t *testing.T) {
 }
 
 // TestOfferFormAndColumns checks offer editor fields and column catalogs.
-// Campaign ids stay hits, uniq and conv. The report catalog has no cost column.
+// Campaign ids stay hits, uniq and conv. The report catalog lists cost and no ROI, profit or uEPC.
 // The URL builder stops at sub_id_30 and does not offer status.
 func TestOfferFormAndColumns(t *testing.T) {
 	html := spaSource()
@@ -1147,12 +1389,20 @@ func TestOfferFormAndColumns(t *testing.T) {
 	must(t, flows, "['hits'", "campaign column id hits")
 	must(t, flows, "['uniq'", "campaign column id uniq")
 	must(t, flows, "['conv'", "campaign column id conv")
-	must(t, html, "kuztds-offer-cols", "offer column storage key")
-	must(t, html, "kuztds-net-cols", "network column storage key")
+	must(t, html, "emtds-offer-cols", "offer column storage key")
+	must(t, html, "emtds-net-cols", "network column storage key")
 	rep := catalogBranch(html, "report")
-	mustNot(t, rep, "['cost'", "report catalog must not list cost")
+	must(t, rep, "['cost','col.cost'", "report catalog lists the cost column")
+	for _, id := range []string{"['roi'", "['uepc'", "['profit','col.profit'"} {
+		mustNot(t, rep, id, "report catalog has no money derived from cost")
+	}
 	macros := offerMacroSource(html)
 	must(t, macros, "{subid}", "offer URL macro subid")
+	must(t, macros, "{root_subid}", "offer URL macro root_subid")
+	must(t, html, "{origin} {root_subid}", "stream output macro hint root_subid")
+	if got := strings.Count(html, "{payout} {root_subid} {sub_id_1}"); got != 3 {
+		t.Fatalf("outbound postback macro hint root_subid count = %d, want 3", got)
+	}
 	must(t, html, "const SUBID_MAX=30", "Sub ID ceiling is 30")
 	must(t, macros, "length:SUBID_MAX", "offer URL macros run through the ceiling")
 	must(t, macros, "'{sub_id_'+(i+1)+'}'", "offer URL macro sub_id_N")
@@ -1469,7 +1719,7 @@ func TestColumnResize(t *testing.T) {
 	must(t, bind, "colResetColumn", "a double click clears one column")
 	store := spaFunctionLine(html, "colWidthRead")
 	must(t, store, "COLW_KEY", "widths are read from the browser store")
-	must(t, html, "const COLW_KEY='kuztds-colw'", "widths stay in kuztds-colw")
+	must(t, html, "const COLW_KEY='emtds-colw'", "widths stay in emtds-colw")
 	write := spaFunctionLine(html, "colWidthWrite")
 	mustNot(t, write, "/api/ui", "column widths are not saved to the shared UI")
 	apply := spaFunctionLine(html, "colApplySaved")
@@ -1586,7 +1836,7 @@ func TestSPAProfileAndReportFilters(t *testing.T) {
 	}
 	must(t, rep, "filterBuilder('events'", "report filter builder")
 	mustNot(t, dash, "filterBuilder('events'", "dashboard filter builder was removed with the Filters button")
-	must(t, html, "kuztds-dash-dim", "dashboard custom dimension memory")
+	must(t, html, "emtds-dash-dim", "dashboard custom dimension memory")
 	must(t, dash, "bd-custom", "one extra breakdown card")
 	must(t, html, "settings:profile", "PAGES routes settings to profile")
 	pagesAt := strings.Index(html, "const PAGES=")
@@ -1618,7 +1868,7 @@ func TestAppearanceAccents(t *testing.T) {
 	must(t, html, `:root[data-accent="blue"]`, "blue accent tokens")
 	must(t, html, `:root[data-accent="green"]`, "green accent tokens")
 	must(t, html, `:root[data-accent="graphite"]`, "graphite accent tokens")
-	must(t, html, `localStorage.getItem('kuztds-accent')`, "remembered accent")
+	must(t, html, `localStorage.getItem('emtds-accent')`, "remembered accent")
 	must(t, html, `data-accent-pick`, "accent swatch")
 	must(t, html, `function applyAccent(`, "applyAccent")
 	must(t, html, `rgb(var(--acc-l))`, "light accent from the RGB triple")
@@ -1679,9 +1929,9 @@ func TestDomainsCatalogAndPager(t *testing.T) {
 	html := spaSource()
 	must(t, html, `if(kind==='domains') return [['id','flows.col.num',1],['host','dom.host',1]`, "domains column set")
 	must(t, html, `const DOM_LOCKED=new Set(['id','host'])`, "locked domain columns")
-	must(t, html, `domains:'kuztds-dom-cols'`, "domains column storage key")
+	must(t, html, `domains:'emtds-dom-cols'`, "domains column storage key")
 	must(t, html, `data-col-gear="domains"`, "domains column gear")
-	must(t, html, `const DOM_PAGE_KEY='kuztds-domains-page'`, "domains page storage key")
+	must(t, html, `const DOM_PAGE_KEY='emtds-domains-page'`, "domains page storage key")
 	must(t, html, `function domainStatusText(`, "domainStatusText")
 	must(t, html, `function domainCell(`, "domainCell")
 	must(t, html, `function paintDomPage(`, "paintDomPage")
@@ -1736,6 +1986,48 @@ func TestApiKeysMenu(t *testing.T) {
 	must(t, html, `'key.prefix':`, "key prefix label")
 	mustNot(t, html, `'key.scope.engine':'Движок ?api='`, "engine scope query hint")
 	mustNot(t, html, `data-revoke=`, "inline revoke button")
+}
+
+// TestApiKeyDialogAccess checks the key dialog: type, role, the shared access editor, the
+// dangerous actions block, the presets, the list caption and the OpenAPI and MCP docs card.
+// t is the test handle. It returns nothing. A missing marker or dictionary entry fails the test.
+func TestApiKeyDialogAccess(t *testing.T) {
+	html := spaSource()
+	must(t, html, `const KEY_ACTIONS=[['keitaro_import',false],['keitaro_purge',false],['logs_delete',false],['groups_replace',false],['cron',true],['boards',true],['landing_files',false],['lists_read',false]]`, "action list with the administrator-only flags")
+	must(t, html, `id="key-type"`, "key type selector")
+	must(t, html, `id="key-role"`, "key role selector")
+	must(t, html, `accessEditorHTML(acc,{catalog:o.catalog})`, "key dialog reuses the user access editor")
+	must(t, html, `readAccessEditor(box, false)`, "key form reads the shared access editor")
+	must(t, html, `bindAccessEditor(el);`, "key dialog binds the shared access editor")
+	must(t, html, `data-kact="${id}"`, "dangerous action checkboxes")
+	must(t, html, `data-kpreset="read"`, "read only preset")
+	must(t, html, `data-kpreset="all"`, "everything preset")
+	must(t, html, `data-show-if="#key-type option[value=ADMIN]:checked"`, "cron and boards shown only for an ADMIN key")
+	must(t, html, `if(el.checked&&(type==='ADMIN'||el.dataset.kadmin!=='1')) actions.push(el.dataset.kact)`, "cron and boards are not sent for a USER key")
+	must(t, html, `if(type==='USER'&&!roleId) body.access=readAccessEditor(box, false);`, "own access only without a role")
+	must(t, html, `function loadAccessCatalog(`, "catalog loader shared with the user access dialog")
+	must(t, html, `function keyKindText(`, "key list caption")
+	must(t, html, `${kind}${revoked}`, "caption under the key name")
+	must(t, html, `href="/api/openapi.json" target="_blank" rel="noopener"`, "OpenAPI link opens in a new tab")
+	must(t, html, `mcpServers:{emtds:{command:'emtds-mcp',env:{EMTDS_URL:origin,EMTDS_API_KEY:'em_...',EMTDS_MCP_WRITE:'0'}}}`, "MCP client config sample")
+	must(t, html, `{id:'mcp', title:tr('key.docs.mcp')`, "OpenAPI and MCP card")
+	keys := []string{
+		"key.type", "key.type.hint", "key.role.none", "key.access.hint", "key.actions.title", "key.actions.hint",
+		"key.act.adminonly", "key.preset.read", "key.preset.all", "key.kind.actions", "key.docs.mcp",
+		"key.docs.b.mcp", "key.docs.b.mcp2", "key.docs.b.denied",
+	}
+	for _, a := range []string{"keitaro_import", "keitaro_purge", "logs_delete", "groups_replace", "cron", "boards", "landing_files", "lists_read"} {
+		keys = append(keys, "key.act."+a, "key.act."+a+".hint")
+	}
+	for _, k := range keys {
+		for _, lang := range []string{"en", "ru", "uk"} {
+			if !trKeyDefined(html, lang, k) {
+				t.Errorf("key %q missing for lang %q", k, lang)
+			}
+		}
+	}
+	must(t, html, `'key.preset.read':'Только чтение'`, "ru read only preset")
+	must(t, html, `'key.actions.title':'Опасные действия'`, "ru dangerous actions title")
 }
 
 // TestProfileTabsSections checks profile tabs, settings sections and the tab title.
@@ -1799,7 +2091,14 @@ func TestStreamProxyAndOrConditions(t *testing.T) {
 	must(t, html, `'ch_non_mobile'`, "non-mobile bot check")
 }
 
+// dictKeyRe matches one quoted dictionary key followed by a colon.
+var dictKeyRe = regexp.MustCompile(`'((?:[^'\\]|\\.)*)'\s*:`)
+
 var trStaticKeyRe = regexp.MustCompile(`\btr(?:Fill)?\('((?:[^'\\]|\\.)+)'\)`)
+
+// idKeyRe matches dictionary identifier keys such as 'ed.order' (lowercase, dotted, no spaces),
+// as opposed to English phrases that ru and uk translate by their own text.
+var idKeyRe = regexp.MustCompile(`^[a-z][a-z0-9_]*(\.[a-z0-9_]+)+$`)
 
 // trKeyExceptions lists tr keys that stay untranslated in every language on purpose.
 var trKeyExceptions = map[string]struct{}{
@@ -1855,13 +2154,43 @@ func spaDictKeys(body string) map[string]struct{} {
 	return dictKeys("{" + body + "}")
 }
 
+// spaDictCache keeps the key sets of one SPA source by dictionary and language.
+type spaDictCache struct {
+	html string
+	sets map[[2]string]map[string]struct{}
+}
+
+var (
+	spaDictMu  sync.Mutex
+	spaDictMem *spaDictCache
+)
+
+// spaDictKeysCached returns spaDictKeys(spaConstLangBody(html, dict, lang)).
+// html is the SPA source; dict is I18N, PHRASE or PHRASE_EXTRA; lang is en, ru or uk.
+// Each pair is parsed once for the same html; another html resets the cache.
+// The returned set is shared and must not be changed. It is nil when the object is missing.
+func spaDictKeysCached(html, dict, lang string) map[string]struct{} {
+	spaDictMu.Lock()
+	defer spaDictMu.Unlock()
+	if spaDictMem == nil || spaDictMem.html != html {
+		spaDictMem = &spaDictCache{html: html, sets: map[[2]string]map[string]struct{}{}}
+	}
+	k := [2]string{dict, lang}
+	set, ok := spaDictMem.sets[k]
+	if !ok {
+		set = spaDictKeys(spaConstLangBody(html, dict, lang))
+		spaDictMem.sets[k] = set
+	}
+	return set
+}
+
 // trKeyDefined reports whether tr() can resolve a key for lang without falling back to the raw key.
 func trKeyDefined(html, lang, key string) bool {
 	if _, ok := trKeyExceptions[key]; ok {
 		return true
 	}
 	check := func(dict, l string) bool {
-		_, ok := spaDictKeys(spaConstLangBody(html, dict, l))[key]
+		_, ok := spaDictKeysCached(html, dict, l)[key]
 		return ok
 	}
 	if check("I18N", lang) {
@@ -1878,6 +2207,10 @@ func trKeyDefined(html, lang, key string) bool {
 	}
 	if check("I18N", "en") {
 		return true
+	}
+	// An identifier key such as 'ed.order' has no English text of its own: tr() would show the key itself.
+	if idKeyRe.MatchString(key) {
+		return check("PHRASE", "en") || check("PHRASE_EXTRA", "en")
 	}
 	// English UI keys often live only in PHRASE (ru/uk translate the English key text).
 	return check("PHRASE", "ru") || check("PHRASE", "uk") || check("PHRASE_EXTRA", "ru") || check("PHRASE_EXTRA", "uk")
@@ -1914,6 +2247,23 @@ func TestTrStaticKeys(t *testing.T) {
 	}
 }
 
+// TestTrIdentifierKeysInEnglish checks that the identifier keys the editor and the tag lists read
+// (some of them through a condition, so no literal tr('…') call shows them) have English text,
+// not only ru and uk: tr() would otherwise show the bare key.
+func TestTrIdentifierKeysInEnglish(t *testing.T) {
+	html := spaSource()
+	for _, key := range []string{"ed.order", "ed.full", "ed.full.off", "tags.less", "tags.more"} {
+		for _, lang := range []string{"en", "ru", "uk"} {
+			if !trKeyDefined(html, lang, key) {
+				t.Errorf("tr(%q) missing for lang %q", key, lang)
+			}
+		}
+		if n := strings.Count(html, "'"+key+"':"); n < 3 {
+			t.Errorf("%s is defined %d times, want en, ru and uk", key, n)
+		}
+	}
+}
+
 // dictBetween returns the SPA source from start up to end.
 // html is the embedded page. start and end are unique markers; end is excluded.
 // A missing marker fails the test.
@@ -1935,9 +2285,8 @@ func dictBetween(t *testing.T, html, start, end string) string {
 // body is the object source. name is the dictionary in the failure.
 func dictDupes(t *testing.T, body, name string) {
 	t.Helper()
-	re := regexp.MustCompile(`'((?:[^'\\]|\\.)*)'\s*:`)
 	seen := map[string]int{}
-	for _, m := range re.FindAllStringSubmatch(body, -1) {
+	for _, m := range dictKeyRe.FindAllStringSubmatch(body, -1) {
 		seen[m[1]]++
 	}
 	for k, n := range seen {
@@ -1977,9 +2326,8 @@ func TestTerms(t *testing.T) {
 // dictKeys collects quoted keys from one dictionary object.
 // body is the object source without the surrounding name. It returns the key set.
 func dictKeys(body string) map[string]struct{} {
-	re := regexp.MustCompile(`'((?:[^'\\]|\\.)*)'\s*:`)
 	out := map[string]struct{}{}
-	for _, m := range re.FindAllStringSubmatch(body, -1) {
+	for _, m := range dictKeyRe.FindAllStringSubmatch(body, -1) {
 		out[m[1]] = struct{}{}
 	}
 	return out
@@ -2040,4 +2388,77 @@ func TestSPALiterals(t *testing.T) {
 	} {
 		mustNot(t, html, lit, lit)
 	}
+}
+
+// TestSPASaveBarEntities checks that the save bar names changed campaigns as #number name,
+// opens them through the slug route and that opening an editor does not mark a campaign changed.
+func TestSPASaveBarEntities(t *testing.T) {
+	html := spaSource()
+	bar := spaFunctionLine(html, "syncSaveBar")
+	must(t, bar, "dirtyEntries([...DIRTY]", "the bar lists the changed campaigns")
+	must(t, bar, `id="dchips"`, "item container")
+	must(t, bar, "go(b.dataset.dgo)", "a click opens the item through the router")
+	must(t, bar, "capFirst(tr('flows'))", "fallback text without items")
+
+	chips := spaFunctionLine(html, "dirtyChipsHTML")
+	must(t, chips, "data-dgo=", "item carries its router path")
+	must(t, chips, "pageAllowed(ME,e.route.split('/')[0])", "no link to a page the session may not open")
+	mustNot(t, chips, "e.ref", "the number is only text, never part of the route")
+
+	ent := spaFunctionLine(html, "dirtyEntries")
+	must(t, ent, "'flows/'+encodeURIComponent(id)", "campaign route is the slug")
+	mustNot(t, ent, "'flows/'+num", "a number is never the campaign address")
+
+	settle := spaFunctionLine(html, "settleGroups")
+	must(t, settle, "SNAP.set(x,", "an untouched campaign adopts the normalised snapshot")
+	must(t, settle, "!DIRTY.has(x)", "a changed campaign keeps its snapshot")
+
+	paint := spaFunctionLine(html, "openFlowSettings")
+	must(t, paint, "settleGroups(collectFlow())", "settings drawer settles after filling the form")
+	must(t, paint, "paintLink(true)", "the first link paint is not an edit")
+	mustNot(t, paint, "if(touched) markDirty(touched)", "painting a link does not mark the campaign")
+
+	stream := spaFunctionLine(html, "openStream")
+	must(t, stream, "collectStream(); settleGroups(g)", "stream drawer settles after opening")
+
+	for _, k := range []string{"dirty.title", "dirty.flow", "dirty.removed", "dirty.all", "dirty.less"} {
+		if n := strings.Count(html, "'"+k+"':"); n != 3 {
+			t.Errorf("%s is defined %d times, want 3 (en, ru, uk)", k, n)
+		}
+	}
+}
+
+// TestKeepUnknownPick checks that every catalog select keeps a saved id its catalog lacks:
+// the campaign domain and source, the stream offer and landing shares, and the offer's network.
+func TestKeepUnknownPick(t *testing.T) {
+	html := spaSource()
+	must(t, spaFunctionLine(html, "domainOpts"), "missingOpt(list, g.domain_id, 'pick.missing.dom')", "the domain select keeps an unknown domain")
+	must(t, spaFunctionLine(html, "offerSelect"), "missingOpt(OFFERS,id,'pick.missing.offer')", "the offer select keeps an unknown offer")
+	must(t, spaFunctionLine(html, "landingSelect"), "missingOpt(LANDINGS,id,'pick.missing.landing')", "the landing select keeps an unknown landing")
+	must(t, html, "missingOpt(sources, g.source_id, 'pick.missing.src')", "the source select keeps an unknown source")
+	must(t, html, "missingOpt(nets,cur?cur.network_id:'','pick.missing.net')", "the network select keeps an unknown network")
+	must(t, spaFunctionLine(html, "missingOpt"), "unknownPick(rows, value)", "one helper decides what is unknown")
+	must(t, spaFunctionLine(html, "flowPickOpts"), "missingOpt(rows,cur,'pick.missing.flow')", "the campaign picker keeps an unknown campaign")
+	must(t, html, "sel('g_group','<option value=\"\">'+tr('— choose a flow —')+'</option>'+flowPickOpts(others,g.out),'data-pick')", "the campaign's send-to select keeps an unknown campaign")
+	must(t, spaFunctionLine(html, "thenActionField"), "others.length||unknownPick(others,(o.out||'').trim())?sel('s_group','<option value=\"\">'+tr('— choose a flow —')+'</option>'+flowPickOpts(others,o.out),'data-pick')", "the stream's send-to select keeps an unknown campaign, even with no other campaign")
+	must(t, html, "'pick.missing.flow':'Кампания #{id} (не найдена)'", "russian label of an unknown campaign")
+	must(t, html, "'pick.missing.flow':'Кампанія #{id} (не знайдено)'", "ukrainian label of an unknown campaign")
+	must(t, html, "option.miss,select:has(option.miss:checked){color:var(--muted)}", "the kept option is muted")
+	for _, k := range []string{"pick.missing.dom", "pick.missing.offer", "pick.missing.landing", "pick.missing.net", "pick.missing.src", "pick.missing.flow"} {
+		if n := strings.Count(html, "'"+k+"':"); n != 3 {
+			t.Errorf("%s is defined %d times, want 3 (en, ru, uk)", k, n)
+		}
+	}
+	must(t, html, "'pick.missing.dom':'Домен #{id} (не найден)'", "russian label of an unknown domain")
+	must(t, html, "'pick.missing.dom':'Домен #{id} (не знайдено)'", "ukrainian label of an unknown domain")
+}
+
+// TestEnsureNumsSource checks that list numbering is a baseline for existing campaigns,
+// and that creating or copying a campaign saves the numbers it builds on.
+func TestEnsureNumsSource(t *testing.T) {
+	html := spaSource()
+	nums := spaFunctionLine(html, "ensureNums")
+	must(t, nums, "if(persist) markDirty(changed); else settleGroups(changed)", "list numbering is a baseline, a create saves it")
+	must(t, spaFunctionLine(html, "newFlow"), "ensureNums(true)", "a new campaign saves the numbers it builds on")
+	must(t, spaFunctionLine(html, "duplicateFlow"), "ensureNums(true)", "a copy saves the numbers it builds on")
 }

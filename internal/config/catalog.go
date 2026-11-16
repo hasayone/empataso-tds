@@ -63,8 +63,9 @@ type Domain struct {
 	Group   string `json:"group,omitempty"`
 	Role    string `json:"role"`
 	Primary bool   `json:"primary,omitempty"`
-	// Disabled hides the host from new campaign links. The engine does not read it
-	// and keeps accepting clicks on this host.
+	// Disabled hides the host from new campaign links. The engine still reads the
+	// host when it decides whether a redirect stays on this tracker, and a
+	// disabled host counts as its own. Clicks on the host are still accepted.
 	Disabled bool   `json:"disabled,omitempty"`
 	OK       bool   `json:"ok,omitempty"`
 	Reason   string `json:"reason,omitempty"`
@@ -233,6 +234,57 @@ func PostbackID(sig string) string {
 	return "pb-" + hex.EncodeToString(sum[:])[:10]
 }
 
+// EffectiveSource returns the traffic source a campaign reads, with the
+// campaign's own parameter names laid over the source.
+//
+// grp may be nil. src may be nil when the campaign has no source. A non-empty
+// campaign parameter replaces the source name of that key. An empty campaign
+// parameter removes the source name, so the field is read under its own name.
+// A missing key keeps the source name. The result is nil when src is nil and
+// the campaign names nothing. src is not modified. When the campaign adds no
+// change, src itself is returned. There is no error.
+func EffectiveSource(grp *Group, src *TrafficSource) *TrafficSource {
+	var over map[string]string
+	if grp != nil {
+		over = grp.Parameters
+	}
+	if len(over) == 0 {
+		return src
+	}
+	merged := map[string]string{}
+	if src != nil {
+		for k, v := range src.Parameters {
+			if t := strings.TrimSpace(v); t != "" {
+				merged[k] = t
+			}
+		}
+	}
+	changed := false
+	for k, v := range over {
+		t := strings.TrimSpace(v)
+		if t == "" {
+			if _, ok := merged[k]; ok {
+				delete(merged, k)
+				changed = true
+			}
+			continue
+		}
+		if merged[k] != t {
+			merged[k] = t
+			changed = true
+		}
+	}
+	if !changed {
+		return src
+	}
+	out := TrafficSource{}
+	if src != nil {
+		out = *src
+	}
+	out.Parameters = merged
+	return &out
+}
+
 // ApplySource reads keyword and sub_id_1..30 from the query.
 // A nil source uses the macro name itself as the query key.
 // The keyword return is empty when the source does not map one or the query has none.
@@ -293,6 +345,46 @@ func IncomingCost(q url.Values, costKey, curKey string) (cents int64, cur string
 // The admin and the import accept this list together with keyword and
 // sub_id_1 through sub_id_30. Without a mapping each name is the query key.
 var ExtraSourceParams = []string{"site", "ad_campaign_id", "creative_id", "external_id"}
+
+// LegacyKeywordParam is the one keyword name that was read before the aliases existed.
+// It is the keyword whatever else the campaign binds to it, so existing links keep
+// their keyword, key routing and separation.
+const LegacyKeywordParam = "q"
+
+// KeywordParams are the query parameter names a request carries its keyword under,
+// in the order the engine tries them: the first non-empty value wins. They apply when
+// the parameter the traffic source maps as keyword is absent or empty. keyword and
+// utm_term are aliases added later and are skipped when another field of the campaign
+// owns the name (see KeywordNameTaken); LegacyKeywordParam is never skipped. The engine
+// and the admin access rules read this one array, so a name the engine accepts is also
+// a name the admin treats as the keyword. It is an array so that no caller can change it.
+var KeywordParams = [...]string{"keyword", LegacyKeywordParam, "utm_term"}
+
+// KeywordNameTaken reports whether a query name belongs to another field of the
+// campaign and so must not double as its keyword. It is the one rule of the engine
+// and of the admin access checks.
+//
+// name is a candidate from KeywordParams. params are the parameters of the campaign's
+// traffic source (nil when it has none); costParam and currencyParam are the campaign's
+// price names. An alias (keyword, utm_term) is taken when the source maps any parameter
+// other than keyword onto it (sub_id_N, site, ad_campaign_id, creative_id, external_id),
+// or when it is the price or currency name; names are compared after trimming.
+// LegacyKeywordParam is never taken: it was the keyword before the aliases, and links
+// that bind it to a Sub ID as well keep reading it as the keyword. It does not allocate.
+func KeywordNameTaken(name string, params map[string]string, costParam, currencyParam string) bool {
+	if name == LegacyKeywordParam {
+		return false
+	}
+	if strings.TrimSpace(costParam) == name || strings.TrimSpace(currencyParam) == name {
+		return true
+	}
+	for field, mapped := range params {
+		if field != "keyword" && strings.TrimSpace(mapped) == name {
+			return true
+		}
+	}
+	return false
+}
 
 // MaxValueBytes is the longest stored value of one visitor-supplied field, in
 // bytes: a sub id, the keyword, an extra field and the value of a Sub ID rule.

@@ -19,13 +19,13 @@ func TestHealthzProbeHeaders(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	if rec.Header().Get("X-Kuztds-Host") != "park.example" {
-		t.Fatalf("host = %q", rec.Header().Get("X-Kuztds-Host"))
+	if rec.Header().Get("X-Emtds-Host") != "park.example" {
+		t.Fatalf("host = %q", rec.Header().Get("X-Emtds-Host"))
 	}
-	if rec.Header().Get("X-Kuztds-Service") != "engine" {
-		t.Fatalf("service = %q", rec.Header().Get("X-Kuztds-Service"))
+	if rec.Header().Get("X-Emtds-Service") != "engine" {
+		t.Fatalf("service = %q", rec.Header().Get("X-Emtds-Service"))
 	}
-	if _, ok := rec.Header()["X-Kuztds-Probe"]; ok {
+	if _, ok := rec.Header()["X-Emtds-Probe"]; ok {
 		t.Fatal("probe header set without a probe")
 	}
 
@@ -36,11 +36,11 @@ func TestHealthzProbeHeaders(t *testing.T) {
 	if rec.Body.String() != "ok" {
 		t.Fatalf("probe body = %q", rec.Body.String())
 	}
-	if rec.Header().Get("X-Kuztds-Host") != "park.example" {
-		t.Fatalf("probe host = %q", rec.Header().Get("X-Kuztds-Host"))
+	if rec.Header().Get("X-Emtds-Host") != "park.example" {
+		t.Fatalf("probe host = %q", rec.Header().Get("X-Emtds-Host"))
 	}
-	if rec.Header().Get("X-Kuztds-Probe") != "abc123" {
-		t.Fatalf("probe = %q", rec.Header().Get("X-Kuztds-Probe"))
+	if rec.Header().Get("X-Emtds-Probe") != "abc123" {
+		t.Fatalf("probe = %q", rec.Header().Get("X-Emtds-Probe"))
 	}
 
 	req = httptest.NewRequest(http.MethodGet, "http://park.example/healthz?probe=zz!!", nil)
@@ -50,7 +50,7 @@ func TestHealthzProbeHeaders(t *testing.T) {
 	if rec.Body.String() != "ok" {
 		t.Fatalf("bad probe body = %q", rec.Body.String())
 	}
-	if _, ok := rec.Header()["X-Kuztds-Probe"]; ok {
+	if _, ok := rec.Header()["X-Emtds-Probe"]; ok {
 		t.Fatal("invalid probe was echoed")
 	}
 }

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/logbuf"
 )
 
 // TestCHOriginRoundTrip checks origin columns after migration 010 and refresh,

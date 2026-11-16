@@ -31,6 +31,9 @@ type SliceRow struct {
 	Profit    float64 `json:"profit"`
 	// DepSum is the sum of deposits. It is not the payout in Profit.
 	DepSum float64 `json:"depsum"`
+	// Cost is the click cost of the row in cents by currency code, as on PerfRow.
+	// An empty code is the tracker currency of imported clicks. It is absent when no click has a price.
+	Cost map[string]int64 `json:"cost,omitempty"`
 }
 
 // Slice groups visits for the report page.
@@ -53,11 +56,35 @@ func (c *CH) SliceFiltered(ctx context.Context, from, to time.Time, conds []Cond
 	return rows, err
 }
 
+// convWhere is the conversions side of conds for a period query.
+// c supplies wave readiness. conds are the conditions of the whole query.
+// sql is the buildWhere fragment (empty or starting with " AND ") and args its placeholder values.
+// ok is false when a condition names a field the conversions table does not have, or a wave
+// that is not ready there: the caller then reads visits only, and that is not an error.
+// err is ErrUnknownField or ErrBadCond from buildWhere.
+func convWhere(c *CH, conds []Cond) (sql string, args []any, ok bool, err error) {
+	for _, cond := range conds {
+		f, found := fieldByName(cond.Field)
+		if !found || f.Conv == "" {
+			return "", nil, false, nil
+		}
+	}
+	sql, args, skip, err := buildWhere(c, "conversions", conds)
+	if err != nil {
+		return "", nil, false, err
+	}
+	if skip {
+		return "", nil, false, nil
+	}
+	return sql, args, true, nil
+}
+
 // SliceMeta is SliceFiltered that also says whether the visit query hit SliceLimit.
 // ctx bounds both queries. from and to are the window. conds filter both sides.
 // It returns the rows, truncated true when more than SliceLimit visit groups exist (only the first SliceLimit by hits are kept), and the same errors as SliceFiltered.
 // Conversion groups outside the kept visit groups still come back as rows with Hits 0, so a truncated report is partial on both sides.
 func (c *CH) SliceMeta(ctx context.Context, from, to time.Time, conds []Cond) ([]SliceRow, bool, error) {
+	ctx = c.analyticsCtx(ctx, 0)
 	evSQL, evArgs, skip, err := buildWhere(c, "events", conds)
 	if err != nil {
 		return nil, false, err
@@ -65,25 +92,9 @@ func (c *CH) SliceMeta(ctx context.Context, from, to time.Time, conds []Cond) ([
 	if skip {
 		return []SliceRow{}, false, nil
 	}
-	convOK := true
-	var cvSQL string
-	var cvArgs []any
-	for _, cond := range conds {
-		f, ok := fieldByName(cond.Field)
-		if !ok || f.Conv == "" {
-			convOK = false
-			break
-		}
-	}
-	if convOK {
-		var skipC bool
-		cvSQL, cvArgs, skipC, err = buildWhere(c, "conversions", conds)
-		if err != nil {
-			return nil, false, err
-		}
-		if skipC {
-			convOK = false
-		}
+	cvSQL, cvArgs, convOK, err := convWhere(c, conds)
+	if err != nil {
+		return nil, false, err
 	}
 	q := sliceEventsSQL(c.clickCols, c.uniqCount(conds, sliceDims(c.clickCols)...), c.firstStepUniq(), evSQL)
 	rows, err := c.conn.Query(ctx, q, append([]any{from, to}, evArgs...)...)
@@ -91,9 +102,8 @@ func (c *CH) SliceMeta(ctx context.Context, from, to time.Time, conds []Cond) ([
 		return nil, false, err
 	}
 	defer rows.Close()
-	type key struct{ group, stream, country, offer, source string }
 	var out []SliceRow
-	index := map[key]int{}
+	index := map[sliceKey]int{}
 	truncated := false
 	for rows.Next() {
 		if len(out) >= SliceLimit {
@@ -106,11 +116,17 @@ func (c *CH) SliceMeta(ctx context.Context, from, to time.Time, conds []Cond) ([
 			return nil, false, err
 		}
 		row.Hits, row.Unique, row.UniqFirst, row.Bots = int64(hits), int64(uniq), int64(first), int64(bots)
-		index[key{row.Group, row.Stream, row.Country, row.Offer, row.Source}] = len(out)
+		index[sliceKey{row.Group, row.Stream, row.Country, row.Offer, row.Source}] = len(out)
 		out = append(out, row)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, false, err
+	}
+	if c.costCols {
+		out, err = c.addSliceCost(ctx, sliceCostSQL(c.clickCols, evSQL), append([]any{from, to}, evArgs...), out, index, truncated)
+		if err != nil {
+			log.Printf("clickhouse: slice cost: %v", err)
+		}
 	}
 	if !convOK {
 		if out == nil {
@@ -132,7 +148,7 @@ func (c *CH) SliceMeta(ctx context.Context, from, to time.Time, conds []Cond) ([
 		if err := pbs.Scan(&group, &stream, &country, &offerID, &sourceID, &conv, &profit, &dep); err != nil {
 			return out, truncated, nil
 		}
-		i, ok := index[key{group, stream, country, offerID, sourceID}]
+		i, ok := index[sliceKey{group, stream, country, offerID, sourceID}]
 		if !ok {
 			i = len(out)
 			out = append(out, SliceRow{Group: group, Stream: stream, Country: country, Offer: offerID, Source: sourceID})
@@ -143,6 +159,57 @@ func (c *CH) SliceMeta(ctx context.Context, from, to time.Time, conds []Cond) ([
 		out = []SliceRow{}
 	}
 	return out, truncated, nil
+}
+
+// sliceKey is one report cell: campaign, stream, country, offer and source.
+type sliceKey struct{ group, stream, country, offer, source string }
+
+// addSliceCost adds the click cost of the period to the report rows, cents by currency.
+// ctx bounds the query. args are from, to and the events filter args of sliceCostSQL.
+// out and index are the rows built so far. A cell that has no visit row is appended, unless
+// truncated says the visit rows were cut: then it is dropped, so the answer stays bounded.
+// It returns the rows, with what was added before a query or scan error, and that error.
+func (c *CH) addSliceCost(ctx context.Context, q string, args []any, out []SliceRow, index map[sliceKey]int, truncated bool) ([]SliceRow, error) {
+	rows, err := c.conn.Query(ctx, q, args...)
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k sliceKey
+		var cur string
+		var cents int64
+		if err := rows.Scan(&k.group, &k.stream, &k.country, &k.offer, &k.source, &cur, &cents); err != nil {
+			return out, err
+		}
+		i, ok := index[k]
+		if !ok && truncated {
+			continue
+		}
+		if !ok {
+			i = len(out)
+			index[k] = i
+			out = append(out, SliceRow{Group: k.group, Stream: k.stream, Country: k.country, Offer: k.offer, Source: k.source})
+		}
+		if out[i].Cost == nil {
+			out[i].Cost = map[string]int64{}
+		}
+		out[i].Cost[cur] += cents
+	}
+	return out, rows.Err()
+}
+
+// sliceCostSQL is the click cost half of the period report, grouped like sliceEventsSQL plus the currency.
+// clickCols adds the offer and source columns. evSQL is the buildWhere fragment, or empty.
+// Placeholders are from, to, then the filter args. Clicks with no price are left out. It does not fail.
+func sliceCostSQL(clickCols bool, evSQL string) string {
+	offer, source, extra := "''", "''", ""
+	if clickCols {
+		offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
+	}
+	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, cost_cur, sum(cost_cents)
+		FROM events WHERE ts >= ? AND ts < ?`, offer, source) + evSQL + fmt.Sprintf(` AND cost_cents > 0
+		GROUP BY group_name, stream_name, country%s, cost_cur`, extra)
 }
 
 // sliceDims lists the id fields the report groups events by.
@@ -182,10 +249,10 @@ func sliceEventsSQL(clickCols bool, uniq, first, evSQL string) string {
 // does not name the column. The string is a full SELECT. It does not fail.
 func sliceConvSQL(c *CH, cvSQL string) string {
 	offer, source, extra := "''", "''", ""
-	click, ext, model, origin := false, false, false, false
+	click, ext, model, origin, root := false, false, false, false, false
 	depSum := "toFloat64(0) AS depsum_sum"
 	if c != nil {
-		click, ext, model, origin = c.clickCols, c.extConv, c.modelConv, c.originConv.Load()
+		click, ext, model, origin, root = c.clickCols, c.extConv, c.modelConv, c.originConv.Load(), c.ready("conversions", waveRoot)
 		if c.clickCols {
 			offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
 		}
@@ -198,5 +265,5 @@ func sliceConvSQL(c *CH, cvSQL string) string {
 		%s
 		) WHERE ts >= ? AND ts < ?%s%s
 		GROUP BY group_name, stream_name, country%s`,
-		offer, source, depSum, conversionUnion(click, ext, model, origin, c != nil && c.subConv, c != nil && c.depsumConv), voidedConfirmedSQL("cid", "status"), cvSQL, extra)
+		offer, source, depSum, conversionUnion(click, ext, model, conversionLateWaves{origin: origin, root: root}, c != nil && c.subConv, c != nil && c.depsumConv), voidedConfirmedSQL("cid", "status"), cvSQL, extra)
 }

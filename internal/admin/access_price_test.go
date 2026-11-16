@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // priceCampaign is c1 with the price names "price" and "cur" on the given source.

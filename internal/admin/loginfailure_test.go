@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // brokenLimiter stands for a limiter whose storage is unreachable.
@@ -52,14 +52,15 @@ func postLogin(t *testing.T, base, user, pass string) int {
 
 // TestBrokenLimiterAnswersBeforeThePasswordCheck is the oracle.
 //
-// A wrong password is 401. A right password with the session store down is 500,
+// A wrong password is 401. A right password with the session store down is 503,
 // because issueSession cannot write the session. With the limiter swallowing its
 // storage error into a fail-open true, an unlimited stream of guesses could be
 // run against a dead Redis and told which one was right — nobody could log in
 // during that window, but the password was learned and Redis comes back.
 //
 // Refusing on the limiter's error removes the difference instead of hiding it:
-// both answers are now 500, and no password is compared to produce them.
+// both answers are now 503 with the session store text, and no password is
+// compared to produce them.
 func TestBrokenLimiterAnswersBeforeThePasswordCheck(t *testing.T) {
 	hash, err := security.HashPassword("p@ss")
 	if err != nil {
@@ -75,7 +76,7 @@ func TestBrokenLimiterAnswersBeforeThePasswordCheck(t *testing.T) {
 
 	wrong := postLogin(t, srv.URL, "admin", "not-the-password")
 	right := postLogin(t, srv.URL, "admin", "p@ss")
-	if wrong != http.StatusInternalServerError || right != http.StatusInternalServerError {
+	if wrong != http.StatusServiceUnavailable || right != http.StatusServiceUnavailable {
 		t.Fatalf("wrong=%d right=%d: the two must be indistinguishable while the store is down",
 			wrong, right)
 	}

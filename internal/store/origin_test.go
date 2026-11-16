@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/logbuf"
 )
 
 func TestOriginMigrationMatchesFields(t *testing.T) {
@@ -79,14 +79,14 @@ func TestEventColumnsOriginFallback(t *testing.T) {
 }
 
 func TestConversionUnionOriginLegacyPostbacks(t *testing.T) {
-	with := conversionUnion(false, false, false, true, false, false)
+	with := conversionUnion(false, false, false, conversionLateWaves{origin: true}, false, false)
 	if !strings.Contains(with, "group_name AS origin_group_name") {
 		t.Fatalf("postbacks stub:\n%s", with)
 	}
 	if !strings.Contains(with, "origin_group_name, origin_group_id FROM conversions") {
 		t.Fatalf("conversions branch:\n%s", with)
 	}
-	if without := conversionUnion(true, true, true, false, false, false); strings.Contains(without, "origin_group") {
+	if without := conversionUnion(true, true, true, conversionLateWaves{}, false, false); strings.Contains(without, "origin_group") {
 		t.Fatalf("origin leaked without flag:\n%s", without)
 	}
 }

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // memGroups is an in-memory campaign store. lists counts the List calls.
@@ -317,6 +317,41 @@ func TestCatalogGroupTrimAndOmit(t *testing.T) {
 	if created.Group != long64 {
 		t.Fatalf("landing 64 group len %d", len([]rune(created.Group)))
 	}
+}
+
+// TestLandingEntryExtensionValidation checks that Entry with a non-allowed extension
+// is rejected with 400, while .html, .htm and .php are accepted.
+func TestLandingEntryExtensionValidation(t *testing.T) {
+	srv, _, _ := catalogServer(t)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+
+	// notes.txt must be rejected.
+	resp := csrfDo(t, c, http.MethodPost, srv.URL+"/api/landings", csrf, config.Landing{
+		ID: "l-bad", Local: true, Entry: "notes.txt",
+	})
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("notes.txt Entry → %d, want 400", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// .html must be accepted.
+	resp = csrfDo(t, c, http.MethodPost, srv.URL+"/api/landings", csrf, config.Landing{
+		ID: "l-html", Local: true, Entry: "index.html",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("index.html Entry → %d, want 201", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	// .php must be accepted.
+	resp = csrfDo(t, c, http.MethodPost, srv.URL+"/api/landings", csrf, config.Landing{
+		ID: "l-php", Local: true, Entry: "index.php",
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("index.php Entry → %d, want 201", resp.StatusCode)
+	}
+	resp.Body.Close()
 }
 
 func TestTrafficSourceRejectsSubID16(t *testing.T) {

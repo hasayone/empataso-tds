@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/cron"
-	"github.com/egerkuzma/kuztds/internal/logbuf"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/cron"
+	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/emtds/bridge/ktimport"
 )
 
 func syncTarget(s *Server, creds ktCreds) keitaroSyncTarget {
@@ -293,6 +293,67 @@ func TestKeitaroSyncDedupExistingCID(t *testing.T) {
 	res := s.runKeitaroSyncPass(context.Background(), syncTarget(s, s.keitaroCreds()), &st, true)
 	if !res.OK || res.Clicks != 0 || len(sink.events) != before {
 		t.Fatalf("ok=%v clicks=%d events=%d", res.OK, res.Clicks, len(sink.events))
+	}
+}
+
+// TestKeitaroSyncClickCost checks the sync asks the click log for cost and stores it on the click
+// in cents with no currency, a click without a price stays at zero, and the clicks cursor moves on.
+func TestKeitaroSyncClickCost(t *testing.T) {
+	now := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	ts := now.Add(-2 * time.Hour)
+	sink := &fakeSink{}
+	dir := t.TempDir()
+	s, _ := syncTestServer(t, "http://tracker.example", "key", sink, filepath.Join(dir, "sync.json"), filepath.Join(dir, "cron.json"), now)
+	rows := `{"rows":[{"sub_id":"priced","datetime":"` + ts.Format(keitaroTimeLayout) + `","campaign_id":1,"cost":"1.26"},` +
+		`{"sub_id":"free","datetime":"` + ts.Format(keitaroTimeLayout) + `","campaign_id":1}],"total":2}`
+	var asked atomic.Bool
+	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if strings.Contains(r.URL.Path, "/clicks/log") {
+			var body struct {
+				Columns []string `json:"columns"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			for _, c := range body.Columns {
+				if c == "cost" {
+					asked.Store(true)
+				}
+			}
+			_, _ = w.Write([]byte(rows))
+			return
+		}
+		if strings.Contains(r.URL.Path, "/log") {
+			_, _ = w.Write([]byte(`{"rows":[],"total":0}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	t.Cleanup(fake.Close)
+	host := keitaroHost(fake.URL)
+	if err := s.cfg.Manifest.Save(ktimport.Manifest{Host: host, Campaigns: map[string]string{"1": "g1"}}); err != nil {
+		t.Fatal(err)
+	}
+	cursor := ts.Add(-time.Minute)
+	st := keitaroSyncFile{Host: host, ClicksTo: cursor, ConversionsTo: cursor}
+	s.ktMu.Lock()
+	s.ktBase = fake.URL
+	s.ktMu.Unlock()
+	res := s.runKeitaroSyncPass(context.Background(), syncTarget(s, s.keitaroCreds()), &st, true)
+	if !res.OK || res.Clicks != 2 || !st.ClicksTo.After(ts) {
+		t.Fatalf("ok=%v err=%q clicks=%d cursor=%v", res.OK, res.ErrText, res.Clicks, st.ClicksTo)
+	}
+	if !asked.Load() {
+		t.Fatal("the click log was not asked for cost")
+	}
+	cost := map[string]int64{}
+	for _, ev := range sink.events {
+		if ev.CostCur != "" {
+			t.Fatalf("imported cost has a currency: %+v", ev)
+		}
+		cost[ev.CID] = ev.CostCents
+	}
+	if len(cost) != 2 || cost["priced"] != 126 || cost["free"] != 0 {
+		t.Fatalf("cost by click %v", cost)
 	}
 }
 

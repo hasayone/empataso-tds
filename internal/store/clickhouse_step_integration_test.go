@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/logbuf"
 )
 
 // stepEvents is one campaign's traffic: two visitors on a landing (step 0) and the

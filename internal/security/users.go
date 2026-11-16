@@ -12,8 +12,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/egerkuzma/kuztds/internal/atomicfile"
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 const (
@@ -72,20 +72,20 @@ type Prefs struct {
 
 // User is one row in users.json, including the argon2id hash for login.
 type User struct {
-	ID           string    `json:"id"`
-	Login        string    `json:"login"`
-	Type         UserType  `json:"type"`
-	Enabled      bool      `json:"enabled"`
-	Hash         string    `json:"hash,omitempty"`
-	Prefs        Prefs     `json:"prefs"`
-	Access       Access    `json:"access"`
+	ID      string   `json:"id"`
+	Login   string   `json:"login"`
+	Type    UserType `json:"type"`
+	Enabled bool     `json:"enabled"`
+	Hash    string   `json:"hash,omitempty"`
+	Prefs   Prefs    `json:"prefs"`
+	Access  Access   `json:"access"`
 	// BoardIDs lists panel section ids this user may open. Empty meaning depends on Type and AllBoards.
 	BoardIDs []string `json:"board_ids,omitempty"`
 	// DefaultBoard is the section opened after sign-in. Empty uses MainBoardID.
 	DefaultBoard string `json:"default_board,omitempty"`
 	// AllBoards grants every section without listing BoardIDs.
-	AllBoards bool `json:"all_boards,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	AllBoards    bool      `json:"all_boards,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 	KeitaroID    int       `json:"keitaro_id,omitempty"`
 	AccessSource string    `json:"access_source,omitempty"`
 	// RoleID names a Role in roles.json. When set, the role replaces Access for a USER.

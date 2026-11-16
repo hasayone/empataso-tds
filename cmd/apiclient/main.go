@@ -3,7 +3,7 @@
 //
 // Collects visitor data, sends it to the engine (?api=base64(JSON)),
 // receives a decision and applies it (redirect/content). The keyword is taken
-// from ?q. Configuration is via the KUZTDS_* environment variables.
+// from ?q. Configuration is via the EMTDS_* environment variables.
 package main
 
 import (
@@ -19,7 +19,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/server"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/server"
 )
 
 type apiRequest struct {
@@ -40,11 +41,11 @@ type apiRequest struct {
 
 func main() {
 	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
-	tdsURL := strings.TrimRight(getenv("KUZTDS_TDS_URL", "http://localhost:8080"), "/")
-	apiKey := os.Getenv("KUZTDS_API_KEY")
-	groupID := getenv("KUZTDS_GROUP_ID", "promo")
-	cookieName := getenv("KUZTDS_COOKIE", "ztu")
-	addr := getenv("KUZTDS_APICLIENT_LISTEN", ":9090")
+	tdsURL := strings.TrimRight(getenv("EMTDS_TDS_URL", "http://localhost:8080"), "/")
+	apiKey := config.Env("EMTDS_API_KEY")
+	groupID := getenv("EMTDS_GROUP_ID", "promo")
+	cookieName := getenv("EMTDS_COOKIE", "ztu")
+	addr := getenv("EMTDS_APICLIENT_LISTEN", ":9090")
 
 	realIP, err := server.NewRealIP(trustedProxies())
 	if err != nil {
@@ -198,14 +199,14 @@ func extraParams(r *http.Request) []string {
 }
 
 func trustedProxies() []string {
-	if v := os.Getenv("KUZTDS_TRUSTED_PROXIES"); v != "" {
+	if v := config.Env("EMTDS_TRUSTED_PROXIES"); v != "" {
 		return strings.Split(v, ",")
 	}
 	return []string{"127.0.0.1/32", "::1/128"}
 }
 
 func getenv(k, def string) string {
-	if v := os.Getenv(k); v != "" {
+	if v := config.Env(k); v != "" {
 		return v
 	}
 	return def

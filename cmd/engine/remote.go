@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/fetch"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/fetch"
 )
 
 // remoteValue loads the value for [REMOTE]:
@@ -20,7 +20,7 @@ import (
 // [REMOTE] has rm.Reserved: failing is instant and free, so waiting longer only
 // buys a slightly better value at the price of every visitor's page. curl has no
 // value of its own — failing means trashResult, which on the default
-// KUZTDS_TRASH_MODE=0 is a burnt click. Expensive to give up means it is worth
+// EMTDS_TRASH_MODE=0 is a burnt click. Expensive to give up means it is worth
 // waiting longer.
 //
 // The coupling to watch: http.Client's timeout covers waiting for a connection,

@@ -92,6 +92,7 @@ func (c *CH) clickFactsBundle(ctx context.Context, from, to time.Time, where str
 		return out, nil
 	}
 	out.Ready = c.clickCols
+	ctx = c.analyticsCtx(ctx, 0)
 	clicks, err := c.clickFacts(ctx, from, to, where, wargs)
 	if err != nil {
 		return out, err
@@ -290,7 +291,7 @@ func (c *CH) ClickBuckets(ctx context.Context, groupID string, from, to time.Tim
 		return nil, nil
 	}
 	where := bucketWhere(includeBots, c.costCols)
-	rows, err := c.conn.Query(ctx, bucketsSQL(c.clickCols, c.uniqCount(nil), where), groupID, from, to)
+	rows, err := c.conn.Query(c.analyticsCtx(ctx, 0), bucketsSQL(c.clickCols, c.uniqCount(nil), where), groupID, from, to)
 	if err != nil {
 		return nil, err
 	}

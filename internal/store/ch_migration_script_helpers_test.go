@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -39,8 +40,10 @@ func substituteMigrationDB(db, script string) string {
 }
 
 // validateMigrationScript checks every statement before execution.
-// Only CREATE DATABASE, CREATE TABLE and ALTER with ADD/MODIFY COLUMN or MODIFY TTL
-// on the given db are allowed.
+// Only CREATE DATABASE, CREATE TABLE and ALTER with ADD/MODIFY COLUMN,
+// ADD INDEX IF NOT EXISTS, MODIFY TTL or MODIFY SETTING
+// non_replicated_deduplication_window on the given db are allowed.
+// MATERIALIZE is refused: rebuilding old parts is a manual step.
 func validateMigrationScript(db, script string) error {
 	body := substituteMigrationDB(db, script)
 	for _, stmt := range splitCHMigration(body) {
@@ -107,7 +110,7 @@ func rejectForeignQualifiers(db, stmt string) error {
 	if regexp.MustCompile("(?i)`kuztds`\\.").MatchString(stmt) {
 		return fmt.Errorf("references production database kuztds")
 	}
-	if regexp.MustCompile(`(?i)\bkuztds\.(?:events|conversions|postbacks|postback_log)\b`).MatchString(stmt) {
+	if regexp.MustCompile(`(?i)\bemtds\.(?:events|conversions|postbacks|postback_log)\b`).MatchString(stmt) {
 		return fmt.Errorf("references production database kuztds")
 	}
 	if regexp.MustCompile(`(?i)\bKUZTDS\.`).MatchString(stmt) && !strings.EqualFold(db, "kuztds") {
@@ -123,15 +126,36 @@ func rejectForeignQualifiers(db, stmt string) error {
 	return nil
 }
 
+// migrationSettingOp is the ALTER operation that changes a table setting.
+const migrationSettingOp = `MODIFY\s+SETTING`
+
+// migrationSettingOnly matches the one setting a migration may change: the
+// deduplication window of a non-replicated table, set to a number. The number
+// is the first submatch.
+var migrationSettingOnly = regexp.MustCompile(`(?is)^MODIFY\s+SETTING\s+non_replicated_deduplication_window\s*=\s*(\d+)\s*;?\s*$`)
+
+// validateAlterMigrationBody checks the body of one ALTER of a migration: only
+// the allowed operations, nothing that destroys data, and a deduplication window
+// no smaller than eventsDedupWindow, which the engine needs to repeat a batch.
+// It returns an error naming the first rule the body breaks.
 func validateAlterMigrationBody(body string) error {
 	b := strings.TrimSpace(body)
 	if b == "" {
 		return fmt.Errorf("empty ALTER body")
 	}
-	if !regexp.MustCompile(`(?is)^(ADD\s+COLUMN|MODIFY\s+COLUMN|MODIFY\s+TTL)\b`).MatchString(b) {
-		return fmt.Errorf("ALTER may only ADD COLUMN, MODIFY COLUMN or MODIFY TTL")
+	if !regexp.MustCompile(`(?is)^(ADD\s+COLUMN|ADD\s+INDEX\s+IF\s+NOT\s+EXISTS|MODIFY\s+COLUMN|MODIFY\s+TTL|` + migrationSettingOp + `)\b`).MatchString(b) {
+		return fmt.Errorf("ALTER may only ADD COLUMN, ADD INDEX IF NOT EXISTS, MODIFY COLUMN, MODIFY TTL or MODIFY SETTING non_replicated_deduplication_window")
 	}
-	if regexp.MustCompile(`(?i)\b(DROP|DELETE|RENAME|ATTACH|DETACH|UPDATE)\b`).MatchString(b) {
+	if regexp.MustCompile(`(?is)^MODIFY\s+SETTING\b`).MatchString(b) {
+		m := migrationSettingOnly.FindStringSubmatch(b)
+		if m == nil {
+			return fmt.Errorf("MODIFY SETTING may only set non_replicated_deduplication_window to a number")
+		}
+		if n, err := strconv.Atoi(m[1]); err != nil || n < eventsDedupWindow {
+			return fmt.Errorf("non_replicated_deduplication_window must be at least %d, the window the engine relies on", eventsDedupWindow)
+		}
+	}
+	if regexp.MustCompile(`(?i)\b(DROP|DELETE|RENAME|ATTACH|DETACH|UPDATE|MATERIALIZE)\b`).MatchString(b) {
 		return fmt.Errorf("forbidden ALTER operation")
 	}
 	return nil

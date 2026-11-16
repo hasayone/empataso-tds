@@ -16,7 +16,7 @@ func TestApplyMergeAndSimulate(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodPost && r.URL.Path == "/api/login":
-			http.SetCookie(w, &http.Cookie{Name: "kuztds_admin", Value: "sess"})
+			http.SetCookie(w, &http.Cookie{Name: "emtds_admin", Value: "sess"})
 			_ = json.NewEncoder(w).Encode(map[string]string{"csrf": "tok"})
 		case r.Method == http.MethodGet && r.URL.Path == "/api/groups":
 			_ = json.NewEncoder(w).Encode([]Group{{ID: "mine", Name: "Mine", Status: true}})

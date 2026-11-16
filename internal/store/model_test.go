@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/logbuf"
+	"github.com/egerkuzma/emtds/internal/logbuf"
 )
 
 func TestModelMigrationMatchesFields(t *testing.T) {
@@ -82,14 +82,14 @@ func TestLogSelectMatchesDestWithModel(t *testing.T) {
 }
 
 func TestConversionUnionModel(t *testing.T) {
-	with := conversionUnion(false, false, true, false, false, false)
+	with := conversionUnion(false, false, true, conversionLateWaves{}, false, false)
 	if !strings.Contains(with, "'' AS device_model") || !strings.Contains(with, ", device_model FROM conversions") {
 		t.Fatalf("model union:\n%s", with)
 	}
-	if without := conversionUnion(true, true, false, false, false, false); strings.Contains(without, "device_model") {
+	if without := conversionUnion(true, true, false, conversionLateWaves{}, false, false); strings.Contains(without, "device_model") {
 		t.Fatalf("model column leaked into the union without the wave:\n%s", without)
 	}
-	if conversionFrom(true, true) != conversionUnion(true, true, false, false, false, false) {
+	if conversionFrom(true, true) != conversionUnion(true, true, false, conversionLateWaves{}, false, false) {
 		t.Fatal("conversionFrom must not add the model wave")
 	}
 }

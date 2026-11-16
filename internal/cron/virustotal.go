@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/atomicfile"
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // runVirusTotal asks VirusTotal about every domain the streams send traffic
@@ -127,7 +127,7 @@ func (r *Runner) runVirusTotal(ctx context.Context, cfg Config) (string, error) 
 		}
 	}
 	if len(fresh) > 0 {
-		text := "🛑 KuzTDS: VirusTotal flags " + strings.Join(fresh, ", ") + "."
+		text := "🛑 EmTDS: VirusTotal flags " + strings.Join(fresh, ", ") + "."
 		if len(disabled) > 0 {
 			text += "\nStreams switched off: " + strings.Join(disabled, ", ") + "."
 		}
@@ -202,26 +202,35 @@ func hostsIn(texts ...string) []string {
 // The file is read again here rather than reused from the start of the run:
 // a pass over many domains takes minutes, and writing back the copy from
 // before it would undo whatever the operator saved in the meantime.
+// Campaigns are edited as JSON objects, so a field this program does not know
+// is written back with the rest of the campaign.
 func (r *Runner) disableStreams(flagged map[string]int) ([]string, error) {
 	b, err := os.ReadFile(r.paths.Groups)
 	if err != nil {
 		return nil, err
 	}
-	var groups []config.Group
+	var groups []map[string]any
 	if err := json.Unmarshal(b, &groups); err != nil {
 		return nil, err
 	}
 	var off []string
-	for gi := range groups {
-		for si := range groups[gi].Streams {
-			s := &groups[gi].Streams[si]
-			if !s.Status {
+	for _, g := range groups {
+		id, _ := g["id"].(string)
+		streams, _ := g["streams"].([]any)
+		for _, raw := range streams {
+			s, ok := raw.(map[string]any)
+			if !ok {
 				continue
 			}
-			for _, d := range hostsIn(s.Out.Out) {
+			on, _ := s["status"].(bool)
+			if !on {
+				continue
+			}
+			name, _ := s["name"].(string)
+			for _, d := range hostsIn(streamOut(s)) {
 				if _, bad := flagged[d]; bad {
-					s.Status = false
-					off = append(off, groups[gi].ID+"/"+s.Name)
+					s["status"] = false
+					off = append(off, id+"/"+name)
 					break
 				}
 			}
@@ -234,4 +243,15 @@ func (r *Runner) disableStreams(flagged map[string]int) ([]string, error) {
 		return nil, err
 	}
 	return off, atomicfile.Write(r.paths.Groups, b, 0o644)
+}
+
+// streamOut returns the output URL of a stream object.
+// s is one stream from groups.json. A missing or non-object output is empty.
+func streamOut(s map[string]any) string {
+	out, _ := s["out"].(map[string]any)
+	if out == nil {
+		return ""
+	}
+	text, _ := out["out"].(string)
+	return text
 }

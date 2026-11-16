@@ -10,7 +10,7 @@ func TestSubIDFilterDropsOverLongValues(t *testing.T) {
 	long := strings.Repeat("x", maxSubIDValueLen+1)
 	exact := strings.Repeat("y", maxSubIDValueLen)
 	payload, _ := json.Marshal([]string{"a", long, exact})
-	rules, ok, _, losses := mapFilters([]KFilter{subFilter("sub_id_2", "accept", string(payload))}, nil, false)
+	rules, ok, _, losses, _ := mapFilters([]KFilter{subFilter("sub_id_2", "accept", string(payload))}, nil, false)
 	if !ok {
 		t.Fatal("the campaign must stay importable")
 	}
@@ -24,7 +24,7 @@ func TestSubIDFilterDropsOverLongValues(t *testing.T) {
 
 func TestSubIDFilterAllValuesTooLongIsSkipped(t *testing.T) {
 	payload, _ := json.Marshal([]string{strings.Repeat("x", 300)})
-	rules, ok, _, losses := mapFilters([]KFilter{
+	rules, ok, _, losses, _ := mapFilters([]KFilter{
 		subFilter("sub_id_1", "accept", string(payload)),
 		subFilter("sub_id_2", "accept", `["a"]`),
 	}, nil, false)

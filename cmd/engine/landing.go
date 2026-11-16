@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -11,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/render"
-	"github.com/egerkuzma/kuztds/internal/server"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/render"
+	"github.com/egerkuzma/emtds/internal/server"
 )
 
 // landingBodyLimit is the maximum landing body read from disk or from PHP.
@@ -32,6 +33,12 @@ type landingServer struct {
 	lookup func(id string) (config.Landing, bool)
 	log    *slog.Logger
 	client *http.Client
+
+	// stats counts the requests to the PHP sidecar for the metrics snapshot.
+	stats landingStats
+	// originOn appends a path token to a PHP redirect onto this tracker's campaign.
+	// Nil leaves Location unchanged. servePHPAsset does not call it.
+	originOn func(location, token string) string
 
 	mu      sync.Mutex
 	warned  map[string]struct{}
@@ -60,7 +67,7 @@ func newLandingServer(dir, phpURL string, lookup func(string) (config.Landing, b
 }
 
 // landingsDir returns the directory local landings are read from.
-// explicit is KUZTDS_LANDINGS_DIR. groupsFile is KUZTDS_GROUPS_FILE.
+// explicit is EMTDS_LANDINGS_DIR. groupsFile is EMTDS_GROUPS_FILE.
 // An explicit path wins. Otherwise, when groupsFile is set, the directory
 // is "landings" next to that file. Both empty returns "" and nothing is served.
 func landingsDir(explicit, groupsFile string) string {
@@ -111,6 +118,10 @@ func (s *landingServer) serveEntry(w http.ResponseWriter, r *http.Request, landi
 		http.NotFound(w, r)
 		return
 	}
+	if landingDenied(name) {
+		http.NotFound(w, r)
+		return
+	}
 	resp, err := s.readEntry(r, landingID, name, deps)
 	if err != nil {
 		if err == errPHPOff {
@@ -131,7 +142,11 @@ func (s *landingServer) serveEntry(w http.ResponseWriter, r *http.Request, landi
 	}
 	if resp.Status < 200 || resp.Status >= 300 {
 		if resp.Status >= 300 && resp.Status < 400 && resp.Location != "" {
-			w.Header().Set("Location", resp.Location)
+			loc := resp.Location
+			if s.originOn != nil {
+				loc = s.originOn(loc, deps.Origin)
+			}
+			w.Header().Set("Location", loc)
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(resp.Status)
@@ -145,21 +160,47 @@ func (s *landingServer) serveEntry(w http.ResponseWriter, r *http.Request, landi
 }
 
 // serveAsset writes one file under /l/{id}/{path}.
-// A directory, a hidden name, or a path that escapes the landing is 404.
-// A .php file or a name without an extension is proxied to PHP.
-// Any other file is static, with Cache-Control public for five minutes.
+// A directory, a hidden name, a path that escapes the landing, or a name
+// from the deny list (landingDenied) answers 404, the same body as a missing file.
+// A .php file is proxied to the PHP sidecar only when the file exists on disk;
+// otherwise it is 404. A name without an extension redirects 301 to
+// rel/index.php when that file exists; otherwise it is 404.
+// Static files are served only when the extension is in allowedLandingExts;
+// any other extension answers 404. Allowed files get Cache-Control public 5 min.
 func (s *landingServer) serveAsset(w http.ResponseWriter, r *http.Request) {
 	if s == nil {
 		http.NotFound(w, r)
 		return
 	}
 	id, rel, ok := landingAssetPath(r.URL.Path)
-	if !ok {
+	if !ok || landingDenied(rel) {
 		http.NotFound(w, r)
 		return
 	}
-	if phpEntry(rel) {
+	ext := strings.ToLower(path.Ext(rel))
+	if ext == ".php" {
+		if !s.fileExists(id, rel) {
+			http.NotFound(w, r)
+			return
+		}
 		s.servePHPAsset(w, r, id, rel)
+		return
+	}
+	if ext == "" {
+		indexPHP := rel + "/index.php"
+		if s.fileExists(id, indexPHP) {
+			target := "/l/" + id + "/" + indexPHP
+			if q := rawQuery(r); q != "" {
+				target += "?" + q
+			}
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+			return
+		}
+		http.NotFound(w, r)
+		return
+	}
+	if _, ok := allowedLandingExts[ext]; !ok {
+		http.NotFound(w, r)
 		return
 	}
 	full, ok := s.fileInLanding(id, rel)
@@ -167,13 +208,20 @@ func (s *landingServer) serveAsset(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	fi, err := os.Stat(full)
+	f, err := os.Open(full)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
 	if err != nil || fi.IsDir() {
 		http.NotFound(w, r)
 		return
 	}
 	w.Header().Set("Cache-Control", "public, max-age=300")
-	http.ServeFile(w, r, full)
+	// ServeContent returns the bytes of index.html. A directory redirect would hide the file.
+	http.ServeContent(w, r, fi.Name(), fi.ModTime(), f)
 }
 
 // resolveEntry picks the file name for landingID.
@@ -323,14 +371,18 @@ func headTagEnd(body string) int {
 // alias is the campaign path segment. cid is the click id. rawQuery is the
 // visitor query, kept except for cid, which is replaced.
 // The result starts with /. There is no error return.
-func offerStepURL(alias, cid, rawQuery string) string {
+func offerStepURL(alias, cid, rawQuery, originTok string) string {
 	alias = strings.Trim(alias, "/")
 	u := "/" + alias + "/offer?cid=" + cid
 	if alias == "" {
 		u = "/offer?cid=" + cid
 	}
-	if rest := queryWithout(rawQuery, "cid"); rest != "" {
+	rest := queryWithout(queryWithout(rawQuery, "cid"), "origin")
+	if rest != "" {
 		u += "&" + rest
+	}
+	if originTok != "" {
+		u += "&origin=" + url.QueryEscape(originTok)
 	}
 	return u
 }

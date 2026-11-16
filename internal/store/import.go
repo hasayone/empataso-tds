@@ -8,7 +8,7 @@ import (
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // ConversionInsert is one row written into the conversions table.
@@ -248,7 +248,7 @@ func (c *CH) InsertConversions(ctx context.Context, rows []ConversionInsert) err
 		cols += ", " + subTailList()
 		n += config.MaxSubID - clickWaveSubs
 	}
-	batch, err := c.conn.PrepareBatch(ctx, "INSERT INTO conversions ("+cols+")")
+	batch, err := c.conn.PrepareBatch(insertCtx(ctx), "INSERT INTO conversions ("+cols+")")
 	if err != nil {
 		return fmt.Errorf("clickhouse: prepare batch: %w", err)
 	}

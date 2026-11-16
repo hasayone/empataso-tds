@@ -53,8 +53,15 @@ type CH struct {
 	// Writes and reads name those columns only after ensureSchema has seen them.
 	// maybeRefreshOriginWave can set these true later without restarting the process.
 	originEvents, originConv atomic.Bool
-	originProbeMu            sync.Mutex
-	originLastProbe          time.Time
+	// rootEvents and rootConv: events and conversions carry the root wave
+	// (root_cid, and on conversions the origin stream and keyword). Writes
+	// name those columns only after ensureSchema has seen them.
+	// maybeRefreshOriginWave can set these true later without a restart.
+	rootEvents, rootConv atomic.Bool
+	// rootMissing counts conversions whose root click was not in the lookup window.
+	rootMissing atomic.Int64
+	originProbeMu   sync.Mutex
+	originLastProbe time.Time
 	// originColumnReader replaces readColumnSet during maybeRefreshOriginWave
 	// when set. Used by tests without ClickHouse.
 	originColumnReader func() (map[string]map[string]bool, error)
@@ -62,6 +69,11 @@ type CH struct {
 	// derived from it. The origin wave is tracked only in originEvents and
 	// originConv after ensureSchema.
 	readyFlags map[string]map[wave]bool
+	// limits bound the statistics queries; see analyticsCtx.
+	limits AnalyticsLimits
+	// dedupReady: the events table deduplicates inserts that carry a token.
+	// See DedupReady.
+	dedupReady atomic.Bool
 }
 
 // OpenCH opens a connection to ClickHouse.
@@ -91,7 +103,7 @@ func openCHRaw(addr, database, username, password string) (*CH, error) {
 		_ = conn.Close()
 		return nil, fmt.Errorf("clickhouse: ping: %w", err)
 	}
-	return &CH{conn: conn}, nil
+	return &CH{conn: conn, limits: DefaultAnalyticsLimits()}, nil
 }
 
 // NetworkColumns reports whether events carry asn/org/timezone/via.
@@ -138,6 +150,7 @@ func (c *CH) SummaryFiltered(ctx context.Context, from, to time.Time, conds []Co
 // summary aggregates events in [from, to). where is empty or from buildWhere.
 // conds are the conditions where came from; they pick the unique aggregate.
 func (c *CH) summary(ctx context.Context, from, to time.Time, where string, wargs []any, conds []Cond) (StatsSummary, error) {
+	ctx = c.analyticsCtx(ctx, 0)
 	var total, uniq, bots uint64
 	qargs := append([]any{from, to}, wargs...)
 	row := c.conn.QueryRow(ctx, summarySQL(c.uniqCount(conds), where), qargs...)
@@ -194,6 +207,7 @@ func (c *CH) TimeSeriesFiltered(ctx context.Context, from, to time.Time, stepSec
 // query adds click prices in cents by currency. An error from any query is
 // returned as-is.
 func (c *CH) timeSeries(ctx context.Context, w window, stepSec int) ([]TSPoint, error) {
+	ctx = c.analyticsCtx(ctx, 0)
 	stepSec = capSeriesStep(w.from, w.to, stepSec)
 	hits := map[int64]seriesHit{}
 	evArgs := append([]any{stepSec, w.from, w.to}, w.args...)
@@ -322,6 +336,7 @@ func (c *CH) PerformanceFiltered(ctx context.Context, from, to time.Time, conds 
 // When cost columns exist, click prices are added on the same row, cents by currency.
 // An error from a query is returned as-is.
 func (c *CH) performance(ctx context.Context, w window) ([]PerfRow, error) {
+	ctx = c.analyticsCtx(ctx, 0)
 	evArgs := append([]any{w.from, w.to}, w.args...)
 	rows, err := c.conn.Query(ctx, performanceSQL(c.uniqCount(w.conds), w.where), evArgs...)
 	if err != nil {
@@ -455,7 +470,7 @@ func (c *CH) BreakdownFiltered(ctx context.Context, from, to time.Time, dim stri
 	qargs = append(qargs, from, to)
 	qargs = append(qargs, args...)
 	qargs = append(qargs, limit)
-	rows, err := c.conn.Query(ctx, breakdownSQL(col, where), qargs...)
+	rows, err := c.conn.Query(c.analyticsCtx(ctx, 0), breakdownSQL(col, where), qargs...)
 	if err != nil {
 		return nil, err
 	}
@@ -482,7 +497,8 @@ type ValuesQuery struct {
 }
 
 // Values returns the top values of q.Field on q.Table over [q.From, q.To).
-// ctx bounds the query and carries max_execution_time=10. q.Table is events
+// ctx bounds the query, which runs under the analytics limits with a 10s
+// ceiling. q.Table is events
 // or conversions. q.Field must have Dim. q.Conds restrict rows; a wave that is
 // not ready yields an empty list. q.Limit <= 0 or above 500 becomes 500.
 // The rows are ordered by count, descending.
@@ -516,9 +532,7 @@ func (c *CH) Values(ctx context.Context, q ValuesQuery) ([]KV, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 500
 	}
-	ctx = clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{
-		"max_execution_time": 10,
-	}))
+	ctx = c.analyticsCtx(ctx, valuesMaxExecution)
 	qargs := make([]any, 0, 2+len(args)+1)
 	qargs = append(qargs, q.From, q.To)
 	qargs = append(qargs, args...)

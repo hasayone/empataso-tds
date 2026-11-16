@@ -151,7 +151,7 @@ func mergeCampaignMaps(base, newer map[string]string) map[string]string {
 
 // AddCampaignsIfAbsent дописывает пары campaign_id → group_id без замены существующих.
 //
-// Параметры: add — новые пары Keitaro campaign_id → id группы kuztds.
+// Параметры: add — новые пары Keitaro campaign_id → id группы emtds.
 // Результат: получатель дополнен только отсутствующими campaign_id, если gid ещё не занят другим campaign_id.
 // Ошибки: нет.
 func (m *Manifest) AddCampaignsIfAbsent(add map[string]string) {
@@ -177,7 +177,7 @@ func (m *Manifest) AddCampaignsIfAbsent(add map[string]string) {
 
 // campaignGIDTaken сообщает, что gid уже привязан к какому-то campaign_id.
 //
-// Параметры: campaigns — карта манифеста; gid — id группы kuztds.
+// Параметры: campaigns — карта манифеста; gid — id группы emtds.
 // Результат: true, если другой campaign_id уже указывает на этот gid.
 // Ошибки: нет.
 func campaignGIDTaken(campaigns map[string]string, gid string) bool {

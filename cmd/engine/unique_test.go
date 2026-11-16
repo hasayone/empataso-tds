@@ -6,8 +6,8 @@ import (
 	"testing"
 
 	"github.com/alicebob/miniredis/v2"
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/store"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -88,7 +88,7 @@ func TestOfferStepRoutesByFirstStepButLogsOwnUniq(t *testing.T) {
 			}
 			for i, s := range steps {
 				rec := j.visit(t, h, s.path)
-				if got := rec.Header().Get("X-Kuztds-Stream"); got != s.stream {
+				if got := rec.Header().Get("X-Emtds-Stream"); got != s.stream {
 					t.Errorf("step %d %s: stream %q, want %q", i, s.path, got, s.stream)
 				}
 			}
@@ -117,7 +117,7 @@ func TestOfferStepDirectIPUnique(t *testing.T) {
 		{"/g1/offer", "9.9.9.9", "fresh"},
 	} {
 		rec := do(t, h, s.path, s.ip, hdr)
-		if got := rec.Header().Get("X-Kuztds-Stream"); got != s.stream {
+		if got := rec.Header().Get("X-Emtds-Stream"); got != s.stream {
 			t.Errorf("%s %s: stream %q, want %q", s.path, s.ip, got, s.stream)
 		}
 	}
@@ -225,7 +225,7 @@ func TestDirectOfferIsFirstStep(t *testing.T) {
 func TestOfferStepWithoutStepWaveSharesFirstStepKey(t *testing.T) {
 	for _, method := range []string{"ip", "cookie"} {
 		t.Run(method, func(t *testing.T) {
-			opts := []func(*engineDeps){func(d *engineDeps) { d.noStepWave = true }}
+			opts := []func(*engineDeps){func(d *engineDeps) { d.noStepWave.Store(true) }}
 			if method == "ip" {
 				opts = append(opts, withRedis(t))
 			}
@@ -239,7 +239,7 @@ func TestOfferStepWithoutStepWaveSharesFirstStepKey(t *testing.T) {
 			if _, ok := j["ztuo_g1"]; ok {
 				t.Error("the offer cookie must not be set without the step wave")
 			}
-			if got := first.Header().Get("X-Kuztds-Stream"); got != "repeat" {
+			if got := first.Header().Get("X-Emtds-Stream"); got != "repeat" {
 				t.Errorf("offer stream %q, want repeat", got)
 			}
 			for i, w := range []uint8{1, 0, 0} {

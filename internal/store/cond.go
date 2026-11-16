@@ -2,6 +2,7 @@ package store
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 )
 
@@ -10,9 +11,12 @@ import (
 const ScopeNone = "\x00"
 
 // Cond is one filter on a journal column.
-// Field is the API name. Op is eq, ne, in or nin.
+// Field is the API name. Op is one of CondOps.
 // Values are the accepted (eq/in) or rejected (ne/nin) values; an empty
-// value is allowed, an empty list is not.
+// value is allowed, an empty list is not. For contains and not_contains the
+// values are substrings: a row matches contains when any of them occurs in
+// the column, not_contains when none does; they need a text field and a value
+// that is not blank.
 // Scope marks a server-side access restriction: it is not counted toward
 // maxConds, Values is not capped by maxCondVal, and parseConds never sets it.
 type Cond struct {
@@ -43,10 +47,36 @@ const (
 	maxCondVal = 200
 )
 
+// Substring operators. They apply only to fields with Text set.
+const (
+	OpContains    = "contains"
+	OpNotContains = "not_contains"
+)
+
+// CondOps lists every filter operator the API accepts, in display order.
+var CondOps = []string{"eq", "ne", "in", "nin", OpContains, OpNotContains}
+
+// ValidOp reports whether op is one of CondOps.
+// op is the operator from the request. It does not fail.
+func ValidOp(op string) bool {
+	for _, o := range CondOps {
+		if o == op {
+			return true
+		}
+	}
+	return false
+}
+
+// substrOp reports whether op compares substrings rather than whole values.
+func substrOp(op string) bool {
+	return op == OpContains || op == OpNotContains
+}
+
 // ValidateConds checks conds against the static field list.
 // table is "events" or "conversions". It does not look at readiness or at
 // the database. ErrUnknownField means a name is missing on that table.
-// ErrBadCond means the operator, an empty list, or a limit is wrong.
+// ErrBadCond means the operator, an empty list, or a limit is wrong, or a
+// substring operator names a field that is not text or carries a blank value.
 // A nil or empty conds is valid and returns nil.
 func ValidateConds(table string, conds []Cond) error {
 	if table != "events" && table != "conversions" {
@@ -54,9 +84,7 @@ func ValidateConds(table string, conds []Cond) error {
 	}
 	nRegular := 0
 	for _, cond := range conds {
-		switch cond.Op {
-		case "eq", "ne", "in", "nin":
-		default:
+		if !ValidOp(cond.Op) {
 			return ErrBadCond
 		}
 		if len(cond.Values) == 0 {
@@ -69,6 +97,11 @@ func ValidateConds(table string, conds []Cond) error {
 		if col, _ := f.tableCol(table); col == "" {
 			return ErrUnknownField
 		}
+		if substrOp(cond.Op) {
+			if err := validateSubstr(f, cond.Values); err != nil {
+				return err
+			}
+		}
 		if cond.Scope {
 			continue
 		}
@@ -79,6 +112,21 @@ func ValidateConds(table string, conds []Cond) error {
 	}
 	if nRegular > maxConds {
 		return ErrBadCond
+	}
+	return nil
+}
+
+// validateSubstr checks a contains or not_contains condition.
+// f is the field, vals the substrings. ErrBadCond, wrapped with the reason,
+// means f is not a text field or a value is blank.
+func validateSubstr(f Field, vals []string) error {
+	if !f.Text {
+		return fmt.Errorf("%w: %s is not a text field", ErrBadCond, f.Name)
+	}
+	for _, v := range vals {
+		if strings.TrimSpace(v) == "" {
+			return fmt.Errorf("%w: empty substring", ErrBadCond)
+		}
 	}
 	return nil
 }
@@ -119,6 +167,11 @@ func buildWhere(c *CH, table string, conds []Cond) (sql string, args []any, skip
 			args = append(args, stringArgs(vals)...)
 			continue
 		}
+		if substrOp(cond.Op) {
+			b.WriteString(substrSQL(expr, cond.Op, len(vals)))
+			args = append(args, stringArgs(vals)...)
+			continue
+		}
 		b.WriteString(" AND ")
 		b.WriteString(expr)
 		if cond.Op == "eq" || cond.Op == "in" {
@@ -149,6 +202,27 @@ func convCampaignSQL(convExpr, eventsExpr string, n int) string {
 	list := placeholders(n)
 	return " AND (" + convExpr + " IN (" + list + ") OR (" + convExpr + " = '' AND cid IN " +
 		"(SELECT cid FROM events WHERE " + eventsExpr + " IN (" + list + ") AND cid != '')))"
+}
+
+// substrSQL is the fragment of a case-insensitive substring condition.
+// expr is the column expression, op is contains or not_contains, n is the
+// number of substrings and is at least 1. Each substring is one placeholder,
+// so no value reaches the SQL text. contains matches when any substring
+// occurs; not_contains when none does and the column is not empty, as ne does.
+// The fragment starts with " AND ". It does not fail.
+func substrSQL(expr, op string, n int) string {
+	hit := "positionCaseInsensitiveUTF8(" + expr + ", ?)"
+	parts := make([]string, n)
+	if op == OpContains {
+		for i := range parts {
+			parts[i] = hit + " > 0"
+		}
+		return " AND (" + strings.Join(parts, " OR ") + ")"
+	}
+	for i := range parts {
+		parts[i] = hit + " = 0"
+	}
+	return " AND " + strings.Join(parts, " AND ") + " AND " + expr + " != ''"
 }
 
 // stringArgs converts a list of strings to placeholder arguments.

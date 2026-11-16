@@ -3,7 +3,7 @@ package admin
 import (
 	"testing"
 
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/emtds/bridge/ktimport"
 )
 
 // importedClickRow is a tracker click that carries an offer and a landing, as a click

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // legacyOverShares is a stored campaign whose only stream has offer shares above 100%.

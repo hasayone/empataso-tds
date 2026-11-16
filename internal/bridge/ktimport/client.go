@@ -83,6 +83,66 @@ func (c *Client) CountCampaigns(ctx context.Context) (int, error) {
 // Ошибки: сеть, статус не 200 у кампаний, потоков, офферов или лендингов, тело не JSON.
 // Не-200 у сетей, источников, доменов и групп снимок не прерывает. Первая ошибка потоков отменяет остальные.
 func (c *Client) FetchSnapshot(ctx context.Context) (Snapshot, error) {
+	return c.fetchSnapshot(ctx, nil)
+}
+
+// FetchCampaignSnapshot читает снимок для досинка одной кампании.
+//
+// Параметры: ctx — отмена; id — id кампании Keitaro.
+// Результат: снимок по правилам ForCampaign: все кампании для alias, потоки только этой кампании,
+// офферы, лендинги, сети, источник и домен, на которые она ссылается. Пользователи не читаются.
+// Ошибки: id не больше нуля, кампании нет в трекере (ErrCampaignNotFound), ошибки FetchSnapshot.
+func (c *Client) FetchCampaignSnapshot(ctx context.Context, id int) (Snapshot, error) {
+	if id <= 0 {
+		return Snapshot{}, fmt.Errorf("keitaro: id кампании должен быть больше нуля")
+	}
+	snap, err := c.fetchSnapshot(ctx, func(camps []Campaign) ([]Campaign, error) {
+		camp, ok := findCampaign(camps, id)
+		if !ok {
+			return nil, fmt.Errorf("%w: %d", ErrCampaignNotFound, id)
+		}
+		return []Campaign{camp}, nil
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	return snap.ForCampaign(id), nil
+}
+
+// FetchCampaignsSnapshot читает один снимок для досинка нескольких кампаний.
+//
+// Параметры: ctx — отмена; ids — id кампаний Keitaro.
+// Результат: снимок, как у FetchSnapshot, но потоки только у тех ids, что есть в трекере, и без пользователей.
+// Снимок одной кампании из него даёт ForCampaign. id, которого нет в трекере, остаётся без потоков.
+// Ошибки: пустой ids или id не больше нуля, ошибки FetchSnapshot.
+func (c *Client) FetchCampaignsSnapshot(ctx context.Context, ids []int) (Snapshot, error) {
+	want := map[int]bool{}
+	for _, id := range ids {
+		if id <= 0 {
+			return Snapshot{}, fmt.Errorf("keitaro: id кампании должен быть больше нуля")
+		}
+		want[id] = true
+	}
+	if len(want) == 0 {
+		return Snapshot{}, fmt.Errorf("keitaro: не заданы id кампаний")
+	}
+	return c.fetchSnapshot(ctx, func(camps []Campaign) ([]Campaign, error) {
+		var out []Campaign
+		for _, camp := range camps {
+			if want[int(camp.ID)] {
+				out = append(out, camp)
+			}
+		}
+		return out, nil
+	})
+}
+
+// fetchSnapshot читает снимок для полного переноса или для выбранных кампаний.
+//
+// Параметры: ctx — отмена; pick — выбирает из списка трекера кампании, чьи потоки читать; nil читает все.
+// Результат: снимок. При заданном pick потоки читаются только у выбранных кампаний, пользователи не читаются.
+// Ошибки: как у FetchSnapshot и ошибка pick.
+func (c *Client) fetchSnapshot(ctx context.Context, pick func([]Campaign) ([]Campaign, error)) (Snapshot, error) {
 	c.report("snapshot", 0, 0)
 	var snap Snapshot
 	for _, path := range []string{
@@ -100,7 +160,13 @@ func (c *Client) FetchSnapshot(ctx context.Context) (Snapshot, error) {
 	if err != nil {
 		return Snapshot{}, err
 	}
-	streams, err := c.fetchCampaignStreams(ctx, snap.Campaigns)
+	targets := snap.Campaigns
+	if pick != nil {
+		if targets, err = pick(snap.Campaigns); err != nil {
+			return Snapshot{}, err
+		}
+	}
+	streams, err := c.fetchCampaignStreams(ctx, targets)
 	if err != nil {
 		return Snapshot{}, err
 	}
@@ -131,6 +197,9 @@ func (c *Client) FetchSnapshot(ctx context.Context) (Snapshot, error) {
 			}
 		}
 		snap.Groups = append(snap.Groups, part...)
+	}
+	if pick != nil {
+		return snap, nil
 	}
 	ok, err := c.getOptionalArrayOK(ctx, "/admin_api/v1/users", &snap.Users)
 	if err != nil {

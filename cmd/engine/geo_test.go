@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/geo"
 )
 
 // fixedGeo answers the same record for every address.
@@ -54,7 +54,7 @@ func TestCountrySourcePrecedence(t *testing.T) {
 	for _, c := range cases {
 		h := testEnv(t, geoGroup(c.source), withGeo(c.geo))
 		rec := do(t, h, "/g1", "8.8.8.8", c.hdr)
-		if got := rec.Header().Get("X-Kuztds-Country"); got != c.want {
+		if got := rec.Header().Get("X-Emtds-Country"); got != c.want {
 			t.Errorf("geo=%q db=%q header=%q → %q; want %q", c.source, c.geo.Country, c.hdr["CF-IPCountry"], got, c.want)
 		}
 	}
@@ -75,16 +75,16 @@ func TestCountryHeaderIgnoredFromUntrustedPeer(t *testing.T) {
 	req.Header.Set("CF-IPCountry", "RU")
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
-	if got := rec.Header().Get("X-Kuztds-Stream"); got == "ru_only" {
+	if got := rec.Header().Get("X-Emtds-Stream"); got == "ru_only" {
 		t.Fatalf("a visitor named their own country and got stream %q (body %q)", got, rec.Body.String())
 	}
-	if got := rec.Header().Get("X-Kuztds-Country"); got != "-" {
+	if got := rec.Header().Get("X-Emtds-Country"); got != "-" {
 		t.Errorf("country = %q; want unknown", got)
 	}
 
 	// The same header through the trusted proxy is the CDN speaking.
 	rec = do(t, h, "/g1", "203.0.113.7", map[string]string{"User-Agent": uaWinChrome, "CF-IPCountry": "RU"})
-	if got := rec.Header().Get("X-Kuztds-Stream"); got != "ru_only" {
+	if got := rec.Header().Get("X-Emtds-Stream"); got != "ru_only" {
 		t.Errorf("through the trusted proxy: stream %q; want ru_only", got)
 	}
 }
@@ -103,7 +103,7 @@ func TestNetworkFiltersAndMacros(t *testing.T) {
 	}
 	h := testEnv(t, geoGroup("db", streams...), withGeo(g))
 	rec := do(t, h, "/g1", "49.36.0.1", map[string]string{"User-Agent": uaWinChrome})
-	if got := rec.Header().Get("X-Kuztds-Stream"); got != "jio_india" {
+	if got := rec.Header().Get("X-Emtds-Stream"); got != "jio_india" {
 		t.Fatalf("stream = %q; want jio_india", got)
 	}
 	want := "as=55836 org=Reliance+Jio+Infocomm+Limited tz=Asia/Kolkata utc=+5:30"
@@ -151,7 +151,7 @@ func TestQueryFilterAndStreamHeader(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); ct != "text/plain" {
 		t.Errorf("stream Content-Type = %q; want text/plain", ct)
 	}
-	if got := do(t, h, "/g1?utm_source=tt", "8.8.8.8", hd).Header().Get("X-Kuztds-Stream"); got != "-" {
+	if got := do(t, h, "/g1?utm_source=tt", "8.8.8.8", hd).Header().Get("X-Emtds-Stream"); got != "-" {
 		t.Errorf("another value must fall through, got stream %q", got)
 	}
 }

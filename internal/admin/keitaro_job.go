@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/emtds/bridge/ktimport"
 )
 
 const keitaroJobTimeout = 2 * time.Hour
@@ -27,8 +27,16 @@ type keitaroJob struct {
 	errText    string
 	startedAt  string
 	finishedAt string
-	busy       bool
+	purging    bool
+	campaign   int
+	// writers counts holders of holdWrite: catalog or campaign writes in progress.
+	writers int
+	// updating is true while an update/pending file is active; begin* and holdWrite refuse when set.
+	updating bool
 }
+
+// keitaroUpdatePendingMsg is the refusal of begin* and holdWrite while an update is pending.
+var keitaroUpdatePendingMsg = errUpdatePending.msg
 
 // keitaroJobView is the JSON body of GET /api/keitaro/job.
 // Times are RFC3339, or empty when unset. The key is not a field.
@@ -43,6 +51,8 @@ type keitaroJobView struct {
 	Error       string          `json:"error"`
 	StartedAt   string          `json:"started_at"`
 	FinishedAt  string          `json:"finished_at"`
+	// CampaignID is the Keitaro campaign of the last dosync of one campaign; omitted for a full import.
+	CampaignID int `json:"campaign_id,omitempty"`
 }
 
 // newKeitaroJob returns an idle job.
@@ -58,22 +68,112 @@ func newKeitaroJob() *keitaroJob {
 
 const keitaroSyncBusyMsg = "идёт актуализация"
 
+// keitaroWriteBusyMsg is the refusal of beginImport, beginPurge and beginSync while a write
+// holds the gate. It carries the keitaro_running code, which errCode reads from the message.
+var keitaroWriteBusyMsg = errKeitaroWriting.msg
+
+// setUpdating sets the update gate flag.
+// When v is true, all new begin* and holdWrite calls are refused with update_pending.
+// It does not return an error.
+func (j *keitaroJob) setUpdating(v bool) {
+	j.mu.Lock()
+	j.updating = v
+	j.mu.Unlock()
+}
+
+// updatingBool returns the current value of the update gate flag.
+func (j *keitaroJob) updatingBool() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.updating
+}
+
+// busyOrWriting reports whether an import, purge, sync or a write hold is active.
+// It does not include the update gate.
+func (j *keitaroJob) busyOrWriting() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.running || j.purging || j.syncing || j.writers > 0
+}
+
+// idleForUpdate reports whether the job is completely idle (no import, purge, sync or writers).
+// It does not check the update gate itself.
+func (j *keitaroJob) idleForUpdate() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return !j.running && !j.purging && !j.syncing && j.writers == 0
+}
+
+// withWrite runs fn while no import, purge or sync can start: the one entry of the write gate.
+// It returns errKeitaroRunning (409 keitaro_running) without calling fn when an import,
+// purge or sync is running, otherwise the error of fn. The hold is dropped when fn returns
+// or panics. Nothing else calls holdWrite or releaseWrite, except tests.
+func (j *keitaroJob) withWrite(fn func() error) error {
+	if err := j.holdWrite(); err != nil {
+		return err
+	}
+	defer j.releaseWrite()
+	return fn()
+}
+
+// holdWrite takes a write hold: while it is held no import, purge or sync can start.
+// It returns errUpdatePending when an update is pending, errKeitaroRunning when an import,
+// purge or sync is already running, and nil after the hold is counted.
+// Every successful call needs one releaseWrite; use withWrite.
+func (j *keitaroJob) holdWrite() error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.updating {
+		return errUpdatePending
+	}
+	if j.running || j.purging || j.syncing {
+		return errKeitaroRunning
+	}
+	j.writers++
+	return nil
+}
+
+// releaseWrite drops one hold taken by holdWrite. A call without a hold changes nothing.
+func (j *keitaroJob) releaseWrite() {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.writers > 0 {
+		j.writers--
+	}
+}
+
+// busy reports whether an import, purge or sync is running.
+// A write hold does not count.
+func (j *keitaroJob) busy() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.running || j.purging || j.syncing
+}
+
 // beginImport marks an import running when nothing else holds the job.
 // It clears the previous error, counts and losses, and sets started_at.
-// It returns "import already running" or "purge already running",
+// It returns keitaroUpdatePendingMsg (code update_pending) while an update is pending,
+// keitaroSyncBusyMsg, "import already running", "purge already running",
+// keitaroWriteBusyMsg (code keitaro_running) while a withWrite is active,
 // or an empty string when the import was marked running.
 // It does not return an error.
 func (j *keitaroJob) beginImport() string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.updating {
+		return keitaroUpdatePendingMsg
+	}
 	if j.syncing {
 		return keitaroSyncBusyMsg
 	}
 	if j.running {
 		return "import already running"
 	}
-	if j.busy {
+	if j.purging {
 		return "purge already running"
+	}
+	if j.writers > 0 {
+		return keitaroWriteBusyMsg
 	}
 	j.running = true
 	j.stage = "idle"
@@ -84,42 +184,68 @@ func (j *keitaroJob) beginImport() string {
 	j.errText = ""
 	j.startedAt = time.Now().UTC().Format(time.RFC3339)
 	j.finishedAt = ""
+	j.campaign = 0
 	return ""
 }
 
+// setCampaign records the Keitaro campaign of the running import for GET /api/keitaro/job.
+// id is the campaign of a dosync of one campaign, or 0 for a full import.
+// It does not return an error.
+func (j *keitaroJob) setCampaign(id int) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	j.campaign = id
+}
+
 // beginPurge holds the lock for one synchronous purge.
-// It returns "import already running" or "purge already running",
+// It returns keitaroUpdatePendingMsg (code update_pending) while an update is pending,
+// keitaroSyncBusyMsg, "import already running", "purge already running",
+// keitaroWriteBusyMsg (code keitaro_running) while a withWrite is active,
 // or an empty string when this purge holds the lock.
 // It does not return an error.
 func (j *keitaroJob) beginPurge() string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.updating {
+		return keitaroUpdatePendingMsg
+	}
 	if j.syncing {
 		return keitaroSyncBusyMsg
 	}
 	if j.running {
 		return "import already running"
 	}
-	if j.busy {
+	if j.purging {
 		return "purge already running"
 	}
-	j.busy = true
+	if j.writers > 0 {
+		return keitaroWriteBusyMsg
+	}
+	j.purging = true
 	return ""
 }
 
 // beginSync marks log catch-up running when manual import and purge are idle.
-// It returns keitaroSyncBusyMsg when catch-up already runs, or the import or purge message.
+// It returns keitaroUpdatePendingMsg (code update_pending) while an update is pending,
+// keitaroSyncBusyMsg when catch-up already runs, the import or purge message,
+// or keitaroWriteBusyMsg (code keitaro_running) while a withWrite is active.
 func (j *keitaroJob) beginSync() string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if j.updating {
+		return keitaroUpdatePendingMsg
+	}
 	if j.syncing {
 		return keitaroSyncBusyMsg
 	}
 	if j.running {
 		return "import already running"
 	}
-	if j.busy {
+	if j.purging {
 		return "purge already running"
+	}
+	if j.writers > 0 {
+		return keitaroWriteBusyMsg
 	}
 	j.syncing = true
 	return ""
@@ -140,10 +266,10 @@ func (j *keitaroJob) syncActive() bool {
 }
 
 // endPurge releases the purge lock taken by beginPurge.
-// It does not return an error. Calling it without a matching begin clears busy.
+// It does not return an error. Calling it without a matching begin clears the purge flag.
 func (j *keitaroJob) endPurge() {
 	j.mu.Lock()
-	j.busy = false
+	j.purging = false
 	j.mu.Unlock()
 }
 
@@ -229,6 +355,7 @@ func (j *keitaroJob) snapshot() keitaroJobView {
 		Error:       j.errText,
 		StartedAt:   j.startedAt,
 		FinishedAt:  j.finishedAt,
+		CampaignID:  j.campaign,
 	}
 }
 
@@ -245,6 +372,10 @@ func copyCounts(in map[string]int) map[string]int {
 // handleKeitaroImport starts a background copy of the selected catalogs and logs.
 // The body matches the previous import: bad JSON is 400, a click or conversion
 // range that is not YYYY-MM-DD is 400, and a missing origin, key or store is 503.
+// A positive campaign_id runs the dosync of that one Keitaro campaign through the same import;
+// a negative id or campaign_id with users, clicks or conversions is 400.
+// filters_only with campaign_ids or all_imported rewrites only imported stream filters, and with
+// dry_run only reports them; a malformed filters_only body is 400.
 // A running import or a purge in progress is 409. Success is 202 with started true.
 // The work uses a two-hour background context, not the request context.
 // The key is removed from the job error later. This handler does not return an error value.
@@ -252,6 +383,14 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 	var req keitaroImportReq
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if msg := req.forFilters(); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	if msg := req.forCampaign(); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
 	if req.Conversions || req.Clicks {
@@ -274,6 +413,7 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, msg)
 		return
 	}
+	s.ktJob.setCampaign(req.CampaignID)
 	// Settings cannot change while the job holds the lock, so this copy is the
 	// one for the whole run. Settings can only be replaced, never cleared.
 	ctx, cancel := context.WithTimeout(context.Background(), keitaroJobTimeout)
@@ -353,6 +493,10 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 		s.logKeitaro("keitaro import", st.counts, time.Since(started))
 		s.ktJob.finish(st.fail, st.counts, st.losses, creds.Key)
 	}()
+	if req.FiltersOnly {
+		s.runRefilter(ctx, req, st)
+		return
+	}
 	var from, to string
 	if req.Conversions || req.Clicks {
 		var err error
@@ -363,7 +507,7 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 		}
 	}
 	if req.catalog() {
-		snap, err := s.keitaroClient(creds).FetchSnapshot(ctx)
+		snap, err := s.fetchImportSnapshot(ctx, creds, req.CampaignID)
 		if err != nil {
 			st.fail = sanitize(err, creds.Key)
 			return
@@ -427,6 +571,18 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 			st.fail = sanitize(err, creds.Key)
 		}
 	}
+}
+
+// fetchImportSnapshot reads the tracker snapshot of one import run.
+// creds is the copy the job took. campaignID is the Keitaro campaign of a dosync, or 0 for all.
+// It returns the full snapshot, or the snapshot of that campaign and the catalogs it uses.
+// The error is a tracker failure or ktimport.ErrCampaignNotFound for an id the tracker lacks.
+func (s *Server) fetchImportSnapshot(ctx context.Context, creds ktCreds, campaignID int) (ktimport.Snapshot, error) {
+	client := s.keitaroClient(creds)
+	if campaignID > 0 {
+		return client.FetchCampaignSnapshot(ctx, campaignID)
+	}
+	return client.FetchSnapshot(ctx)
 }
 
 // logImportOpts selects which logs to import and supplies manifest context.

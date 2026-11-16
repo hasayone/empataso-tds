@@ -1,14 +1,15 @@
-module github.com/egerkuzma/kuztds
+module github.com/egerkuzma/emtds
 
 go 1.25.0
 
 require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.46.0
 	github.com/alicebob/miniredis/v2 v2.38.0
-	github.com/kuztds/bridge v0.0.0
+	github.com/emtds/bridge v0.0.0
 	github.com/mileusna/useragent v1.3.5
 	github.com/oschwald/maxminddb-golang v1.13.1
 	github.com/redis/go-redis/v9 v9.20.0
+	github.com/toon-format/toon-go v1.0.1
 	golang.org/x/crypto v0.52.0
 	golang.org/x/sync v0.22.0
 )
@@ -33,4 +34,4 @@ require (
 	golang.org/x/sys v0.45.0 // indirect
 )
 
-replace github.com/kuztds/bridge => ./internal/bridge
+replace github.com/emtds/bridge => ./internal/bridge

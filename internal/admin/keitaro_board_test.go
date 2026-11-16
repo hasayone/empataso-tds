@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/emtds/bridge/ktimport"
 )
 
 func TestMergeImportedGroupsKeepsBoardOnReimport(t *testing.T) {
@@ -178,6 +178,10 @@ func TestKeitaroSyncPassMapsBoardCampaignNum(t *testing.T) {
 	var calls atomic.Int32
 	fake := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		if calls.Add(1) == 1 {
 			_, _ = w.Write([]byte(`{"rows":[{"sub_id":"c1","datetime":"` + ts.Format(keitaroTimeLayout) + `","campaign_id":7}],"total":1}`))
 			return

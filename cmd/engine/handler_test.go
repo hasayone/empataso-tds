@@ -13,12 +13,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/detect"
-	"github.com/egerkuzma/kuztds/internal/geo"
-	"github.com/egerkuzma/kuztds/internal/ipindex"
-	"github.com/egerkuzma/kuztds/internal/seplist"
-	"github.com/egerkuzma/kuztds/internal/server"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/egerkuzma/emtds/internal/geo"
+	"github.com/egerkuzma/emtds/internal/ipindex"
+	"github.com/egerkuzma/emtds/internal/seplist"
+	"github.com/egerkuzma/emtds/internal/server"
 )
 
 // testEnv assembles a minimal engine for httptest: empty dataDir, Nop geo,
@@ -36,7 +36,7 @@ func testEnv(t *testing.T, groups *config.Groups, opts ...func(*engineDeps)) htt
 	seps.Load(separationFiles(groups)...)
 	d := &engineDeps{
 		log: log, lists: lists, sigs: sigs, seps: seps, geores: geo.Nop{},
-		groups: groups, dataDir: dir, keysDir: dir, trashMode: "0",
+		groups: groups, dataDir: dir, keyFiles: newKeyWriter(dir, 0, nil), trashMode: "0",
 	}
 	for _, o := range opts {
 		o(d)
@@ -140,7 +140,7 @@ func TestBlacklistForbidden(t *testing.T) {
 	lists.Load(ipLists...)
 	sigs := detect.NewSignatures(dir, log)
 	d := &engineDeps{log: log, lists: lists, sigs: sigs, geores: geo.Nop{},
-		groups: group(), dataDir: dir, keysDir: dir, trashMode: "0"}
+		groups: group(), dataDir: dir, keyFiles: newKeyWriter(dir, 0, nil), trashMode: "0"}
 	realIP, _ := server.NewRealIP([]string{"127.0.0.1/32"})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", d.root)
@@ -173,11 +173,11 @@ func TestStreamSelectionByDevice(t *testing.T) {
 
 	rec := do(t, h, "/g1", "8.8.8.8", map[string]string{"User-Agent": iphone})
 	if got := rec.Body.String(); got != "MOBILE" {
-		t.Errorf("iPhone → MOBILE stream, got %q (stream=%s)", got, rec.Header().Get("X-Kuztds-Stream"))
+		t.Errorf("iPhone → MOBILE stream, got %q (stream=%s)", got, rec.Header().Get("X-Emtds-Stream"))
 	}
 	rec = do(t, h, "/g1", "8.8.8.8", map[string]string{"User-Agent": desktop})
 	if got := rec.Body.String(); got != "DESKTOP" {
-		t.Errorf("desktop → DESKTOP stream, got %q (stream=%s)", got, rec.Header().Get("X-Kuztds-Stream"))
+		t.Errorf("desktop → DESKTOP stream, got %q (stream=%s)", got, rec.Header().Get("X-Emtds-Stream"))
 	}
 }
 
@@ -254,10 +254,10 @@ func TestBotRedirect(t *testing.T) {
 	// empty UA → bot → bot_redirect 404
 	rec := do(t, h, "/g1", "8.8.8.8", map[string]string{"User-Agent": ""})
 	if rec.Code != http.StatusNotFound {
-		t.Fatalf("empty-UA bot → 404, got %d (bot=%s)", rec.Code, rec.Header().Get("X-Kuztds-Bot"))
+		t.Fatalf("empty-UA bot → 404, got %d (bot=%s)", rec.Code, rec.Header().Get("X-Emtds-Bot"))
 	}
-	if rec.Header().Get("X-Kuztds-Bot") != "empty_ua" {
-		t.Errorf("want bot=empty_ua, got %q", rec.Header().Get("X-Kuztds-Bot"))
+	if rec.Header().Get("X-Emtds-Bot") != "empty_ua" {
+		t.Errorf("want bot=empty_ua, got %q", rec.Header().Get("X-Emtds-Bot"))
 	}
 }
 
@@ -287,7 +287,7 @@ func TestSeparation(t *testing.T) {
 	seps := seplist.NewSet(dir, log)
 	seps.Load(separationFiles(gg)...)
 	d := &engineDeps{log: log, lists: lists, sigs: sigs, seps: seps, geores: geo.Nop{},
-		groups: gg, dataDir: dir, keysDir: dir, trashMode: "0"}
+		groups: gg, dataDir: dir, keyFiles: newKeyWriter(dir, 0, nil), trashMode: "0"}
 	realIP, _ := server.NewRealIP([]string{"127.0.0.1/32"})
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", d.root)
@@ -424,8 +424,8 @@ func TestCookieUniqueness(t *testing.T) {
 	})
 	h := testEnv(t, gg)
 	rec := do(t, h, "/g1", "8.8.8.8", nil)
-	if rec.Header().Get("X-Kuztds-Uniq") != "yes" {
-		t.Fatalf("first visit uniq=yes, got %q", rec.Header().Get("X-Kuztds-Uniq"))
+	if rec.Header().Get("X-Emtds-Uniq") != "yes" {
+		t.Fatalf("first visit uniq=yes, got %q", rec.Header().Get("X-Emtds-Uniq"))
 	}
 	ck := rec.Result().Cookies()
 	if len(ck) == 0 {
@@ -440,8 +440,8 @@ func TestCookieUniqueness(t *testing.T) {
 	}
 	rec2 := httptest.NewRecorder()
 	h.ServeHTTP(rec2, req)
-	if rec2.Header().Get("X-Kuztds-Uniq") != "no" {
-		t.Errorf("repeat visit uniq=no, got %q", rec2.Header().Get("X-Kuztds-Uniq"))
+	if rec2.Header().Get("X-Emtds-Uniq") != "no" {
+		t.Errorf("repeat visit uniq=no, got %q", rec2.Header().Get("X-Emtds-Uniq"))
 	}
 }
 

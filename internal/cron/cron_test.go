@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/store"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 // env is a runner over a temp directory with Telegram and VirusTotal pointed
@@ -61,6 +61,7 @@ func newEnv(t *testing.T) *env {
 		ASNDB:   filepath.Join(e.dir, "asn.mmdb"),
 	}, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	e.r.telegramBase, e.r.vtBase, e.r.vtPause = e.srv.URL, e.srv.URL, 0
+	e.r.probeIP = asnProbeIP(t)
 	return e
 }
 
@@ -404,7 +405,7 @@ func TestGeoDBSendsBasicAuthAndNeedsATarget(t *testing.T) {
 		t.Errorf("%q, %v", msg, err)
 	}
 	e.r.paths.ASNDB = ""
-	if _, err := e.r.runGeoDB(context.Background(), GeoDB{Sources: []GeoSource{src}}); err == nil || !strings.Contains(err.Error(), "KUZTDS_ASN_DB") {
+	if _, err := e.r.runGeoDB(context.Background(), GeoDB{Sources: []GeoSource{src}}); err == nil || !strings.Contains(err.Error(), "EMTDS_ASN_DB") {
 		t.Errorf("no target path: err = %v; want it to name the variable", err)
 	}
 }
@@ -785,7 +786,7 @@ func TestConversionsBacklogAndFailure(t *testing.T) {
 	})
 
 	e.r.pb = nil
-	if _, err := e.r.runConversions(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "KUZTDS_CLICKHOUSE_ADDR") {
+	if _, err := e.r.runConversions(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "EMTDS_CLICKHOUSE_ADDR") {
 		t.Errorf("no store: %v", err)
 	}
 }

@@ -7,8 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/fetch"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // remoteStream builds a group whose out is bare [REMOTE], fetched from srv.
@@ -30,7 +29,7 @@ func TestRemoteBodyCannotPickVariants(t *testing.T) {
 	defer srv.Close()
 
 	h := testEnv(t, remoteStream(srv.URL, "random", "RESERVED"), func(d *engineDeps) {
-		d.fetcher = fetch.New("test", nil)
+		d.fetcher = testFetcher()
 	})
 	for i := 0; i < 20; i++ {
 		if body := do(t, h, "/g1", "8.8.8.8", nil).Body.String(); body != "RESERVED" {
@@ -54,7 +53,7 @@ func TestRemoteBodyIsNotMacroExpanded(t *testing.T) {
 	defer srv.Close()
 
 	h := testEnv(t, remoteStream(srv.URL, "", ""), func(d *engineDeps) {
-		d.fetcher = fetch.New("test", nil)
+		d.fetcher = testFetcher()
 		d.dataDir = dir
 	})
 	if body := do(t, h, "/g1", "8.8.8.8", nil).Body.String(); body != "[RANDLINE-(secret.dat)-1]" {

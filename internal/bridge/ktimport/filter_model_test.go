@@ -48,7 +48,7 @@ func TestModelFilterExact(t *testing.T) {
 }
 
 func TestModelFilterApproximatedLoss(t *testing.T) {
-	rules, ok, _, losses := mapFilters([]KFilter{
+	rules, ok, _, losses, _ := mapFilters([]KFilter{
 		{Name: "device_model", Mode: "accept", Payload: json.RawMessage(`["SM-S918B"]`)},
 	}, nil, false)
 	if !ok || rules.Model.Flag != 2 {
@@ -61,7 +61,7 @@ func TestModelFilterApproximatedLoss(t *testing.T) {
 
 func TestEmptyExactFilterIsReported(t *testing.T) {
 	for _, name := range []string{"device_model", "sub_id_4"} {
-		_, ok, _, losses := mapFilters([]KFilter{
+		_, ok, _, losses, _ := mapFilters([]KFilter{
 			{Name: name, Mode: "accept", Payload: json.RawMessage(`[]`)},
 			{Name: "country", Mode: "accept", Payload: json.RawMessage(`["pl"]`)},
 		}, nil, false)
@@ -75,7 +75,7 @@ func TestEmptyExactFilterIsReported(t *testing.T) {
 }
 
 func TestModelFilterLoss(t *testing.T) {
-	_, _, _, losses := mapFilters([]KFilter{
+	_, _, _, losses, _ := mapFilters([]KFilter{
 		{Name: "device_model", Mode: "accept", Payload: json.RawMessage(`["/^Pixel/"]`)},
 		{Name: "country", Mode: "accept", Payload: json.RawMessage(`["pl"]`)},
 	}, nil, false)

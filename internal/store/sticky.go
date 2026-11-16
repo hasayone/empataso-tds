@@ -38,11 +38,9 @@ func (c *Counters) StickyGet(ctx context.Context, group string, ip netip.Addr) (
 // StickySet remembers token for the pair (group, ip) for ttl.
 //
 // ctx bounds the Redis call. token is the opaque value the engine signed for
-// the drawn stream. A non-positive ttl is 24h. It returns the Redis error,
-// which the caller ignores: a stream that was not saved is drawn again.
+// the drawn stream. A non-positive ttl is 24h, and the lifetime never exceeds the
+// ceiling set by SetUniqMax. It returns the Redis error, which the caller
+// ignores: a stream that was not saved is drawn again.
 func (c *Counters) StickySet(ctx context.Context, group string, ip netip.Addr, token string, ttl time.Duration) error {
-	if ttl <= 0 {
-		ttl = 24 * time.Hour
-	}
-	return c.rdb.Set(ctx, stickyKey(group, ip), token, ttl).Err()
+	return c.rdb.Set(ctx, stickyKey(group, ip), token, capWindow(ttl, c.uniqMax)).Err()
 }

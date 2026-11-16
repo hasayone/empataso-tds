@@ -4,9 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // section is a panel area a user may be granted. Names are stored in users.json access.sections.
@@ -27,6 +28,9 @@ const (
 	secLists       section = "lists"
 	secTools       section = "tools"
 	secGroups      section = "groups"
+	// secAssistant is the AI assistant. While aiAdminOnly is true it is in neither
+	// userSections nor adminSections: a role cannot grant it and the panel does not list it.
+	secAssistant section = "assistant"
 	// Admin-only panel areas.
 	secUsers         section = "users"
 	secAPIKeys       section = "api_keys"
@@ -63,10 +67,97 @@ var (
 	errAccessHidden   = errors.New("unknown hidden field")
 )
 
+// isAccessErr reports whether err comes from normalizeAccess: an unknown
+// section, resource, mode or hidden field, or a list that is too long.
+func isAccessErr(err error) bool {
+	return errors.Is(err, errAccessSection) || errors.Is(err, errAccessResource) ||
+		errors.Is(err, errAccessMode) || errors.Is(err, errAccessLimit) || errors.Is(err, errAccessHidden)
+}
+
 // routeRule binds one mux pattern to a section and optional administrator-only flag.
+//
+// cookie marks a route that an Api-Key session may not call. action names the
+// dangerous operation (one of the security.Action constants) an API key must
+// hold; cookie sessions are not limited by it. heavy marks a route that reads
+// large ranges of ClickHouse data.
 type routeRule struct {
-	sec   section
-	admin bool
+	sec    section
+	admin  bool
+	cookie bool
+	action string
+	heavy  bool
+}
+
+// cookieRoutes lists the routes closed to Api-Key sessions: sessions, accounts,
+// keys, roles, integration secrets, domain connection and update write actions.
+var cookieRoutes = append([]string{
+	"POST /api/logout", "GET /api/me", "GET /api/me/views", "PUT /api/me/views", "POST /api/password",
+	"GET /api/api-keys", "POST /api/api-keys", "POST /api/api-keys/{id}/rotate",
+	"PUT /api/api-keys/{id}", "DELETE /api/api-keys/{id}",
+	"GET /api/users", "POST /api/users", "GET /api/users/{id}", "PUT /api/users/{id}",
+	"DELETE /api/users/{id}", "PUT /api/users/{id}/password", "PUT /api/users/{id}/access",
+	"GET /api/roles", "POST /api/roles", "POST /api/roles/reload", "GET /api/roles/{id}",
+	"PUT /api/roles/{id}", "DELETE /api/roles/{id}",
+	"GET /api/keitaro/settings", "PUT /api/keitaro/settings", "POST /api/keitaro/check",
+	"GET /api/cloudflare", "PUT /api/cloudflare", "POST /api/cloudflare/test",
+	"GET /api/checker/settings", "PUT /api/checker/settings", "POST /api/checker/test",
+	"GET /api/checker/keywords/preview", "POST /api/checker/keywords/fill",
+	"GET /api/checker/status", "GET /api/checker/consoles",
+	"GET /api/checker/apps/{group}", "PUT /api/checker/apps/{group}",
+	"POST /api/checker/apps/{group}/create", "POST /api/checker/apps/{group}/refresh",
+	"GET /api/docs/settings", "PUT /api/docs/settings",
+	"GET /api/registrars/namecheap", "PUT /api/registrars/namecheap",
+	"POST /api/registrars/namecheap/test", "POST /api/registrars/namecheap/check",
+	"POST /api/registrars/namecheap/register",
+	"POST /api/domains/{id}/ns", "POST /api/domains/{id}/cloudflare",
+	"POST /api/domains/{id}/admin-dns", "POST /api/domains/connected/ack",
+	"POST /api/update/apply", "POST /api/update/rollback", "POST /api/update/check",
+}, aiRoutePatterns...)
+
+// actionRoutes maps each dangerous action to the routes it unlocks for an API key.
+var actionRoutes = map[string][]string{
+	security.ActionKeitaroImport: {"POST /api/keitaro/import"},
+	security.ActionKeitaroPurge:  {"POST /api/keitaro/purge"},
+	security.ActionLogsDelete:    {"DELETE /api/logs"},
+	security.ActionGroupsReplace: {"PUT /api/groups"},
+	security.ActionCron:          {"PUT /api/cron", "POST /api/cron/run"},
+	security.ActionBoards: {
+		"POST /api/boards", "PUT /api/boards/order", "PATCH /api/boards/{id}",
+		"PUT /api/boards/{id}/members", "POST /api/boards/{id}/assign",
+		"DELETE /api/boards/{id}", "POST /api/boards/move", "POST /api/boards/import",
+	},
+	security.ActionLandingFiles: {
+		"DELETE /api/landings/{id}",
+		"POST /api/landings/{id}/archive", "PUT /api/landings/{id}/files/{path...}",
+		"DELETE /api/landings/{id}/files/{path...}",
+	},
+	security.ActionListsRead: {
+		"GET /api/lists", "GET /api/lists/{name}",
+	},
+}
+
+// heavyRoutes lists the routes that scan large ranges of ClickHouse data.
+// A heavy route takes one of the API key's keyHeavyMax slots; cookie sessions are never counted.
+var heavyRoutes = []string{
+	"GET /api/logs/export", "GET /api/postbacks/export", "GET /api/stats/facts", "GET /api/postback-log",
+	"GET /api/stats/summary", "GET /api/stats/timeseries", "GET /api/stats/breakdown", "GET /api/stats/performance",
+	"GET /api/report", "GET /api/logs", "GET /api/log-values", "GET /api/logs/filters", "GET /api/postbacks",
+	"GET /api/keywords/stats", "GET /api/keywords/trend",
+}
+
+// flagRoutes applies set to the rule of every pattern in patterns.
+// It panics on a pattern that has no rule: the flag tables are fixed at build
+// time and a typo must not start the server.
+func flagRoutes(m map[string]routeRule, patterns []string, set func(*routeRule)) {
+	for _, p := range patterns {
+		rr, ok := m[p]
+		if !ok {
+			// Intentional startup panic: a flag on a route without a rule is a typo in a build-time table.
+			panic("admin: route flag for unknown route: " + p)
+		}
+		set(&rr)
+		m[p] = rr
+	}
 }
 
 // routeAccess maps mux pattern strings to access rules for every protected route.
@@ -94,6 +185,12 @@ func buildRouteAccess() map[string]routeRule {
 	addCoreRoutes(m, open, rule)
 	addCatalogRoutes(m, rule, addCRUD)
 	addAdminRoutes(m, rule)
+	addAssistantRoutes(m, open, rule)
+	flagRoutes(m, cookieRoutes, func(rr *routeRule) { rr.cookie = true })
+	flagRoutes(m, heavyRoutes, func(rr *routeRule) { rr.heavy = true })
+	for action, patterns := range actionRoutes {
+		flagRoutes(m, patterns, func(rr *routeRule) { rr.action = action })
+	}
 	return m
 }
 
@@ -107,6 +204,8 @@ func addCoreRoutes(m map[string]routeRule, open func() routeRule, rule func(sect
 	m["GET /api/notices"] = open()
 	m["GET /api/log-fields"] = open()
 	m["GET /api/ui"] = open()
+	m["GET /api/openapi.json"] = open()
+	m["GET /api/postman.json"] = open()
 	m["GET /api/groups"] = open()
 	m["GET /api/boards"] = open()
 	m["POST /api/boards"] = routeRule{sec: secAny, admin: true}
@@ -147,6 +246,9 @@ func addCoreRoutes(m map[string]routeRule, open func() routeRule, rule func(sect
 
 	m["GET /api/report"] = rule(secReport)
 	m["GET /api/keys"] = rule(secKeywords)
+	m["GET /api/keys/download"] = rule(secKeywords)
+	m["GET /api/keywords/stats"] = rule(secKeywords)
+	m["GET /api/keywords/trend"] = rule(secKeywords)
 }
 
 // addCatalogRoutes registers catalog CRUD, landing files, domain check, lists, and tools.
@@ -172,7 +274,20 @@ func addCatalogRoutes(m map[string]routeRule, rule func(section) routeRule, addC
 	m["POST /api/domains/connected/ack"] = rule(secDomains)
 	m["GET /api/cloudflare"] = rule(secIntegrations)
 	m["PUT /api/cloudflare"] = rule(secIntegrations)
+	m["GET /api/docs/settings"] = rule(secIntegrations)
+	m["PUT /api/docs/settings"] = rule(secIntegrations)
 	m["POST /api/cloudflare/test"] = rule(secIntegrations)
+	m["GET /api/checker/settings"] = rule(secIntegrations)
+	m["PUT /api/checker/settings"] = rule(secIntegrations)
+	m["POST /api/checker/test"] = rule(secIntegrations)
+	m["GET /api/checker/keywords/preview"] = rule(secIntegrations)
+	m["POST /api/checker/keywords/fill"] = rule(secIntegrations)
+	m["GET /api/checker/status"] = rule(secFlows)
+	m["GET /api/checker/consoles"] = rule(secFlows)
+	m["GET /api/checker/apps/{group}"] = rule(secFlows)
+	m["PUT /api/checker/apps/{group}"] = rule(secFlows)
+	m["POST /api/checker/apps/{group}/create"] = rule(secFlows)
+	m["POST /api/checker/apps/{group}/refresh"] = rule(secFlows)
 	m["GET /api/registrars/namecheap"] = rule(secIntegrations)
 	m["PUT /api/registrars/namecheap"] = rule(secIntegrations)
 	m["POST /api/registrars/namecheap/test"] = rule(secIntegrations)
@@ -209,6 +324,15 @@ func addAdminRoutes(m map[string]routeRule, rule func(section) routeRule) {
 	m["POST /api/keitaro/import"] = rule(secIntegrations)
 	m["GET /api/keitaro/job"] = rule(secIntegrations)
 	m["POST /api/keitaro/purge"] = rule(secIntegrations)
+
+	// Update routes: explicitly admin-only regardless of isAdminSection evaluation.
+	updateAdmin := routeRule{sec: secSettings, admin: true}
+	m["GET /api/version"] = updateAdmin
+	m["GET /api/update"] = updateAdmin
+	m["GET /api/update/log"] = updateAdmin
+	m["POST /api/update/apply"] = updateAdmin
+	m["POST /api/update/rollback"] = updateAdmin
+	m["POST /api/update/check"] = updateAdmin
 
 	keys := rule(secAPIKeys)
 	m["GET /api/api-keys"] = keys
@@ -247,21 +371,80 @@ func isAdminSection(sec section) bool {
 	return false
 }
 
-// sessionUser returns the users.json record for sess, or false for root and API sessions.
+// keyUserPrefix starts the id of the synthetic user behind a USER API key.
+const keyUserPrefix = "apikey:"
+
+// isUserKey reports whether sess was opened by an API key of type USER.
+func isUserKey(sess security.Session) bool {
+	return sess.API && sess.KeyType == security.KeyTypeUser
+}
+
+// sessionUID returns the owner id recorded on rows sess creates.
+// It is the users.json id for a file user, "apikey:<id>" for a USER key, and
+// empty for the environment administrator and ADMIN keys.
+func sessionUID(sess security.Session) string {
+	if isUserKey(sess) {
+		return keyUserPrefix + sess.KeyID
+	}
+	return sess.UID
+}
+
+// keyUser returns the synthetic USER account of a USER key session.
+// Its role and access come from the session; accessOf resolves them like a file user.
+func keyUser(sess security.Session) security.User {
+	u := security.User{ID: sessionUID(sess), Type: security.UserRegular, Enabled: true, RoleID: sess.KeyRole}
+	if sess.KeyAccess != nil {
+		u.Access = *sess.KeyAccess
+	}
+	return u
+}
+
+// sessionUser returns the account behind sess: the users.json record, or the
+// synthetic user of a USER key. Root and ADMIN key sessions return false.
 func (s *Server) sessionUser(sess security.Session) (security.User, bool) {
-	if sess.API || sess.UID == "" {
+	if sess.API {
+		if isUserKey(sess) {
+			return keyUser(sess), true
+		}
+		return security.User{}, false
+	}
+	if sess.UID == "" {
 		return security.User{}, false
 	}
 	return s.userByID(sess.UID)
 }
 
 // isAdmin reports whether sess has full administrator privileges.
+// An API key has them when its type is ADMIN or empty; any other type is limited.
 func (s *Server) isAdmin(sess security.Session) bool {
-	if sess.API || sess.UID == "" {
+	if sess.API {
+		return sess.KeyType == "" || sess.KeyType == security.KeyTypeAdmin
+	}
+	if sess.UID == "" {
 		return true
 	}
 	u, ok := s.userByID(sess.UID)
 	return ok && u.Type == security.UserAdmin
+}
+
+// aiAdminOnly keeps the AI assistant to administrators during the beta. Opening it
+// to users takes this switch to false, secAssistant added to userSections, and the
+// same name added to USER_ACCESS_SECTIONS in the panel.
+const aiAdminOnly = true
+
+// aiAllowed reports whether sess may use the AI assistant.
+// A request authenticated by an API key never may: every /api/ai/* route is for cookie
+// sessions only. An administrator account always may; any other session only when
+// aiAdminOnly is off and its access holds secAssistant.
+// It returns false for a session without an account.
+func (s *Server) aiAllowed(sess security.Session) bool {
+	if sess.API {
+		return false
+	}
+	if s.isAdmin(sess) {
+		return true
+	}
+	return !aiAdminOnly && s.allowed(sess, routeRule{sec: secAssistant})
 }
 
 // allowed reports whether sess may use a route described by rule.
@@ -300,10 +483,31 @@ func (s *Server) guard(rule routeRule, next http.Handler) http.Handler {
 	})
 }
 
-// handle registers pattern behind auth and guard using routeAccess.
-// It is called only from Handler() at server startup. Panic when pattern is
-// missing from routeAccess is intentional: an uncovered route is a programmer
-// error and the server must not start with an unprotected route (fail-closed).
+// requireAction rejects an API session whose key lacks rule.action.
+// A rule without an action, and every cookie session, pass to next. The answer
+// is 403 "action required: <name>". There is no error return.
+func requireAction(rule routeRule, next http.Handler) http.Handler {
+	if rule.action == "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sess := sessionFrom(r.Context())
+		if sess.API && !slices.Contains(sess.KeyActions, rule.action) {
+			writeErr(w, http.StatusForbidden, "action required: "+rule.action)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// handle registers pattern behind auth, guard and the rule flags using routeAccess.
+// A cookie rule wraps h in cookieOnly and an action rule requires the key action,
+// both after guard. Between auth and the scope checks an API-key request passes
+// the per-key limiter (keyLimit) and, for a write, the audit log (auditWrites,
+// which records pattern as the route). It is called only from Handler() at server startup. Panic
+// when pattern is missing from routeAccess is intentional: an uncovered route
+// is a programmer error and the server must not start with an unprotected
+// route (fail-closed).
 func (s *Server) handle(mux *http.ServeMux, pattern string, h http.Handler) {
 	rule, ok := routeAccess[pattern]
 	if !ok {
@@ -311,7 +515,43 @@ func (s *Server) handle(mux *http.ServeMux, pattern string, h http.Handler) {
 		panic("admin: route without access rule: " + pattern)
 	}
 	s.routes = append(s.routes, pattern)
-	mux.Handle(pattern, s.auth(s.boardScope(s.guard(rule, h))))
+	if rule.cookie {
+		h = cookieOnly(h)
+	}
+	inner := s.boardScope(s.guard(rule, requireAction(rule, h)))
+	if s.inner == nil {
+		s.inner = make(map[string]http.Handler)
+	}
+	s.inner[pattern] = inner
+	mux.Handle(pattern, s.auth(s.keyLimit(rule, s.auditWrites(pattern, inner))))
+}
+
+// publicRoutes lists the routes mounted without the session check, by mux pattern.
+// A true value marks a sign-in route: it belongs to the browser session flow and an
+// API key has no use for it. None of them reads the Api-Key header.
+var publicRoutes = map[string]bool{
+	"GET /api/health": false, "GET /healthz": false, "GET /api/brand": false,
+	"GET /docs": false, "GET /api/docs/openapi.json": false, "GET /api/docs/postman.json": false, "GET /api/docs.md": false, "GET /llms.txt": false,
+	"GET /api/setup": true, "POST /api/setup": true, "POST /api/login": true, "POST /api/recover": true,
+}
+
+// publicRule returns the rule the API docs give the public route pattern: open to
+// every caller, and cookie-only for a sign-in route. It is never used to guard a request.
+func publicRule(pattern string) routeRule {
+	return routeRule{sec: secAny, cookie: publicRoutes[pattern]}
+}
+
+// handlePublic registers pattern on mux without the session check and records it in
+// s.public for the API docs. It is called only from Handler() at server startup and
+// panics when pattern is missing from publicRoutes: an unlisted public route is a
+// programmer error.
+func (s *Server) handlePublic(mux *http.ServeMux, pattern string, h http.HandlerFunc) {
+	if _, ok := publicRoutes[pattern]; !ok {
+		// Intentional startup panic: every public route must be listed for the docs.
+		panic("admin: public route not listed: " + pattern)
+	}
+	s.public = append(s.public, pattern)
+	mux.HandleFunc(pattern, h)
 }
 
 // userPages returns panel section ids visible to u in userSections order.

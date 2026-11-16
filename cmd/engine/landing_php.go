@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/render"
+	"github.com/egerkuzma/emtds/internal/render"
 )
 
-// errPHPOff is returned when a PHP file is requested and KUZTDS_PHP_URL is empty.
+// errPHPOff is returned when a PHP file is requested and EMTDS_PHP_URL is empty.
 var errPHPOff = errors.New("php url is empty")
 
 // errLandingTooBig is returned when a landing body exceeds landingBodyLimit.
@@ -44,7 +44,7 @@ func (s *landingServer) readEntry(r *http.Request, id, name string, deps render.
 		if ip == "" && r != nil {
 			ip = landingClientIP(r)
 		}
-		return s.proxyPHP(r, id, name, ip, deps.CID)
+		return s.proxyPHP(r, id, name, ip, deps.CID, deps.Origin)
 	}
 	full, ok := s.fileInLanding(id, name)
 	if !ok {
@@ -77,7 +77,7 @@ func (s *landingServer) servePHPAsset(w http.ResponseWriter, r *http.Request, id
 	if r != nil {
 		cid = r.URL.Query().Get("cid")
 	}
-	resp, err := s.proxyPHP(r, id, rel, landingClientIP(r), cid)
+	resp, err := s.proxyPHP(r, id, rel, landingClientIP(r), cid, "")
 	if err != nil {
 		if s.log != nil {
 			s.log.Warn("engine: landing php fetch failed", "landing", id, "err", err)
@@ -102,14 +102,26 @@ func (s *landingServer) servePHPAsset(w http.ResponseWriter, r *http.Request, id
 
 // proxyPHP fetches id/name from the PHP origin.
 // r supplies the query and the visitor headers that are copied.
-// ip is X-Forwarded-For. cid is X-Kuztds-Cid.
+// ip is X-Forwarded-For. cid is sent as X-Emtds-Cid and X-Kuztds-Cid.
+// origin is sent as X-Emtds-Origin and may be empty.
 // The result carries the body, the status, Location and Content-Type.
 // err is set on transport failure, a timeout, or an oversized body.
 // A non-2xx status is returned with its body and a nil error.
-func (s *landingServer) proxyPHP(r *http.Request, id, name, ip, cid string) (phpResponse, error) {
+// Every request that is sent is counted in the landing metrics with its time
+// and its failure, if any.
+func (s *landingServer) proxyPHP(r *http.Request, id, name, ip, cid, origin string) (phpResponse, error) {
 	if s == nil || s.phpURL == "" {
 		return phpResponse{}, errPHPOff
 	}
+	start := time.Now()
+	resp, err := s.fetchPHP(r, id, name, ip, cid, origin)
+	s.stats.observe(time.Since(start), resp.Status, err)
+	return resp, err
+}
+
+// fetchPHP is the request to the PHP origin that proxyPHP counts. Arguments and
+// results are those of proxyPHP; the origin is known to be set.
+func (s *landingServer) fetchPHP(r *http.Request, id, name, ip, cid, origin string) (phpResponse, error) {
 	parent := context.Background()
 	if r != nil {
 		parent = r.Context()
@@ -123,6 +135,9 @@ func (s *landingServer) proxyPHP(r *http.Request, id, name, ip, cid string) (php
 	if ip != "" {
 		req.Header.Set("X-Forwarded-For", ip)
 	}
+	req.Header.Set("X-Emtds-Cid", cid)
+	req.Header.Set("X-Emtds-Origin", origin)
+	// Uploaded PHP landings may read HTTP_X_KUZTDS_CID, so the old name is sent too.
 	req.Header.Set("X-Kuztds-Cid", cid)
 	if r != nil {
 		if ua := r.Header.Get("User-Agent"); ua != "" {
@@ -147,7 +162,7 @@ func (s *landingServer) proxyPHP(r *http.Request, id, name, ip, cid string) (php
 	return phpResponse{
 		Body:        body,
 		Status:      resp.StatusCode,
-		Location:    resp.Header.Get("Location"),
+		Location:    rewritePHPLocation(resp.Header.Get("Location"), s.phpURL, id),
 		ContentType: resp.Header.Get("Content-Type"),
 	}, nil
 }
@@ -199,6 +214,48 @@ func (s *landingServer) warnPHP() {
 	if s.log != nil {
 		s.log.Warn("engine: php landings disabled")
 	}
+}
+
+// rewritePHPLocation translates a Location header from the PHP sidecar into an
+// engine-relative path. phpURL is EMTDS_PHP_URL (e.g. http://php:80). id is the
+// landing id passed to proxyPHP. Two cases are rewritten: (1) an absolute URL
+// whose host equals the host or hostname of phpURL and whose path starts with
+// /<id>/; (2) a relative path that starts with /<id>/. Both become /l/<id>/...
+// with the original query preserved. External URLs and anything else are returned
+// unchanged. An empty loc or a parse error returns loc unmodified.
+func rewritePHPLocation(loc, phpURL, id string) string {
+	if loc == "" || id == "" {
+		return loc
+	}
+	u, err := url.Parse(loc)
+	if err != nil {
+		return loc
+	}
+	prefix := "/" + id + "/"
+	var uPath, uQuery string
+	if u.Host != "" {
+		// Absolute URL: check whether the host belongs to the PHP sidecar.
+		p, err := url.Parse(phpURL)
+		if err != nil || (u.Host != p.Host && u.Hostname() != p.Hostname()) {
+			return loc
+		}
+		uPath = u.Path
+		uQuery = u.RawQuery
+	} else if strings.HasPrefix(u.Path, "/") {
+		// Relative path starting with /.
+		uPath = u.Path
+		uQuery = u.RawQuery
+	} else {
+		return loc
+	}
+	if !strings.HasPrefix(uPath, prefix) {
+		return loc
+	}
+	result := "/l" + uPath
+	if uQuery != "" {
+		result += "?" + uQuery
+	}
+	return result
 }
 
 // readLimited reads at most landingBodyLimit bytes.

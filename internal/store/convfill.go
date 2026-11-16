@@ -4,23 +4,23 @@ import "time"
 
 // ClickFill is click metadata used to backfill empty conversion fields.
 type ClickFill struct {
-	TS         time.Time
-	GroupID    string
-	GroupName  string
-	IP         string
-	UserAgent  string
-	OS         string
-	OSVersion  string
-	Browser    string
-	BrowserVer string
-	Brand      string
-	Referer    string
-	Lang       string
-	City       string
-	Region     string
-	LandingID  string
-	OfferID    string
-	NetworkID  string
+	TS              time.Time
+	GroupID         string
+	GroupName       string
+	IP              string
+	UserAgent       string
+	OS              string
+	OSVersion       string
+	Browser         string
+	BrowserVer      string
+	Brand           string
+	Referer         string
+	Lang            string
+	City            string
+	Region          string
+	LandingID       string
+	OfferID         string
+	NetworkID       string
 	SourceID        string
 	OriginGroupID   string
 	OriginGroupName string

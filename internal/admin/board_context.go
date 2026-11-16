@@ -5,11 +5,24 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
-const boardHeader = "X-Kuztds-Board"
+const (
+	// boardHeader names the section header sent by the panel and API clients.
+	boardHeader = "X-Emtds-Board"
+	// legacyBoardHeader is the section header of clients built before the rename; it is still read.
+	legacyBoardHeader = "X-Kuztds-Board"
+)
+
+// requestBoard returns the trimmed section header of r: X-Emtds-Board first, then X-Kuztds-Board.
+func requestBoard(r *http.Request) string {
+	if v := strings.TrimSpace(r.Header.Get(boardHeader)); v != "" {
+		return v
+	}
+	return strings.TrimSpace(r.Header.Get(legacyBoardHeader))
+}
 
 const boardKey ctxKey = 1
 
@@ -40,7 +53,7 @@ func boardsAllFrom(ctx context.Context) bool {
 	return true
 }
 
-// boardScope resolves the request section from X-Kuztds-Board and stores it in ctx.
+// boardScope resolves the request section from X-Emtds-Board and stores it in ctx.
 // A header naming a section the session may not open answers 403. An empty header uses the user default.
 func (s *Server) boardScope(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +63,7 @@ func (s *Server) boardScope(next http.Handler) http.Handler {
 			writeErr(w, http.StatusInternalServerError, "boards error")
 			return
 		}
-		raw := strings.TrimSpace(r.Header.Get(boardHeader))
+		raw := requestBoard(r)
 		current := meta.defaultID
 		if raw != "" {
 			want := config.NormalizeBoardID(raw)
@@ -85,13 +98,13 @@ func (s *Server) boardScope(next http.Handler) http.Handler {
 }
 
 type boardMeta struct {
-	all         bool
-	switchable  bool
-	defaultID   string
-	visibleIDs  []string
-	visibleSet  map[string]bool
-	includeAll  bool
-	roles       map[string]string
+	all        bool
+	switchable bool
+	defaultID  string
+	visibleIDs []string
+	visibleSet map[string]bool
+	includeAll bool
+	roles      map[string]string
 }
 
 func (m boardMeta) canOpen(id string) bool {
@@ -269,7 +282,12 @@ func boardMemberRoles(list []config.Board, uid string) map[string]string {
 	return roles
 }
 
+// canManageBoards reports whether sess may see board members and manage boards.
+// The environment administrator, ADMIN keys and administrators may; a USER key never.
 func (s *Server) canManageBoards(sess security.Session) bool {
+	if isUserKey(sess) {
+		return false
+	}
 	if sess.UID == "" {
 		return true
 	}

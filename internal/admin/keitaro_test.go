@@ -12,9 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/store"
-	"github.com/kuztds/bridge/ktimport"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/emtds/bridge/ktimport"
 )
 
 func TestSanitizeKeitaroKey(t *testing.T) {

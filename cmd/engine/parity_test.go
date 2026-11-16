@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,7 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/store"
 )
 
 func loadBook[T any](t *testing.T, name string, list []T, idOf func(T) string) *config.Book[T] {
@@ -81,8 +83,8 @@ func TestOutboundFiresOncePerStatus(t *testing.T) {
 		}},
 	})
 	d := &engineDeps{groups: g, outbound: make(chan outboundJob, 4)}
-	d.fireOutbound("g1", "abc", 1.5, "lead", nil)
-	d.fireOutbound("g1", "abc", 2, "sale", nil)
+	d.fireOutbound("g1", "abc", "", 1.5, "lead", [config.MaxSubID]string{})
+	d.fireOutbound("g1", "abc", "", 2, "sale", [config.MaxSubID]string{})
 	if len(d.outbound) != 1 {
 		t.Fatalf("queued %d, want the sale only", len(d.outbound))
 	}
@@ -100,10 +102,27 @@ func TestQueueOutboundOnce(t *testing.T) {
 		}},
 	})
 	d := &engineDeps{groups: g, outbound: make(chan outboundJob, 4)}
-	d.queueOutbound("g1", "abc", 1.5, "sale", nil)
-	d.queueOutbound("g1", "abc", 1.5, "sale", nil)
+	fresh := store.ConversionResult{GroupID: "g1", Fresh: true}
+	d.queueOutbound(fresh, "abc", 1.5, "sale", [config.MaxSubID]string{})
+	d.queueOutbound(fresh, "abc", 1.5, "sale", [config.MaxSubID]string{})
 	if len(d.outbound) != 1 {
 		t.Fatalf("queued %d, want one", len(d.outbound))
+	}
+}
+
+// TestQueueOutboundSkipsRepeat checks that a pair the store already had sends
+// nothing, however many times the postback arrives.
+func TestQueueOutboundSkipsRepeat(t *testing.T) {
+	g := config.NewGroups(&config.Group{
+		ID: "g1", Status: true,
+		Postbacks: []config.OutboundPostback{{
+			URL: "https://pb.example/pb?cid={subid}", Method: "GET", Statuses: []string{"sale"},
+		}},
+	})
+	d := &engineDeps{groups: g, outbound: make(chan outboundJob, 4)}
+	d.queueOutbound(store.ConversionResult{GroupID: "g1"}, "abc", 1, "sale", [config.MaxSubID]string{})
+	if len(d.outbound) != 0 {
+		t.Fatalf("queued %d for a repeated pair, want none", len(d.outbound))
 	}
 }
 
@@ -115,9 +134,9 @@ func TestQueueOutboundUnmarksWhenDropped(t *testing.T) {
 		}},
 	})
 	d := &engineDeps{groups: g, outbound: make(chan outboundJob)}
-	d.queueOutbound("g1", "abc", 1, "sale", nil)
-	if !d.markOutbound("abc", "sale") {
-		t.Fatal("dropped job kept the mark")
+	d.queueOutbound(store.ConversionResult{GroupID: "g1", Fresh: true}, "abc", 1, "sale", [config.MaxSubID]string{})
+	if !d.takeOutbound(context.Background(), "abc", "sale") {
+		t.Fatal("dropped job kept the lock")
 	}
 }
 

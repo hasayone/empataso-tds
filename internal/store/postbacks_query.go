@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // PostbackQuery filters the conversion journal.
@@ -45,6 +45,13 @@ type PostbackTotals struct {
 type postbackOriginSnap struct {
 	originConv   bool
 	originEvents bool
+	rootConv     bool
+}
+
+// conversionLateWaves selects optional conversion attribution columns.
+type conversionLateWaves struct {
+	origin bool
+	root   bool
 }
 
 // postbackPage is one paginated conversion-journal SELECT with shared match SQL.
@@ -84,9 +91,11 @@ func (c *CH) PostbacksExcluding(ctx context.Context, from, to time.Time, group s
 // zero. Profit is the sum over the whole match, not the page. Count is the
 // number of matching rows. A query error is returned as-is.
 func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow, PostbackTotals, error) {
+	ctx = c.analyticsCtx(ctx, 0)
 	c.maybeRefreshOriginWave()
 	originConv := c.originConv.Load()
-	tot, where, args, from, skip, err := c.postbackMatch(ctx, q, originConv)
+	rootConv := c.ready("conversions", waveRoot)
+	tot, where, args, from, skip, err := c.postbackMatch(ctx, q, originConv, rootConv)
 	if err != nil || skip {
 		return []PostbackRow{}, tot, err
 	}
@@ -101,7 +110,7 @@ func (c *CH) QueryPostbacks(ctx context.Context, q PostbackQuery) ([]PostbackRow
 	page := postbackPage{
 		from: from, where: where, args: args,
 		sort: q.Sort, desc: q.Desc, limit: limit, offset: off,
-		origin: postbackOriginSnap{originConv: originConv, originEvents: c.originEvents.Load()},
+		origin: postbackOriginSnap{originConv: originConv, originEvents: c.originEvents.Load(), rootConv: rootConv},
 	}
 	out, err := c.queryPostbackRows(ctx, page)
 	return out, tot, err
@@ -119,10 +128,12 @@ func (c *CH) EachPostback(ctx context.Context, q PostbackQuery, max int, prepare
 	if max > PostbackExportMax {
 		max = PostbackExportMax
 	}
+	ctx = c.analyticsCtx(ctx, 0)
 	c.maybeRefreshOriginWave()
 	originConv := c.originConv.Load()
 	originEvents := c.originEvents.Load()
-	tot, where, args, from, skip, err := c.postbackMatch(ctx, q, originConv)
+	rootConv := c.ready("conversions", waveRoot)
+	tot, where, args, from, skip, err := c.postbackMatch(ctx, q, originConv, rootConv)
 	if err != nil {
 		return false, err
 	}
@@ -145,7 +156,7 @@ func (c *CH) EachPostback(ctx context.Context, q PostbackQuery, max int, prepare
 		page := postbackPage{
 			from: from, where: where, args: args,
 			sort: q.Sort, desc: q.Desc, limit: batch, offset: offset,
-			origin: postbackOriginSnap{originConv: originConv, originEvents: originEvents},
+			origin: postbackOriginSnap{originConv: originConv, originEvents: originEvents, rootConv: rootConv},
 		}
 		rows, err := c.queryPostbackRows(ctx, page)
 		if err != nil {
@@ -170,7 +181,9 @@ func (c *CH) EachPostback(ctx context.Context, q PostbackQuery, max int, prepare
 
 // postbackMatch returns totals and the shared FROM/WHERE for conversion journal queries.
 // Lead and sale rows voided by a newer rejection are omitted from the rows, the count and the payout sum.
-func (c *CH) postbackMatch(ctx context.Context, q PostbackQuery, originConv bool) (PostbackTotals, string, []any, string, bool, error) {
+// ctx bounds the totals query, q supplies filters, and the wave flags select optional UNION columns.
+// It returns filter errors and ClickHouse query errors unchanged.
+func (c *CH) postbackMatch(ctx context.Context, q PostbackQuery, originConv, rootConv bool) (PostbackTotals, string, []any, string, bool, error) {
 	if !c.clickCols && (q.Offer != "" || q.Landing != "" || q.Source != "" || q.Network != "") {
 		return PostbackTotals{}, "", nil, "", true, nil
 	}
@@ -186,7 +199,7 @@ func (c *CH) postbackMatch(ctx context.Context, q PostbackQuery, originConv bool
 	where += extra
 	args = append(args, extraArgs...)
 	where += voidedConfirmedSQL("cid", "status")
-	from := conversionUnion(c.clickCols, c.extConv, c.modelConv, originConv, c.subConv, c.depsumConv)
+	from := conversionUnion(c.clickCols, c.extConv, c.modelConv, conversionLateWaves{origin: originConv, root: rootConv}, c.subConv, c.depsumConv)
 	var tot PostbackTotals
 	var n uint64
 	if err := c.conn.QueryRow(ctx, "SELECT "+postbackSumSelect(c.depsumConv)+" FROM ("+from+") WHERE "+where, args...).Scan(&tot.Profit, &tot.DepSum, &n); err != nil {
@@ -204,12 +217,13 @@ func (c *CH) queryPostbackRows(ctx context.Context, page postbackPage) ([]Postba
 	if err != nil {
 		return nil, err
 	}
-	sel, extCols := c.postbackColumns(page.origin.originConv)
+	sel, extCols := c.postbackColumns(page.origin.originConv, page.origin.rootConv)
 	q := "SELECT " + sel + " FROM (" + page.from + ") WHERE " + page.where + " ORDER BY " + order + " LIMIT ? OFFSET ?"
+	qctx := ctx
 	if slow {
-		q += " SETTINGS max_execution_time=20"
+		qctx = c.analyticsCtx(ctx, journalSortMaxExecution)
 	}
-	rows, err := c.conn.Query(ctx, q, append(page.args, page.limit, page.offset)...)
+	rows, err := c.conn.Query(qctx, q, append(page.args, page.limit, page.offset)...)
 	if err != nil {
 		return nil, err
 	}
@@ -384,6 +398,12 @@ func postbackExtPtr(p *PostbackRow, col string) any {
 		return &p.OriginCampaign
 	case "origin_group_id":
 		return &p.OriginCampaignID
+	case "root_cid":
+		return &p.RootCID
+	case "origin_stream_name":
+		return &p.OriginStream
+	case "origin_keyword":
+		return &p.OriginKeyword
 	case "depsum":
 		return &p.DepSum
 	default:
@@ -430,8 +450,9 @@ func postbackWhere(q PostbackQuery, click bool) (string, []any) {
 
 // convLogExtraCols lists optional conversions columns for the journal SELECT,
 // in the same order as convExtra and conversionUnion.
-func convLogExtraCols(click, ext, model, origin, sub, dep bool) []string {
-	_, cols := convExtra(click, ext, model, origin, sub, dep)
+// Each parameter selects its corresponding schema wave. It does not fail.
+func convLogExtraCols(click, ext, model bool, late conversionLateWaves, sub, dep bool) []string {
+	_, cols := convExtra(click, ext, model, late, sub, dep)
 	if cols == "" {
 		return nil
 	}
@@ -441,9 +462,10 @@ func convLogExtraCols(click, ext, model, origin, sub, dep bool) []string {
 // postbackColumns builds the SELECT list of the conversion log for the waves
 // that are ready. It returns the list and the optional column names in the order
 // postbackDest scans them (matches conversionUnion).
-func (c *CH) postbackColumns(originConv bool) (sel string, extraCols []string) {
+// originConv and rootConv select their late schema waves. It does not fail.
+func (c *CH) postbackColumns(originConv, rootConv bool) (sel string, extraCols []string) {
 	sel = "ts, group_name, stream_name, domain, page, device, country, city, profit, cid, status"
-	extraCols = convLogExtraCols(c.clickCols, c.extConv, c.modelConv, originConv, c.subConv, c.depsumConv)
+	extraCols = convLogExtraCols(c.clickCols, c.extConv, c.modelConv, conversionLateWaves{origin: originConv, root: rootConv}, c.subConv, c.depsumConv)
 	if len(extraCols) > 0 {
 		sel += ", " + strings.Join(extraCols, ", ")
 	}
@@ -464,20 +486,21 @@ func (c *CH) postbackDest(p *PostbackRow, subs []string, extraCols []string) []a
 // conversionFrom is conversionUnion without the model wave.
 // click and ext select the waves; see conversionUnion.
 func conversionFrom(click, ext bool) string {
-	return conversionUnion(click, ext, false, false, false, false)
+	return conversionUnion(click, ext, false, conversionLateWaves{}, false, false)
 }
 
 // conversionUnion is the old postbacks table plus one row per cid and status.
 // click adds the click-wave columns, ext the ext-wave columns and model the
 // device_model column. origin adds origin_group_name and origin_group_id.
+// root adds root_cid, origin_stream_name and origin_keyword.
 // The postbacks branch uses typed stand-ins so the union lines up.
 // All flags false keep the original two-column status shape.
-func conversionUnion(click, ext, model, origin, sub, dep bool) string {
+func conversionUnion(click, ext, model bool, late conversionLateWaves, sub, dep bool) string {
 	base := `ts, domain, page, device, operator, country, city, profit, group_name, stream_name, cid`
 	post := `SELECT ` + base + `, '' AS status`
 	conv := `SELECT ` + base + `, status`
-	if click || ext || model || origin || sub || dep {
-		stubs, cols := convExtra(click, ext, model, origin, sub, dep)
+	if click || ext || model || late.origin || late.root || sub || dep {
+		stubs, cols := convExtra(click, ext, model, late, sub, dep)
 		if stubs != "" {
 			post += ", " + stubs
 			conv += ", " + cols
@@ -489,11 +512,11 @@ func conversionUnion(click, ext, model, origin, sub, dep bool) string {
 }
 
 // convExtra lists stand-ins and real names for the click, ext, model and deposit waves.
-// click, ext, model, origin, sub and dep select which waves are included.
+// click, ext, model, sub and dep select their waves; late selects origin and root.
 // Base columns are omitted. The postbacks side of dep is toFloat64(0).
 // The two strings have the same length and the same order. Both are empty
 // when no flag is set or the waves add nothing.
-func convExtra(click, ext, model, origin, sub, dep bool) (stubs, cols string) {
+func convExtra(click, ext, model bool, late conversionLateWaves, sub, dep bool) (stubs, cols string) {
 	var stubParts, colParts []string
 	for _, f := range fields {
 		if f.Conv == "" || f.ConvWave == waveBase {
@@ -513,7 +536,11 @@ func convExtra(click, ext, model, origin, sub, dep bool) (stubs, cols string) {
 				continue
 			}
 		case waveOrigin:
-			if !origin {
+			if !late.origin {
+				continue
+			}
+		case waveRoot:
+			if !late.root {
 				continue
 			}
 		case waveSub:

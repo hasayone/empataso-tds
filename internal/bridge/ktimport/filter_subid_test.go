@@ -40,7 +40,7 @@ func TestSubIDFilterNotCarried(t *testing.T) {
 }
 
 func TestSubIDFiltersStayApart(t *testing.T) {
-	rules, ok, _, losses := mapFilters([]KFilter{
+	rules, ok, _, losses, _ := mapFilters([]KFilter{
 		subFilter("sub_id_1", "accept", `["a"]`),
 		subFilter("sub_id_2", "reject", `["b"]`),
 	}, nil, false)
@@ -68,7 +68,7 @@ func TestSubIDDuplicateKey(t *testing.T) {
 		{"accept and reject is skipped", false, subFilter("sub_id_1", "accept", `["a"]`), subFilter("sub_id_1", "reject", `["b"]`), 2, "a", true},
 	}
 	for _, c := range cases {
-		rules, _, _, losses := mapFilters([]KFilter{c.a, c.b}, nil, c.or)
+		rules, _, _, losses, _ := mapFilters([]KFilter{c.a, c.b}, nil, c.or)
 		got := rules.SubIDs["sub_id_1"]
 		if got.Flag != c.flag || strings.Join(got.Values, "|") != c.values {
 			t.Errorf("%s: sub_id_1 = %+v", c.name, got)
@@ -80,7 +80,7 @@ func TestSubIDDuplicateKey(t *testing.T) {
 }
 
 func TestQueryFilterKeepsFlagOnMerge(t *testing.T) {
-	rules, _, _, losses := mapFilters([]KFilter{
+	rules, _, _, losses, _ := mapFilters([]KFilter{
 		subFilter("parameter", "accept", `{"name":"utm","value":"a","mode":"accept"}`),
 		subFilter("parameter", "reject", `{"name":"utm","value":"b","mode":"reject"}`),
 	}, nil, false)

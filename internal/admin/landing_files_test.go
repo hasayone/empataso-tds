@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 func zipBytes(t *testing.T, files map[string]string) []byte {
@@ -191,6 +191,99 @@ func TestLandingArchiveUpdatesEntryAndDeleteRemovesDir(t *testing.T) {
 	if err != nil || len(list) != 0 {
 		t.Fatalf("catalog after delete %+v %v", list, err)
 	}
+}
+
+// TestLandingFilesListRereadsSize checks that GET /api/landings/{id}/files shows the size
+// and change time from disk after an archive, an editor save and a write from outside
+// the admin, and that the answer is never cached.
+func TestLandingFilesListRereadsSize(t *testing.T) {
+	dir := t.TempDir()
+	landings := NewJSONStore[config.Landing](filepath.Join(dir, "landings.json"))
+	if err := landings.Save(context.Background(), []config.Landing{{ID: "702", Name: "Local", Local: true, Status: true}}); err != nil {
+		t.Fatal(err)
+	}
+	hash, err := security.HashPassword("p@ss")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := New(Config{
+		AdminUser: "admin", PasswordHash: hash,
+		Sessions: security.NewMemoryStore(), Stats: fakeStats{},
+		Groups: &memGroups{}, Limiter: allowAll{}, SessionTTL: time.Hour,
+		Landings: landings, LandingFiles: NewFileLandings(filepath.Join(dir, "files")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(s.Handler())
+	t.Cleanup(srv.Close)
+	c := newClient(t)
+	code, csrf := login(t, c, srv.URL, "admin", "p@ss")
+	if code != http.StatusOK {
+		t.Fatalf("login %d", code)
+	}
+	listURL := srv.URL + "/api/landings/702/files"
+	upload := func(step string, files map[string]string) {
+		t.Helper()
+		if raw, code := landingDo(t, c, http.MethodPost, srv.URL+"/api/landings/702/archive", csrf, "application/zip", zipBytes(t, files)); code != http.StatusOK {
+			t.Fatalf("%s: %d %s", step, code, raw)
+		}
+	}
+	upload("archive", map[string]string{"index.php": "<?php", "log.json": "[1,2,3,4,5]"})
+	if f := listedFile(t, c, listURL, "log.json"); f.Size != 11 || f.Modified.IsZero() || f.Modified.Location() != time.UTC {
+		t.Fatalf("after archive %+v", f)
+	}
+	if raw, code := landingDo(t, c, http.MethodPut, srv.URL+"/api/landings/702/files/log.json", csrf, "text/plain", []byte("[]")); code != http.StatusOK {
+		t.Fatalf("put %d %s", code, raw)
+	}
+	if f := listedFile(t, c, listURL, "log.json"); f.Size != 2 {
+		t.Fatalf("after editor save %+v", f)
+	}
+	outside := filepath.Join(dir, "files", "702", "log.json")
+	later := time.Now().Add(time.Hour).UTC().Truncate(time.Second)
+	if err := os.WriteFile(outside, []byte("[1,2,3,4,5,6,7,8,9]"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(outside, later, later); err != nil {
+		t.Fatal(err)
+	}
+	if f := listedFile(t, c, listURL, "log.json"); f.Size != 19 || !f.Modified.Equal(later) {
+		t.Fatalf("after outside write %+v, want time %v", f, later)
+	}
+	upload("second archive", map[string]string{"index.php": "<?php", "log.json": "{}"})
+	if f := listedFile(t, c, listURL, "log.json"); f.Size != 2 {
+		t.Fatalf("after second archive %+v", f)
+	}
+}
+
+// listedFile reads one file row from a landing file list and checks the list is not cacheable.
+// c is a signed-in client, url the list route, path the file to return.
+// It fails the test on a request error, a cache header other than private no-store,
+// a validator header, or a missing path.
+func listedFile(t *testing.T, c *http.Client, url, path string) FileInfo {
+	t.Helper()
+	resp, err := c.Get(url)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if cc := resp.Header.Get("Cache-Control"); cc != "private, no-store" {
+		t.Fatalf("Cache-Control %q", cc)
+	}
+	if resp.Header.Get("ETag") != "" || resp.Header.Get("Last-Modified") != "" {
+		t.Fatal("the file list carries a cache validator")
+	}
+	var list []FileInfo
+	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range list {
+		if f.Path == path {
+			return f
+		}
+	}
+	t.Fatalf("%s missing in %+v", path, list)
+	return FileInfo{}
 }
 
 func landingDo(t *testing.T, c *http.Client, method, url, csrf, contentType string, body []byte) ([]byte, int) {

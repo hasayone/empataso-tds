@@ -26,6 +26,8 @@ const (
 type ktCreds struct {
 	Base string
 	Key  string
+	// gets is the GET budget of a sync pass; nil leaves GET requests unlimited.
+	gets *keitaroGETBudget
 }
 
 // configured reports whether origin and key are both non-empty. Blank space does not count.

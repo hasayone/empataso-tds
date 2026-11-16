@@ -6,17 +6,17 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 // registerRoles mounts CRUD routes for roles.json behind cookie sessions.
 func registerRoles(s *Server, mux *http.ServeMux) {
-	s.handle(mux, "GET /api/roles", cookieOnly(http.HandlerFunc(s.handleRolesList)))
-	s.handle(mux, "POST /api/roles", cookieOnly(http.HandlerFunc(s.handleRolesCreate)))
-	s.handle(mux, "POST /api/roles/reload", cookieOnly(http.HandlerFunc(s.handleRolesReload)))
-	s.handle(mux, "GET /api/roles/{id}", cookieOnly(http.HandlerFunc(s.handleRolesGet)))
-	s.handle(mux, "PUT /api/roles/{id}", cookieOnly(http.HandlerFunc(s.handleRolesUpdate)))
-	s.handle(mux, "DELETE /api/roles/{id}", cookieOnly(http.HandlerFunc(s.handleRolesDelete)))
+	s.handle(mux, "GET /api/roles", http.HandlerFunc(s.handleRolesList))
+	s.handle(mux, "POST /api/roles", http.HandlerFunc(s.handleRolesCreate))
+	s.handle(mux, "POST /api/roles/reload", http.HandlerFunc(s.handleRolesReload))
+	s.handle(mux, "GET /api/roles/{id}", http.HandlerFunc(s.handleRolesGet))
+	s.handle(mux, "PUT /api/roles/{id}", http.HandlerFunc(s.handleRolesUpdate))
+	s.handle(mux, "DELETE /api/roles/{id}", http.HandlerFunc(s.handleRolesDelete))
 }
 
 // roleView is the public row of a role: the stored fields plus how many users use it.

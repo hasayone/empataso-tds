@@ -1,9 +1,10 @@
-// Package cron is the background service of KuzTDS: the periodic chores the
+// Package cron is the background service of EmTDS: the periodic chores the
 // engine must not do on its hot path and the admin should not do in a request.
 //
 // Jobs: refresh bot IP lists, refresh the geo databases, check domains with
 // VirusTotal, watch free disk space, delete old keyword files, and announce
-// conversions — with Telegram as the one notification channel.
+// conversions — with Telegram as the one notification channel. Besides the
+// jobs, the service checks Redis memory every minute (see WatchRedis).
 //
 // The service talks to the rest of the system through files only. Its config
 // is a JSON file the admin panel edits; its state is a JSON file the admin
@@ -22,7 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/detect"
 )
 
 // Job names, as used in the config, the status file and "run now" requests.
@@ -59,7 +61,43 @@ type Config struct {
 	Cleanup     Cleanup     `json:"cleanup"`
 	Conversions Conversions `json:"conversions"`
 	KeitaroSync KeitaroSync `json:"keitaro_sync"`
+
+	// Seeded lists the default sources already offered to this installation
+	// (see the Seed constants). A source the user removed stays removed because
+	// its key is recorded here.
+	Seeded []string `json:"seeded,omitempty"`
 }
+
+// Kinds of a GeoSource: which database file the source replaces.
+const (
+	KindCity    = "city"
+	KindASN     = "asn"
+	KindDBIPASN = "dbip_asn"
+)
+
+// Keys of Config.Seeded: default sources added to configs written before they existed.
+// A key names a default source, not a kind.
+const (
+	SeedDBIPASN      = "dbip_asn"
+	SeedPrivateRelay = "ip_private_relay"
+)
+
+// DBIPASNURL is the URL template of the DB-IP ASN Lite database, the one source of it.
+// {YYYY-MM} is the month; see MonthPlaceholder.
+const DBIPASNURL = "https://download.db-ip.com/free/dbip-asn-lite-" + MonthPlaceholder + ".mmdb.gz"
+
+// DBIPASNHost is the only host a dbip_asn source may download from or be redirected to.
+const DBIPASNHost = "download.db-ip.com"
+
+// MonthPlaceholder in a geo source URL stands for the current month, as YYYY-MM in UTC.
+const MonthPlaceholder = "{YYYY-MM}"
+
+var (
+	// seedGeoSource is the DB-IP ASN source added under SeedDBIPASN.
+	seedGeoSource = GeoSource{Kind: KindDBIPASN, URL: DBIPASNURL}
+	// seedIPSource is the iCloud Private Relay source added under SeedPrivateRelay.
+	seedIPSource = IPSource{URL: "https://mask-api.icloud.com/egress-ip-ranges.csv", Target: detect.ListPrivateRelay, Mode: "replace"}
+)
 
 // KeitaroSync — periodic log catch-up from Keitaro (admin executor only).
 type KeitaroSync struct {
@@ -106,12 +144,12 @@ type GeoDB struct {
 }
 
 // GeoSource is one database download. Kind says which file it replaces: the
-// paths themselves come from the service's environment (KUZTDS_GEO_DB,
-// KUZTDS_ASN_DB), not from this config — the admin panel can change what is
-// downloaded, never where it is written.
+// paths themselves come from the service's environment (EMTDS_GEO_DB,
+// EMTDS_ASN_DB, EMTDS_DBIP_ASN_DB), not from this config — the admin panel can
+// change what is downloaded, never where it is written.
 type GeoSource struct {
-	Kind     string `json:"kind"`     // "city" | "asn"
-	URL      string `json:"url"`      // .mmdb, .mmdb.gz or .tar.gz
+	Kind     string `json:"kind"`     // KindCity | KindASN | KindDBIPASN
+	URL      string `json:"url"`      // .mmdb, .mmdb.gz or .tar.gz; may contain {YYYY-MM}
 	User     string `json:"user"`     // basic auth (MaxMind: account id)
 	Password string `json:"password"` // basic auth (MaxMind: license key; secret)
 }
@@ -179,17 +217,97 @@ func Default() Config {
 			{URL: "https://iplists.firehol.org/files/proxylists_1d.ipset", Target: "ip_proxy", Mode: "merge"},
 			{URL: "https://iplists.firehol.org/files/socks_proxy_1d.ipset", Target: "ip_proxy", Mode: "merge"},
 			{URL: "https://iplists.firehol.org/files/tor_exits.ipset", Target: "ip_proxy", Mode: "merge"},
+			seedIPSource,
 		}},
 		GeoDB: GeoDB{EveryMinutes: 3 * 24 * 60, Sources: []GeoSource{
-			{Kind: "city", URL: "https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz"},
-			{Kind: "asn", URL: "https://download.maxmind.com/geoip/databases/GeoLite2-ASN/download?suffix=tar.gz"},
+			{Kind: KindCity, URL: "https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz"},
+			{Kind: KindASN, URL: "https://download.maxmind.com/geoip/databases/GeoLite2-ASN/download?suffix=tar.gz"},
+			seedGeoSource,
 		}},
 		VirusTotal:  VirusTotal{EveryMinutes: 12 * 60, FromGroups: true, Threshold: 1},
 		Disk:        Disk{EveryMinutes: 10, MinFreePercent: 10},
 		Cleanup:     Cleanup{EveryMinutes: 24 * 60, KeysDays: 30},
 		Conversions: Conversions{EveryMinutes: 1, Template: DefaultConversionTemplate},
 		KeitaroSync: KeitaroSync{EveryMinutes: 15},
+		Seeded:      []string{SeedDBIPASN, SeedPrivateRelay},
 	}
+}
+
+// seed adds, in memory, each default source whose key is missing from Seeded
+// and records the key. A source already present (same kind and URL, or same
+// target and URL) is not added twice. The receiver is changed in place.
+func (c *Config) seed() {
+	has := func(key string) bool {
+		for _, k := range c.Seeded {
+			if k == key {
+				return true
+			}
+		}
+		return false
+	}
+	if !has(SeedDBIPASN) {
+		found := false
+		for _, s := range c.GeoDB.Sources {
+			found = found || (s.Kind == seedGeoSource.Kind && cleanURL(s.URL) == seedGeoSource.URL)
+		}
+		if !found {
+			c.GeoDB.Sources = append(append([]GeoSource{}, c.GeoDB.Sources...), seedGeoSource)
+		}
+		c.Seeded = append(c.Seeded, SeedDBIPASN)
+	}
+	if !has(SeedPrivateRelay) {
+		found := false
+		for _, s := range c.IPLists.Sources {
+			found = found || (s.Target == seedIPSource.Target && cleanURL(s.URL) == seedIPSource.URL)
+		}
+		if !found {
+			c.IPLists.Sources = append(append([]IPSource{}, c.IPLists.Sources...), seedIPSource)
+		}
+		c.Seeded = append(c.Seeded, SeedPrivateRelay)
+	}
+}
+
+// KeepSeeded returns c with Seeded set to the union of its own keys and the
+// stored ones, so a save from a client that does not send the field cannot
+// make a removed default source come back.
+func (c Config) KeepSeeded(stored Config) Config {
+	seen := map[string]bool{}
+	var out []string
+	for _, list := range [][]string{stored.Seeded, c.Seeded} {
+		for _, k := range list {
+			if !seen[k] {
+				seen[k] = true
+				out = append(out, k)
+			}
+		}
+	}
+	c.Seeded = out
+	return c
+}
+
+// ExpandMonth replaces every {YYYY-MM} in rawURL with the month of t in UTC.
+// It returns rawURL unchanged when there is no placeholder.
+func ExpandMonth(rawURL string, t time.Time) string {
+	return strings.ReplaceAll(rawURL, MonthPlaceholder, t.UTC().Format("2006-01"))
+}
+
+// geoURLs returns the URLs to try for a geo source at time now, in order: the
+// URL with the current month and, when it has the placeholder, the previous
+// month, because a monthly file is published some days into the month.
+func geoURLs(rawURL string, now time.Time) []string {
+	rawURL = cleanURL(rawURL)
+	if !strings.Contains(rawURL, MonthPlaceholder) {
+		return []string{rawURL}
+	}
+	now = now.UTC()
+	prev := time.Date(now.Year(), now.Month()-1, 1, 0, 0, 0, 0, time.UTC)
+	return []string{ExpandMonth(rawURL, now), ExpandMonth(rawURL, prev)}
+}
+
+// dbipURLAllowed reports whether u may be fetched for a dbip_asn source:
+// https and exactly the DB-IP download host.
+func dbipURLAllowed(u *url.URL) bool {
+	return u != nil && u.Scheme == "https" && u.Host == DBIPASNHost
 }
 
 // Floors returns a copy of minimum schedule intervals in minutes for each job.
@@ -303,11 +421,16 @@ func (c Config) Validate() error {
 		}
 	}
 	for i, s := range c.GeoDB.Sources {
-		if s.Kind != "city" && s.Kind != "asn" {
-			return fmt.Errorf("geo source %d: kind must be city or asn", i+1)
+		if s.Kind != KindCity && s.Kind != KindASN && s.Kind != KindDBIPASN {
+			return fmt.Errorf("geo source %d: kind must be city, asn or dbip_asn", i+1)
 		}
-		if err := httpURL(s.URL); err != nil {
+		if err := httpURL(ExpandMonth(s.URL, time.Now())); err != nil {
 			return fmt.Errorf("geo source %d: %w", i+1, err)
+		}
+		if s.Kind == KindDBIPASN {
+			if u, err := url.Parse(cleanURL(ExpandMonth(s.URL, time.Now()))); err != nil || !dbipURLAllowed(u) {
+				return fmt.Errorf("geo source %d: dbip_asn must be an https URL on %s", i+1, DBIPASNHost)
+			}
 		}
 	}
 	for _, d := range c.VirusTotal.Domains {
@@ -326,8 +449,12 @@ func (c Config) Validate() error {
 
 var domainRe = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
 
+// cleanURL returns a source URL as it is used: without the spaces a pasted
+// value often carries. Validation and every download go through it.
+func cleanURL(raw string) string { return strings.TrimSpace(raw) }
+
 func httpURL(raw string) error {
-	u, err := url.Parse(strings.TrimSpace(raw))
+	u, err := url.Parse(cleanURL(raw))
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return fmt.Errorf("%q is not an http(s) URL", raw)
 	}
@@ -335,7 +462,9 @@ func httpURL(raw string) error {
 }
 
 // Load reads the config file. A missing file is not an error: it yields the
-// defaults, which is what a fresh installation has.
+// defaults, which is what a fresh installation has. A file written before a
+// default source existed gets that source added in memory (see Config.Seeded);
+// the file itself is not rewritten.
 func Load(path string) (Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -345,14 +474,26 @@ func Load(path string) (Config, error) {
 		return Config{}, err
 	}
 	c := Default()
+	// What the file has not been offered yet is decided by the file alone.
+	c.Seeded = nil
 	// Slices in the file replace the default ones wholesale (that is how
 	// encoding/json treats them), so removing a default source sticks.
 	if err := json.Unmarshal(b, &c); err != nil {
 		return Config{}, fmt.Errorf("cron config %s: %w", path, err)
 	}
+	c.seed()
 	return c, nil
 }
 
+// Credentials returns the user and password to send with a download of s.
+// A dbip_asn source gets none, whatever the source holds: DB-IP is public, and
+// a license key must never reach it. This is the only place that decides.
+func (s GeoSource) Credentials() (user, password string) {
+	if s.Kind == KindDBIPASN {
+		return "", ""
+	}
+	return s.User, s.Password
+}
 // Save writes the config file atomically, readable by the owner only: it
 // holds a bot token and API keys.
 func Save(path string, c Config) error {

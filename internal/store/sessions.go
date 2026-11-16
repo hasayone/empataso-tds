@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/security"
 	"github.com/redis/go-redis/v9"
 )
 

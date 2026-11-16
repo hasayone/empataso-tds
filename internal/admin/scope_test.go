@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -9,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/security"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/security"
 )
 
 func TestViewerMode(t *testing.T) {
@@ -103,25 +104,20 @@ func TestCanWriteBoardRoleCreated(t *testing.T) {
 }
 
 func TestScopedCampaignsHideOrigin(t *testing.T) {
-	v := viewer{grants: map[string]security.Grant{resCampaigns: {Mode: security.ModeSelected}}}
-	if !scopedCampaigns(v) {
-		t.Fatal("selected campaign grant is scoped")
-	}
-	v.hidden = map[string]bool{}
-	if scopedCampaigns(v) {
-		v.hidden["origin_campaign"] = true
-		v.hidden["origin_campaign_id"] = true
-	}
-	if !v.hidden["origin_campaign"] || !v.hidden["origin_campaign_id"] {
-		t.Fatalf("origin fields hidden for scoped viewer: %v", v.hidden)
-	}
-	full := viewer{grants: map[string]security.Grant{resCampaigns: {Mode: security.ModeFull}}}
-	if scopedCampaigns(full) {
-		t.Fatal("full campaign grant is not scoped")
+	_, _, s, selected, full := scopeOriginServer(t)
+	fields := []string{"origin_campaign", "origin_campaign_id", "root_cid", "origin_stream", "origin_keyword"}
+	for name, user := range map[string]security.User{"selected": selected, "full": full} {
+		ctx := context.WithValue(context.Background(), sessionKey, security.Session{UID: user.ID})
+		v := s.viewerFrom(ctx)
+		for _, field := range fields {
+			if got, want := fieldHidden(v, field), name == "selected"; got != want {
+				t.Errorf("%s fieldHidden(%s) = %v, want %v", name, field, got, want)
+			}
+		}
 	}
 }
 
-func scopeOriginServer(t *testing.T) (*httptest.Server, *http.Client) {
+func scopeOriginServer(t *testing.T) (*httptest.Server, *http.Client, *Server, security.User, security.User) {
 	t.Helper()
 	hash, err := security.HashPassword("p@ss")
 	if err != nil {
@@ -140,10 +136,16 @@ func scopeOriginServer(t *testing.T) (*httptest.Server, *http.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mustUser(t, s, "sel", "secret1", security.Access{
+	selected := mustUser(t, s, "sel", "secret1", security.Access{
 		Sections: userSectionsAll(),
 		Grants: map[string]security.Grant{
 			resCampaigns: {Mode: security.ModeSelected, IDs: []string{"c1"}, Labels: []string{"promo"}},
+		},
+	})
+	full := mustUser(t, s, "full", "secret2", security.Access{
+		Sections: userSectionsAll(),
+		Grants: map[string]security.Grant{
+			resCampaigns: {Mode: security.ModeFull},
 		},
 	})
 	srv := httptest.NewServer(s.Handler())
@@ -152,11 +154,11 @@ func scopeOriginServer(t *testing.T) (*httptest.Server, *http.Client) {
 	if code, _ := login(t, c, srv.URL, "sel", "secret1"); code != http.StatusOK {
 		t.Fatalf("login %d", code)
 	}
-	return srv, c
+	return srv, c, s, selected, full
 }
 
 func TestScopedCampaignOriginHiddenEndpoints(t *testing.T) {
-	srv, c := scopeOriginServer(t)
+	srv, c, _, _, _ := scopeOriginServer(t)
 	base := srv.URL
 
 	for _, ep := range []string{"/api/logs", "/api/postbacks"} {
@@ -169,7 +171,7 @@ func TestScopedCampaignOriginHiddenEndpoints(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Fatalf("%s %d %s", ep, resp.StatusCode, body)
 		}
-		for _, key := range []string{"origin_campaign", "origin_campaign_id", "S_origin_campaign"} {
+		for _, key := range []string{"origin_campaign", "origin_campaign_id", "root_cid", "origin_stream", "origin_keyword", "S_origin_campaign"} {
 			if strings.Contains(body, key) {
 				t.Fatalf("%s leaks %q: %s", ep, key, body)
 			}
@@ -183,6 +185,9 @@ func TestScopedCampaignOriginHiddenEndpoints(t *testing.T) {
 		"/api/postbacks?sort=origin_campaign",
 		"/api/log-values?table=events&field=origin_campaign",
 		"/api/log-values?table=conversions&field=origin_campaign",
+		"/api/logs?f=root_cid:eq:x",
+		"/api/postbacks?f=origin_stream:eq:x",
+		"/api/postbacks?sort=origin_keyword",
 	} {
 		resp, err := c.Get(base + p)
 		if err != nil {
@@ -201,7 +206,7 @@ func TestScopedCampaignOriginHiddenEndpoints(t *testing.T) {
 	}
 	body, _ := ioReadAllString(resp)
 	resp.Body.Close()
-	for _, key := range []string{`"origin_campaign"`, `"origin_campaign_id"`} {
+	for _, key := range []string{`"origin_campaign"`, `"origin_campaign_id"`, `"root_cid"`, `"origin_stream"`, `"origin_keyword"`} {
 		if strings.Contains(body, key) {
 			t.Fatalf("log-fields lists origin: %s", body)
 		}
@@ -219,7 +224,7 @@ func TestScopedCampaignOriginHiddenEndpoints(t *testing.T) {
 		}
 		head := strings.Split(strings.SplitN(body, "\n", 2)[0], ",")
 		for _, col := range head {
-			if col == "origin_campaign" || col == "origin_campaign_id" {
+			if col == "origin_campaign" || col == "origin_campaign_id" || col == "root_cid" || col == "origin_stream" || col == "origin_keyword" {
 				t.Fatalf("%s header has %s", p, col)
 			}
 		}

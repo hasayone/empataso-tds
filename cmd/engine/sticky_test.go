@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // stickyGroup is a weighted group with two catch-all streams and sticky on.
@@ -25,7 +25,7 @@ func weighted(name string, weight int) config.Stream {
 }
 
 func streamOf(rec interface{ Header() http.Header }) string {
-	return rec.Header().Get("X-Kuztds-Stream")
+	return rec.Header().Get("X-Emtds-Stream")
 }
 
 // stickyToken is the token the engine itself issues for a stream of group g1.

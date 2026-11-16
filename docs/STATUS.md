@@ -2,10 +2,15 @@
 
 # STATUS — where we are and how to continue
 
-Snapshot as of 2026-10-21. For details: `docs/USAGE.md`, `TODO.md`.
+Snapshot as of 2026-11-15. For details: `docs/USAGE.md`, `TODO.md`, `docs/wiki/README.md`.
 
 ## Done (in `main`, tests green)
-- **Admin on admin.<domain>**: primary or admin/both role → `https://admin.<domain>/`, proxied `admin` A in Cloudflare, nginx accepts admin.* only from Cloudflare, `KUZTDS_ADMIN_TRUSTED_PROXIES`, `/healthz` with `X-Kuztds-Service: admin`, login on admin.* without Redis — 503. Docs: `docs/wiki/namecheap.md`, `admin-api.md`.
+- **Rename to EmTDS**: `EMTDS_*` variables with a fallback to the old `KUZTDS_*` (`config.Env`), session cookie `emtds_admin` (the old `kuztds_admin` is still accepted), headers `X-Emtds-*` (the old `X-Kuztds-*` are accepted), image `emtds:local`, containers `emtds-*`, compose project `emtds-app`, state volume `emtds-app_emtds_state`, server paths `/opt/emtds`, `/etc/emtds`, `/var/lib/emtds`, nginx `emtds*.conf`. The ClickHouse database and user stay `kuztds`: renaming them is a data migration. Server switch-over: `deploy/migrate-emtds.sh`, `docs/wiki/emtds-migration.md`.
+- **API keys for AI agents and MCP**: a key is `ADMIN` or `USER` (role or its own access), dangerous actions (`keitaro_import`, `keitaro_purge`, `logs_delete`, `groups_replace`, `cron`, `boards`, `landing_files`) are granted per key, cookie-only routes stay closed to keys, error answers carry a stable `code`, each key has a rate limit and a JSONL audit of its writes, `GET /api/openapi.json` describes the routes a session may use. `cmd/mcp` (`make mcp`) turns that schema into MCP tools over stdio. Docs: `docs/wiki/admin-api.md`, `docs/wiki/mcp.md`.
+- **Domains and integrations**: the domain list with roles, Cloudflare (zones, DNS, `ssl` and `always_use_https`), Namecheap registration, domain checks. Docs: `docs/wiki/offers-landings.md`, `docs/wiki/namecheap.md`.
+- **Catalogs, boards and access**: offers, landings (local files, PHP), networks, sources, sections (boards), users and roles, first-login form and password recovery code, admin hash on the state volume. Docs: `docs/wiki/boards.md`, `users.md`, `roles.md`.
+- **Keitaro import and postbacks**: import of catalogs, campaigns, landing files, users, clicks and conversions from `#/integrations`; `/postback` with `depsum`, outbound S2S templates (`s2s.json`), Sub ID 1…30. Docs: `docs/wiki/keitaro.md`, `postbacks.md`, `log-filters.md`.
+- **Admin on admin.<domain>**: primary or admin/both role → `https://admin.<domain>/`, proxied `admin` A in Cloudflare, nginx accepts admin.* only from Cloudflare, `EMTDS_ADMIN_TRUSTED_PROXIES`, `/healthz` with `X-Emtds-Service: admin`, login on admin.* without Redis — 503. Docs: `docs/wiki/namecheap.md`, `admin-api.md`.
 - **Keitaro catch-up**: `keitaro_sync` job in admin (`keitaro-sync.json`, click dedup, locks with import/purge, cron Conversions skips the tracker import domain). Docs: `docs/wiki/keitaro.md`.
 - **Phases 1–7**: ipindex (+hot-reload), realip, geo (mmdb/Nop) + detect
   (device/OS/browser/brand + bots), router (rule-based stream selection),
@@ -43,7 +48,7 @@ Snapshot as of 2026-10-21. For details: `docs/USAGE.md`, `TODO.md`.
   `DeleteGroupLogs` keys on `group_id` now (`clickhouse.go`).
 - **2026-09-30 — geo, cron, flows** (one branch):
   1. **Geo from MaxMind-format databases.** `geo.DB` reads a City/Country file
-     (`KUZTDS_GEO_DB`) and an ASN file (`KUZTDS_ASN_DB`) into memory and swaps
+     (`EMTDS_GEO_DB`) and an ASN file (`EMTDS_ASN_DB`) into memory and swaps
      them when the files change; a corrupt replacement never blanks the data.
      New stream conditions: `asn`, `org`, `timezone` (UTC offset or zone name),
      `get` (URL parameter). New macros `[ASN] [ORG] [TIMEZONE] [UTC]`. Events
@@ -178,8 +183,8 @@ Snapshot as of 2026-10-21. For details: `docs/USAGE.md`, `TODO.md`.
   promised first-segment matching all along. `handler.go` + `routing_test.go`.
 
 - **Hot-reload of the groups config (2026-08-20):** the engine re-reads
-  `KUZTDS_GROUPS_FILE` when it changes and swaps it in atomically, on the same
-  `KUZTDS_RELOAD_INTERVAL` ticker as the `.dat` lists — `config.Groups.Replace`
+  `EMTDS_GROUPS_FILE` when it changes and swaps it in atomically, on the same
+  `EMTDS_RELOAD_INTERVAL` ticker as the `.dat` lists — `config.Groups.Replace`
   finally has a caller. Admin edits go live without a restart. A malformed or
   missing file is skipped and retried, leaving the running config in place, and
   ip_list files a newly added stream references are loaded *before* the swap, so
@@ -251,45 +256,47 @@ closures into `cmd/engine/handler.go` (`engineDeps.root`) and `cmd/apiclient`
 
 ## Remaining
 See `TODO.md`: a second factor for the admin login, a settings page for the
-api client, a fourth device category, version ranges in OS/browser filters,
-deployment packaging (Dockerfile, production compose, systemd units).
+api client, a fourth device category, version ranges in OS/browser filters.
+Deployment packaging exists: `Dockerfile`, `deploy/docker-compose.app.yml`,
+`deploy/install.sh`, the watchdog timer (`docs/wiki/watchdog.md`).
 
 ## How to run again (dev)
 ```bash
-cd kuztds
+cd emtds
 make infra-up                         # ClickHouse + Redis
 go run ./cmd/admin -hash 'admin123' > /tmp/admin.hash   # password hash
 
 # engine :8080
-KUZTDS_DATA_DIR=../database KUZTDS_GROUPS_FILE=configs/test_groups.json \
-KUZTDS_TRUSTED_PROXIES=127.0.0.1/32 KUZTDS_POSTBACK_KEY=pbsecret KUZTDS_API_KEY=apikey123 \
-KUZTDS_KEYS_DIR=/tmp/kuztds-keys KUZTDS_GEO_DB=internal/geo/testdata/GeoLite2-City-Test.mmdb \
-KUZTDS_REDIS_ADDR=localhost:6379 KUZTDS_CLICKHOUSE_ADDR=localhost:9000 \
-KUZTDS_CLICKHOUSE_DB=kuztds KUZTDS_CLICKHOUSE_USER=kuztds KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_DATA_DIR=../database EMTDS_GROUPS_FILE=configs/test_groups.json \
+EMTDS_TRUSTED_PROXIES=127.0.0.1/32 EMTDS_POSTBACK_KEY=pbsecret EMTDS_API_KEY=apikey123 \
+EMTDS_KEYS_DIR=/tmp/emtds-keys EMTDS_GEO_DB=internal/geo/testdata/GeoLite2-City-Test.mmdb \
+EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
+EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/engine
 
 # admin :8090 (admin / admin123)
-KUZTDS_ADMIN_PASSWORD_HASH="$(cat /tmp/admin.hash)" KUZTDS_ADMIN_PASSWORD_FILE=/tmp/admin.hash \
-KUZTDS_ADMIN_COOKIE_SECURE=false KUZTDS_ENGINE_URL=http://localhost:8080 \
-KUZTDS_GROUPS_FILE=configs/test_groups.json KUZTDS_DATA_DIR=../database KUZTDS_KEYS_DIR=/tmp/kuztds-keys \
-KUZTDS_REDIS_ADDR=localhost:6379 KUZTDS_CLICKHOUSE_ADDR=localhost:9000 \
-KUZTDS_CLICKHOUSE_DB=kuztds KUZTDS_CLICKHOUSE_USER=kuztds KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_ADMIN_PASSWORD_HASH="$(cat /tmp/admin.hash)" EMTDS_ADMIN_PASSWORD_FILE=/tmp/admin.hash \
+EMTDS_ADMIN_COOKIE_SECURE=false EMTDS_ENGINE_URL=http://localhost:8080 \
+EMTDS_GROUPS_FILE=configs/test_groups.json EMTDS_DATA_DIR=../database EMTDS_KEYS_DIR=/tmp/emtds-keys \
+EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
+EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/admin
 
-# cron (optional; add KUZTDS_CRON_FILE / KUZTDS_GEO_DB / KUZTDS_ASN_DB to the admin too,
+# cron (optional; add EMTDS_CRON_FILE / EMTDS_GEO_DB / EMTDS_ASN_DB to the admin too,
 # and the two geo paths to the engine)
-KUZTDS_CRON_FILE=/tmp/kuztds-cron.json KUZTDS_DATA_DIR=../database KUZTDS_KEYS_DIR=/tmp/kuztds-keys \
-KUZTDS_GROUPS_FILE=configs/test_groups.json \
-KUZTDS_GEO_DB=/tmp/kuztds-geo/city.mmdb KUZTDS_ASN_DB=/tmp/kuztds-geo/asn.mmdb \
-KUZTDS_CLICKHOUSE_ADDR=localhost:9000 KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CRON_FILE=/tmp/emtds-cron.json EMTDS_DATA_DIR=../database EMTDS_KEYS_DIR=/tmp/emtds-keys \
+EMTDS_GROUPS_FILE=configs/test_groups.json \
+EMTDS_GEO_DB=/tmp/emtds-geo/city.mmdb EMTDS_ASN_DB=/tmp/emtds-geo/asn.mmdb \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/cron
 ```
 The ClickHouse schema is applied automatically from `migrations/clickhouse/*.sql`
 on a fresh database; on an existing one the engine and the admin add the newer
-columns themselves at start.
+columns themselves at start, except the Sub ID 13…30 wave: apply
+`migrations/clickhouse/011_sub_id_30.sql` by hand (`docs/wiki/log-filters.md`).
 
 ## Notes
-- The admin and the engine must point to the SAME `KUZTDS_GROUPS_FILE`. The
+- The admin and the engine must point to the SAME `EMTDS_GROUPS_FILE`. The
   admin reads and writes it live; the engine re-reads it when it changes, on the
-  `KUZTDS_RELOAD_INTERVAL` ticker. No restart needed.
+  `EMTDS_RELOAD_INTERVAL` ticker. No restart needed.
 - Group: `id` = identifier and address `/<id>`; `name` — optional display name.

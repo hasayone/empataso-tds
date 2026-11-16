@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/kuztds/internal/config"
-	"github.com/egerkuzma/kuztds/internal/ipindex"
+	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/egerkuzma/emtds/internal/ipindex"
 )
 
 // writeGroups writes a groups file and makes sure its mtime differs from the

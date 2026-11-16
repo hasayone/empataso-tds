@@ -3,7 +3,7 @@ package admin
 import (
 	"os"
 
-	"github.com/egerkuzma/kuztds/internal/atomicfile"
+	"github.com/egerkuzma/emtds/internal/atomicfile"
 )
 
 // writeFileAtomic is atomicfile.Write; the reasoning lives there.

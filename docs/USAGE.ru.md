@@ -1,6 +1,6 @@
 [English](USAGE.md) · **Русский**
 
-# KuzTDS — руководство
+# EmTDS — руководство
 
 Что это, как запустить, как настроить.
 
@@ -13,7 +13,7 @@
 куда его направить (редирект/iframe/JS/контент/заглушка), отделяет ботов от
 людей, пишет статистику. Написана на Go ради скорости и безопасности.
 
-Четыре исполняемых компонента:
+Исполняемые компоненты:
 
 | Бинарник | Назначение | Порт по умолчанию |
 |----------|-----------|-------------------|
@@ -21,6 +21,10 @@
 | `cmd/admin` | REST API + веб-интерфейс администратора | 8090 |
 | `cmd/cron` | фоновый сервис: обновление списков и гео-баз, VirusTotal, диск, Telegram | — |
 | `cmd/apiclient` | клиент для лендинга/донора | 9090 |
+| `cmd/mcp` | MCP-сервер для ИИ-агента по stdio (`make mcp`, см. [wiki/mcp.md](wiki/mcp.md)) | — |
+| `cmd/loadgen` | генератор кликов по тестовым кампаниям (см. [wiki/loadgen.md](wiki/loadgen.md)) | — |
+
+Переменная `EMTDS_*` при пустом значении берётся из той же с прежним префиксом `KUZTDS_`. База и пользователь ClickHouse по-прежнему называются `kuztds` (значения по умолчанию у `EMTDS_CLICKHOUSE_DB` и `EMTDS_CLICKHOUSE_USER`).
 
 Хранилища: **ClickHouse** (логи/конверсии), **Redis** (уникальность/лимиты/
 фаервол/сессии). Оба опциональны — без них движок работает, пропуская
@@ -31,7 +35,7 @@
 ```bash
 # зависимости
 brew install go docker
-cd kuztds
+cd emtds
 
 # инфраструктура (ClickHouse + Redis), схема применяется автоматически
 make infra-up
@@ -40,28 +44,29 @@ make infra-up
 go run ./cmd/admin -hash 'мой-пароль'   # выведет $argon2id$...
 
 # движок
-KUZTDS_DATA_DIR=../database KUZTDS_GROUPS_FILE=configs/groups.example.json \
-KUZTDS_TRUSTED_PROXIES=127.0.0.1/32 KUZTDS_POSTBACK_KEY=secret KUZTDS_API_KEY=apikey \
-KUZTDS_REDIS_ADDR=localhost:6379 \
-KUZTDS_CLICKHOUSE_ADDR=localhost:9000 KUZTDS_CLICKHOUSE_DB=kuztds \
-KUZTDS_CLICKHOUSE_USER=kuztds KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_DATA_DIR=../database EMTDS_GROUPS_FILE=configs/groups.example.json \
+EMTDS_TRUSTED_PROXIES=127.0.0.1/32 EMTDS_POSTBACK_KEY=secret EMTDS_API_KEY=apikey \
+EMTDS_REDIS_ADDR=localhost:6379 \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=kuztds \
+EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/engine
 
 # админка (открыть http://localhost:8090, логин admin)
-KUZTDS_ADMIN_PASSWORD_HASH='<хэш>' KUZTDS_ADMIN_PASSWORD_FILE=./admin.hash \
-KUZTDS_ENGINE_URL=http://localhost:8080 KUZTDS_GROUPS_FILE=configs/groups.example.json \
-KUZTDS_DATA_DIR=../database KUZTDS_KEYS_DIR=./keys \
-KUZTDS_REDIS_ADDR=localhost:6379 KUZTDS_CLICKHOUSE_ADDR=localhost:9000 \
-KUZTDS_CLICKHOUSE_DB=kuztds KUZTDS_CLICKHOUSE_USER=kuztds KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_ADMIN_PASSWORD_HASH='<хэш>' EMTDS_ADMIN_PASSWORD_FILE=./admin.hash \
+EMTDS_ENGINE_URL=http://localhost:8080 EMTDS_GROUPS_FILE=configs/groups.example.json \
+EMTDS_DATA_DIR=../database EMTDS_KEYS_DIR=./keys \
+EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
+EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/admin
 
 # cron-сервис (опционально) — настраивается потом на странице Automation.
-# Дай движку и админке те же KUZTDS_GEO_DB / KUZTDS_ASN_DB,
-# а админке — тот же KUZTDS_CRON_FILE.
-KUZTDS_CRON_FILE=./cron.json KUZTDS_DATA_DIR=../database KUZTDS_KEYS_DIR=./keys \
-KUZTDS_GROUPS_FILE=configs/groups.example.json \
-KUZTDS_GEO_DB=./geo/city.mmdb KUZTDS_ASN_DB=./geo/asn.mmdb \
-KUZTDS_CLICKHOUSE_ADDR=localhost:9000 KUZTDS_CLICKHOUSE_PASSWORD=devpassword \
+# Дай движку и админке те же EMTDS_GEO_DB / EMTDS_ASN_DB
+# (dbip-asn.mmdb ляжет рядом с ними, если не задан EMTDS_DBIP_ASN_DB),
+# а админке — тот же EMTDS_CRON_FILE.
+EMTDS_CRON_FILE=./cron.json EMTDS_DATA_DIR=../database EMTDS_KEYS_DIR=./keys \
+EMTDS_GROUPS_FILE=configs/groups.example.json \
+EMTDS_GEO_DB=./geo/city.mmdb EMTDS_ASN_DB=./geo/asn.mmdb \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/cron
 ```
 
@@ -70,51 +75,68 @@ go run ./cmd/cron
 ### engine
 | Переменная | Назначение |
 |------------|-----------|
-| `KUZTDS_LISTEN` | адрес прослушивания (`:8080`) |
-| `KUZTDS_DATA_DIR` | каталог `.dat`-списков (IP, wap, сигнатуры) |
-| `KUZTDS_GROUPS_FILE` | JSON-конфиг групп (без него — встроенная demo) |
-| `KUZTDS_TRUSTED_PROXIES` | CIDR доверенных прокси (для XFF/CF), через запятую |
-| `KUZTDS_GEO_DB` | путь к City- или Country-базе `.mmdb` в формате MaxMind (GeoLite2, GeoIP2, DB-IP Lite). Без неё страна берётся из `CF-IPCountry`, а город/регион/часовой пояс неизвестны. Тестовые базы лежат в `internal/geo/testdata/` |
-| `KUZTDS_ASN_DB` | путь к ASN-базе `.mmdb` в формате MaxMind; без неё условия по ASN / организации не срабатывают никогда |
-| `KUZTDS_REDIS_ADDR` / `KUZTDS_REDIS_PASSWORD` | Redis (uniq/limit/firewall) |
-| `KUZTDS_CLICKHOUSE_ADDR` / `_DB` / `_USER` / `_PASSWORD` | ClickHouse (логи) |
-| `KUZTDS_POSTBACK_KEY` | ключ для `?pb=` постбэка |
-| `KUZTDS_API_KEY` | ключ для режима `?api=` (api-клиенты) |
-| `KUZTDS_KEYS_DIR` | каталог сбора ключевых слов |
-| `KUZTDS_TRASH_MODE` / `KUZTDS_TRASH_URL` | поведение для неизвестной группы (0=200,1=redirect,2=403,3=404) |
-| `KUZTDS_CURL_CACHE` | кэш CURL-редиректа, минут |
-| `KUZTDS_CURL_UA` | User-Agent, с которым движок ходит за CURL / `[REMOTE]` |
-| `KUZTDS_RELOAD_INTERVAL` | период hot-reload списков, групп и гео-баз (`1m`) |
+| `EMTDS_LISTEN` | адрес прослушивания (`:8080`) |
+| `EMTDS_DATA_DIR` | каталог `.dat`-списков (IP, wap, сигнатуры) |
+| `EMTDS_GROUPS_FILE` | JSON-конфиг групп (без него — встроенная demo) |
+| `EMTDS_TRUSTED_PROXIES` | CIDR доверенных прокси (для XFF/CF), через запятую |
+| `EMTDS_GEO_DB` | путь к City- или Country-базе `.mmdb` в формате MaxMind (GeoLite2, GeoIP2, DB-IP Lite). Без неё страна берётся из `CF-IPCountry`, а город/регион/часовой пояс неизвестны. Тестовые базы лежат в `internal/geo/testdata/` |
+| `EMTDS_ASN_DB` | путь к ASN-базе `.mmdb` в формате MaxMind; без неё условия по ASN / организации не срабатывают никогда |
+| `EMTDS_DBIP_ASN_DB` | путь к базе DB-IP ASN Lite `.mmdb`; без переменной — `dbip-asn.mmdb` рядом с `EMTDS_ASN_DB`, иначе рядом с `EMTDS_GEO_DB`. По ASN и организации DB-IP главнее MaxMind; при его промахе отвечает MaxMind, а написание MaxMind остаётся в `OrgAlt` / `ASNAlt`, чтобы старые фильтры продолжали совпадать. Атрибуция: «IP to ASN data by DB-IP.com», CC BY 4.0 ([wiki/geo-databases.md](wiki/geo-databases.md)) |
+| `EMTDS_REDIS_ADDR` / `EMTDS_REDIS_PASSWORD` | Redis (uniq/limit/firewall) |
+| `EMTDS_CLICKHOUSE_ADDR` / `_DB` / `_USER` / `_PASSWORD` | ClickHouse (логи) |
+| `EMTDS_POSTBACK_KEY` | ключ для `?pb=` постбэка |
+| `EMTDS_API_KEY` | ключ для режима `?api=` (api-клиенты) |
+| `EMTDS_KEYS_DIR` | каталог сбора ключевых слов |
+| `EMTDS_TRASH_MODE` / `EMTDS_TRASH_URL` | поведение для неизвестной группы (0=200,1=redirect,2=403,3=404) |
+| `EMTDS_CURL_CACHE` | кэш CURL-редиректа, минут |
+| `EMTDS_CURL_UA` | User-Agent, с которым движок ходит за CURL / `[REMOTE]` |
+| `EMTDS_RELOAD_INTERVAL` | период hot-reload списков, групп, каталогов, API-ключей и гео-баз (`1m`) |
+| `EMTDS_API_KEYS_FILE` | файл API-ключей (`api_keys.json`); ключи с доступом `engine` открывают `?api=`. Без него работает только `EMTDS_API_KEY` |
+| `EMTDS_PAGES_DIR` / `EMTDS_LANDINGS_DIR` | HTML-страницы (`@page:`) и локальные лендинги; по умолчанию `pages` и `landings` рядом с файлом групп |
+| `EMTDS_PHP_URL` | бэкенд для `.php`-лендингов (`http://php:80`); пусто — для них ответ 503 |
+| `EMTDS_OFFERS_FILE` / `EMTDS_LANDINGS_FILE` / `EMTDS_SOURCES_FILE` / `EMTDS_NETWORKS_FILE` / `EMTDS_S2S_FILE` | каталоги; по умолчанию `offers.json`, `landings.json`, `sources.json`, `networks.json`, `s2s.json` рядом с файлом групп |
+| `EMTDS_BOT_FILE` | профиль защиты от ботов; по умолчанию `bot_protection.json` рядом с файлом групп |
+| `EMTDS_CID_KEY` / `EMTDS_CID_KEY_FILE` | ключ подписи click id (от 32 байт) или файл с ним; по умолчанию `cid.key` рядом с файлом групп |
 
 ### admin
 | Переменная | Назначение |
 |------------|-----------|
-| `KUZTDS_ADMIN_LISTEN` | адрес (`:8090`) |
-| `KUZTDS_ADMIN_USER` | логин (`admin`) |
-| `KUZTDS_ADMIN_PASSWORD_HASH` | argon2id-хэш пароля |
-| `KUZTDS_ADMIN_PASSWORD_FILE` | файл хэша (приоритетнее; туда пишется смена пароля в UI) |
-| `KUZTDS_ADMIN_COOKIE_SECURE` | флаг Secure для cookie (`true`; локально `false`) |
-| `KUZTDS_ENGINE_URL` | адрес, по которому процесс админки зовёт движок |
-| `KUZTDS_PUBLIC_URL` | адрес ссылок в браузере, если он не loopback и не имя `engine`. Пусто или `http://engine:8080` — хост открытой админки и порт движка |
-| `KUZTDS_GROUPS_FILE` / `KUZTDS_DATA_DIR` / `KUZTDS_KEYS_DIR` | те же пути, что у движка |
-| `KUZTDS_REDIS_ADDR` / `KUZTDS_CLICKHOUSE_*` | хранилища (сессии, статистика) |
-| `KUZTDS_GEO_DB` / `KUZTDS_ASN_DB` | те же пути, что у движка — для Tools (проверка IP) и «Test a visitor» |
-| `KUZTDS_CRON_FILE` | файл конфига cron-сервиса; без него страница Automation только для чтения |
-| `KUZTDS_ADMIN_TRUSTED_PROXIES` | CIDR доверенных прокси для admin (X-Forwarded-For / Secure cookie); неверный CIDR — admin не стартует; на проде задаёт `apply-edge.sh` |
-| `KUZTDS_KEITARO_SYNC_FILE` | курсор досинка Keitaro (`keitaro-sync.json`); по умолчанию рядом с манифестом импорта |
-| `KUZTDS_PUBLIC_IP` | публичный IP для A-записей Cloudflare (`@` и `admin.<домен>`) |
+| `EMTDS_ADMIN_LISTEN` | адрес (`:8090`) |
+| `EMTDS_ADMIN_USER` | логин (`admin`) |
+| `EMTDS_ADMIN_PASSWORD_HASH` | argon2id-хэш пароля |
+| `EMTDS_ADMIN_PASSWORD_FILE` | файл хэша (приоритетнее; туда пишется смена пароля в UI) |
+| `EMTDS_ADMIN_COOKIE_SECURE` | флаг Secure для cookie (`true`; локально `false`) |
+| `EMTDS_ENGINE_URL` | адрес, по которому процесс админки зовёт движок |
+| `EMTDS_PUBLIC_URL` | адрес ссылок в браузере, если он не loopback и не имя `engine`. Пусто или `http://engine:8080` — хост открытой админки и порт движка |
+| `EMTDS_GROUPS_FILE` / `EMTDS_DATA_DIR` / `EMTDS_KEYS_DIR` | те же пути, что у движка |
+| `EMTDS_REDIS_ADDR` / `EMTDS_CLICKHOUSE_*` | хранилища (сессии, статистика) |
+| `EMTDS_GEO_DB` / `EMTDS_ASN_DB` / `EMTDS_DBIP_ASN_DB` | те же пути, что у движка — для Tools (проверка IP) и «Test a visitor» |
+| `EMTDS_CRON_FILE` | файл конфига cron-сервиса; без него страница Automation только для чтения |
+| `EMTDS_ADMIN_TRUSTED_PROXIES` | CIDR доверенных прокси для admin (X-Forwarded-For / Secure cookie); неверный CIDR — admin не стартует; на проде задаёт `apply-edge.sh` |
+| `EMTDS_KEITARO_SYNC_FILE` | курсор досинка Keitaro (`keitaro-sync.json`); по умолчанию рядом с манифестом импорта |
+| `EMTDS_PUBLIC_IP` | публичный IP для A-записей Cloudflare (`@` и `admin.<домен>`) |
+| `EMTDS_API_KEYS_FILE` | файл API-ключей; пусто — ключи выключены, заголовок `Api-Key` не принимается ([wiki/admin-api.md](wiki/admin-api.md)) |
+| `EMTDS_DATA_DIR` | кроме списков, сюда же пишется журнал действий ключей: `<каталог>/audit/admin-ГГГГ-ММ.jsonl`; пусто — только лог |
+| `EMTDS_UI_FILE` / `EMTDS_VIEWS_FILE` / `EMTDS_USERS_FILE` / `EMTDS_ROLES_FILE` / `EMTDS_BOARDS_FILE` | `ui.json`, `views.json`, `users.json`, `roles.json`, `boards.json` рядом с файлом групп, если путь не задан |
+| `EMTDS_OFFERS_FILE` / `EMTDS_LANDINGS_FILE` / `EMTDS_SOURCES_FILE` / `EMTDS_NETWORKS_FILE` / `EMTDS_DOMAINS_FILE` / `EMTDS_S2S_FILE` / `EMTDS_SPEND_FILE` | каталоги и расход, те же имена с `.json` рядом с файлом групп; движок читает те же файлы. Счётчики id лежат в `*_seq.json` (`EMTDS_OFFER_SEQ_FILE`, `EMTDS_LANDING_SEQ_FILE`, `EMTDS_SOURCE_SEQ_FILE`, `EMTDS_NETWORK_SEQ_FILE`, `EMTDS_DOMAIN_SEQ_FILE`) |
+| `EMTDS_BOT_FILE` / `EMTDS_PAGES_DIR` / `EMTDS_LANDINGS_DIR` | то же, что у движка |
+| `EMTDS_KEITARO_FILE` | подключение к Keitaro (`keitaro.json`); без файла действуют `KEITARO_BASE_URL` и `KEITARO_API_KEY` ([wiki/keitaro.md](wiki/keitaro.md)) |
+| `EMTDS_CLOUDFLARE_FILE` / `EMTDS_NAMECHEAP_FILE` | `cloudflare.json` и `namecheap.json` с токенами интеграций. `EMTDS_NAMECHEAP_URL` / `EMTDS_NAMECHEAP_SANDBOX_URL` меняют адреса API Namecheap |
+| `EMTDS_DOMAIN_WATCH` | период фоновой проверки доменов, длительность Go (`5m` по умолчанию, не меньше `1m`) |
+| `EMTDS_RECOVERY_LOGIN` | логин для `emtds-admin -recovery`; пусто — `EMTDS_ADMIN_USER` |
+| `EMTDS_ADMIN_PASSWORD` | читает только точка входа контейнера: при старте превращает пароль в `EMTDS_ADMIN_PASSWORD_HASH`. Пустые пароль и хэш открывают форму первого входа |
 
 ### cron
 | Переменная | Назначение |
 |------------|-----------|
-| `KUZTDS_CRON_FILE` | файл конфига (JSON, по умолчанию `cron.json`), пишется админкой. Состояние сервис хранит в `<file>.status.json`, запросы «запустить сейчас» берёт из `<file>.run` |
-| `KUZTDS_DATA_DIR` / `KUZTDS_KEYS_DIR` / `KUZTDS_GROUPS_FILE` | те же пути, что у движка |
-| `KUZTDS_GEO_DB` / `KUZTDS_ASN_DB` | куда пишется скачанная City- / ASN-база. Конфиг выбирает, что скачивать; пути назначения берутся только отсюда |
-| `KUZTDS_CLICKHOUSE_*` | нужны только для уведомлений о конверсиях |
+| `EMTDS_CRON_FILE` | файл конфига (JSON, по умолчанию `cron.json`), пишется админкой. Состояние сервис хранит в `<file>.status.json`, запросы «запустить сейчас» берёт из `<file>.run` |
+| `EMTDS_DATA_DIR` / `EMTDS_KEYS_DIR` / `EMTDS_GROUPS_FILE` | те же пути, что у движка |
+| `EMTDS_GEO_DB` / `EMTDS_ASN_DB` / `EMTDS_DBIP_ASN_DB` | куда пишется скачанная City- / ASN- / DB-IP ASN-база. Конфиг выбирает, что скачивать; пути назначения берутся только отсюда |
+| `EMTDS_CLICKHOUSE_*` | нужны только для уведомлений о конверсиях |
 
 ### apiclient
-`KUZTDS_TDS_URL` (URL движка), `KUZTDS_API_KEY`, `KUZTDS_GROUP_ID`,
-`KUZTDS_APICLIENT_LISTEN`, `KUZTDS_TRUSTED_PROXIES`, `KUZTDS_COOKIE` (имя cookie
+`EMTDS_TDS_URL` (URL движка), `EMTDS_API_KEY`, `EMTDS_GROUP_ID`,
+`EMTDS_APICLIENT_LISTEN`, `EMTDS_TRUSTED_PROXIES`, `EMTDS_COOKIE` (имя cookie
 уникальности, которую ставит клиент; по умолчанию `ztu`).
 
 ## Ссылки, которые отдаёт движок
@@ -122,7 +144,9 @@ go run ./cmd/cron
 - Группа: `http://домен/<id>` (и алиасы `http://домен/<alias>`)
 - С ключевым словом: `http://домен/<id>?q=КЛЮЧ`
 - С доп. параметрами: `http://домен/<id>?p1=...&p2=...` → макросы `[PAR-1..5]`
-- Постбэк-пиксель: `http://домен/?pb=KEY&cid=[CID]&profit=1.50`
+- Постбэк-пиксель: `http://домен/?pb=KEY&cid=[CID]&profit=1.50`; без ключа —
+  `GET|POST /postback` с `subid`, `status`, `payout`, `depsum`
+  ([wiki/postbacks.md](wiki/postbacks.md))
 - Любая переменная строки запроса может быть условием потока («URL parameter»:
   `utm_source=fb` или просто `sub1` — «присутствует»).
 
@@ -134,7 +158,7 @@ go run ./cmd/cron
 ## Веб-интерфейс админки
 
 Одна **верхняя панель**: навигация, выбор периода, переключатель темы, меню
-пользователя (Settings, Log out). Сайдбаров нет; каждая страница занимает всю
+пользователя (Профиль, Интеграции, Выход). Сайдбаров нет; каждая страница занимает всю
 ширину и имеет свой адрес (`#/flows/promo`, `#/tools/8.8.8.8`), так что
 «назад/вперёд» и ссылки работают. Светлая и тёмная темы: кнопка солнце/луна
 переключает и запоминает выбор в браузере (`localStorage`); пока выбор не
@@ -156,7 +180,13 @@ go run ./cmd/cron
 подгружаются из данных за период через `GET /api/logs/filters`; поле IP;
 люди/боты; CSV; строка открывает детали визита — маршрут, местоположение, сеть,
 User-Agent, реферер), **Conversions**, **Keywords**, **Lists** (редактор
-`.dat`), **Tools** (ниже), **Automation** (ниже), **Settings**.
+`.dat`), **Tools** (ниже), **Automation** (ниже), **Профиль** (меню пользователя:
+пароль, название и логотип компании, API-ключи, пользователи, разделы).
+
+Остальные страницы описаны в [вики](wiki/README.md): офферы и лендинги,
+партнёрские сети, источники трафика, домены, отчёт, интеграции (перенос из
+Keitaro, Cloudflare, Namecheap), защита от ботов, HTML-страницы, роли и
+API-ключи с [MCP-сервером](wiki/mcp.md).
 
 ### Flows
 
@@ -275,7 +305,7 @@ chance,distribution,header}, bots, separation, remote, api_mac, curl}`.
 - `geo` — какой источник страны побеждает, когда отвечают оба: `cf` = сначала
   заголовок CDN `CF-IPCountry`, всё остальное (`db`) = сначала гео-база; второй
   источник — запасной. Заголовку верят, только если запрос пришёл через прокси
-  из `KUZTDS_TRUSTED_PROXIES`.
+  из `EMTDS_TRUSTED_PROXIES`.
 - `redirect: "group"` с `out: "<id>"` — у потока или как выход группы по
   умолчанию — передаёт посетителя в другую группу (до трёх переходов;
   отсутствующая или выключенная цель отвечает как неизвестная группа). Визит
@@ -287,7 +317,7 @@ chance,distribution,header}, bots, separation, remote, api_mac, curl}`.
   `comment` — заметка для оператора.
 - Редактируется через UI («Flows»: схема, редактор в выдвижной панели, одна
   панель сохранения). Движок перечитывает файл при изменении, по тикеру
-  `KUZTDS_RELOAD_INTERVAL` (по умолчанию 1 мин) — правки и из UI, и внесённые в
+  `EMTDS_RELOAD_INTERVAL` (по умолчанию 1 мин) — правки и из UI, и внесённые в
   файл напрямую вступают в силу без рестарта. Файл, который не распарсился или
   пропал, пропускается и пробуется снова, работающий конфиг остаётся на месте.
 

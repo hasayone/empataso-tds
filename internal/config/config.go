@@ -1,4 +1,4 @@
-// Package config provides the typed configuration for kuztds.
+// Package config provides the typed configuration for emtds.
 //
 // Secrets are not hardcoded here: they come from
 // environment variables / a secret file. The stream config is
@@ -35,7 +35,7 @@ type Redis struct {
 	DB   int    `yaml:"db"`
 }
 
-// Secrets are read only from the environment (KUZTDS_*), never from a file in the repo.
+// Secrets are read only from the environment (EMTDS_*), never from a file in the repo.
 type Secrets struct {
 	ClickHousePassword string
 	RedisPassword      string
@@ -65,8 +65,17 @@ type Group struct {
 	// fallback. City, region, time zone and ASN always come from the database.
 	Geo string `json:"geo,omitempty"`
 
-	UniqMethod  string       `json:"uniq_method,omitempty"`  // "ip" (default) | "cookie"
-	UniqSeconds int          `json:"uniq_seconds,omitempty"` // uniqueness window
+	// UniqMethod is the legacy switch, used only when UniqBy is empty and
+	// UniqCookie is false: "cookie" counts with a plain cookie, anything else
+	// with Redis by IP.
+	UniqMethod string `json:"uniq_method,omitempty"`
+	// UniqBy is the Redis identity: "ip_ua" adds a hash of the user-agent, any
+	// other value is the IP alone. Empty together with UniqCookie false keeps UniqMethod.
+	UniqBy string `json:"uniq_by,omitempty"`
+	// UniqCookie, when true, also sets a signed cookie for UniqSeconds (at most
+	// 8760 hours). A valid cookie is a repeat after Redis has dropped its key.
+	UniqCookie  bool `json:"uniq_cookie,omitempty"`
+	UniqSeconds int  `json:"uniq_seconds,omitempty"` // uniqueness window
 	Firewall    FirewallRule `json:"firewall,omitzero"`      // antiflood; a zero rule is omitted
 	SaveKeys    bool         `json:"save_keys,omitempty"`    // save keywords
 	SaveKeysSE  bool         `json:"save_keys_se,omitempty"` // save keywords from search engines
@@ -103,6 +112,15 @@ type Group struct {
 	CostToken     string `json:"cost_token,omitempty"`
 	CurrencyParam string `json:"currency_param,omitempty"`
 	CurrencyToken string `json:"currency_token,omitempty"`
+	// Parameters overrides the traffic source query names for this campaign.
+	// A key is keyword, an extra click field or sub_id_N. A non-empty value is
+	// the query key read on a click and replaces the source mapping of that key.
+	// An empty value clears the source mapping, so the field is read under its
+	// own name. A missing key keeps the source mapping.
+	Parameters map[string]string `json:"parameters,omitempty"`
+	// ParamTokens are the placeholders written into this campaign's link after
+	// the query name, for example {keyword}. The engine does not expand them.
+	ParamTokens map[string]string `json:"param_tokens,omitempty"`
 	// Postbacks are outbound URLs fired after an inbound conversion.
 	Postbacks []OutboundPostback `json:"postbacks,omitempty"`
 	// id шаблонов из общего каталога s2s.json.

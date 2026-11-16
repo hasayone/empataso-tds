@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // leafName returns the field name a leaf path ends in, without list or map marks.
@@ -122,9 +122,9 @@ var macroSurface = map[string]struct {
 		"AffiliateNetwork.BoardID":     "panel section id; never expanded",
 	}},
 	"OutboundPostback": {reflect.TypeOf(config.OutboundPostback{}), map[string]string{
-		"OutboundPostback.ID":       "template id",
-		"OutboundPostback.Name":     "template label",
-		"OutboundPostback.BoardID":  "panel section id; never expanded",
+		"OutboundPostback.ID":      "template id",
+		"OutboundPostback.Name":    "template label",
+		"OutboundPostback.BoardID": "panel section id; never expanded",
 	}},
 }
 
@@ -256,6 +256,9 @@ var writeRouteGuard = map[string]string{
 	"POST /api/simulate":                        "dry run, stores nothing",
 	"POST /api/boards/import":                   "copy by id; ids are not templates",
 	"POST /api/boards/move":                     "move by id; ids are not templates",
+	"PUT /api/checker/apps/{group}":             "keyword, bundle, notion and console are stored as data and never expanded",
+	"POST /api/checker/apps/{group}/create":     "queues the stored record; no template",
+	"POST /api/checker/apps/{group}/refresh":    "reads the checker status; stores no template",
 }
 
 func TestEveryWriteRouteIsInventoried(t *testing.T) {

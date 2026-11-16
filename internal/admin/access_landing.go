@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // entryFile is the file the engine serves as the page of a landing: its path and bytes.

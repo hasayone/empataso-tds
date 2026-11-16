@@ -120,7 +120,7 @@ func campaignMacroMap(params map[string]KParam) map[string]string {
 	return out
 }
 
-// outgoingMask — маска kuztds для ключа, который раскрывается не из query.
+// outgoingMask — маска emtds для ключа, который раскрывается не из query.
 //
 // Параметры: canon — имя после canonParam.
 // Результат: [KEY] для keyword, {sub_id_N} для слота и false для остальных ключей.

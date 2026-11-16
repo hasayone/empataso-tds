@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/egerkuzma/kuztds/internal/config"
+	"github.com/egerkuzma/emtds/internal/config"
 )
 
 // macroSkipFields are struct fields that hold labels or notes, not templates; their
