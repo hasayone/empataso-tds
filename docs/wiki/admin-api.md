@@ -391,9 +391,9 @@ nginx менять не нужно: в `deploy/nginx/emtds.conf` (по IP) и `e
 
 | Маршрут | Что делает | Галочка ключа |
 | --- | --- | --- |
-| `GET /api/keitaro/job` | Состояние последнего переноса из Keitaro, в том числе после перезапуска admin. |  |
+| `GET /api/keitaro/job` | Состояние задачи переноса из Keitaro. |  |
 | `GET /api/keitaro/status` | Заданы ли адрес и ключ Keitaro. |  |
-| `POST /api/keitaro/import` | Запуск переноса из Keitaro. Одно поле `resume: true` продолжает оборванный полный перенос. | `keitaro_import` |
+| `POST /api/keitaro/import` | Запуск задачи переноса из Keitaro. | `keitaro_import` |
 | `POST /api/keitaro/purge` | Удаление всего, что принёс перенос из Keitaro. | `keitaro_purge` |
 
 ### Версия и обновления
