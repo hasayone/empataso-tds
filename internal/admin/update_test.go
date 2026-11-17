@@ -493,6 +493,40 @@ func TestUpdateReadyNotWrittenWithWriters(t *testing.T) {
 	s.ktJob.releaseWrite()
 }
 
+// TestUpdateReadyAfterImportFinishes verifies that the gate waits for a running import and confirms
+// idle with the same id once that import has finished, while the pending file stays the same.
+func TestUpdateReadyAfterImportFinishes(t *testing.T) {
+	dir := t.TempDir()
+	s, _ := newUpdateServer(t, dir, "")
+	if msg := s.ktJob.beginImport(); msg != "" {
+		t.Fatal(msg)
+	}
+	pendingID := "aabb1122ccdd3344"
+	writePendingFile(t, dir, pendingID)
+	readyPath := filepath.Join(dir, cron.UpdateReadyFile)
+
+	s.checkPendingOnce()
+	if _, err := os.Stat(readyPath); err == nil {
+		t.Fatal("ready.json was written while the import runs")
+	}
+	if msg := s.ktJob.beginImport(); msg != keitaroUpdatePendingMsg && msg != "import already running" {
+		t.Fatalf("second import: %q", msg)
+	}
+
+	s.ktJob.finish("", nil, nil, "")
+	s.checkPendingOnce()
+	var ready cron.ReadyFile
+	if err := cron.ReadUpdateJSON(readyPath, cron.UpdateMaxJSON, &ready); err != nil {
+		t.Fatalf("ready.json after the import: %v", err)
+	}
+	if ready.ID != pendingID || !ready.KeitaroIdle {
+		t.Fatalf("ready %+v", ready)
+	}
+	if msg := s.ktJob.beginImport(); msg != keitaroUpdatePendingMsg {
+		t.Fatalf("import during the update: %q", msg)
+	}
+}
+
 // TestUpdatePendingGateFailClosed verifies that if state.json exists but cannot be
 // read (bad JSON), the gate remains raised (fail-closed).
 func TestUpdatePendingGateFailClosed(t *testing.T) {

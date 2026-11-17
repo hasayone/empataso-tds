@@ -840,6 +840,51 @@ eq(timers.length, 8, 'every read schedules the next one');
 `)
 }
 
+// TestUpdateBannerAndButton runs the "new version" banner and the update start under node: a hide until the next version
+// lasts while the target stays and ends with a newer one, a hide for 24 hours ends with its time, the banner and the
+// button of "Settings → About" start the same request, and a blocked update gives its reason without a dialog.
+func TestUpdateBannerAndButton(t *testing.T) {
+	html := spaSource()
+	must(t, spaFunctionLine(html, "sysNotice"), "updApplyStart(updOpenAbout)", "the banner starts the update")
+	must(t, spaFunctionLine(html, "aboutPage"), "applyBtn.onclick=()=>updApplyStart(updOpenAbout)", "About starts the same update")
+	must(t, spaFunctionLine(html, "aboutPage"), "${agentHtml}${checkHtml}${btnsHtml}${stateHtml}", "the buttons stand above the last run")
+	consts := regexp.MustCompile(`(?m)^const UPD_HIDE_KEY=.*$`).FindAllString(html, -1)
+	if len(consts) != 1 {
+		t.Fatalf("found %d banner constants, want 1", len(consts))
+	}
+	prelude := consts[0] + `
+const tr = k => k;
+const esc = s => String(s);
+const store = {};
+var localStorage = {getItem: k => k in store ? store[k] : null, setItem: (k, v) => { store[k] = String(v); }};
+let upd = null, toasts = [], modals = [], posts = [];
+const get = async () => upd;
+const toast = (m, bad) => { toasts.push(m); };
+const q = () => ({value: 'abcdef1'});
+const call = async (m, p, b) => { posts.push([m, p, b]); };
+const formModal = (title, html, ok) => { modals.push(ok); };
+`
+	assistantNode(t, []string{"updBannerHidden", "updBannerHide", "updErrText", "updApplyStart"}, prelude, `
+const now = 1000;
+eq(updBannerHidden('abc123def456', now), false, 'nothing hidden at first');
+updBannerHide('abc123def456', 0);
+eq([updBannerHidden('abc123def456', now + 9e12), updBannerHidden('fff000fff000', now)], [true, false], 'until the next version: hidden for the target, shown for a newer one');
+updBannerHide('abc123def456', now + UPD_HIDE_DAY);
+eq([updBannerHidden('abc123def456', now + UPD_HIDE_DAY - 1), updBannerHidden('abc123def456', now + UPD_HIDE_DAY)], [true, false], 'for 24 hours: shown again after its time');
+store[UPD_HIDE_KEY] = '{bad';
+eq(updBannerHidden('abc123def456', now), false, 'a broken record shows the banner');
+upd = {can_apply: false, apply_block: 'keitaro_running'};
+await updApplyStart(() => {});
+eq([toasts, modals.length], [['upd.block.keitaro_running'], 0], 'a running import blocks with its reason and no dialog');
+upd = {can_apply: true, check: {target: {commit: 'abcdef1234567890abcdef1234567890abcdef12'}}};
+let after = 0;
+await updApplyStart(() => { after++; });
+eq(modals.length, 1, 'an allowed update asks to confirm');
+eq(await modals[0](), 'stay', 'the dialog stays on the page');
+eq([posts, after], [[['POST', '/api/update/apply', {target: 'abcdef1234567890abcdef1234567890abcdef12', confirm: 'abcdef1'}]], 1], 'one request into the inbox, then the page refresh');
+`)
+}
+
 // TestPeriodButtonShowsLabel checks the period button of the header: the label is written on the button next to the calendar icon,
 // it hides only on the nav-short step that fitNav takes after the nav labels, and the period stays in title and aria-label.
 func TestPeriodButtonShowsLabel(t *testing.T) {

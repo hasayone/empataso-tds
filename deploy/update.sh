@@ -946,7 +946,7 @@ keitaro_gate() {
 		(( SECONDS < deadline )) || break
 		_sleep 5
 	done
-	die "keitaro: нет ready.json от admin; добавьте --keitaro-idle"
+	die "keitaro: нет ready.json от admin за 10 минут — идёт перенос или актуализация Keitaro; обновление не применено, повторите после окончания"
 }
 
 # ------------------------------------------------------------------

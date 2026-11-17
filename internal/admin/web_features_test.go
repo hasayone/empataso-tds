@@ -1431,7 +1431,7 @@ func TestSPAAboutWiring(t *testing.T) {
 		t.Errorf("aboutPage reads /api/system %d times, want once in loadServer", n)
 	}
 	must(t, about, "async function loadServer(){", "the server block has its own loader")
-	poll := spaBetween(about, "setTimeout(()=>{", "},2000)")
+	poll := spaBetween(about, "setTimeout(()=>{", "},pollMs)")
 	must(t, poll, "render();", "the polling loop redraws the update data")
 	mustNot(t, poll, "loadServer", "the polling loop does not read the server block")
 	must(t, about, "q('#about-sys-refresh',body).onclick=loadServer;", "the server block has its own button")
