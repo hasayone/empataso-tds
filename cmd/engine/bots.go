@@ -162,10 +162,21 @@ type botInput struct {
 // save_ip appends only addresses of a search-engine user agent that DNS
 // confirmed.
 func detectBot(lists *ipindex.Set, sigs *detect.Signatures, dataDir string, in botInput, b config.Bots) string {
-	bot := detect.BotNone
+	bot, _ := detectBotWhy(lists, sigs, dataDir, in, b)
+	return bot
+}
+
+// detectBotWhy is detectBot that also returns why: "source: rule" of the
+// downloaded signature database when its rule gave the label, empty otherwise.
+// ch_ua covers the built-in signatures, signature_ua.dat and that database, so
+// every stream and profile with ch_ua gets it without a switch of its own.
+func detectBotWhy(lists *ipindex.Set, sigs *detect.Signatures, dataDir string, in botInput, b config.Bots) (bot, why string) {
+	bot = detect.BotNone
 	confirmed := false
 	if b.CheckUA {
-		bot = detect.BotByUA(in.UA, sigs.UAMatcher())
+		var hit detect.BotHit
+		bot, hit = detect.ClassifyUA(in.UA, sigs.UAMatcher(), sigs.BotDB())
+		why = hit.Reason
 		if detect.Verifiable(bot) {
 			bot, confirmed = verifyCrawler(lists, in.IP, bot)
 		}
@@ -223,7 +234,7 @@ func detectBot(lists *ipindex.Set, sigs *detect.Signatures, dataDir string, in b
 			}
 		}
 	}
-	return bot
+	return bot, why
 }
 
 // verifyCrawler checks that ip really belongs to the search engine label that

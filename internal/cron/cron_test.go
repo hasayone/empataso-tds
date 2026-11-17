@@ -94,8 +94,8 @@ func TestLoadMissingFileGivesDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, j := range Jobs {
-		if c.Enabled(j) {
-			t.Errorf("%s is on by default; a fresh install must do nothing until told to", j)
+		if c.Enabled(j) != (j == JobBotSignatures) {
+			t.Errorf("%s on = %v by default; a fresh install refreshes only the bot signatures until told to", j, c.Enabled(j))
 		}
 	}
 	if err := c.Validate(); err != nil {
@@ -814,7 +814,11 @@ func TestTelegramErrorsDoNotCarryTheToken(t *testing.T) {
 
 // ---------- runner ----------
 
+// saveConfig writes c as the runner's config with the bot signature job off,
+// so a test of another job does not download the real signature sources.
+// Tests of that job write their config with Save.
 func (e *env) saveConfig(c Config) {
+	c.BotSignatures.Enabled = false
 	if err := Save(e.r.paths.Config, c); err != nil {
 		e.t.Fatal(err)
 	}

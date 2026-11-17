@@ -679,6 +679,9 @@ func cronConfigSample() map[string]any {
 		"ip_lists": map[string]any{"enabled": true, "every_minutes": 360, "sources": []map[string]string{
 			{"url": "https://example.com/ranges.txt", "target": "ip_example", "mode": "replace"},
 		}},
+		"bot_signatures": map[string]any{"enabled": true, "every_minutes": 1440, "sources": []map[string]any{
+			{"name": "example", "url": "https://example.com/bots.json", "enabled": true},
+		}},
 		"geo_db": map[string]any{"enabled": false, "every_minutes": 1440, "sources": []map[string]string{}},
 		"virustotal": map[string]any{
 			"enabled": false, "every_minutes": 720, "api_key": "********", "domains": []string{"example.com"},
@@ -701,21 +704,28 @@ func cronRouteDocs() map[string]routeDoc {
 				"heartbeat is fresh. jobs lists the job names and floors the shortest allowed period of each in minutes. " +
 				"geo_paths tells which geo databases are known and present; telegram_configured and keitaro_configured " +
 				"say whether the notification channel and the Keitaro connection are set. config_error is present when " +
-				"the saved configuration fails the checks. 500 when the configuration file cannot be read.",
+				"the saved configuration fails the checks. status.bot_signatures, after the first run of bot_signatures, " +
+				"holds the number of rules in the bot signature database, the time it was last written and, per source, " +
+				"the accepted and rejected rules, the time of the last good download and the last error. " +
+				"500 when the configuration file cannot be read.",
 			RU: docOf("Настройки автоматизации и состояние каждой задачи.",
 				"Только для ключа администратора. config — сохранённая конфигурация, секреты показаны как ********. "+
 					"status содержит пульс сервиса cron и последний запуск каждой задачи; alive равен true, пока пульс свежий. "+
 					"jobs перечисляет имена задач, floors — наименьший допустимый период каждой в минутах. "+
 					"geo_paths показывает, какие гео-базы известны и на месте; telegram_configured и keitaro_configured "+
 					"говорят, заданы ли канал уведомлений и подключение к Keitaro. config_error есть, когда сохранённая "+
-					"конфигурация не проходит проверки. 500, если файл конфигурации не читается."),
+					"конфигурация не проходит проверки. status.bot_signatures после первого запуска bot_signatures содержит "+
+					"число правил в базе сигнатур ботов, время её записи и по каждому источнику принятые и отклонённые правила, "+
+					"время последней удачной загрузки и последнюю ошибку. 500, если файл конфигурации не читается."),
 			UK: docOf("Налаштування автоматизації та стан кожного завдання.",
 				"Лише для ключа адміністратора. config — збережена конфігурація, секрети показані як ********. "+
 					"status містить пульс сервісу cron і останній запуск кожного завдання; alive дорівнює true, поки пульс свіжий. "+
 					"jobs перелічує імена завдань, floors — найменший допустимий період кожного в хвилинах. "+
 					"geo_paths показує, які гео-бази відомі та на місці; telegram_configured і keitaro_configured "+
 					"кажуть, чи задані канал сповіщень і підключення до Keitaro. config_error є, коли збережена "+
-					"конфігурація не проходить перевірки. 500, якщо файл конфігурації не читається."),
+					"конфігурація не проходить перевірки. status.bot_signatures після першого запуску bot_signatures містить "+
+					"кількість правил у базі сигнатур ботів, час її запису та для кожного джерела прийняті й відхилені правила, "+
+					"час останнього вдалого завантаження та останню помилку. 500, якщо файл конфігурації не читається."),
 			Response: map[string]any{
 				"available": true, "alive": true, "config": cronConfigSample(),
 				"status": map[string]any{
@@ -724,9 +734,15 @@ func cronRouteDocs() map[string]routeDoc {
 						"last_run": "2026-11-16T11:55:00Z", "ok": true, "message": "free space 42%",
 						"duration_ms": 12, "next_run": "2026-11-16T12:05:00Z", "running": false,
 					}},
+					"bot_signatures": map[string]any{
+						"rules": 1840, "updated": "2026-11-16T03:00:00Z",
+						"sources": []map[string]any{
+							{"name": "example", "url": "https://example.com/bots.json", "rules": 1840, "rejected": 12, "ok": "2026-11-16T03:00:00Z"},
+						},
+					},
 				},
-				"jobs":   []string{"ip_lists", "geo_db", "virustotal", "disk", "cleanup", "conversions", "keitaro_sync"},
-				"floors": map[string]int{"ip_lists": 10, "geo_db": 60, "virustotal": 30, "disk": 1, "cleanup": 60, "conversions": 1, "keitaro_sync": 5},
+				"jobs":   []string{"ip_lists", "bot_signatures", "geo_db", "virustotal", "disk", "cleanup", "conversions", "keitaro_sync"},
+				"floors": map[string]int{"ip_lists": 10, "bot_signatures": 60, "geo_db": 60, "virustotal": 30, "disk": 1, "cleanup": 60, "conversions": 1, "keitaro_sync": 5},
 				"geo_paths": map[string]bool{
 					"city": true, "asn": true, "city_file": true, "asn_file": true, "dbip": true, "dbip_file": false,
 				},
@@ -740,21 +756,24 @@ func cronRouteDocs() map[string]routeDoc {
 			Description: "Administrator key only; needs the cron key action. The body is the whole configuration in the shape " +
 				"of config in GET: a section you leave out is saved as disabled, except keitaro_sync, which keeps its " +
 				"saved value. A secret sent as ******** or left empty keeps the stored one. 400 with the reason when " +
-				"a source URL, a list name or a period is not valid; the shortest periods are in floors of GET. " +
+				"a source URL, a list name, a bot signature source name (unique, letters, digits, dots, dashes, underscores) " +
+				"or a period is not valid; the shortest periods are in floors of GET. " +
 				"503 when the cron file is not set.",
 			RU: docOf("Сохранение настроек автоматизации.",
 				"Только для ключа администратора; нужна галочка ключа cron. Тело — вся конфигурация в форме config из GET: "+
 					"пропущенный раздел сохраняется выключенным, кроме keitaro_sync, который сохраняет прежнее значение. "+
 					"Секрет, присланный как ******** или пустым, сохраняет прежний. 400 с причиной, если адрес источника, "+
-					"имя списка или период недопустимы; наименьшие периоды — в floors у GET. "+
+					"имя списка, имя источника сигнатур ботов (уникальное: буквы, цифры, точка, дефис, подчёркивание) "+
+					"или период недопустимы; наименьшие периоды — в floors у GET. "+
 					"503, если файл cron не задан."),
 			UK: docOf("Збереження налаштувань автоматизації.",
 				"Лише для ключа адміністратора; потрібна галочка ключа cron. Тіло — вся конфігурація у формі config із GET: "+
 					"пропущений розділ зберігається вимкненим, окрім keitaro_sync, який зберігає попереднє значення. "+
 					"Секрет, надісланий як ******** або порожнім, зберігає попередній. 400 з причиною, якщо адреса джерела, "+
-					"ім'я списку чи період недопустимі; найменші періоди — у floors у GET. "+
+					"ім'я списку, ім'я джерела сигнатур ботів (унікальне: літери, цифри, крапка, дефіс, підкреслення) "+
+					"чи період недопустимі; найменші періоди — у floors у GET. "+
 					"503, якщо файл cron не заданий."),
-			Body: objectBody("The configuration sections telegram, ip_lists, geo_db, virustotal, disk, cleanup, conversions " +
+			Body: objectBody("The configuration sections telegram, ip_lists, bot_signatures, geo_db, virustotal, disk, cleanup, conversions " +
 				"and keitaro_sync, each with enabled and every_minutes plus its own fields."),
 			Example:  cronConfigSample(),
 			Response: map[string]string{"status": "saved"},
@@ -762,21 +781,21 @@ func cronRouteDocs() map[string]routeDoc {
 		},
 		"POST /api/cron/run": {
 			ID: "run_cron_job", Summary: "Ask the cron service to run one job now.",
-			Description: "Administrator key only; needs the cron key action. job is ip_lists, geo_db, virustotal, disk, " +
+			Description: "Administrator key only; needs the cron key action. job is ip_lists, bot_signatures, geo_db, virustotal, disk, " +
 				"cleanup, conversions, keitaro_sync or telegram_test (sends a test message to the saved Telegram chat). " +
 				"telegram_test from an API key is 403 \"cookie session required\"; a browser session may run it. " +
 				"The answer is 202: the job is only queued and its result appears in GET /api/cron. " +
 				"400 for an unknown job; for keitaro_sync 409 when Keitaro is not set up or a catch-up is already running. " +
 				"503 when the cron file is not set.",
 			RU: docOf("Запуск одной задачи cron прямо сейчас.",
-				"Только для ключа администратора; нужна галочка ключа cron. job — ip_lists, geo_db, virustotal, disk, "+
+				"Только для ключа администратора; нужна галочка ключа cron. job — ip_lists, bot_signatures, geo_db, virustotal, disk, "+
 					"cleanup, conversions, keitaro_sync или telegram_test (отправляет тестовое сообщение в сохранённый чат Telegram). "+
 					"telegram_test от ключа — 403 «cookie session required»; сессия браузера может его запустить. "+
 					"Ответ 202: задача лишь поставлена в очередь, результат появится в GET /api/cron. "+
 					"400 для неизвестной задачи; для keitaro_sync 409, если Keitaro не настроен или догрузка уже идёт. "+
 					"503, если файл cron не задан."),
 			UK: docOf("Запуск одного завдання cron просто зараз.",
-				"Лише для ключа адміністратора; потрібна галочка ключа cron. job — ip_lists, geo_db, virustotal, disk, "+
+				"Лише для ключа адміністратора; потрібна галочка ключа cron. job — ip_lists, bot_signatures, geo_db, virustotal, disk, "+
 					"cleanup, conversions, keitaro_sync або telegram_test (надсилає тестове повідомлення у збережений чат Telegram). "+
 					"telegram_test від ключа — 403 «cookie session required»; сесія браузера може його запустити. "+
 					"Відповідь 202: завдання лише поставлене в чергу, результат з'явиться в GET /api/cron. "+

@@ -22,6 +22,8 @@ const (
 	BotSignUA      = "sign_ua"
 	BotSignRef     = "sign_ref"
 	BotUABlacklist = "ua_blacklist"
+	// BotSignDB labels a User-Agent that matched a rule of the downloaded bot signature database.
+	BotSignDB = "sign_db"
 )
 
 // FakeLabel returns the label of a bot that claims to be label but failed
@@ -96,6 +98,31 @@ func BotByUA(ua string, m *Matcher) string {
 		m = DefaultUAMatcher()
 	}
 	return m.Match(ua)
+}
+
+// ClassifyUA classifies a bot by its User-Agent: the matcher m first (nil means
+// DefaultUAMatcher), then the downloaded database db (nil means none). db is
+// asked only when m found no label and ua has no token of a human browser or
+// app, so a search engine label and its IP verification stay as they are and a
+// database rule never makes a search engine User-Agent count more than before.
+// It returns BotNone for an empty ua or no match, BotSignDB with the rule in hit
+// for a database match, and the matcher label with an empty hit otherwise. It
+// does not allocate and does not use the network.
+func ClassifyUA(ua string, m *Matcher, db *BotDB) (label string, hit BotHit) {
+	if ua == "" {
+		return BotNone, BotHit{}
+	}
+	if m == nil {
+		m = DefaultUAMatcher()
+	}
+	label, human := m.MatchHuman(ua)
+	if label != BotNone || human {
+		return label, BotHit{}
+	}
+	if h, ok := db.Match(ua); ok {
+		return BotSignDB, h
+	}
+	return BotNone, BotHit{}
 }
 
 // BotByReferer: a substring from signature_ref.dat in the referer → sign_ref.

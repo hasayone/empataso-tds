@@ -29,20 +29,21 @@ import (
 
 // Job names, as used in the config, the status file and "run now" requests.
 const (
-	JobIPLists     = "ip_lists"
-	JobGeoDB       = "geo_db"
-	JobVirusTotal  = "virustotal"
-	JobDisk        = "disk"
-	JobCleanup     = "cleanup"
-	JobConversions = "conversions"
-	JobKeitaroSync = "keitaro_sync"
+	JobIPLists       = "ip_lists"
+	JobBotSignatures = "bot_signatures"
+	JobGeoDB         = "geo_db"
+	JobVirusTotal    = "virustotal"
+	JobDisk          = "disk"
+	JobCleanup       = "cleanup"
+	JobConversions   = "conversions"
+	JobKeitaroSync   = "keitaro_sync"
 	// JobTelegramTest is not scheduled: it exists so the admin panel can ask
 	// for a test message.
 	JobTelegramTest = "telegram_test"
 )
 
 // Jobs lists the scheduled jobs in display order.
-var Jobs = []string{JobIPLists, JobGeoDB, JobVirusTotal, JobDisk, JobCleanup, JobConversions}
+var Jobs = []string{JobIPLists, JobBotSignatures, JobGeoDB, JobVirusTotal, JobDisk, JobCleanup, JobConversions}
 
 // AdminJobs lists tasks configured in cron.json but executed only by the admin
 // process (not by this cron runner).
@@ -53,14 +54,15 @@ const MaxKeitaroSyncInterval = 10080
 
 // Config is the whole cron configuration (one JSON file).
 type Config struct {
-	Telegram    Telegram    `json:"telegram"`
-	IPLists     IPLists     `json:"ip_lists"`
-	GeoDB       GeoDB       `json:"geo_db"`
-	VirusTotal  VirusTotal  `json:"virustotal"`
-	Disk        Disk        `json:"disk"`
-	Cleanup     Cleanup     `json:"cleanup"`
-	Conversions Conversions `json:"conversions"`
-	KeitaroSync KeitaroSync `json:"keitaro_sync"`
+	Telegram      Telegram      `json:"telegram"`
+	IPLists       IPLists       `json:"ip_lists"`
+	BotSignatures BotSignatures `json:"bot_signatures"`
+	GeoDB         GeoDB         `json:"geo_db"`
+	VirusTotal    VirusTotal    `json:"virustotal"`
+	Disk          Disk          `json:"disk"`
+	Cleanup       Cleanup       `json:"cleanup"`
+	Conversions   Conversions   `json:"conversions"`
+	KeitaroSync   KeitaroSync   `json:"keitaro_sync"`
 
 	// Seeded lists the default sources already offered to this installation
 	// (see the Seed constants). A source the user removed stays removed because
@@ -136,6 +138,23 @@ type IPSource struct {
 	Mode   string `json:"mode"`   // "replace" (default) | "merge"
 }
 
+// BotSignatures — refresh the bot User-Agent signature database the engine
+// checks together with its built-in signatures.
+type BotSignatures struct {
+	Enabled      bool        `json:"enabled"`
+	EveryMinutes int         `json:"every_minutes"`
+	Sources      []BotSource `json:"sources"`
+}
+
+// BotSource is one signature file: a unique name shown in the click
+// diagnostics, the URL of the raw file and whether it is used. The format is
+// recognized from the content (see detect.ParseBotSource).
+type BotSource struct {
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Enabled bool   `json:"enabled"`
+}
+
 // GeoDB — refresh the MaxMind-format databases.
 type GeoDB struct {
 	Enabled      bool        `json:"enabled"`
@@ -191,8 +210,9 @@ type Conversions struct {
 const DefaultConversionTemplate = "💰 [PROFIT] — [GROUP] / [STREAM] · [COUNTRY] · [DEVICE]"
 
 // Default returns the configuration a fresh installation starts with:
-// everything off, intervals and sources filled in so that turning a job on
-// is one switch.
+// intervals and sources filled in so that turning a job on is one switch.
+// Every job is off except bot_signatures, which the engine's bot check relies
+// on in every stream; a config file without that section gets it on as well.
 func Default() Config {
 	return Config{
 		IPLists: IPLists{EveryMinutes: 24 * 60, Sources: []IPSource{
@@ -218,6 +238,11 @@ func Default() Config {
 			{URL: "https://iplists.firehol.org/files/socks_proxy_1d.ipset", Target: "ip_proxy", Mode: "merge"},
 			{URL: "https://iplists.firehol.org/files/tor_exits.ipset", Target: "ip_proxy", Mode: "merge"},
 			seedIPSource,
+		}},
+		BotSignatures: BotSignatures{Enabled: true, EveryMinutes: 24 * 60, Sources: []BotSource{
+			{Name: "matomo", URL: "https://raw.githubusercontent.com/matomo-org/device-detector/master/regexes/bots.yml", Enabled: true},
+			{Name: "crawler-user-agents", URL: "https://raw.githubusercontent.com/monperrus/crawler-user-agents/master/crawler-user-agents.json", Enabled: true},
+			{Name: "isbot", URL: "https://raw.githubusercontent.com/omrilotan/isbot/main/src/patterns.json", Enabled: true},
 		}},
 		GeoDB: GeoDB{EveryMinutes: 3 * 24 * 60, Sources: []GeoSource{
 			{Kind: KindCity, URL: "https://download.maxmind.com/geoip/databases/GeoLite2-City/download?suffix=tar.gz"},
@@ -345,6 +370,8 @@ func (c Config) intervalMinutes(job string) int {
 	switch job {
 	case JobIPLists:
 		return c.IPLists.EveryMinutes
+	case JobBotSignatures:
+		return c.BotSignatures.EveryMinutes
 	case JobGeoDB:
 		return c.GeoDB.EveryMinutes
 	case JobVirusTotal:
@@ -365,7 +392,7 @@ func (c Config) intervalMinutes(job string) int {
 // minimum intervals: a typo must not turn a job into a tight loop against
 // someone else's API.
 var minInterval = map[string]int{
-	JobIPLists: 10, JobGeoDB: 60, JobVirusTotal: 30, JobDisk: 1, JobCleanup: 60, JobConversions: 1,
+	JobIPLists: 10, JobBotSignatures: 60, JobGeoDB: 60, JobVirusTotal: 30, JobDisk: 1, JobCleanup: 60, JobConversions: 1,
 	JobKeitaroSync: 5,
 }
 
@@ -387,6 +414,8 @@ func (c Config) Enabled(job string) bool {
 	switch job {
 	case JobIPLists:
 		return c.IPLists.Enabled
+	case JobBotSignatures:
+		return c.BotSignatures.Enabled
 	case JobGeoDB:
 		return c.GeoDB.Enabled
 	case JobVirusTotal:
@@ -405,6 +434,9 @@ func (c Config) Enabled(job string) bool {
 
 var listNameRe = regexp.MustCompile(`^[a-z0-9_]{1,64}$`)
 
+// botSourceNameRe is the shape of a bot signature source name: it ends up in a response header.
+var botSourceNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+
 // Validate rejects a configuration the service could not run safely. It is
 // called by the admin before saving and by the service after loading, so a
 // file edited by hand gets the same checks.
@@ -418,6 +450,19 @@ func (c Config) Validate() error {
 		}
 		if s.Mode != "" && s.Mode != "replace" && s.Mode != "merge" {
 			return fmt.Errorf("ip list source %d: mode must be replace or merge", i+1)
+		}
+	}
+	names := map[string]bool{}
+	for i, s := range c.BotSignatures.Sources {
+		if !botSourceNameRe.MatchString(s.Name) {
+			return fmt.Errorf("bot signature source %d: name must be 1-64 letters, digits, dots, dashes or underscores", i+1)
+		}
+		if names[strings.ToLower(s.Name)] {
+			return fmt.Errorf("bot signature source %d: name %q is used twice", i+1, s.Name)
+		}
+		names[strings.ToLower(s.Name)] = true
+		if err := httpURL(s.URL); err != nil {
+			return fmt.Errorf("bot signature source %d: %w", i+1, err)
 		}
 	}
 	for i, s := range c.GeoDB.Sources {
@@ -494,6 +539,7 @@ func (s GeoSource) Credentials() (user, password string) {
 	}
 	return s.User, s.Password
 }
+
 // Save writes the config file atomically, readable by the owner only: it
 // holds a bot token and API keys.
 func Save(path string, c Config) error {

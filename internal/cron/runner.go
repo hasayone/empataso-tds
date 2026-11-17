@@ -69,6 +69,8 @@ type Status struct {
 	Loss *LossState `json:"event_loss,omitempty"`
 	// Spool is the last check of the engines' disk queues; nil until the first one.
 	Spool *SpoolState `json:"event_spool,omitempty"`
+	// BotSigs is the bot signature database after the last run; nil until the first one.
+	BotSigs *BotSigState `json:"bot_signatures,omitempty"`
 
 	// Version and Commit are the build metadata of the running binary.
 	// Written on every save so the updater can read them via -probe.
@@ -410,6 +412,8 @@ func (r *Runner) exec(ctx context.Context, cfg Config, job string) (msg string, 
 	switch job {
 	case JobIPLists:
 		return r.runIPLists(ctx, cfg.IPLists)
+	case JobBotSignatures:
+		return r.runBotSignatures(ctx, cfg.BotSignatures)
 	case JobGeoDB:
 		return r.runGeoDB(ctx, cfg.GeoDB)
 	case JobVirusTotal:

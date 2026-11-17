@@ -225,6 +225,13 @@ func newMatcher(pats []pattern) *Matcher {
 // otherwise the best remaining label wins, and bare labels count only when
 // "mozilla/" was not seen. It does not allocate and does not report an error.
 func (m *Matcher) Match(ua string) string {
+	label, _ := m.MatchHuman(ua)
+	return label
+}
+
+// MatchHuman is Match that also reports whether ua carries a token of a human
+// browser or app (flagHuman). It does not allocate and does not report an error.
+func (m *Matcher) MatchHuman(ua string) (label string, human bool) {
 	var sum summary
 	var s uint32
 	for i := 0; i < len(ua); i++ {
@@ -248,12 +255,13 @@ func (m *Matcher) Match(ua string) string {
 			sum.merge(m.nodes[s].sum)
 		}
 	}
-	if sum.flags&flagHuman == 0 && sum.se != prioNone {
-		return labelByPrio[sum.se]
+	human = sum.flags&flagHuman != 0
+	if !human && sum.se != prioNone {
+		return labelByPrio[sum.se], false
 	}
 	best := sum.other
 	if sum.flags&flagMozilla == 0 {
 		best = max(best, sum.bare)
 	}
-	return labelByPrio[best]
+	return labelByPrio[best], human
 }

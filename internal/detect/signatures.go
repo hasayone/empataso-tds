@@ -26,6 +26,7 @@ type Signatures struct {
 	ref       atomic.Pointer[[]string]
 	uaBlack   atomic.Pointer[[]string]
 	proxyOrg  atomic.Pointer[[]string]
+	botDB     atomic.Pointer[BotDB]
 
 	stamps map[string]fileStamp
 	smu    chan struct{} // lightweight mutex for stamps (buffer 1)
@@ -50,6 +51,8 @@ const (
 	maxUALineBytes = 256
 	// maxUABytes is the total size of the pattern lines of signature_ua.dat that is kept (256 KiB).
 	maxUABytes = 256 << 10
+	// maxBotDBFileBytes caps the size of FileBotSignatures that is read (16 MiB).
+	maxBotDBFileBytes = 16 << 20
 )
 
 // NewSignatures creates the holder and performs the initial load.
@@ -65,8 +68,19 @@ func NewSignatures(dir string, log *slog.Logger) *Signatures {
 	s.uaBlack.Store(&empty)
 	org := DefaultProxyOrg()
 	s.proxyOrg.Store(&org)
+	s.botDB.Store(&BotDB{})
 	s.Reload()
 	return s
+}
+
+// BotDB returns the current downloaded bot signature database. It is never nil
+// for a holder made by NewSignatures; a nil receiver gives nil, which matches
+// nothing. The database is immutable and is replaced as a whole on reload.
+func (s *Signatures) BotDB() *BotDB {
+	if s == nil {
+		return nil
+	}
+	return s.botDB.Load()
 }
 
 // UAMatcher returns the current UA matcher: the built-in signatures and search
@@ -123,6 +137,56 @@ func (s *Signatures) Reload() {
 	s.reloadOne(fileRef, true, readLines, storeList(&s.ref))
 	s.reloadOne(fileUABlack, false, readLines, storeList(&s.uaBlack))
 	s.reloadOne(fileProxyOrg, false, readProxyOrgFile, storeList(&s.proxyOrg))
+	s.reloadBotDB()
+}
+
+// reloadBotDB swaps in FileBotSignatures when its modification time or size
+// changed. A file that cannot be read or parsed is logged once and the previous
+// database stays; a removed file leaves an empty database, so only the built-in
+// signatures count. Clicks keep reading the old database until the swap.
+func (s *Signatures) reloadBotDB() {
+	path := filepath.Join(s.dir, FileBotSignatures)
+	fi, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) && s.forget(FileBotSignatures) {
+			s.botDB.Store(&BotDB{})
+			s.log.Info("detect: bot signature database removed, built-in signatures only")
+		}
+		return
+	}
+	cur := fileStamp{mod: fi.ModTime(), size: fi.Size()}
+	<-s.smu
+	prev, known := s.stamps[FileBotSignatures]
+	s.stamps[FileBotSignatures] = cur
+	s.smu <- struct{}{}
+	if known && prev.mod.Equal(cur.mod) && prev.size == cur.size {
+		return
+	}
+	if cur.size > maxBotDBFileBytes {
+		s.log.Warn("detect: bot signature database too large, previous kept", "bytes", cur.size, "limit_bytes", maxBotDBFileBytes)
+		return
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		s.log.Warn("detect: bot signature database unreadable, previous kept", "err", err)
+		return
+	}
+	db, skipped, err := LoadBotDB(b)
+	if err != nil {
+		s.log.Warn("detect: bot signature database invalid, previous kept", "err", err)
+		return
+	}
+	s.botDB.Store(db)
+	s.log.Info("detect: bot signature database loaded", "rules", db.Len(), "weak", db.Weak(), "skipped", skipped)
+}
+
+// forget drops the stamp of name and reports whether it was known.
+func (s *Signatures) forget(name string) bool {
+	<-s.smu
+	_, known := s.stamps[name]
+	delete(s.stamps, name)
+	s.smu <- struct{}{}
+	return known
 }
 
 // storeList returns an apply function that swaps the list into dst.
@@ -137,11 +201,7 @@ func (s *Signatures) resetIfRemoved(name string, reset func()) {
 	if _, err := os.Stat(filepath.Join(s.dir, name+".dat")); !errors.Is(err, fs.ErrNotExist) {
 		return
 	}
-	<-s.smu
-	_, known := s.stamps[name]
-	delete(s.stamps, name)
-	s.smu <- struct{}{}
-	if known {
+	if s.forget(name) {
 		reset()
 		s.log.Info("detect: signature file removed, built-in list restored", "name", name)
 	}

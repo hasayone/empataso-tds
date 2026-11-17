@@ -377,7 +377,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		profile = d.botProfile()
 	}
 	botIn := botInput{IP: ip, UA: ua, Ref: refOrEmpty(ref), Lang: v.Lang, Proxy: proxy, Device: device}
-	profileBot := detectBot(d.lists, d.sigs, d.dataDir, botIn, profile)
+	profileBot, profileWhy := detectBotWhy(d.lists, d.sigs, d.dataDir, botIn, profile)
 	v.Bot = profileBot != detect.BotNone
 	// Output defaults — from the group; the stream overrides them.
 	//
@@ -441,9 +441,9 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	if selStream != nil {
 		botsCfg = selStream.Bots
 	}
-	bot := profileBot
+	bot, botWhy := profileBot, profileWhy
 	if !sameBotChecks(botsCfg, profile) {
-		bot = detectBot(d.lists, d.sigs, d.dataDir, botIn, botsCfg)
+		bot, botWhy = detectBotWhy(d.lists, d.sigs, d.dataDir, botIn, botsCfg)
 	}
 	// Separate serving for bots (bot_redirect). "skip"/"" → normal stream (the bot is still logged).
 	botServed := false
@@ -458,7 +458,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	// The log, the header and keyword collection see the bot that routed the visitor
 	// even when the selected stream has no bot toggles of its own.
 	if bot == detect.BotNone {
-		bot = profileBot
+		bot, botWhy = profileBot, profileWhy
 	}
 
 	// separation: substitute the output by keyword (unless this is bot serving).
@@ -637,6 +637,9 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	// Diagnostic headers (before writing the response) + render.
 	h := w.Header()
 	h.Set("X-Emtds-Bot", emptyDash(bot))
+	if botWhy != "" {
+		h.Set("X-Emtds-Bot-Reason", botWhy)
+	}
 	h.Set("X-Emtds-Device", device)
 	h.Set("X-Emtds-Country", country)
 	h.Set("X-Emtds-Stream", streamName)
