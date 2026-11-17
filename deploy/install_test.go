@@ -1130,7 +1130,7 @@ func TestInstallRunLockHeld(t *testing.T) {
 	sb := newInstallSandbox(t)
 	_, script := sb.cloneSandbox(t, true)
 	lock := sb.path("run", "emtds-update.lock")
-	holder := exec.Command("flock", "-n", lock, "sleep", "60")
+	holder := exec.Command("flock", "-x", lock, "sleep", "60")
 	if err := holder.Start(); err != nil {
 		t.Fatal(err)
 	}
