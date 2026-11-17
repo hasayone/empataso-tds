@@ -711,7 +711,10 @@ func cronConfigSample() map[string]any {
 		},
 		"disk":         map[string]any{"enabled": true, "every_minutes": 10, "paths": []string{}, "min_free_percent": 10},
 		"cleanup":      map[string]any{"enabled": true, "every_minutes": 1440, "keys_days": 30},
-		"conversions":  map[string]any{"enabled": false, "every_minutes": 1, "template": "[PROFIT] [GROUP] [COUNTRY]"},
+		"conversions": map[string]any{
+			"enabled": false, "every_minutes": 1, "template": "[PROFIT] [GROUP] [COUNTRY]",
+			"period": "today", "timezone": "UTC",
+		},
 		"keitaro_sync": map[string]any{"enabled": false, "every_minutes": 15},
 	}
 }

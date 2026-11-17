@@ -79,7 +79,8 @@ type User struct {
 	Hash    string   `json:"hash,omitempty"`
 	Prefs   Prefs    `json:"prefs"`
 	Access  Access   `json:"access"`
-	// BoardIDs lists panel section ids this user may open. Empty meaning depends on Type and AllBoards.
+	// BoardIDs mirrors the sections that list this user as a member. It limits only a
+	// regular user without AllBoards; an administrator sees every section.
 	BoardIDs []string `json:"board_ids,omitempty"`
 	// DefaultBoard is the section opened after sign-in. Empty uses MainBoardID.
 	DefaultBoard string `json:"default_board,omitempty"`
@@ -124,19 +125,19 @@ func (u User) clone() User {
 }
 
 // VisibleBoards returns section ids this user may open and whether every section is allowed.
+// It is the single place that decides section visibility for a users.json account.
 // envAdmin is true for the environment administrator (empty id or SourceEnv).
+// An administrator and an AllBoards account see every section whatever BoardIDs holds:
+// section membership only limits a regular user. A regular user with no BoardIDs sees main.
 // When all is true, ids is nil and any section id is visible.
 func (u User) VisibleBoards(envAdmin bool) (ids []string, all bool) {
 	if envAdmin || u.ID == "" || u.Source == SourceEnv {
 		return nil, true
 	}
-	if u.AllBoards {
+	if u.AllBoards || u.Type == UserAdmin {
 		return nil, true
 	}
-	if u.Type == UserAdmin && len(u.BoardIDs) == 0 {
-		return nil, true
-	}
-	if u.Type == UserRegular && len(u.BoardIDs) == 0 {
+	if len(u.BoardIDs) == 0 {
 		return []string{config.MainBoardID}, false
 	}
 	seen := make(map[string]bool, len(u.BoardIDs))

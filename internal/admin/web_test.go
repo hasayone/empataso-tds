@@ -658,6 +658,49 @@ func TestFlowsFolderField(t *testing.T) {
 	mustNot(t, line, "'folder'", "FLOW_METRIC does not list folder")
 }
 
+// TestFlowsGroupsHeader checks that the campaigns header opens the shared group window on folder.
+// html is the SPA source. The test fails when the button, its place, or the folder actions are missing.
+func TestFlowsGroupsHeader(t *testing.T) {
+	html := spaSource()
+	body := pageFnBody(html, "flows")
+	if body == "" {
+		t.Fatal("flows page missing")
+	}
+	phStart := strings.Index(body, `<div class="ph">`)
+	bar := strings.Index(body, `id="fbar"`)
+	if phStart < 0 || bar < 0 || bar < phStart {
+		t.Fatal("campaigns header missing")
+	}
+	ph := body[phStart:bar]
+	must(t, ph, `groupHeadBtn('flow-groups')`, "campaign groups button sits in the header")
+	must(t, body, `sectionAllowed(ME,'groups')`, "button follows the groups section")
+	btn := strings.Index(ph, `groupHeadBtn('flow-groups')`)
+	gear := strings.Index(ph, `data-col-gear="flows"`)
+	if btn < 0 || gear < 0 || btn > gear {
+		t.Fatal("groups button must sit left of the column gear")
+	}
+	must(t, body, "openGroupWindow({", "header opens the shared group window")
+	must(t, body, "campaignFolders()", "window lists campaign folders")
+	must(t, body, "clearCampaignFolder(", "delete clears the campaign folder")
+	must(t, body, "FLOW_NEW_FOLDER", "create prefills a new campaign")
+	must(t, spaFunctionLine(html, "groupHeadBtn"), `icon('folder')`, "groups control is a folder icon")
+	must(t, spaFunctionLine(html, "groupHeadBtn"), `tr('dom.groups')`, "groups label goes through tr")
+	clr := spaFunctionLine(html, "clearCampaignFolder")
+	if clr == "" {
+		t.Fatal("clearCampaignFolder missing")
+	}
+	must(t, clr, "for(", "clear is sequential")
+	must(t, clr, "await", "clear awaits the save")
+	mustNot(t, clr, "Promise.all", "clear must not use Promise.all")
+	must(t, clr, "'/api/groups/'", "clear writes the campaign")
+	must(t, clr, "delete saved.folder", "clear removes folder from the saved body")
+	must(t, clr, "delete g.folder", "clear removes folder in memory")
+	must(t, spaFunctionLine(html, "newFlow"), "g.folder=", "new campaign stores the group on folder")
+	must(t, html, "'dom.groups':'Groups'", "english groups label")
+	must(t, html, "'dom.groups':'Группы'", "russian groups label")
+	must(t, html, "'dom.groups':'Групи'", "ukrainian groups label")
+}
+
 // TestGroupCreateButton checks that every group field shares one plus control in the same row as the field.
 // html is the SPA source. The test fails when the plus, its label, or a translation is missing.
 func TestGroupCreateButton(t *testing.T) {

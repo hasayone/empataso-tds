@@ -28,15 +28,19 @@ func TestVisibleBoards(t *testing.T) {
 	if ids, all := admin.VisibleBoards(false); !all || ids != nil {
 		t.Fatalf("admin empty boards: ids=%v all=%v", ids, all)
 	}
-	adminList := User{ID: "a2", Type: UserAdmin, BoardIDs: []string{"sales", ""}}
-	if ids, all := adminList.VisibleBoards(false); all || len(ids) != 2 || ids[1] != config.MainBoardID {
-		t.Fatalf("admin list: ids=%v all=%v", ids, all)
+	adminList := User{ID: "a2", Type: UserAdmin, BoardIDs: []string{"sales"}}
+	if ids, all := adminList.VisibleBoards(false); !all || ids != nil {
+		t.Fatalf("admin with membership list must see every section: ids=%v all=%v", ids, all)
 	}
 	user := User{ID: "u1", Type: UserRegular}
 	if ids, all := user.VisibleBoards(false); all || len(ids) != 1 || ids[0] != config.MainBoardID {
 		t.Fatalf("user default: ids=%v all=%v", ids, all)
 	}
-	allBoards := User{ID: "u2", Type: UserRegular, AllBoards: true}
+	userList := User{ID: "u3", Type: UserRegular, BoardIDs: []string{"sales", "", "sales"}}
+	if ids, all := userList.VisibleBoards(false); all || len(ids) != 2 || ids[0] != "sales" || ids[1] != config.MainBoardID {
+		t.Fatalf("user list: ids=%v all=%v", ids, all)
+	}
+	allBoards := User{ID: "u2", Type: UserRegular, AllBoards: true, BoardIDs: []string{"sales"}}
 	if ids, all := allBoards.VisibleBoards(false); !all || ids != nil {
 		t.Fatalf("all_boards: ids=%v all=%v", ids, all)
 	}

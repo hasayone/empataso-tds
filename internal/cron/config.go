@@ -199,11 +199,19 @@ type Cleanup struct {
 	KeysDays     int  `json:"keys_days"`
 }
 
-// Conversions — announce new postbacks.
+// Conversions — announce new postbacks and a profit summary for one report period.
+// Period is a report period id (today, yesterday, week, 7d, month, prevmonth,
+// 30d, year, all, dates, times). Empty means today. From and To bound dates
+// and times, as RFC3339 or a local timestamp in Timezone. Timezone is an IANA
+// name; empty means UTC. The summary uses the same payout sum as the report.
 type Conversions struct {
 	Enabled      bool   `json:"enabled"`
 	EveryMinutes int    `json:"every_minutes"`
 	Template     string `json:"template"` // [PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [CID]
+	Period       string `json:"period,omitempty"`
+	From         string `json:"from,omitempty"`
+	To           string `json:"to,omitempty"`
+	Timezone     string `json:"timezone,omitempty"`
 }
 
 // DefaultConversionTemplate is used when the template is empty.
@@ -252,7 +260,7 @@ func Default() Config {
 		VirusTotal:  VirusTotal{EveryMinutes: 12 * 60, FromGroups: true, Threshold: 1},
 		Disk:        Disk{EveryMinutes: 10, MinFreePercent: 10},
 		Cleanup:     Cleanup{EveryMinutes: 24 * 60, KeysDays: 30},
-		Conversions: Conversions{EveryMinutes: 1, Template: DefaultConversionTemplate},
+		Conversions: Conversions{EveryMinutes: 1, Template: DefaultConversionTemplate, Period: "today"},
 		KeitaroSync: KeitaroSync{EveryMinutes: 15},
 		Seeded:      []string{SeedDBIPASN, SeedPrivateRelay},
 	}
@@ -488,6 +496,9 @@ func (c Config) Validate() error {
 	}
 	if c.Cleanup.KeysDays < 0 {
 		return errors.New("cleanup: keys days must not be negative")
+	}
+	if err := c.Conversions.validate(); err != nil {
+		return err
 	}
 	return nil
 }

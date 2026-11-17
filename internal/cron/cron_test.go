@@ -601,21 +601,34 @@ func TestCleanupRemovesOnlyOldKeywordFiles(t *testing.T) {
 type fakePB struct {
 	rows     []store.PostbackRow
 	from, to time.Time
+	calls    []fakePBCall
 	err      error
+}
+
+// fakePBCall is one PostbacksExcluding invocation.
+type fakePBCall struct {
+	from, to time.Time
+	exclude  string
 }
 
 func (f *fakePB) PostbacksExcluding(_ context.Context, from, to time.Time, _ string, _ int, excludeDomain string) ([]store.PostbackRow, float64, error) {
 	f.from, f.to = from, to
+	f.calls = append(f.calls, fakePBCall{from, to, excludeDomain})
+	if f.err != nil {
+		return nil, 0, f.err
+	}
 	var out []store.PostbackRow
+	var sum float64
 	for _, r := range f.rows {
 		if excludeDomain != "" && r.Domain == excludeDomain {
 			continue
 		}
 		if !r.TS.Before(from) && r.TS.Before(to) {
 			out = append(out, r)
+			sum += r.Profit
 		}
 	}
-	return out, 0, f.err
+	return out, sum, nil
 }
 
 func TestConversionsSkipsKeitaroImportDomain(t *testing.T) {
@@ -641,12 +654,13 @@ func TestConversionsSkipsKeitaroImportDomain(t *testing.T) {
 		{TS: t1, Domain: "own", Profit: 1},
 	}
 	clock = clock.Add(time.Minute)
-	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || msg != "1 new conversion(s)" {
+	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || !strings.HasPrefix(msg, "1 new conversion(s)") {
 		t.Fatalf("%q %v", msg, err)
 	}
 }
 
 func TestConversions(t *testing.T) {
+	t.Setenv("EMTDS_ALERT_LANG", "en")
 	e := newEnv(t)
 	pb := &fakePB{}
 	e.r.pb = pb
@@ -656,10 +670,14 @@ func TestConversions(t *testing.T) {
 	cfg.Telegram = tg
 	cfg.Conversions.Template = "[PROFIT] [GROUP]/[STREAM] [COUNTRY] [DEVICE] [CID]"
 
-	// History from before the first run is not announced.
+	// History from before the first run is not announced line by line.
+	// The period profit still goes out, once.
 	pb.rows = []store.PostbackRow{{TS: clock.Add(-time.Hour), Profit: 9}}
-	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || msg != "watching for new conversions" || len(e.messages()) != 0 {
+	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || !strings.Contains(msg, "watching for new conversions") || len(e.messages()) != 1 {
 		t.Fatalf("first run: %q, %v, %q", msg, err, e.messages())
+	}
+	if m := e.messages(); m[0] != "Profit for today: 9.00" || strings.Count(m[0], "Profit for today") != 1 {
+		t.Fatalf("first summary: %q", m)
 	}
 
 	// Two new ones, returned newest first by the store, announced oldest first.
@@ -669,26 +687,44 @@ func TestConversions(t *testing.T) {
 		{TS: t1, Group: "Promo", Stream: "ru_mobile", Country: "ru", Device: "phone", Profit: 1, CID: "c1"},
 	}
 	clock = clock.Add(time.Minute)
-	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || msg != "2 new conversion(s)" {
+	e.mu.Lock()
+	e.sent = nil
+	e.mu.Unlock()
+	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || !strings.HasPrefix(msg, "2 new conversion(s)") {
 		t.Fatalf("%q, %v", msg, err)
 	}
-	want := []string{"1.00 Promo/ru_mobile RU phone c1", "2.50 Promo/us_all US phone c2"}
-	if m := e.messages(); len(m) != 2 || m[0] != want[0] || m[1] != want[1] {
+	want := []string{"1.00 Promo/ru_mobile RU phone c1", "2.50 Promo/us_all US phone c2", "Profit for today: 3.50"}
+	if m := e.messages(); len(m) != 3 || m[0] != want[0] || m[1] != want[1] || m[2] != want[2] || strings.Count(strings.Join(m, "\n"), "Profit for today") != 1 {
 		t.Errorf("messages = %q; want %q", m, want)
 	}
-	if pb.to.Nanosecond() != 0 {
-		t.Errorf("window end %v must be a whole second", pb.to)
+	var incrTo time.Time
+	for _, c := range pb.calls {
+		if c.exclude == "" && c.to.Nanosecond() == 0 {
+			incrTo = c.to
+		}
+	}
+	if incrTo.IsZero() {
+		t.Fatal("incremental window end must be a whole second")
 	}
 
-	// Nothing new: the window starts where the previous one ended.
-	prevTo := pb.to
+	// Nothing new: the window starts where the previous one ended, and the summary is sent once.
+	prevTo := incrTo
+	nCall := len(pb.calls)
 	clock = clock.Add(time.Minute)
-	if msg, _ := e.r.runConversions(context.Background(), cfg); msg != "0 new conversion(s)" || !pb.from.Equal(prevTo) {
-		t.Errorf("%q; from %v, want %v", msg, pb.from, prevTo)
+	e.mu.Lock()
+	e.sent = nil
+	e.mu.Unlock()
+	msg, _ := e.r.runConversions(context.Background(), cfg)
+	if !strings.HasPrefix(msg, "0 new conversion(s)") || len(pb.calls) < nCall+2 || !pb.calls[nCall].from.Equal(prevTo) {
+		t.Errorf("%q; from %v, want %v", msg, pb.calls[nCall].from, prevTo)
+	}
+	if m := e.messages(); len(m) != 1 || m[0] != "Profit for today: 3.50" {
+		t.Errorf("quiet run: %q", m)
 	}
 }
 
 func TestConversionsTelegramPartialAdvance(t *testing.T) {
+	t.Setenv("EMTDS_ALERT_LANG", "en")
 	e := newEnv(t)
 	pb := &fakePB{}
 	e.r.pb = pb
@@ -741,15 +777,16 @@ func TestConversionsTelegramPartialAdvance(t *testing.T) {
 	e.mu.Lock()
 	e.sent = nil
 	e.mu.Unlock()
-	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || msg != "2 new conversion(s)" {
+	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || !strings.HasPrefix(msg, "2 new conversion(s)") {
 		t.Fatalf("%q %v", msg, err)
 	}
-	if len(e.messages()) != 2 {
-		t.Fatalf("messages = %d", len(e.messages()))
+	if m := e.messages(); len(m) != 3 || strings.Count(strings.Join(m, "\n"), "Profit for today") != 1 {
+		t.Fatalf("messages = %q", m)
 	}
 }
 
 func TestConversionsBacklogAndFailure(t *testing.T) {
+	t.Setenv("EMTDS_ALERT_LANG", "en")
 	e := newEnv(t)
 	pb := &fakePB{}
 	e.r.pb = pb
@@ -758,6 +795,9 @@ func TestConversionsBacklogAndFailure(t *testing.T) {
 	cfg := Default()
 	cfg.Telegram = tg
 	_, _ = e.r.runConversions(context.Background(), cfg)
+	e.mu.Lock()
+	e.sent = nil
+	e.mu.Unlock()
 
 	for i := 0; i < 25; i++ { // newest first
 		pb.rows = append(pb.rows, store.PostbackRow{TS: clock.Add(time.Duration(30-i) * time.Second), Profit: 1})
@@ -767,7 +807,8 @@ func TestConversionsBacklogAndFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := e.messages()
-	if len(m) != maxAnnounce+1 || !strings.Contains(m[maxAnnounce], "5 more conversions, 5.00 in total") {
+	joined := strings.Join(m, "\n")
+	if len(m) != maxAnnounce+2 || !strings.Contains(m[maxAnnounce], "5 more conversions, 5.00 in total") || strings.Count(joined, "Profit for today") != 1 {
 		t.Errorf("%d messages, last %q", len(m), m[len(m)-1])
 	}
 
@@ -788,6 +829,67 @@ func TestConversionsBacklogAndFailure(t *testing.T) {
 	e.r.pb = nil
 	if _, err := e.r.runConversions(context.Background(), cfg); err == nil || !strings.Contains(err.Error(), "EMTDS_CLICKHOUSE_ADDR") {
 		t.Errorf("no store: %v", err)
+	}
+}
+
+func TestConvPeriodMatchesReport(t *testing.T) {
+	now := time.Date(2026, 10, 13, 15, 0, 0, 0, time.UTC)
+	from, to := convPeriod(Conversions{Period: "today"}, now)
+	if !from.Equal(time.Date(2026, 10, 13, 0, 0, 0, 0, time.UTC)) || !to.Equal(now) {
+		t.Fatalf("today %v %v", from, to)
+	}
+	kyivNow := time.Date(2026, 10, 13, 10, 0, 0, 0, time.UTC)
+	from, _ = convPeriod(Conversions{Period: "today", Timezone: "Europe/Kyiv"}, kyivNow)
+	if got := from.UTC().Format(time.RFC3339); got != "2026-10-12T21:00:00Z" {
+		t.Fatalf("kyiv today %s", got)
+	}
+	from, to = convPeriod(Conversions{Period: "dates", Timezone: "UTC", From: "2026-10-01T00:00", To: "2026-10-02T00:00"}, now)
+	if !from.Equal(time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)) || !to.Equal(time.Date(2026, 10, 2, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("dates %v %v", from, to)
+	}
+	if err := (Conversions{Period: "nope"}).validate(); err == nil {
+		t.Fatal("unknown period must be refused")
+	}
+	if got := profitSummaryText("today", from, to, 12.5, "ru"); got != "Профит за сегодня: 12.50" {
+		t.Fatalf("ru summary %q", got)
+	}
+}
+
+func TestConversionsManualProfitOnce(t *testing.T) {
+	t.Setenv("EMTDS_ALERT_LANG", "en")
+	e := newEnv(t)
+	pb := &fakePB{}
+	e.r.pb = pb
+	clock := time.Date(2026, 9, 30, 18, 0, 0, 0, time.UTC)
+	e.r.now = func() time.Time { return clock }
+	cfg := Default()
+	cfg.Telegram = tg
+	cfg.Conversions.Period = "today"
+	pb.rows = []store.PostbackRow{{TS: clock.Add(-2 * time.Hour), Profit: 4.5, CID: "old"}}
+	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || !strings.Contains(msg, "profit 4.50") {
+		t.Fatalf("manual: %q %v", msg, err)
+	}
+	m := e.messages()
+	if len(m) != 1 || m[0] != "Profit for today: 4.50" {
+		t.Fatalf("one summary, no replay: %q", m)
+	}
+	pb.rows = append(pb.rows, store.PostbackRow{TS: clock.Add(time.Minute), Profit: 1, CID: "new"})
+	clock = clock.Add(2 * time.Minute)
+	e.mu.Lock()
+	e.sent = nil
+	e.mu.Unlock()
+	if _, err := e.r.runConversions(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	m = e.messages()
+	nProfit := 0
+	for _, line := range m {
+		if strings.HasPrefix(line, "Profit for today") {
+			nProfit++
+		}
+	}
+	if nProfit != 1 || len(m) != 2 || m[1] != "Profit for today: 5.50" {
+		t.Fatalf("summary once beside the new line: %q", m)
 	}
 }
 

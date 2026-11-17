@@ -140,6 +140,83 @@ func TestBoardMemberRoleCreatedAndRead(t *testing.T) {
 	}
 }
 
+// boardIDsSeen returns the normalized section ids of GET /api/boards for client c.
+func boardIDsSeen(t *testing.T, c *http.Client, base string) []string {
+	t.Helper()
+	resp, raw := boardGet(t, c, base+"/api/boards", "")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("boards %d", resp.StatusCode)
+	}
+	var out boardsResponse
+	if err := json.Unmarshal(raw, &out); err != nil {
+		t.Fatal(err)
+	}
+	ids := make([]string, 0, len(out.Items))
+	for _, b := range out.Items {
+		ids = append(ids, config.NormalizeBoardID(b.ID))
+	}
+	return ids
+}
+
+// putBoardMembers replaces the members of section id as the signed-in owner.
+func putBoardMembers(t *testing.T, c *http.Client, base, csrf, id string, members []config.BoardMember) {
+	t.Helper()
+	resp, raw := boardJSON(t, c, http.MethodPut, base+"/api/boards/"+id+"/members", "", csrf, boardMembersBody{Members: members})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("members %s: %d %s", id, resp.StatusCode, raw)
+	}
+}
+
+func TestBoardMembershipNeverNarrowsFullAccess(t *testing.T) {
+	full := security.Access{Sections: sectionStrings(userSections)}
+	hs, srv := boardTestServer(t, &boardMemGroups{}, "", func(s *Server) {
+		_ = s.users.Add(security.User{ID: "adm", Login: "tofan", Hash: mustHash(t, "p@ss"), Enabled: true, Type: security.UserAdmin})
+		_ = s.users.Add(security.User{ID: "stale", Login: "stale", Hash: mustHash(t, "p@ss"), Enabled: true, Type: security.UserAdmin, BoardIDs: []string{"seo"}})
+		_ = s.users.Add(security.User{ID: "wide", Login: "wide", Hash: mustHash(t, "p@ss"), Enabled: true, Type: security.UserRegular, AllBoards: true, Access: full})
+		_ = s.users.Add(security.User{ID: "lim", Login: "lim", Hash: mustHash(t, "p@ss"), Enabled: true, Type: security.UserRegular, Access: full})
+	})
+	owner, csrf := boardLogin(t, hs.URL, "admin", "p@ss")
+	tofan, _ := boardLogin(t, hs.URL, "tofan", "p@ss")
+	stale, _ := boardLogin(t, hs.URL, "stale", "p@ss")
+	wide, _ := boardLogin(t, hs.URL, "wide", "p@ss")
+	lim, _ := boardLogin(t, hs.URL, "lim", "p@ss")
+	everyAll := func(step string) {
+		t.Helper()
+		for name, c := range map[string]*http.Client{"tofan": tofan, "stale": stale, "wide": wide} {
+			if got := boardIDsSeen(t, c, hs.URL); len(got) != 3 {
+				t.Fatalf("%s: %s sees %v, want every section", step, name, got)
+			}
+			if resp, _ := boardGet(t, c, hs.URL+"/api/groups", "aso"); resp.StatusCode != http.StatusOK {
+				t.Fatalf("%s: %s opens aso: %d", step, name, resp.StatusCode)
+			}
+		}
+	}
+
+	everyAll("before")
+	putBoardMembers(t, owner, hs.URL, csrf, "seo", []config.BoardMember{
+		{UserID: "adm", Role: config.BoardRoleRead},
+		{UserID: "wide", Role: config.BoardRoleRead},
+		{UserID: "lim", Role: config.BoardRoleEdit},
+	})
+	everyAll("added")
+	if got := boardIDsSeen(t, lim, hs.URL); len(got) != 1 || got[0] != "seo" {
+		t.Fatalf("limited user sees %v, want only seo", got)
+	}
+	if resp, _ := boardGet(t, lim, hs.URL+"/api/groups", "aso"); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("limited user opens aso: %d", resp.StatusCode)
+	}
+	u, _ := srv.userByID("wide")
+	if !u.AllBoards {
+		t.Fatal("membership cleared all_boards")
+	}
+
+	putBoardMembers(t, owner, hs.URL, csrf, "seo", []config.BoardMember{{UserID: "lim", Role: config.BoardRoleEdit}})
+	everyAll("removed")
+	if got := boardIDsSeen(t, lim, hs.URL); len(got) != 1 || got[0] != "seo" {
+		t.Fatalf("limited user after removal of others sees %v", got)
+	}
+}
+
 func TestBoardAssignHoldsGroupsMu(t *testing.T) {
 	groups := &boardMemGroups{list: []config.Group{{ID: "c1", BoardID: "main"}}}
 	hs, s := boardTestServer(t, groups, "", nil)

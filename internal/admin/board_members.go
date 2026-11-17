@@ -374,7 +374,12 @@ func boardIDsForMember(boards []config.Board, userID string) []string {
 	return out
 }
 
-// syncUsersBoardIDsFromMembers updates BoardIDs for each user in affected from all board members.
+// syncUsersBoardIDsFromMembers sets BoardIDs of each user in affected to the sections
+// of boards that list the user as a member.
+// boards is the stored section list after the change; affected are the user ids that
+// were or now are members. AllBoards and Type stay as they are, so membership never
+// narrows an administrator or an all-sections account.
+// It returns the users store or persist error; without users storage it does nothing.
 func (s *Server) syncUsersBoardIDsFromMembers(boards []config.Board, affected []string) error {
 	if !s.usersEnabled() || len(affected) == 0 {
 		return nil
@@ -384,7 +389,6 @@ func (s *Server) syncUsersBoardIDsFromMembers(boards []config.Board, affected []
 	for _, uid := range affected {
 		ids := boardIDsForMember(boards, uid)
 		if err := s.users.Update(uid, func(u *security.User) error {
-			u.AllBoards = false
 			u.BoardIDs = ids
 			return nil
 		}); err != nil {
