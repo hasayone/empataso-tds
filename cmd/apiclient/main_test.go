@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/server"
+	"github.com/hasayone/empataso-tds/internal/server"
 )
 
 // fakeTDS spins up a fake engine, decodes ?api= and calls reply to build the

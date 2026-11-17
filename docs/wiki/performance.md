@@ -20,13 +20,13 @@
 
 Выполнять в тихий час, а не во время переноса из Keitaro (`GET /api/keitaro/job` → `running: false`).
 
-1. Проверить, что индекс есть: `SELECT name, type_full, granularity FROM system.data_skipping_indices WHERE database = 'kuztds' AND table = 'events'`.
-2. Оценить объём: `SELECT count() AS parts, sum(rows) AS rows, formatReadableSize(sum(data_compressed_bytes)) AS size FROM system.parts WHERE active AND database = 'kuztds' AND table = 'events'`. Мутация читает колонку `cid` каждого куска и пишет рядом файл индекса, примерно 1,2 байта на строку. Свободного места на томе ClickHouse нужно не меньше этого с запасом. Память — небольшая: кусок обрабатывается по гранулам.
+1. Проверить, что индекс есть: `SELECT name, type_full, granularity FROM system.data_skipping_indices WHERE database = 'emtds' AND table = 'events'`.
+2. Оценить объём: `SELECT count() AS parts, sum(rows) AS rows, formatReadableSize(sum(data_compressed_bytes)) AS size FROM system.parts WHERE active AND database = 'emtds' AND table = 'events'`. Мутация читает колонку `cid` каждого куска и пишет рядом файл индекса, примерно 1,2 байта на строку. Свободного места на томе ClickHouse нужно не меньше этого с запасом. Память — небольшая: кусок обрабатывается по гранулам.
 3. Запустить по партициям, начиная с самых свежих: по ним идут почти все постбеки. Например:
-   `ALTER TABLE kuztds.events MATERIALIZE INDEX idx_cid IN PARTITION 20261115`
-   Для всей таблицы сразу: `ALTER TABLE kuztds.events MATERIALIZE INDEX idx_cid`. Это фоновая мутация, вставки она не блокирует.
-4. Следить: `SELECT command, parts_to_do, is_done, latest_fail_reason FROM system.mutations WHERE database = 'kuztds' AND table = 'events' AND NOT is_done`. Остановить при необходимости: `KILL MUTATION WHERE database = 'kuztds' AND table = 'events' AND command LIKE '%MATERIALIZE INDEX%'`. Уже обработанные куски сохранят индекс.
-5. Проверка эффекта без записи: `EXPLAIN indexes = 1 SELECT ts FROM kuztds.events WHERE cid = 'nope' ORDER BY ts DESC LIMIT 1`. В блоке `Skip` для `idx_cid` число кусков и гранул должно быть заметно меньше общего.
+   `ALTER TABLE emtds.events MATERIALIZE INDEX idx_cid IN PARTITION 20261115`
+   Для всей таблицы сразу: `ALTER TABLE emtds.events MATERIALIZE INDEX idx_cid`. Это фоновая мутация, вставки она не блокирует.
+4. Следить: `SELECT command, parts_to_do, is_done, latest_fail_reason FROM system.mutations WHERE database = 'emtds' AND table = 'events' AND NOT is_done`. Остановить при необходимости: `KILL MUTATION WHERE database = 'emtds' AND table = 'events' AND command LIKE '%MATERIALIZE INDEX%'`. Уже обработанные куски сохранят индекс.
+5. Проверка эффекта без записи: `EXPLAIN indexes = 1 SELECT ts FROM emtds.events WHERE cid = 'nope' ORDER BY ts DESC LIMIT 1`. В блоке `Skip` для `idx_cid` число кусков и гранул должно быть заметно меньше общего.
 
 ## Redis у движка
 
@@ -39,7 +39,7 @@
 | `EMTDS_ENGINE_REDIS_WRITE_TIMEOUT` | `200ms` | запись команды |
 | `EMTDS_ENGINE_REDIS_POOL_TIMEOUT` | `300ms` | ожидание свободного соединения |
 
-Значение — длительность Go (`250ms`, `2s`). Пустое, неверное или неположительное значение оставляет значение по умолчанию. Старый префикс `KUZTDS_` тоже читается. Подключение к Redis движок делает одной попыткой (у go-redis по умолчанию пять), чтобы недоступный Redis не держал клик пять тайм-аутов подряд. При старте в логе `redis connected` видны действующие значения.
+Значение — длительность Go (`250ms`, `2s`). Пустое, неверное или неположительное значение оставляет значение по умолчанию. Подключение к Redis движок делает одной попыткой (у go-redis по умолчанию пять), чтобы недоступный Redis не держал клик пять тайм-аутов подряд. При старте в логе `redis connected` видны действующие значения.
 
 Admin эти переменные не читает: у него свой процесс и стандартные тайм-ауты go-redis.
 

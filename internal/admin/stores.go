@@ -13,8 +13,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // FileGroups is a GroupsStore backed by a JSON groups configuration file.

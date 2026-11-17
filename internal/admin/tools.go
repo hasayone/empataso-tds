@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/cron"
-	"github.com/egerkuzma/emtds/internal/detect"
-	"github.com/egerkuzma/emtds/internal/geo"
-	"github.com/egerkuzma/emtds/internal/ipindex"
-	"github.com/egerkuzma/emtds/internal/router"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/detect"
+	"github.com/hasayone/empataso-tds/internal/geo"
+	"github.com/hasayone/empataso-tds/internal/ipindex"
+	"github.com/hasayone/empataso-tds/internal/router"
 )
 
 // GeoInfo is what the panel needs from the geo resolver: answers and the list
@@ -394,7 +394,7 @@ type cronState struct {
 		DBIP     bool `json:"dbip"`      // a path for the DB-IP ASN database is known (Config.GeoDBIPPath)
 		DBIPFile bool `json:"dbip_file"` // DB-IP ASN database file exists and is not empty
 	} `json:"geo_paths"`
-	DBIPURL string `json:"dbip_url"` // URL template of the DB-IP ASN source, {YYYY-MM} is the month
+	DBIPURL            string           `json:"dbip_url"`                     // URL template of the DB-IP ASN source, {YYYY-MM} is the month
 	TelegramConfigured bool             `json:"telegram_configured"`          // stored token and chat id are both set
 	KeitaroConfigured  bool             `json:"keitaro_configured"`           // tracker origin and key are both set
 	ConfigError        string           `json:"config_error,omitempty"`       // Validate failure; never includes a secret

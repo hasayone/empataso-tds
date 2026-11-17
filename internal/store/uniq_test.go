@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 // squash collapses whitespace so a query compares by its tokens.

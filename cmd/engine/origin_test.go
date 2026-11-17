@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 func waitCaptureEvents(ins *captureIns, want int, timeout time.Duration) []logbuf.Event {

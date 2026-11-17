@@ -4,8 +4,8 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/security"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // Hiding the uniq field hides every key that carries it, the first-step

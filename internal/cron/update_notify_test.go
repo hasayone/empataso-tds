@@ -248,6 +248,157 @@ func TestCheckUpdatesNoGroupsPath(t *testing.T) {
 	}
 }
 
+// writeCheck stores check as check.json in dir and fails the test on error.
+func writeCheck(t *testing.T, dir string, check CheckFile) {
+	t.Helper()
+	if err := WriteUpdateJSON(filepath.Join(dir, UpdateCheckFile), check); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCheckUpdatesMainPause verifies that on the main channel a new target is announced at most once
+// per updateMainAnnounceEvery: a second push inside the pause is silent, and once the pause
+// has passed the target that is current then is announced.
+func TestCheckUpdatesMainPause(t *testing.T) {
+	e := newEnv(t)
+	dir := prepareUpdateDir(t, e)
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	e.r.now = func() time.Time { return now }
+
+	first := makeCheck(now)
+	first.Channel = "main"
+	writeCheck(t, dir, first)
+	e.r.checkUpdates(context.Background(), tg)
+	if m := e.messages(); len(m) != 1 {
+		t.Fatalf("first target: want 1 message, got %d", len(m))
+	}
+
+	second := first
+	second.Target = CheckRef{Commit: "ccddee1122334455667788990011aabbccddeeff"}
+	now = now.Add(updateMainAnnounceEvery - time.Minute)
+	second.At = now
+	writeCheck(t, dir, second)
+	e.r.checkUpdates(context.Background(), tg)
+	if m := e.messages(); len(m) != 1 {
+		t.Fatalf("second target inside the pause: want still 1 message, got %d", len(m))
+	}
+
+	third := second
+	third.Target = CheckRef{Commit: "ddeeff1122334455667788990011aabbccddeeff"}
+	now = now.Add(2 * time.Minute)
+	third.At = now
+	writeCheck(t, dir, third)
+	e.r.checkUpdates(context.Background(), tg)
+	m := e.messages()
+	if len(m) != 2 {
+		t.Fatalf("target after the pause: want 2 messages, got %d", len(m))
+	}
+	if !strings.Contains(m[1], "ddeeff112233") {
+		t.Errorf("the message after the pause must name the current target: %q", m[1])
+	}
+	e.r.checkUpdates(context.Background(), tg)
+	if m := e.messages(); len(m) != 2 {
+		t.Errorf("the same target again: want still 2 messages, got %d", len(m))
+	}
+}
+
+// TestCheckUpdatesReleaseNotPaused verifies that the pause belongs to the main channel only.
+func TestCheckUpdatesReleaseNotPaused(t *testing.T) {
+	e := newEnv(t)
+	dir := prepareUpdateDir(t, e)
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	e.r.now = func() time.Time { return now }
+
+	first := makeCheck(now)
+	writeCheck(t, dir, first)
+	e.r.checkUpdates(context.Background(), tg)
+
+	second := first
+	second.Target = CheckRef{Commit: "ccddee1122334455667788990011aabbccddeeff", Tag: "v1.2.0"}
+	now = now.Add(time.Minute)
+	second.At = now
+	writeCheck(t, dir, second)
+	e.r.checkUpdates(context.Background(), tg)
+	if m := e.messages(); len(m) != 2 {
+		t.Errorf("release channel: want 2 messages, got %d", len(m))
+	}
+}
+
+// TestCheckUpdatesMainResultNotPaused verifies that a run result is announced at once while a
+// target of the main channel is paused.
+func TestCheckUpdatesMainResultNotPaused(t *testing.T) {
+	e := newEnv(t)
+	dir := prepareUpdateDir(t, e)
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	e.r.now = func() time.Time { return now }
+
+	check := makeCheck(now)
+	check.Channel = "main"
+	writeCheck(t, dir, check)
+	e.r.checkUpdates(context.Background(), tg)
+
+	for i, result := range []string{StateOK, StateRolledBack, StateFailed} {
+		state := makeState(now)
+		state.ID = "0123456789abcde" + string(rune('0'+i))
+		state.Result = result
+		if err := WriteUpdateJSON(filepath.Join(dir, UpdateStateFile), state); err != nil {
+			t.Fatal(err)
+		}
+		e.r.checkUpdates(context.Background(), tg)
+		if m := e.messages(); len(m) != 2+i {
+			t.Fatalf("result %s: want %d messages, got %d", result, 2+i, len(m))
+		}
+	}
+}
+
+// TestCheckUpdatesSignedSuffix verifies that the signed mark is added for a verified target only.
+func TestCheckUpdatesSignedSuffix(t *testing.T) {
+	for _, signed := range []bool{true, false} {
+		e := newEnv(t)
+		dir := prepareUpdateDir(t, e)
+		now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+		e.r.now = func() time.Time { return now }
+
+		check := makeCheck(now)
+		check.Signed = signed
+		writeCheck(t, dir, check)
+		e.r.checkUpdates(context.Background(), tg)
+
+		m := e.messages()
+		if len(m) != 1 {
+			t.Fatalf("signed=%v: want 1 message, got %d", signed, len(m))
+		}
+		if has := strings.Contains(m[0], "signed ✓"); has != signed {
+			t.Errorf("signed=%v: mark present = %v in %q", signed, has, m[0])
+		}
+	}
+}
+
+// TestTargetPaused covers the pause rule directly: the channel, a zero time, the edges of the
+// period and a time in the future.
+func TestTargetPaused(t *testing.T) {
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	cases := []struct {
+		name     string
+		channel  string
+		targetAt time.Time
+		want     bool
+	}{
+		{"main, never announced", "main", time.Time{}, false},
+		{"main, just announced", "main", now, true},
+		{"main, inside the period", "main", now.Add(-updateMainAnnounceEvery + time.Second), true},
+		{"main, period over", "main", now.Add(-updateMainAnnounceEvery), false},
+		{"main, clock moved back", "main", now.Add(time.Minute), false},
+		{"release, just announced", "release", now, false},
+	}
+	for _, c := range cases {
+		got := targetPaused(CheckFile{Channel: c.channel}, Announced{TargetAt: c.targetAt}, now)
+		if got != c.want {
+			t.Errorf("%s: %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
 // TestCheckUpdatesResultMessage verifies the result message fields (from12→to12,
 // reason, cron_lagging, events_lost).
 func TestCheckUpdatesResultMessage(t *testing.T) {
@@ -289,5 +440,49 @@ func TestCheckUpdatesResultMessage(t *testing.T) {
 	}
 	if !strings.Contains(msg, "health check failed") {
 		t.Errorf("want reason in message: %q", msg)
+	}
+}
+
+// TestNotifyMessagesEscapeVolumeFields verifies that the fields of check.json and state.json
+// that reach a message (channel, version labels, commits, state result) are escaped, so that
+// markup written to the shared volume does not become part of the Telegram HTML.
+func TestNotifyMessagesEscapeVolumeFields(t *testing.T) {
+	const markup = `<a href="//evil">x</a>`
+	msgs := updateLangs["en"]
+
+	check := makeCheck(time.Now())
+	check.Channel = markup
+	check.Current = CheckRef{Version: markup}
+	check.Target = CheckRef{Tag: markup}
+	if msg := buildTargetMsg(check, msgs); strings.Contains(msg, "<a ") || strings.Contains(msg, "</a>") {
+		t.Errorf("target message carries markup: %q", msg)
+	}
+
+	state := makeState(time.Now())
+	state.From = markup
+	state.To = markup
+	state.Result = markup
+	if msg := buildResultMsg(state, msgs); strings.Contains(msg, "<a ") || strings.Contains(msg, "</a>") {
+		t.Errorf("result message carries markup: %q", msg)
+	}
+}
+
+// TestCheckUpdatesIgnoresInvalidCheck verifies that a check.json with a foreign channel or tag
+// sends no message and is not recorded as announced.
+func TestCheckUpdatesIgnoresInvalidCheck(t *testing.T) {
+	e := newEnv(t)
+	dir := prepareUpdateDir(t, e)
+	now := time.Date(2026, 11, 15, 12, 0, 0, 0, time.UTC)
+	e.r.now = func() time.Time { return now }
+
+	check := makeCheck(now)
+	check.Target.Tag = `v1.1.0"><a href="//evil">x</a>`
+	if err := WriteUpdateJSON(filepath.Join(dir, UpdateCheckFile), check); err != nil {
+		t.Fatal(err)
+	}
+
+	e.r.checkUpdates(context.Background(), tg)
+	if m := e.messages(); len(m) != 0 {
+		t.Errorf("invalid check.json must not be announced: %q", m)
 	}
 }

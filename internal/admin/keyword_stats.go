@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // keywordSlots is how many keyword statistics queries may run at once on one Server.

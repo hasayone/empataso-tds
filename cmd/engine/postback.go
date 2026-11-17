@@ -12,9 +12,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/server"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/server"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // postbackOriginalMax is the stored length of the raw postback status.

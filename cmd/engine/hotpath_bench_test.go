@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/detect"
-	"github.com/egerkuzma/emtds/internal/geo"
-	"github.com/egerkuzma/emtds/internal/ipindex"
-	"github.com/egerkuzma/emtds/internal/server"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/detect"
+	"github.com/hasayone/empataso-tds/internal/geo"
+	"github.com/hasayone/empataso-tds/internal/ipindex"
+	"github.com/hasayone/empataso-tds/internal/server"
 )
 
 // BenchmarkBotProfile measures reading the installation bot profile on the request path.

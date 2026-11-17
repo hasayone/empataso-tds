@@ -7,7 +7,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // maxValueLimit is the largest /api/log-values page.

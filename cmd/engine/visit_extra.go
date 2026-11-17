@@ -4,9 +4,9 @@ import (
 	"net/http"
 	"net/url"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/detect"
-	"github.com/egerkuzma/emtds/internal/router"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/detect"
+	"github.com/hasayone/empataso-tds/internal/router"
 )
 
 // applyModelHint lets the Sec-CH-UA-Model header override the model read from

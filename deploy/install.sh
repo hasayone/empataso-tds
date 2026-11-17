@@ -7,13 +7,7 @@ TDS_DIR=
 if [[ -n "$SELF" ]]; then
 	TDS_DIR=$(dirname "$(dirname "$SELF")")
 fi
-STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-${KUZTDS_INSTALL_STATE_DIR:-}}"
-if [[ -z "$STATE_DIR" ]]; then
-	STATE_DIR=/etc/emtds
-	if [[ ! -e /etc/emtds && -d /etc/kuztds ]]; then
-		STATE_DIR=/etc/kuztds
-	fi
-fi
+STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-/etc/emtds}"
 MARKER="$STATE_DIR/installed"
 SERVER_ENV="$STATE_DIR/server.env"
 INFRA_OVERRIDE="$STATE_DIR/compose.infra.yml"
@@ -22,14 +16,65 @@ UP_SCRIPT="$STATE_DIR/up.sh"
 OUR_DEPLOY_DIR="${TDS_DIR}/deploy"
 INSTALL_CHANNEL="${EMTDS_INSTALL_CHANNEL:-release}"
 INSTALL_REPO="${EMTDS_INSTALL_REPO:-}"
+# Каталог клона EmTDS, куда загрузчик кладёт код (рядом с ним создаётся временный клон).
+INSTALL_DIR="${EMTDS_INSTALL_DIR:-/opt/emtds}"
+# Общий замок установщика, агента обновлений и watchdog: пока он занят, watchdog уступает.
+LOCK_FILE="${EMTDS_INSTALL_LOCK_FILE:-/run/emtds-update.lock}"
+MEMINFO="${EMTDS_INSTALL_MEMINFO:-/proc/meminfo}"
+OS_RELEASE="${EMTDS_INSTALL_OS_RELEASE:-/etc/os-release}"
+# Скрипт агента обновлений, который ставит update.sh --install.
+UPDATE_LIB_SCRIPT=/usr/local/lib/emtds/update.sh
+# Корень, где ищутся каталоги прежних установок (<корень>/*tds/installed).
+OLD_ETC_ROOT="${EMTDS_INSTALL_OLD_ETC_ROOT:-/etc}"
+ALLOWED_SIGNERS="$STATE_DIR/allowed_signers"
+# Необязательный файл ключей подписи (--allowed-signers): без него подпись не проверяется и не включается.
+INSTALL_SIGNERS=
+# 1 — не ставить nginx и не применять apply-edge.sh (--no-edge).
+NO_EDGE=0
+# 1 — apply-edge.sh отработал: админка открыта на https://<публичный IP>/.
+INSTALL_EDGE_APPLIED=0
+# Исходные аргументы командной строки: загрузчик передаёт их клону через exec.
+ORIG_ARGS=()
+# Временный клон загрузчика; удаляется при любом выходе, пока не переименован в INSTALL_DIR.
+LOADER_TMP=
 export EMTDS_SERVER_ENV="$SERVER_ENV"
-if [[ -f "${OUR_DEPLOY_DIR}/apply-edge.sh" ]]; then
+
+# Назначение: можно ли удалить одноразовый установщик после успеха.
+# Параметры: $1 — путь к install.sh.
+# Результат: код 0 если удаление разрешено.
+# Ошибки: код 1.
+can_self_delete() {
+	local path=$1 base parent
+	if [[ ! -f "$path" ]] || [[ -L "$path" ]]; then
+		return 1
+	fi
+	base=$(basename "$path")
+	[[ "$base" == install.sh ]] || return 1
+	parent=$(basename "$(dirname "$path")")
+	[[ "$parent" == deploy ]] || return 1
+	return 0
+}
+
+# Назначение: нужен ли режим загрузчика: установщик запущен не из deploy/ клона или в каталоге нет кода.
+# Параметры: $1 — путь к install.sh; $2 — каталог кода (на уровень выше deploy/).
+# Результат: код 0, если нужен загрузчик.
+# Ошибки: код 1 — код уже на месте, работает основной сценарий.
+loader_mode_needed() {
+	local path=$1 tds_dir=$2
+	if ! can_self_delete "$path"; then
+		return 0
+	fi
+	[[ ! -f "${tds_dir}/deploy/docker-compose.app.yml" ]]
+}
+
+# Библиотека apply-edge.sh подключается только из дерева EmTDS (deploy/install.sh с compose-файлом рядом):
+# загрузчик, лежащий, например, в /root, не должен исполнять файл из каталога выше себя.
+if ! loader_mode_needed "$SELF" "$TDS_DIR" && [[ -f "${OUR_DEPLOY_DIR}/apply-edge.sh" ]]; then
 	# shellcheck source=apply-edge.sh
 	source "${OUR_DEPLOY_DIR}/apply-edge.sh"
 fi
 APP_CONTAINERS=(emtds-engine emtds-admin emtds-cron emtds-php)
-LEGACY_APP_CONTAINERS=(kuztds-engine kuztds-admin kuztds-cron kuztds-php)
-INFRA_COMPOSE=(docker compose -p deploy --env-file "$TDS_DIR/.env" --env-file "$SERVER_ENV" -f "$TDS_DIR/deploy/docker-compose.yml" -f "$INFRA_OVERRIDE")
+INFRA_COMPOSE=(docker compose -p emtds-infra --env-file "$TDS_DIR/.env" --env-file "$SERVER_ENV" -f "$TDS_DIR/deploy/docker-compose.yml" -f "$INFRA_OVERRIDE")
 APP_COMPOSE=(docker compose --env-file "$TDS_DIR/.env" --env-file "$SERVER_ENV" -f "$TDS_DIR/deploy/docker-compose.app.yml" -f "$APP_OVERRIDE")
 
 # Назначение: вывести сообщение пользователю с префиксом установщика.
@@ -38,6 +83,23 @@ APP_COMPOSE=(docker compose --env-file "$TDS_DIR/.env" --env-file "$SERVER_ENV" 
 # Ошибки: нет.
 msg() {
 	printf 'emtds-install: %s\n' "$*"
+}
+
+# Назначение: прервать установку с сообщением об ошибке.
+# Параметры: текст сообщения.
+# Результат: строка на stderr, выход с кодом 1.
+# Ошибки: всегда код 1.
+die() {
+	msg "$*" >&2
+	exit 1
+}
+
+# Назначение: проверить права root; песочница тестов (EMTDS_INSTALL_SANDBOX=1) проверку пропускает.
+# Параметры: нет.
+# Результат: код 0, если права есть.
+# Ошибки: код 1.
+is_root() {
+	[[ "${EMTDS_INSTALL_SANDBOX:-}" == 1 ]] || [[ $(id -u) -eq 0 ]]
 }
 
 # Назначение: классифицировать сервер по RAM, CPU и свободному месту.
@@ -156,6 +218,7 @@ EMTDS_REDIS_PUBLISH=127.0.0.1:6379:6379
 EMTDS_ADMIN_PUBLISH=127.0.0.1:8090:8090
 EMTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080
 EMTDS_PUBLIC_IP=${public_ip}
+EMTDS_ENV=production
 EOF
 }
 
@@ -313,7 +376,7 @@ check_env() {
 		printf 'emtds-install: задайте непустой CLICKHOUSE_PASSWORD в .env\n' >&2
 		return 1
 	fi
-	val=$(env_value_compat "$file" ADMIN_PASSWORD)
+	val=$(env_value "$file" EMTDS_ADMIN_PASSWORD)
 	if [[ -n "$val" && "$val" == admin ]]; then
 		printf 'emtds-install: EMTDS_ADMIN_PASSWORD не должен быть значением admin\n' >&2
 		return 1
@@ -321,13 +384,14 @@ check_env() {
 	return 0
 }
 
-# Назначение: собрать .env коробки с паролем ClickHouse и без пароля админки.
-# Параметры: $1 — пароль ClickHouse.
+# Назначение: собрать .env коробки с паролем ClickHouse, токеном первого входа и без пароля админки.
+# Параметры: $1 — пароль ClickHouse; $2 — токен первого входа (EMTDS_SETUP_TOKEN).
 # Результат: содержимое файла на stdout.
 # Ошибки: нет.
 render_box_env() {
-	local ch_pw=$1
+	local ch_pw=$1 setup_token=$2
 	printf 'CLICKHOUSE_PASSWORD=%s\n' "$ch_pw"
+	printf 'EMTDS_SETUP_TOKEN=%s\n' "$setup_token"
 }
 
 # Назначение: канал apt Docker для поддерживаемой системы.
@@ -346,37 +410,47 @@ docker_apt_channel() {
 	esac
 }
 
-# Назначение: создать .env коробки, если его нет, либо проверить существующий.
+# Назначение: дописать в существующий .env токен первого входа, если его нет или он не 32 знака hex.
 # Параметры: $1 — путь к .env.
-# Результат: файл с паролем ClickHouse; пароль админки не добавляется и не печатается.
+# Результат: в файле EMTDS_SETUP_TOKEN из 32 строчных шестнадцатеричных знаков (пустое, с пробелами
+# и любое другое значение заменяется новым); остальные строки и режим файла не меняются.
+# Ошибки: openssl или запись, код 1.
+ensure_setup_token() {
+	local file=$1 token rest
+	if [[ "$(env_value "$file" EMTDS_SETUP_TOKEN)" =~ ^[0123456789abcdef]{32}$ ]]; then
+		return 0
+	fi
+	if ! token=$(openssl rand -hex 16); then
+		msg "не удалось сгенерировать токен первого входа" >&2
+		return 1
+	fi
+	rest=$(grep -v '^EMTDS_SETUP_TOKEN=' "$file" || true)
+	{
+		[[ -z "$rest" ]] || printf '%s\n' "$rest"
+		printf 'EMTDS_SETUP_TOKEN=%s\n' "$token"
+	} | write_atomic "$file" 0600
+}
+
+# Назначение: создать .env коробки, если его нет, либо проверить существующий и дополнить токеном.
+# Параметры: $1 — путь к .env.
+# Результат: файл с паролем ClickHouse и токеном первого входа; пароль админки не добавляется и не печатается.
 # Ошибки: openssl, запись или check_env, код 1.
 ensure_box_env() {
-	local file=$1 pw
+	local file=$1 pw token
 	if [[ -f "$file" ]]; then
-		check_env "$file"
+		check_env "$file" || return 1
+		ensure_setup_token "$file"
 		return
 	fi
 	if ! pw=$(openssl rand -hex 24); then
 		msg "не удалось сгенерировать пароль ClickHouse" >&2
 		return 1
 	fi
-	render_box_env "$pw" | write_atomic "$file" 0600
-}
-
-# Назначение: можно ли удалить одноразовый установщик после успеха.
-# Параметры: $1 — путь к install.sh.
-# Результат: код 0 если удаление разрешено.
-# Ошибки: код 1.
-can_self_delete() {
-	local path=$1 base parent
-	if [[ ! -f "$path" ]] || [[ -L "$path" ]]; then
+	if ! token=$(openssl rand -hex 16); then
+		msg "не удалось сгенерировать токен первого входа" >&2
 		return 1
 	fi
-	base=$(basename "$path")
-	[[ "$base" == install.sh ]] || return 1
-	parent=$(basename "$(dirname "$path")")
-	[[ "$parent" == deploy ]] || return 1
-	return 0
+	render_box_env "$pw" "$token" | write_atomic "$file" 0600
 }
 
 # Назначение: экспортировать build-args из git, если .git присутствует в TDS_DIR.
@@ -392,6 +466,18 @@ export_build_args() {
 		EMTDS_COMMIT=$(git -c safe.directory="$TDS_DIR" -C "$TDS_DIR" rev-parse HEAD 2>/dev/null || true)
 		EMTDS_COMMIT_DATE=$(git -c safe.directory="$TDS_DIR" -C "$TDS_DIR" show -s --format=%cI HEAD 2>/dev/null || true)
 	fi
+}
+
+# Назначение: убедиться до сборки, что у git-дерева определён полный коммит.
+# Параметры: нет (EMTDS_COMMIT из export_build_args, каталог TDS_DIR).
+# Результат: код 0, если .git нет или EMTDS_COMMIT состоит из 40 шестнадцатеричных знаков.
+# Ошибки: .git есть, а коммит не определён (пустое дерево, повреждение) — код 1: образ получил бы dev-сборку.
+require_build_commit() {
+	if [[ -d "${TDS_DIR}/.git" && ! "${EMTDS_COMMIT:-}" =~ ^[0-9a-f]{40}$ ]]; then
+		msg "не удалось определить коммит git-дерева ${TDS_DIR}; сборка отменена" >&2
+		return 1
+	fi
+	return 0
 }
 
 # Назначение: записать содержимое stdin в файл атомарно.
@@ -423,7 +509,7 @@ diagnose() {
 # Результат: число на stdout.
 # Ошибки: нет.
 mem_mib() {
-	awk '/^MemTotal:/ { printf "%d", $2/1024 }' /proc/meminfo
+	awk '/^MemTotal:/ { printf "%d", $2/1024 }' "$MEMINFO"
 }
 
 # Назначение: свободное место в GiB для Docker или /var.
@@ -505,18 +591,11 @@ check_foreign_resources() {
 		[[ -z "$cid" ]] && continue
 		wd=$(container_label "$cid" com.docker.compose.project.working_dir)
 		if [[ "$wd" != "$OUR_DEPLOY_DIR" ]]; then
-			msg "проект deploy принадлежит другому стеку" >&2
+			msg "проект emtds-infra принадлежит другому стеку" >&2
 			exit 1
 		fi
 		our_count=$((our_count + 1))
-	done < <(docker ps -aq --filter label=com.docker.compose.project=deploy 2>/dev/null || true)
-
-	for name in "${LEGACY_APP_CONTAINERS[@]}"; do
-		if docker container inspect "$name" >/dev/null 2>&1; then
-			msg "найден контейнер ${name} стека до переименования; запустите deploy/migrate-emtds.sh" >&2
-			exit 1
-		fi
-	done
+	done < <(docker ps -aq --filter label=com.docker.compose.project=emtds-infra 2>/dev/null || true)
 
 	for name in "${APP_CONTAINERS[@]}"; do
 		if docker container inspect "$name" >/dev/null 2>&1; then
@@ -530,10 +609,10 @@ check_foreign_resources() {
 		fi
 	done
 
-	if docker network inspect deploy_default >/dev/null 2>&1; then
-		proj=$(docker network inspect -f '{{ index .Labels "com.docker.compose.project"}}' deploy_default 2>/dev/null || true)
-		if [[ "$proj" != deploy ]]; then
-			msg "сеть deploy_default принадлежит другому проекту" >&2
+	if docker network inspect emtds-infra_default >/dev/null 2>&1; then
+		proj=$(docker network inspect -f '{{ index .Labels "com.docker.compose.project"}}' emtds-infra_default 2>/dev/null || true)
+		if [[ "$proj" != emtds-infra ]]; then
+			msg "сеть emtds-infra_default принадлежит другому проекту" >&2
 			exit 1
 		fi
 	fi
@@ -572,7 +651,7 @@ check_foreign_resources() {
 wait_clickhouse_schema() {
 	local deadline=$((SECONDS + 300)) out
 	while (( SECONDS < deadline )); do
-		out=$(infra_compose exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" -q "SELECT count() FROM system.columns WHERE database = '\''kuztds'\'' AND table = '\''events'\'' AND name = '\''step'\''"' 2>/dev/null || true)
+		out=$(infra_compose exec -T clickhouse sh -c 'clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" -q "SELECT count() FROM system.columns WHERE database = '\''emtds'\'' AND table = '\''events'\'' AND name = '\''step'\''"' 2>/dev/null || true)
 		if [[ "$(echo "$out" | tr -d '[:space:]')" == 1 ]]; then
 			return 0
 		fi
@@ -670,6 +749,327 @@ write_state_files() {
 	render_up_sh | write_atomic "$UP_SCRIPT" 0755
 }
 
+# Назначение: установить пакеты apt без вопросов; замок установщика (fd 9) в apt не наследуется.
+# Параметры: имена пакетов.
+# Результат: пакеты установлены.
+# Ошибки: apt-get завершился с ошибкой, код 1.
+apt_install() {
+	export DEBIAN_FRONTEND=noninteractive
+	apt-get -o DPkg::Lock::Timeout=300 update -y 9>&-
+	apt-get -o DPkg::Lock::Timeout=300 install -y "$@" 9>&-
+}
+
+# Назначение: выполнить git загрузчика с закреплёнными параметрами безопасности:
+# без системной и пользовательской конфигурации, хуков, запросов пароля и транспорта ext.
+# Параметры: аргументы git.
+# Результат: код возврата git.
+# Ошибки: код git.
+loader_git() {
+	GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
+		git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c core.sshCommand= \
+		-c gpg.program=gpg -c gpg.ssh.program=ssh-keygen -c protocol.ext.allow=never "$@"
+}
+
+# Назначение: выполнить loader_git внутри клона (safe.directory закреплён на этот каталог).
+# Параметры: $1 — каталог клона; остальные — аргументы git.
+# Результат: код возврата git.
+# Ошибки: код git.
+loader_git_in() {
+	local dir=$1
+	shift
+	loader_git -c "safe.directory=${dir}" -C "$dir" "$@"
+}
+
+# Назначение: выбрать ссылку для checkout по каналу установки.
+# Параметры: $1 — каталог клона; $2 — канал (main или release).
+# Результат: refs/remotes/origin/main или refs/tags/<максимальный vX.Y.Z> на stdout; тег release обязан
+# быть предком origin/main, как в update.sh.
+# Ошибки: нет origin/main, нет тегов vX.Y.Z или тег вне истории main — сообщение на stderr, код 1.
+loader_pick_ref() {
+	local dir=$1 channel=$2 tag sha
+	case "$channel" in
+		main)
+			if ! loader_git_in "$dir" rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
+				msg "в репозитории нет ветки main" >&2
+				return 1
+			fi
+			printf 'refs/remotes/origin/main'
+			;;
+		release)
+			tag=$(loader_git_in "$dir" tag -l 'v*' | LC_ALL=C grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1 || true)
+			if [[ -z "$tag" ]]; then
+				msg "в репозитории нет тегов vX.Y.Z: канал release невозможен, используйте --channel main" >&2
+				return 1
+			fi
+			if ! sha=$(loader_git_in "$dir" rev-parse --verify --quiet "refs/tags/${tag}^{commit}"); then
+				msg "не удалось разрешить тег ${tag}" >&2
+				return 1
+			fi
+			if ! loader_git_in "$dir" rev-parse --verify --quiet refs/remotes/origin/main >/dev/null; then
+				msg "в репозитории нет ветки main: тег ${tag} нельзя сверить с ней" >&2
+				return 1
+			fi
+			if ! loader_git_in "$dir" merge-base --is-ancestor "$sha" refs/remotes/origin/main; then
+				msg "тег ${tag} не является предком origin/main" >&2
+				return 1
+			fi
+			printf 'refs/tags/%s' "$tag"
+			;;
+		*)
+			msg "--channel: допустимо release или main" >&2
+			return 1
+			;;
+	esac
+}
+
+# Назначение: проверить подпись SSH у того, что вытащено в каталог клона, до запуска его установщика.
+# Параметры: $1 — каталог клона; $2 — ссылка из loader_pick_ref; $3 — файл allowed_signers.
+# Результат: код 0, если HEAD равен коммиту ссылки и подпись верна. Ссылка refs/tags/* — подпись тега,
+# иначе — подпись коммита HEAD.
+# Ошибки: файл не читается, HEAD не совпал со ссылкой, подписи нет или она неверна — сообщение на stderr, код 1.
+loader_verify() {
+	local dir=$1 ref=$2 signers=$3 out head want
+	if [[ ! -r "$signers" ]]; then
+		msg "--allowed-signers: файл ${signers} не читается" >&2
+		return 1
+	fi
+	head=$(loader_git_in "$dir" rev-parse HEAD 2>/dev/null || true)
+	want=$(loader_git_in "$dir" rev-parse --verify --quiet "${ref}^{commit}" 2>/dev/null || true)
+	if [[ -z "$head" || "$head" != "$want" ]]; then
+		msg "HEAD клона не совпадает с ${ref}: подпись проверять не у чего" >&2
+		return 1
+	fi
+	if [[ "$ref" == refs/tags/* ]]; then
+		out=$(loader_git_in "$dir" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=${signers}" verify-tag "$ref" 2>&1) || {
+			printf '%s\n' "$out" >&2
+			msg "подпись тега ${ref#refs/tags/} не прошла проверку" >&2
+			return 1
+		}
+		return 0
+	fi
+	out=$(loader_git_in "$dir" -c gpg.format=ssh -c "gpg.ssh.allowedSignersFile=${signers}" verify-commit HEAD 2>&1) || {
+		printf '%s\n' "$out" >&2
+		msg "подпись коммита HEAD не прошла проверку" >&2
+		return 1
+	}
+}
+
+# Назначение: удалить временный клон загрузчика (ловушка EXIT).
+# Параметры: нет.
+# Результат: каталог LOADER_TMP удалён, если он ещё не переименован в INSTALL_DIR.
+# Ошибки: нет.
+loader_cleanup() {
+	if [[ -n "$LOADER_TMP" && -d "$LOADER_TMP" ]]; then
+		rm -rf -- "$LOADER_TMP"
+	fi
+}
+
+# Назначение: удалить остатки прерванных прогонов загрузчика (например, после kill -9): каталоги
+# <INSTALL_DIR>.clone.XXXXXX, где XXXXXX — шесть знаков [A-Za-z0-9], внутри есть .git, это не ссылка,
+# и они не менялись больше часа (параллельный прогон не задевается). Чужие имена не трогаются.
+# Параметры: нет (INSTALL_DIR).
+# Результат: старые временные клоны удалены.
+# Ошибки: нет.
+loader_sweep_stale() {
+	local dir prefix="${INSTALL_DIR}.clone."
+	for dir in "${prefix}"??????; do
+		[[ "${dir#"$prefix"}" =~ ^[A-Za-z0-9]{6}$ ]] || continue
+		[[ -d "$dir" && ! -L "$dir" && -d "${dir}/.git" ]] || continue
+		[[ -n "$(find "$dir" -maxdepth 0 -mmin +60 2>/dev/null)" ]] || continue
+		rm -rf -- "$dir"
+	done
+}
+
+# Назначение: обновить в существующем клоне ветки и теги по origin. Локальные теги сначала удаляются,
+# чтобы снятый в origin тег не остался кандидатом в release; ветки берутся явным refspec, а настроенные
+# у клона refspec игнорируются.
+# Параметры: $1 — каталог клона.
+# Результат: refs/remotes/origin/* и теги совпадают с origin.
+# Ошибки: удаление тегов или fetch не удались — код 1.
+loader_fetch() {
+	local dir=$1 tags
+	tags=$(loader_git_in "$dir" tag -l) || return 1
+	if [[ -n "$tags" ]]; then
+		# Имена ссылок git не содержат пробелов и шаблонных знаков, разбиение по словам безопасно.
+		# shellcheck disable=SC2086
+		loader_git_in "$dir" tag -d $tags >/dev/null || return 1
+	fi
+	loader_git_in "$dir" -c 'remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*' \
+		fetch --quiet --tags --force origin '+refs/heads/*:refs/remotes/origin/*'
+}
+
+# Назначение: перевести клон на версию канала (общий шаг для нового и существующего клона):
+# выбрать ссылку, checkout --detach, проверить подпись при --allowed-signers, убедиться в наличии
+# файлов, которым передаётся управление.
+# Параметры: $1 — каталог клона (INSTALL_CHANNEL, INSTALL_SIGNERS).
+# Результат: код 0, клон на detached HEAD выбранной версии.
+# Ошибки: версия не выбрана, checkout, подпись или нет deploy/install.sh и deploy/docker-compose.app.yml —
+# сообщение на stderr, код 1.
+loader_checkout() {
+	local dir=$1 ref file
+	ref=$(loader_pick_ref "$dir" "$INSTALL_CHANNEL") || return 1
+	if ! loader_git_in "$dir" checkout --quiet --detach "${ref}^{commit}"; then
+		msg "не удалось перейти на ${ref}" >&2
+		return 1
+	fi
+	if [[ -n "$INSTALL_SIGNERS" ]]; then
+		loader_verify "$dir" "$ref" "$INSTALL_SIGNERS" || return 1
+	fi
+	for file in deploy/install.sh deploy/docker-compose.app.yml; do
+		if [[ ! -f "${dir}/${file}" ]]; then
+			msg "в ${dir} нет ${file}: это не код EmTDS" >&2
+			return 1
+		fi
+	done
+}
+
+# Назначение: склонировать репозиторий целиком во временный каталог рядом с INSTALL_DIR,
+# перейти на версию канала (loader_checkout) и атомарно переименовать.
+# Параметры: нет (INSTALL_REPO, INSTALL_DIR).
+# Результат: INSTALL_DIR — клон на detached HEAD выбранной версии с историей и тегами.
+# Ошибки: clone, выбор версии, подпись или rename не удались — сообщение, код 1, временный клон удалён.
+loader_clone() {
+	local tmp
+	install -d -m 0755 "$(dirname "$INSTALL_DIR")"
+	tmp=$(mktemp -d "${INSTALL_DIR}.clone.XXXXXX")
+	LOADER_TMP=$tmp
+	trap loader_cleanup EXIT
+	loader_git clone --quiet -- "$INSTALL_REPO" "$tmp" || die "не удалось клонировать ${INSTALL_REPO}"
+	loader_checkout "$tmp" || exit 1
+	chmod 0755 "$tmp"
+	mv -T -- "$tmp" "$INSTALL_DIR" || die "не удалось переименовать клон в ${INSTALL_DIR}"
+	LOADER_TMP=
+}
+
+# Назначение: принять уже существующий INSTALL_DIR: только чистый клон с тем же origin; затем он
+# обновляется и переводится на версию канала так же, как свежий клон (fetch и loader_checkout).
+# Параметры: нет (INSTALL_DIR, INSTALL_REPO).
+# Результат: код 0, клон на detached HEAD выбранной версии; при --allowed-signers подпись проверена
+# именно у неё.
+# Ошибки: не клон, другой origin, локальные правки, fetch, выбор версии или подпись — сообщение, код 1.
+loader_reuse_clone() {
+	local dir=$INSTALL_DIR origin
+	if [[ -L "$dir" || ! -d "${dir}/.git" ]]; then
+		die "каталог ${dir} уже существует и не является клоном: переместите его и повторите"
+	fi
+	origin=$(loader_git_in "$dir" remote get-url origin 2>/dev/null || true)
+	if [[ "$origin" != "$INSTALL_REPO" ]]; then
+		die "в ${dir} клон другого репозитория (origin не совпадает с --repo)"
+	fi
+	if [[ -n "$(loader_git_in "$dir" status --porcelain 2>/dev/null || echo dirty)" ]]; then
+		die "в клоне ${dir} есть локальные изменения: очистите дерево и повторите"
+	fi
+	loader_fetch "$dir" || die "не удалось получить обновления из ${INSTALL_REPO}"
+	loader_checkout "$dir" || exit 1
+}
+
+# Назначение: проверить адрес репозитория по правилу update.sh (validate_repo_url): https://хост/путь,
+# git@хост:путь.git или ssh://git@хост/путь, без учётных данных и пробельных знаков. В песочнице тестов
+# (EMTDS_INSTALL_SANDBOX=1) допустим ещё абсолютный локальный путь; http://, git:// и file:// отклоняются всегда.
+# Параметры: $1 — адрес.
+# Результат: код 0, если адрес допустим.
+# Ошибки: код 1 без вывода: адрес в сообщения не попадает.
+valid_repo_url() {
+	local url=$1
+	local creds='^https?://[^@]+@' allowed='^(git@[^:]+:.+\.git|ssh://git@[^/]+/.+|https://[^/]+/.+)$' local_path='^/.+'
+	[[ -n "$url" && "$url" != *[[:space:]]* && "$url" != *[[:cntrl:]]* ]] || return 1
+	[[ ! "$url" =~ $creds ]] || return 1
+	[[ "$url" =~ $allowed ]] && return 0
+	[[ "${EMTDS_INSTALL_SANDBOX:-}" == 1 && "$url" =~ $local_path ]]
+}
+
+# Назначение: отказать до любых действий, если --repo не проходит valid_repo_url.
+# Параметры: нет (INSTALL_REPO).
+# Результат: код 0, адрес допустим.
+# Ошибки: сообщение без адреса и код 1.
+require_valid_repo() {
+	valid_repo_url "$INSTALL_REPO" || die "--repo: недопустимый адрес (нужен https://хост/путь, git@хост:путь.git или ssh://git@хост/путь без учётных данных)"
+}
+
+# Назначение: режим загрузчика — получить код из репозитория и передать управление его установщику.
+# Параметры: нет (ORIG_ARGS, INSTALL_REPO и остальные настройки; адрес уже проверен require_valid_repo).
+# Результат: exec bash INSTALL_DIR/deploy/install.sh с теми же аргументами и EMTDS_INSTALL_LOADED=1;
+# сюда управление не возвращается.
+# Ошибки: повторный вход в загрузчик, нет --repo, apt, клон, версия, подпись или нет compose-файла —
+# сообщение, код 1.
+run_loader() {
+	[[ "${EMTDS_INSTALL_LOADED:-}" != 1 ]] || die "загрузчик запущен повторно из уже полученного кода: установщик клона сам не распознал свой каталог; остановка вместо бесконечного перезапуска"
+	[[ -n "$INSTALL_REPO" ]] || die "режим загрузчика: задайте --repo URL репозитория"
+	[[ -z "$INSTALL_SIGNERS" || -r "$INSTALL_SIGNERS" ]] || die "--allowed-signers: файл ${INSTALL_SIGNERS} не читается"
+	msg "режим загрузчика: код EmTDS из ${INSTALL_REPO} в ${INSTALL_DIR}"
+	apt_install git ca-certificates curl
+	loader_sweep_stale
+	if [[ -e "$INSTALL_DIR" || -L "$INSTALL_DIR" ]]; then
+		loader_reuse_clone
+	else
+		loader_clone
+	fi
+	[[ -f "${INSTALL_DIR}/deploy/docker-compose.app.yml" ]] || die "в ${INSTALL_DIR} нет deploy/docker-compose.app.yml: передавать управление нечему"
+	EMTDS_INSTALL_LOADED=1 exec bash "${INSTALL_DIR}/deploy/install.sh" "${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}"
+}
+
+# Назначение: взять общий замок установщика и агента обновлений на весь прогон (fd 9).
+# Параметры: нет.
+# Результат: замок удерживается до выхода или до release_run_lock.
+# Ошибки: замок занят другим процессом — сообщение, код 1.
+acquire_run_lock() {
+	mkdir -p "$(dirname "$LOCK_FILE")"
+	exec 9>"$LOCK_FILE"
+	flock -n 9 || die "уже идёт установка или обновление (занят ${LOCK_FILE}); дождитесь завершения и повторите"
+}
+
+# Назначение: отпустить замок: update.sh берёт тот же файл сам и отказал бы при занятом замке.
+# Параметры: нет.
+# Результат: fd 9 закрыт, замок свободен.
+# Ошибки: нет.
+release_run_lock() {
+	exec 9>&-
+}
+
+# Назначение: положить файл ключей подписи на место для агента обновлений, если он передан.
+# Параметры: нет (INSTALL_SIGNERS).
+# Результат: STATE_DIR/allowed_signers с правами 0644; без флага файл не создаётся, подпись выключена.
+# Ошибки: файл не читается или запись не удалась, код 1.
+install_allowed_signers() {
+	[[ -n "$INSTALL_SIGNERS" ]] || return 0
+	[[ -r "$INSTALL_SIGNERS" ]] || die "--allowed-signers: файл ${INSTALL_SIGNERS} не читается"
+	write_atomic "$ALLOWED_SIGNERS" 0644 <"$INSTALL_SIGNERS"
+}
+
+# Назначение: поставить nginx пакетом, если его нет.
+# Параметры: $1 — ubuntu или debian на поддерживаемой версии, иначе пусто.
+# Результат: nginx доступен в PATH.
+# Ошибки: неподдерживаемая система или сбой apt — сообщение, код 1.
+ensure_nginx() {
+	local distro=$1
+	if command -v nginx >/dev/null 2>&1; then
+		return 0
+	fi
+	if [[ -z "$distro" ]]; then
+		die "nginx не найден, а пакеты ставятся только на Ubuntu 22.04, 24.04 и Debian 12: установите nginx вручную или запустите с --no-edge"
+	fi
+	msg "nginx не найден, ставлю пакет"
+	apt_install nginx || die "не удалось установить nginx"
+	command -v nginx >/dev/null 2>&1 || die "после установки nginx недоступен"
+}
+
+# Назначение: напечатать в консоль адрес первого входа и токен (только stdout, в файлы не пишется).
+# Параметры: $1 — публичный IPv4.
+# Результат: строки на stdout.
+# Ошибки: нет.
+print_first_login() {
+	local public_ip=$1 token
+	token=$(env_value "$TDS_DIR/.env" EMTDS_SETUP_TOKEN)
+	if (( INSTALL_EDGE_APPLIED )); then
+		msg "вход: https://${public_ip}/ (сертификат самоподписанный, браузер предупредит)"
+	else
+		msg "вход: ssh -L 8090:127.0.0.1:8090 user@host, затем http://127.0.0.1:8090/"
+	fi
+	if [[ -n "$token" ]]; then
+		msg "токен первого входа (нужен при создании администратора, сохраните): ${token}"
+	fi
+}
+
 # Назначение: внутренний self-test без root и Docker.
 # Параметры: нет.
 # Результат: self-test ok, код 0.
@@ -743,9 +1143,13 @@ run_self_test() {
 	assert_eq "$(grep -c 'GOMEMLIMIT: ${EMTDS_GOMEMLIMIT:-1840MiB}' <<<"$(render_app_override 16000)")" 2 app_gomemlimit_2g
 
 	env_out=$(render_server_env 203.0.113.1)
-	assert_eq "$(echo "$env_out" | wc -l | tr -d ' ')" 6 server_env_lines
+	assert_eq "$(echo "$env_out" | wc -l | tr -d ' ')" 7 server_env_lines
 	if [[ "$env_out" != *'EMTDS_ENGINE_PUBLISH=127.0.0.1:18080:8080'* ]]; then
 		printf 'self-test FAIL: server.env без порта движка 18080\n'
+		exit 1
+	fi
+	if [[ "$env_out" != *'EMTDS_ENV=production'* ]]; then
+		printf 'self-test FAIL: server.env без EMTDS_ENV=production\n'
 		exit 1
 	fi
 	if [[ "$env_out" != *'EMTDS_PUBLIC_IP=203.0.113.1'* ]]; then
@@ -783,21 +1187,50 @@ run_self_test() {
 		printf 'self-test FAIL: check_env admin=admin\n'
 		exit 1
 	fi
-	printf 'CLICKHOUSE_PASSWORD=ch\nKUZTDS_ADMIN_PASSWORD=admin\n' >"$f"
-	if check_env "$f" 2>/dev/null; then
-		printf 'self-test FAIL: check_env legacy admin=admin\n'
-		exit 1
-	fi
 	printf 'CLICKHOUSE_PASSWORD=ch\nEMTDS_ADMIN_PASSWORD=\n' >"$f"
 	check_env "$f" 2>/dev/null || { printf 'self-test FAIL: check_env empty admin\n'; exit 1; }
 	printf 'CLICKHOUSE_PASSWORD=ch\n' >"$f"
 	check_env "$f" 2>/dev/null || { printf 'self-test FAIL: check_env no admin key\n'; exit 1; }
 	local box_env
-	box_env=$(render_box_env 'cafebabe')
-	if [[ "$box_env" != 'CLICKHOUSE_PASSWORD=cafebabe' || "$box_env" == *EMTDS_ADMIN_PASSWORD* ]]; then
+	box_env=$(render_box_env 'cafebabe' 'feedface')
+	if [[ "$box_env" != $'CLICKHOUSE_PASSWORD=cafebabe\nEMTDS_SETUP_TOKEN=feedface' || "$box_env" == *EMTDS_ADMIN_PASSWORD* ]]; then
 		printf 'self-test FAIL: render_box_env\n'
 		exit 1
 	fi
+	local box_file="$SELFTEST_TMP/box.env"
+	printf 'CLICKHOUSE_PASSWORD=ch' >"$box_file"
+	ensure_box_env "$box_file" || { printf 'self-test FAIL: ensure_box_env existing\n'; exit 1; }
+	[[ "$(env_value "$box_file" CLICKHOUSE_PASSWORD)" == ch ]] || { printf 'self-test FAIL: ensure_box_env keeps password\n'; exit 1; }
+	assert_eq "$(env_value "$box_file" EMTDS_SETUP_TOKEN | tr -d '0-9a-f' | wc -c | tr -d ' ')" 0 setup_token_hex
+	assert_eq "$(env_value "$box_file" EMTDS_SETUP_TOKEN | wc -c | tr -d ' ')" 32 setup_token_len
+	local token_before
+	token_before=$(env_value "$box_file" EMTDS_SETUP_TOKEN)
+	ensure_box_env "$box_file"
+	assert_eq "$(env_value "$box_file" EMTDS_SETUP_TOKEN)" "$token_before" setup_token_kept
+	assert_eq "$(grep -c '^EMTDS_SETUP_TOKEN=' "$box_file")" 1 setup_token_once
+	printf 'CLICKHOUSE_PASSWORD=ch\nEMTDS_SETUP_TOKEN=\n' >"$box_file"
+	ensure_box_env "$box_file"
+	assert_eq "$(grep -c '^EMTDS_SETUP_TOKEN=' "$box_file")" 1 setup_token_empty_replaced
+	assert_eq "$(env_value "$box_file" EMTDS_SETUP_TOKEN | wc -c | tr -d ' ')" 32 setup_token_empty_filled
+	local bad_token good_token
+	good_token=$(printf 'ab%.0s' {1..16})
+	for bad_token in " ${good_token}" "${good_token} " short "${good_token^^}" "${good_token:0:31}g" "${good_token}00"; do
+		printf 'CLICKHOUSE_PASSWORD=ch\nEMTDS_SETUP_TOKEN=%s\n' "$bad_token" >"$box_file"
+		ensure_box_env "$box_file"
+		assert_eq "$(grep -c '^EMTDS_SETUP_TOKEN=' "$box_file")" 1 "setup_token_bad_once:${bad_token}"
+		[[ "$(env_value "$box_file" EMTDS_SETUP_TOKEN)" =~ ^[0123456789abcdef]{32}$ && "$(env_value "$box_file" EMTDS_SETUP_TOKEN)" != "${bad_token// /}" ]] \
+			|| { printf 'self-test FAIL: setup_token_bad_replaced:%s\n' "$bad_token"; exit 1; }
+	done
+	local repo_ok repo_bad
+	for repo_ok in 'https://example.com/owner/repo.git' 'https://example.com/owner/repo' 'git@example.com:owner/repo.git' 'ssh://git@example.com/owner/repo.git'; do
+		EMTDS_INSTALL_SANDBOX= valid_repo_url "$repo_ok" || { printf 'self-test FAIL: valid_repo_url должен принять %s\n' "$repo_ok"; exit 1; }
+	done
+	for repo_bad in '' 'https://user:pass@example.com/o/r.git' 'https://user@example.com/o/r.git' 'http://example.com/o/r.git' 'git://example.com/o/r.git' \
+		'file:///tmp/r.git' '/tmp/r.git' 'ftp://example.com/o/r.git' 'git@example.com:owner/repo' 'https://example.com' 'https://example.com/o/r .git' $'https://example.com/o/r.git\nhttps://example.org/x' '-oops'; do
+		EMTDS_INSTALL_SANDBOX= valid_repo_url "$repo_bad" && { printf 'self-test FAIL: valid_repo_url должен отклонить %q\n' "$repo_bad"; exit 1; }
+	done
+	EMTDS_INSTALL_SANDBOX=1 valid_repo_url /tmp/r.git || { printf 'self-test FAIL: в песочнице локальный путь допустим\n'; exit 1; }
+	EMTDS_INSTALL_SANDBOX=1 valid_repo_url file:///tmp/r.git && { printf 'self-test FAIL: file:// отклоняется и в песочнице\n'; exit 1; }
 	local channel
 	channel=$(docker_apt_channel debian bookworm) || { printf 'self-test FAIL: debian bookworm\n'; exit 1; }
 	assert_eq "$channel" "debian bookworm" docker_debian
@@ -826,9 +1259,16 @@ run_self_test() {
 	can_self_delete "$SELFTEST_TMP/other/install.sh" && { printf 'self-test FAIL: wrong parent dir\n'; exit 1; }
 	can_self_delete /dev/fd/63 && { printf 'self-test FAIL: fd path\n'; exit 1; }
 
+	loader_mode_needed "$SELFTEST_TMP/other/install.sh" "$SELFTEST_TMP" || { printf 'self-test FAIL: файл вне deploy/ должен включать режим загрузчика\n'; exit 1; }
+	loader_mode_needed "$SELFTEST_TMP/deploy/install.sh" "$SELFTEST_TMP" || { printf 'self-test FAIL: нет docker-compose.app.yml должен включать режим загрузчика\n'; exit 1; }
+	: >"$SELFTEST_TMP/deploy/docker-compose.app.yml"
+	loader_mode_needed "$SELFTEST_TMP/deploy/install.sh" "$SELFTEST_TMP" && { printf 'self-test FAIL: код на месте, загрузчик не нужен\n'; exit 1; }
+	loader_mode_needed "$SELFTEST_TMP/deploy/link.sh" "$SELFTEST_TMP" || { printf 'self-test FAIL: ссылка должна включать режим загрузчика\n'; exit 1; }
+	loader_mode_needed "" "$SELFTEST_TMP" || { printf 'self-test FAIL: пустой путь должен включать режим загрузчика\n'; exit 1; }
+
 	local up_out up_file
 	up_out=$(render_up_sh)
-	for frag in '-p deploy' 'compose.infra.yml' 'compose.app.yml' 'server.env' '--wait'; do
+	for frag in '-p emtds-infra' 'compose.infra.yml' 'compose.app.yml' 'server.env' '--wait'; do
 		if [[ "$up_out" != *"$frag"* ]]; then
 			printf 'self-test FAIL: render_up_sh без фрагмента %s\n' "$frag"
 			exit 1
@@ -850,35 +1290,28 @@ run_self_test() {
 		[[ -z "${EMTDS_COMMIT}" ]] || { printf 'self-test FAIL: EMTDS_COMMIT без .git должен быть пустым\n'; exit 1; }
 		TDS_DIR="$notgit" export_build_args main
 		[[ "${EMTDS_CHANNEL}" == main ]] || { printf 'self-test FAIL: build-args channel main\n'; exit 1; }
+		TDS_DIR="$notgit" EMTDS_COMMIT= require_build_commit || { printf 'self-test FAIL: без .git пустой коммит допустим\n'; exit 1; }
+		mkdir -p "$notgit/.git"
+		TDS_DIR="$notgit" EMTDS_COMMIT= require_build_commit 2>/dev/null && { printf 'self-test FAIL: при .git пустой коммит должен отклоняться\n'; exit 1; }
+		TDS_DIR="$notgit" EMTDS_COMMIT=abc123 require_build_commit 2>/dev/null && { printf 'self-test FAIL: короткий коммит должен отклоняться\n'; exit 1; }
+		TDS_DIR="$notgit" EMTDS_COMMIT=$(printf 'ab%.0s' {1..20}) require_build_commit || { printf 'self-test FAIL: полный коммит должен приниматься\n'; exit 1; }
 	) || exit 1
 
 	printf 'self-test ok\n'
 }
 
-# Назначение: основной сценарий установки EmTDS. Только root.
+# Назначение: основной сценарий установки EmTDS из клона (deploy/install.sh на месте). Только root,
+# весь прогон под общим замком установщика и агента обновлений.
 # Параметры: нет.
-# Результат: маркер installed, сообщения об успехе.
+# Результат: маркер installed, сообщения об успехе, адрес и токен первого входа.
 # Ошибки: любая проверка или шаг развёртывания, код 1.
 run_install() {
-	if [[ -z "$SELF" || ! -f "$SELF" ]] || [[ "${BASH_SOURCE[0]:-}" != "$0" ]]; then
-		msg "запустите: sudo bash deploy/install.sh" >&2
-		exit 1
-	fi
+	acquire_run_lock
 
-	if [[ -f "$MARKER" ]]; then
-		msg "EmTDS уже установлен, поднять снова: ${UP_SCRIPT}"
-		exit 0
-	fi
-
-	if [[ $(id -u) -ne 0 ]]; then
-		msg "нужны права root (sudo)" >&2
-		exit 1
-	fi
-
-	local docker_distro= docker_codename= channel
-	if [[ -f /etc/os-release ]]; then
+	local docker_distro= docker_codename= channel watchdog_failed=0
+	if [[ -f "$OS_RELEASE" ]]; then
 		# shellcheck source=/dev/null
-		source /etc/os-release
+		source "$OS_RELEASE"
 		if channel=$(docker_apt_channel "${ID:-}" "${VERSION_CODENAME:-}"); then
 			docker_distro=${channel%% *}
 			docker_codename=${channel#* }
@@ -910,9 +1343,11 @@ run_install() {
 	public_ip=$(detect_public_ipv4) || exit 1
 
 	write_state_files "$mem" "$public_ip"
+	install_allowed_signers
 
 	cd "$TDS_DIR"
 	export_build_args "${INSTALL_CHANNEL}"
+	require_build_commit || exit 1
 	if ! timeout 1800 "${APP_COMPOSE[@]}" build engine; then
 		msg "сборка образа не завершилась; проверьте сеть и повторите" >&2
 		diagnose
@@ -940,21 +1375,16 @@ run_install() {
 
 	verify_running_stack
 
-	if command -v nginx >/dev/null 2>&1; then
+	if (( NO_EDGE )); then
+		msg "--no-edge: nginx и apply-edge.sh пропущены, стек установлен без edge"
+	else
+		ensure_nginx "$docker_distro"
 		if [[ -f "${OUR_DEPLOY_DIR}/apply-edge.sh" ]]; then
 			if ! bash "${OUR_DEPLOY_DIR}/apply-edge.sh" "$public_ip"; then
 				msg "не удалось применить конфигурацию nginx (apply-edge.sh)" >&2
 				exit 1
 			fi
-		fi
-	else
-		msg "nginx не установлен; пропуск apply-edge.sh (стек установлен без edge)"
-	fi
-
-	if [[ -f "${OUR_DEPLOY_DIR}/watchdog.sh" ]]; then
-		if ! bash "${OUR_DEPLOY_DIR}/watchdog.sh" --install; then
-			msg "не удалось включить emtds-watchdog.timer" >&2
-			exit 1
+			INSTALL_EDGE_APPLIED=1
 		fi
 	fi
 
@@ -964,8 +1394,9 @@ run_install() {
 		elif command -v systemctl >/dev/null 2>&1; then
 			local update_args=(--install "--channel" "${INSTALL_CHANNEL}" "--tds-dir" "${TDS_DIR}")
 			[[ -n "${INSTALL_REPO}" ]] && update_args+=(--repo "${INSTALL_REPO}")
+			release_run_lock
 			if ! bash "${OUR_DEPLOY_DIR}/update.sh" "${update_args[@]}"; then
-				msg "предупреждение: не удалось установить агент обновлений; продолжение"
+				die "не удалось установить агент обновлений (update.sh --install); исправьте причину и повторите установку"
 			fi
 		else
 			msg "агент обновлений не установлен: нет systemd, запустите update.sh --install вручную"
@@ -973,6 +1404,13 @@ run_install() {
 	fi
 
 	date -Iseconds | write_atomic "$MARKER" 0644
+
+	# Таймер сторожа включается последним: пока шли сборка и update.sh --install, замок на миг
+	# освобождался, и сторож мог вмешаться в недоустановленный стек. Сбой не отменяет установку.
+	if [[ -f "${OUR_DEPLOY_DIR}/watchdog.sh" ]] && ! bash "${OUR_DEPLOY_DIR}/watchdog.sh" --install; then
+		watchdog_failed=1
+		msg "не удалось включить emtds-watchdog.timer; стек установлен, включите сторож вручную: bash ${OUR_DEPLOY_DIR}/watchdog.sh --install" >&2
+	fi
 
 	if can_self_delete "$SELF" && [[ ! -d "${TDS_DIR}/.git" ]]; then
 		rm -f -- "$SELF"
@@ -984,11 +1422,12 @@ run_install() {
 	fi
 
 	msg "готово: движок 127.0.0.1:18080, админка 127.0.0.1:8090"
-	if [[ -z "$(env_value_compat "$TDS_DIR/.env" ADMIN_PASSWORD)" ]]; then
+	if [[ -z "$(env_value "$TDS_DIR/.env" EMTDS_ADMIN_PASSWORD)" ]]; then
 		msg "первый вход спросит логин, пароль и почту главного администратора"
 	fi
-	msg "вход: ssh -L 8090:127.0.0.1:8090 user@host"
+	print_first_login "$public_ip"
 	msg "повторный старт: ${UP_SCRIPT}"
+	(( watchdog_failed == 0 )) || exit 1
 }
 
 # Назначение: вывести краткую справку по аргументам.
@@ -996,27 +1435,81 @@ run_install() {
 # Результат: текст usage на stderr.
 # Ошибки: нет.
 usage() {
-	msg "использование: sudo bash deploy/install.sh | install.sh --self-test" >&2
+	msg "использование: sudo bash install.sh --repo URL [--channel release|main] [--allowed-signers FILE] [--no-edge] | --self-test" >&2
 }
 
-# Назначение: точка входа установщика.
-# Параметры: [--channel release|main] [--repo URL] | --self-test.
-# Результат: код выхода сценария.
-# Ошибки: см. run_install и run_self_test.
-main() {
-	local mode=install
+# Назначение: найти прежнюю установку: каталог <OLD_ETC_ROOT>/*tds с маркером installed, кроме STATE_DIR.
+# Параметры: нет.
+# Результат: код 0 и путь первого найденного каталога на stdout.
+# Ошибки: код 1 — прежней установки нет.
+find_old_install() {
+	local dir
+	for dir in "$OLD_ETC_ROOT"/*tds; do
+		[[ "$dir" != "$STATE_DIR" && -f "$dir/installed" ]] || continue
+		printf '%s' "$dir"
+		return 0
+	done
+	return 1
+}
+
+# Назначение: разобрать аргументы командной строки в глобальные настройки установщика.
+# Параметры: аргументы командной строки.
+# Результат: INSTALL_CHANNEL, INSTALL_REPO, INSTALL_SIGNERS, NO_EDGE, MODE заданы.
+# Ошибки: неизвестный аргумент, аргумент без значения или канал не release/main — usage, код 2.
+parse_args() {
+	MODE=install
 	while (( $# > 0 )); do
 		case "$1" in
-			--self-test) mode=self-test; shift ;;
-			--channel)   INSTALL_CHANNEL="${2:-release}"; shift 2 ;;
-			--repo)      INSTALL_REPO="${2:-}"; shift 2 ;;
+			--self-test) MODE=self-test; shift ;;
+			--no-edge)   NO_EDGE=1; shift ;;
+			--channel | --repo | --allowed-signers)
+				(( $# >= 2 )) || { usage; exit 2; }
+				case "$1" in
+					--channel)         INSTALL_CHANNEL=$2 ;;
+					--repo)            INSTALL_REPO=$2 ;;
+					--allowed-signers) INSTALL_SIGNERS=$(readlink -f -- "$2" 2>/dev/null || printf '%s' "$2") ;;
+				esac
+				shift 2
+				;;
 			*)           usage; exit 2 ;;
 		esac
 	done
-	case "$mode" in
-		self-test) run_self_test ;;
-		*)         run_install ;;
-	esac
+	if [[ ! "$INSTALL_CHANNEL" =~ ^(release|main)$ ]]; then
+		msg "--channel: допустимо release или main" >&2
+		exit 2
+	fi
+}
+
+# Назначение: точка входа установщика. Порядок: аргументы, root, маркер установки, отказ на старой
+# установке, затем загрузчик (кода нет) или основной сценарий (код на месте).
+# Параметры: [--channel release|main] [--repo URL] [--allowed-signers FILE] [--no-edge] | --self-test.
+# Результат: код выхода сценария.
+# Ошибки: см. run_loader, run_install и run_self_test.
+main() {
+	local old_dir
+	ORIG_ARGS=("$@")
+	parse_args "$@"
+	if [[ "$MODE" == self-test ]]; then
+		run_self_test
+		return
+	fi
+	is_root || die "нужны права root (sudo)"
+	if [[ -f "$MARKER" ]]; then
+		msg "EmTDS уже установлен, поднять снова: ${UP_SCRIPT}"
+		msg "проверить обновления: ${UPDATE_LIB_SCRIPT} --check"
+		exit 0
+	fi
+	if old_dir=$(find_old_install); then
+		die "найдена прежняя установка в ${old_dir}: переносите её отдельно, этот установщик её не трогает"
+	fi
+	if [[ -n "$INSTALL_REPO" ]]; then
+		require_valid_repo
+	fi
+	if loader_mode_needed "$SELF" "$TDS_DIR"; then
+		run_loader
+	else
+		run_install
+	fi
 }
 
 main "$@"

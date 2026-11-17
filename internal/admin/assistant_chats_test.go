@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // chatClock returns a clock that moves one minute on every call, starting at start.

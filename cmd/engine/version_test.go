@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // versionTestCommit is a valid 40-character lowercase hex commit SHA.

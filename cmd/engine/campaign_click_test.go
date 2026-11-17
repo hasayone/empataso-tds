@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // promoCampaign is the shape of the local promo flow: the public path is

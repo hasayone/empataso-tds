@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/config"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // migrateBotProtection404 переписывает сохранённые потоки Bot Protection и «Замыкающий» с show_html_404

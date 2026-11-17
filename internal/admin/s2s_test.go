@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 func s2sAPI(t *testing.T) (*Server, *httptest.Server) {

@@ -11,13 +11,13 @@ import (
 )
 
 // TestAPIKeyHeaderPrefixes requires the Api-Key header to accept a stored em_ key
-// and a stored kz_ key issued before em_, and to refuse a stored key under any
-// other prefix with 401.
+// and to refuse a stored key under any other prefix, including the retired
+// two-letter one (assembled from parts), with 401.
 func TestAPIKeyHeaderPrefixes(t *testing.T) {
 	raws := map[string]int{
-		"em_" + strings.Repeat("a", 40): http.StatusOK,
-		"kz_" + strings.Repeat("b", 40): http.StatusOK,
-		"xx_" + strings.Repeat("c", 40): http.StatusUnauthorized,
+		"em_" + strings.Repeat("a", 40):      http.StatusOK,
+		"k" + "z_" + strings.Repeat("b", 40): http.StatusUnauthorized,
+		"xx_" + strings.Repeat("c", 40):      http.StatusUnauthorized,
 	}
 	var items []string
 	i := 0

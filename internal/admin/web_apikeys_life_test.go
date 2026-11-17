@@ -17,7 +17,7 @@ func TestSPAKeyLifetime(t *testing.T) {
 	}
 	must(t, pure, "const KEY_TTL_DAYS=[0, 7, 30, 90, 365];", "lifetimes match security.KeyTTLDays")
 	table := spaFunctionLine(html, "paintKeyTable")
-	for _, want := range []string{"keyLifeHTML(item)", "keyUseHTML(item)", "{id:'expires_at',label:'key.life',on:1}", "{id:'last_used_at',label:'key.used',on:1}", "on:()=>extendKey(item)", "(item&&item.lead||'kz_')"} {
+	for _, want := range []string{"keyLifeHTML(item)", "keyUseHTML(item)", "{id:'expires_at',label:'key.life',on:1}", "{id:'last_used_at',label:'key.used',on:1}", "on:()=>extendKey(item)", "'em_'+(item&&item.prefix||'')"} {
 		must(t, table, want, "paintKeyTable: "+want)
 	}
 	must(t, spaFunctionLine(html, "keyFormHTML"), "${item?'':keyTTLSelectHTML(tr('key.ttl'))}", "lifetime is chosen on create")

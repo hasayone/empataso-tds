@@ -15,8 +15,8 @@ data_dir: "./data"            # directory of .dat lists
 
 clickhouse:
   addr: "127.0.0.1:9000"
-  database: "kuztds"
-  username: "kuztds"
+  database: "emtds"
+  username: "emtds"
   # password -> env EMTDS_CLICKHOUSE_PASSWORD
 
 redis:

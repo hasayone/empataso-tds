@@ -480,7 +480,8 @@ func TestAssistantWidgetUsageBlock(t *testing.T) {
 const trFill = (k, m) => k + ':' + m.used + (m.limit !== undefined ? '/' + m.limit : '');
 `, `
 eq(aiLim(10, 300, String), 'ai.chat.usage.of:10/300', 'used of the limit');
-eq(aiLim(10, 0, String), 'ai.chat.usage.nolimit:10', 'zero means no limit');
+eq(aiLim(10, null, String), 'ai.chat.usage.nolimit:10', 'null means no limit');
+eq(aiLim(10, 0, String), 'ai.chat.usage.of:10/0', 'zero is a limit');
 eq(aiLim(undefined, 5, String), 'ai.chat.usage.of:0/5', 'missing usage is zero');
 `)
 	assistantNode(t, []string{"aiLim", "aiPct", "aiPriceUnknown", "aiPaintUse"}, `
@@ -494,7 +495,7 @@ let box = new E('div');
 const q = () => box;
 const AI = {model:'a', status:null};
 `, `
-const usage = {tokens:5, usd:1, limit_tokens:10, limit_usd:0};
+const usage = {tokens:5, usd:1, limit_tokens:10, limit_usd:null};
 AI.model = 'a';
 AI.status = {usage, model_info:[{id:'a', price_unknown:false}, {id:'b', price_unknown:true}], price_unknown:true};
 aiPaintUse();
@@ -862,7 +863,7 @@ let LANG = 'ru';
 const uiLang = () => LANG;
 const sent = [];
 async function aiStream(id, body){ sent.push([id, body]); AI.ended = true; }
-const aiBusyUI = () => {}, aiPaintLog = () => {}, aiAddMessage = () => {}, aiStatusLoad = () => {}, toast = () => {};
+const aiBusyUI = () => {}, aiPaintLog = () => {}, aiAddMessage = () => {}, aiStatusLoad = () => {}, toast = () => {}, aiMicAbort = () => {};
 const aiPageContext = () => ({page:'offers'});
 async function aiReloadChat(){}
 const tr = k => k, aiErrOf = e => String(e);
@@ -896,6 +897,8 @@ const rows = host => host.all().filter(e => e.className.split(' ').includes('aim
 const rowInput = r => r.children[0].children[0];
 const tr = k => k, trFill = (k, m) => k + JSON.stringify(m);
 const uiLocale = () => 'en-US';
+const icon = k => '[' + k + ']';
+const $ = h => { const e = new El('svg'); e.attrs.markup = h; return e; };
 `
 
 // TestAssistantWidgetModelPicker runs the shared model list under node: the search matches id and name in any letter case, the
@@ -1235,3 +1238,305 @@ picker.reset();
 eq([only.checked, rows()], [false, 3], 'reset clears the tools filter');
 `)
 }
+
+// TestAssistantWidgetDictationMarkup checks that the dictation button is built only when the browser has speech recognition, sits
+// in the row under the input with a dictionary label in en, ru and uk, and is released on send, close, language change and unmount.
+func TestAssistantWidgetDictationMarkup(t *testing.T) {
+	html := spaSource()
+	must(t, assistantFn(html, "aiShellHTML"), "${aiMicHTML()}", "the shell takes the button from aiMicHTML")
+	must(t, assistantFn(html, "aiShellHTML"), "${aiMicLineHTML()}", "the shell takes the waves line from aiMicLineHTML")
+	mic := assistantFn(html, "aiMicHTML")
+	must(t, mic, "if(!aiSpeechCtor()&&!aiLocalCan()) return '';", "no API and no recorder, no button")
+	must(t, mic, `id="ai-mic"`, "the button id")
+	must(t, mic, "aria-pressed", "the listening state is exposed")
+	if strings.Count(mic, "<button") != 1 {
+		t.Errorf("aiMicHTML has %d buttons, want exactly one: stop replaces the microphone", strings.Count(mic, "<button"))
+	}
+	line := assistantFn(html, "aiMicLineHTML")
+	must(t, line, "if(!aiSpeechCtor()&&!aiLocalCan()) return '';", "no API and no recorder, no waves line")
+	must(t, line, `id="ai-wave"`, "the waves are in the markup")
+	must(t, line, "'<i></i>'.repeat(AI_WAVE_BARS)", "the waves are bars")
+	must(t, line, `id="ai-mic-note"`, "the note of the line")
+	paint := assistantFn(html, "aiMicPaint")
+	must(t, paint, "b.innerHTML=icon(on?'square':'mic')", "stop replaces the microphone in the same button")
+	must(t, paint, "w.hidden=!on", "the waves show only while listening")
+	run := assistantFn(html, "aiMicRun")
+	must(t, run, "r.continuous=true; r.interimResults=true;", "the recognition is continuous with drafts")
+	must(t, run, "try{aiMicRun(s);", "the end of a browser session starts the next one until stop")
+	wave := assistantFn(html, "aiWaveStart")
+	must(t, wave, "getUserMedia({audio:true})", "the analyser listens to the microphone")
+	must(t, wave, "createAnalyser()", "the bars follow the loudness")
+	must(t, wave, "prefers-reduced-motion:reduce", "the bars stay still on request")
+	must(t, html, "@media (prefers-reduced-motion:reduce){.ai-wave i{", "static bars in CSS for reduced motion")
+	if i := strings.Index(html, "\n  .ai-mic-note{"); i < 0 || strings.Contains(html[i:i+strings.Index(html[i+1:], "\n")+1], "nowrap") {
+		t.Error("the note of the dictation must not be cut to one line")
+	}
+	must(t, assistantFn(html, "aiSpeechCtor"), "window.SpeechRecognition||window.webkitSpeechRecognition", "both constructors are tried")
+	must(t, assistantFn(html, "aiMountPanel"), "const mic=q('#ai-mic',p); if(mic) mic.onclick=aiMicToggle;", "the button is wired only when present")
+	must(t, assistantFn(html, "aiSend"), "aiMicAbort();", "sending stops the dictation")
+	must(t, assistantFn(html, "aiToggle"), "if(!AI.open) aiMicAbort();", "closing the panel stops the dictation")
+	must(t, assistantFn(html, "aiUnmount"), "aiMicAbort();", "unmounting stops the dictation")
+	must(t, assistantFn(html, "aiSync"), "if(AI.lang!==uiLang()){aiMicAbort();", "a language change stops the dictation")
+	for _, key := range []string{"ai.chat.mic", "ai.chat.mic.stop", "ai.chat.mic.on", "ai.chat.mic.denied", "ai.chat.mic.none", "ai.chat.mic.err", "ai.chat.mic.local.load", "ai.chat.mic.local.work", "ai.chat.mic.local.fail", "ai.chat.mic.local.none", "ai.chat.mic.blocked"} {
+		if n := strings.Count(html, "'"+key+"':'"); n != 3 {
+			t.Errorf("dictionary key %s is in %d languages, want 3", key, n)
+		}
+	}
+}
+
+// TestAssistantWidgetDictation runs the dictation under node with a fake recogniser: the language follows the interface, a confirmed
+// phrase is appended after a space with the cursor at the end and an input event, a draft stays out of the field, the button turns into
+// stop and back, the end of a browser session starts the next recogniser until stop, a failure is shown in full only when the session
+// brought no phrase, the bars move and follow the analyser, and nothing is sent.
+func TestAssistantWidgetDictation(t *testing.T) {
+	html := spaSource()
+	consts := regexp.MustCompile(`(?m)^const AI_(?:SPEECH_(?:LANG|ERR|LOCAL)|ASR_(?:LIB|LANG)|WAVE_BARS)=.*$`).FindAllString(html, -1)
+	if len(consts) != 6 {
+		t.Fatalf("found %d dictation constants, want 6", len(consts))
+	}
+	prelude := strings.Join(consts, "\n") + `
+const esc = s => s, icon = k => '<svg ' + k + '>', tr = k => k;
+let LANG = 'ru';
+const uiLang = () => LANG;
+const mkEl = () => { const el = {hidden:true, textContent:'', innerHTML:'', title:'', attrs:{}, cls:{}, style:{height:''}, setAttribute(k, v){ el.attrs[k] = v; }};
+  el.classList = {toggle:(c, on) => { el.cls[c] = !!on; }}; return el; };
+const mic = mkEl(), note = mkEl(), line = mkEl(), wave = mkEl(), bars = [mkEl(), mkEl(), mkEl()];
+let inputs = 0, caret = -1;
+const ta = {value:'', maxLength:4000, setSelectionRange(a){ caret = a; }, dispatchEvent(){ inputs++; }, focus(){ document.activeElement = ta; }};
+const document = {activeElement:null};
+const q = sel => ({'#ai-mic':mic, '#ai-mic-note':note, '#ai-mic-line':line, '#ai-wave':wave, '#ai-text':ta})[sel] || null;
+const qa = sel => sel === '#ai-wave>i' ? bars : [];
+const AI = {rec:null};
+let made = [], failStart = false, frames = [], cancelled = [], RM = false;
+const matchMedia = () => ({matches:RM});
+const requestAnimationFrame = f => { frames.push(f); return frames.length; };
+const cancelAnimationFrame = id => { cancelled.push(id); };
+class FakeRec { constructor(){ made.push(this); this.calls = []; } start(){ if(failStart) throw new Error('refused'); this.calls.push('start'); } stop(){ this.calls.push('stop'); } abort(){ this.calls.push('abort'); } }
+var window = {};
+var navigator = {};
+`
+	assistantNode(t, []string{"aiSpeechCtor", "aiLocalCan", "aiLocalPreferred", "aiMicHTML", "aiMicLineHTML", "aiMicPaint", "aiDictAppend", "aiWaveStop", "aiWaveStart", "aiLocalRelease", "aiMicAbort", "aiMicFinish", "aiMicRun", "aiMicToggle"}, prelude, `
+const res = (text, isFinal) => ({resultIndex:0, results:[{isFinal, 0:{transcript:text}}]});
+eq([aiMicHTML(), aiMicLineHTML()], ['', ''], 'no API, no button and no waves');
+window = {webkitSpeechRecognition:FakeRec};
+eq(aiMicHTML().includes('id="ai-mic"'), true, 'the API gives the button');
+eq([aiMicHTML().split('<button').length - 1, aiMicLineHTML().includes('<i></i>'.repeat(9)), aiMicLineHTML().includes('id="ai-wave"')], [1, true, true], 'one button and the bars in the line');
+window = {SpeechRecognition:FakeRec};
+eq(aiSpeechCtor() === FakeRec, true, 'the standard constructor is found');
+
+for (const [lang, tag] of [['ru', 'ru-RU'], ['uk', 'uk-UA'], ['en', 'en-US']]) {
+  LANG = lang; made = [];
+  aiMicToggle();
+  eq([made[0].lang, made[0].calls], [tag, ['start']], 'recognition language for ' + lang);
+  aiMicAbort();
+}
+
+LANG = 'ru'; made = []; ta.value = '';
+aiMicToggle();
+const r = made[0];
+eq([r.continuous, r.interimResults, mic.cls.rec, mic.attrs['aria-pressed'], mic.attrs['aria-label']], [true, true, true, 'true', 'ai.chat.mic.stop'], 'the button shows listening');
+eq([mic.innerHTML, wave.hidden, line.hidden, note.hidden], ['<svg square>', false, false, true], 'stop replaces the microphone and the waves show');
+eq(made.length, 1, 'one click makes one recogniser');
+r.onresult(res('привет', false));
+eq([ta.value, note.textContent, inputs], ['', 'привет', 0], 'a draft stays out of the field');
+r.onresult(res(' привет', true));
+eq([ta.value, inputs, caret], ['привет', 1, 6], 'the first phrase is the whole text');
+r.onresult(res('мир', true));
+eq([ta.value, inputs, caret], ['привет мир', 2, 10], 'the next phrase follows after a space');
+ta.value = 'a '; aiDictAppend(ta, 'b');
+eq(ta.value, 'a b', 'no second space after a space');
+ta.value = 'x'.repeat(3999); aiDictAppend(ta, 'yz');
+eq(ta.value.length, 4000, 'the text is cut to maxlength');
+ta.value = 'keep'; aiDictAppend(ta, '   ');
+eq(ta.value, 'keep', 'an empty phrase changes nothing');
+
+aiMicToggle();
+eq([r.calls, mic.cls.rec, mic.attrs['aria-pressed']], [['start', 'stop'], false, 'false'], 'a second click stops and the button is idle');
+eq([mic.innerHTML, wave.hidden, line.hidden], ['<svg mic>', true, true], 'the microphone is back and the waves are gone');
+r.onresult(res('хвост', true));
+eq(ta.value, 'keep хвост', 'the last phrase still arrives after stop');
+document.activeElement = mic;
+r.onend();
+eq([AI.rec, document.activeElement === ta], [null, true], 'the end frees the state and returns focus to the field');
+
+// The end of a browser session starts the next recogniser while the user has not pressed stop.
+made = []; ta.value = ''; aiMicToggle();
+const s1 = AI.rec;
+made[0].onresult(res('раз', true));
+made[0].onend();
+eq([made.length, made[1].calls, made[1].continuous, AI.rec === s1, mic.cls.rec, wave.hidden], [2, ['start'], true, true, true, false], 'the end without stop restarts the recogniser and keeps listening');
+made[1].onresult(res('два', true));
+eq(ta.value, 'раз два', 'a phrase of the next recogniser is appended too');
+made[1].onend();
+eq(made.length, 3, 'and again');
+aiMicToggle();
+made[2].onend();
+eq([AI.rec, made.length, mic.cls.rec], [null, 3, false], 'after stop the end does not restart');
+
+// A refusal or a missing microphone, no phrase in the session: the full text of the failure, no restart.
+const failures = [['not-allowed', 'ai.chat.mic.denied'], ['audio-capture', 'ai.chat.mic.none'], ['language-not-supported', 'ai.chat.mic.err']];
+for (const [code, key] of failures) {
+  made = []; aiMicToggle();
+  made[0].onerror({error:code}); made[0].onend();
+  eq([AI.rec, made.length, note.textContent, note.cls.bad, note.hidden, line.hidden, wave.hidden, mic.innerHTML], [null, 1, key, true, false, false, true, '<svg mic>'], 'failure ' + code);
+}
+
+// A phrase in the session hides the failure that ends it.
+made = []; aiMicToggle();
+made[0].onresult(res('слово', true));
+made[0].onerror({error:'audio-capture'}); made[0].onend();
+eq([AI.rec, note.hidden, line.hidden], [null, true, true], 'a failure after a phrase shows no failure text');
+
+// Silence restarts; stop after silence only is an empty result, stop without any error shows nothing.
+made = []; aiMicToggle();
+made[0].onerror({error:'no-speech'}); made[0].onend();
+eq([made.length, AI.rec !== null, note.hidden], [2, true, true], 'silence restarts and shows no text');
+made[1].onerror({error:'no-speech'}); aiMicToggle(); made[1].onend();
+eq([AI.rec, note.textContent, note.cls.bad], [null, 'ai.chat.mic.err', true], 'stop after silence only says the speech was not recognised');
+made = []; aiMicToggle(); aiMicToggle(); made[0].onend();
+eq([AI.rec, note.hidden, line.hidden], [null, true, true], 'stop with no error shows nothing');
+
+// Quick empty ends do not loop for ever.
+made = []; aiMicToggle();
+for (let i = 0; i < 4 && AI.rec; i++) made[made.length - 1].onend();
+eq([AI.rec, made.length, note.textContent], [null, 4, 'ai.chat.mic.err'], 'a quick series of ends closes the session');
+
+// A browser that refuses to start.
+made = []; failStart = true; aiMicToggle(); failStart = false;
+eq([AI.rec, note.textContent, note.cls.bad, mic.cls.rec], [null, 'ai.chat.mic.err', true, false], 'a refused start is a failure text');
+
+// A click on the microphone while the previous dictation finishes starts a new one.
+made = []; aiMicToggle(); aiMicToggle();
+const old = made[0];
+aiMicToggle();
+eq([old.calls, made.length, mic.cls.rec], [['start', 'stop', 'abort'], 2, true], 'a new dictation does not wait for the old end');
+aiMicAbort();
+
+// The bars: a smooth movement without an analyser, still with reduced motion, loudness with one.
+made = []; frames = []; cancelled = []; bars.forEach(b => { b.style.height = ''; });
+aiMicToggle();
+eq(frames.length, 1, 'the animation starts with the listening');
+frames[0](0); frames[1](400);
+const hs = bars.map(b => parseFloat(b.style.height));
+eq([hs.every(h => h >= 4 && h <= 22), new Set(hs).size > 1, String(bars[0].style.height).endsWith('px')], [true, true, true], 'without an analyser the bars still move');
+aiMicToggle();
+eq([cancelled.length > 0, bars[0].style.height], [true, ''], 'stop ends the animation and resets the bars');
+made[0].onend();
+RM = true; frames = []; made = []; aiMicToggle();
+eq([frames.length, wave.hidden], [0, false], 'reduced motion: no running animation, the waves are still shown');
+aiMicAbort(); RM = false;
+
+let tracks = 0, closed = 0;
+class FakeCtx { constructor(){ this.state = 'running'; } createAnalyser(){ this.an = {frequencyBinCount:128, getByteFrequencyData(b){ b.fill(255); }}; return this.an; } createMediaStreamSource(){ return {connect(){}}; } close(){ closed++; } }
+window = {SpeechRecognition:FakeRec, AudioContext:FakeCtx};
+navigator = {mediaDevices:{getUserMedia: async () => ({getTracks: () => [{stop(){ tracks++; }}]})}};
+made = []; frames = []; aiMicToggle();
+await new Promise(r => setTimeout(r, 0));
+for (let i = 0; i < 40; i++) frames[frames.length - 1](i * 16);
+eq(bars.every(b => parseFloat(b.style.height) > 20), true, 'a loud microphone lifts every bar');
+aiMicToggle();
+eq([tracks, closed], [1, 1], 'stop releases the microphone stream and the audio context');
+made[0].onend();
+made = []; aiMicToggle(); aiMicToggle();
+await new Promise(r => setTimeout(r, 0));
+eq(tracks, 2, 'a stream granted after stop is released at once');
+made[0].onend();
+
+made = []; aiMicToggle();
+const a = made[0];
+aiMicAbort();
+eq([a.calls, a.onresult, a.onend, AI.rec], [['start', 'abort'], null, null, null], 'abort drops the recogniser and its handlers');
+`)
+}
+
+// TestAssistantWidgetDictationLocal runs under node the fallback of a browser without its own speech service (the embedded Electron
+// browser answers network): no text about the internet, the dictation goes on with the recognition inside the page, the model loads with
+// a status that is not a failure, the recording becomes text in the language of the interface, the browser is remembered, and a model
+// that does not load or a browser that cannot record have their own texts.
+func TestAssistantWidgetDictationLocal(t *testing.T) {
+	html := spaSource()
+	mustNot(t, html, "ai.chat.mic.net", "no message about the network of the speech service")
+	for _, s := range []string{"Check your internet", "Проверьте интернет", "Перевірте інтернет"} {
+		if i := strings.Index(html, s); i >= 0 && strings.Contains(html[max(0, i-200):i], "'ai.chat.mic") {
+			t.Errorf("a dictation text still says %q", s)
+		}
+	}
+	must(t, html, "const AI_SPEECH_LOCAL=new Set(['network','service-not-allowed']);", "the codes that switch to the local recognition")
+	must(t, assistantFn(html, "aiAsrLoad"), "import(AI_ASR_LIB)", "the library loads only when the dictation needs it")
+	must(t, html, "AI_ASR_LIB='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/", "a pinned library version")
+	consts := regexp.MustCompile(`(?m)^const AI_(?:SPEECH_(?:LANG|ERR|LOCAL)|ASR_(?:LIB|LANG|SILENCE)|MIC_BLOCKED|WAVE_BARS)=.*$`).FindAllString(html, -1)
+	prelude := strings.Join(consts, "\n") + `
+const esc = s => s, icon = k => '<svg ' + k + '>', tr = k => k, trFill = (k, m) => k + ':' + m.pct;
+let LANG = 'ru';
+const uiLang = () => LANG;
+const mkEl = () => { const el = {hidden:true, textContent:'', innerHTML:'', title:'', attrs:{}, cls:{}, style:{height:''}, setAttribute(k, v){ el.attrs[k] = v; }};
+  el.classList = {toggle:(c, on) => { el.cls[c] = !!on; }}; return el; };
+const mic = mkEl(), note = mkEl(), line = mkEl(), wave = mkEl();
+const ta = {value:'', maxLength:4000, setSelectionRange(){}, dispatchEvent(){}, focus(){}};
+const document = {activeElement:null};
+const q = sel => ({'#ai-mic':mic, '#ai-mic-note':note, '#ai-mic-line':line, '#ai-wave':wave, '#ai-text':ta})[sel] || null;
+const qa = () => [];
+const AI = {rec:null, asr:null, asrReady:false, asrPct:0, asrFiles:{}};
+const matchMedia = () => ({matches:true});
+const store = {};
+var localStorage = {getItem: k => k in store ? store[k] : null, setItem: (k, v) => { store[k] = String(v); }};
+let made = [], recs = [], tracks = 0, loads = 0, seen = null, model = null, modelFail = false;
+class FakeRec { constructor(){ made.push(this); } start(){} stop(){} abort(){} }
+class FakeMR { constructor(){ this.state = 'inactive'; this.mimeType = 'audio/webm'; recs.push(this); } start(){ this.state = 'recording'; } stop(){ this.state = 'inactive'; if (this.onstop) this.onstop(); } }
+let trackState = 'live';
+const stream = () => { const tk = {readyState:trackState, stop(){ tracks++; }}; return {getTracks: () => [tk], getAudioTracks: () => [tk]}; };
+var window = {SpeechRecognition:FakeRec, MediaRecorder:FakeMR, AudioContext:function(){}};
+var navigator = {mediaDevices:{getUserMedia: async () => stream()}};
+const MediaRecorder = FakeMR;
+let release = null;
+function aiAsrLoad(){ loads++; if (modelFail) return Promise.reject(new Error('offline')); if (!model) model = new Promise(r => { release = () => { AI.asrReady = true; r((audio, opts) => { seen = opts; return {text:' привет мир '}; }); }; }); return model; }
+let level = 0.5;
+async function aiAsrAudio(){ return new Float32Array(16).fill(level); }
+`
+	assistantNode(t, []string{"aiSpeechCtor", "aiLocalCan", "aiLocalPreferred", "aiMicPaint", "aiDictAppend", "aiWaveStop", "aiWaveStart",
+		"aiAsrProgress", "aiAsrNote", "aiAsrHeard", "aiLocalRelease", "aiLocalStart", "aiLocalDone", "aiMicAbort", "aiMicFinish", "aiMicRun", "aiMicToggle"}, prelude, `
+const tick = () => new Promise(r => setTimeout(r, 0));
+aiMicToggle();
+eq(made.length, 1, 'a browser with SpeechRecognition tries its service first');
+made[0].onerror({error:'network'}); made[0].onend();
+eq([AI.rec && AI.rec.local, note.textContent, note.cls.bad, mic.cls.rec, store['emtds-asr-local']], [true, 'ai.chat.mic.local.load:0', false, true, '1'], 'network moves to the local recognition with a load status, not a failure');
+await tick();
+eq([recs.length, recs[0].state], [1, 'recording'], 'the microphone is recorded in the page');
+aiAsrProgress({status:'progress', file:'a', loaded:30, total:100});
+aiAsrProgress({status:'progress', file:'b', loaded:70, total:100});
+eq(note.textContent, 'ai.chat.mic.local.load:50', 'the status sums the model files');
+release(); await tick();
+eq([note.hidden, mic.cls.rec], [true, true], 'a ready model hides the status while the user speaks');
+recs[0].ondataavailable({data:new Blob(['voice'])});
+aiMicToggle();
+await tick(); await tick();
+eq([ta.value, seen && seen.language, seen && seen.task, AI.rec, note.hidden, mic.cls.rec, tracks], ['привет мир', 'russian', 'transcribe', null, true, false, 1], 'stop turns the recording into text in the interface language and frees the microphone');
+
+made = []; aiMicToggle();
+eq([made.length, AI.rec && AI.rec.local], [0, true], 'the remembered browser goes straight to the local recognition');
+await tick();
+aiMicAbort(); await tick();
+eq([AI.rec, tracks, ta.value], [null, 2, 'привет мир'], 'abort frees the microphone and takes no text');
+
+AI.asrReady = false; model = null; modelFail = true; aiMicToggle(); await tick();
+recs[recs.length - 1].ondataavailable({data:new Blob(['voice'])});
+aiMicToggle(); await tick(); await tick();
+eq([note.textContent, note.cls.bad], ['ai.chat.mic.local.fail', true], 'a model that does not load has its own text');
+modelFail = false;
+
+delete store['emtds-asr-local']; window = {SpeechRecognition:FakeRec}; made = [];
+aiMicToggle(); made[0].onerror({error:'service-not-allowed'}); made[0].onend();
+eq([AI.rec, note.textContent, note.cls.bad], [null, 'ai.chat.mic.local.none', true], 'a browser that cannot record says so, not the internet');
+
+window = {SpeechRecognition:FakeRec, MediaRecorder:FakeMR, AudioContext:function(){}}; trackState = 'ended'; const before = tracks;
+aiMicToggle(); await tick();
+eq([AI.rec, note.textContent, note.cls.bad, tracks - before], [null, 'ai.chat.mic.blocked', true, 1], 'an ended microphone stream (embedded browser) says the browser gives no microphone and frees it');
+
+trackState = 'live'; level = 0.001; seen = null; const textBefore = ta.value;
+aiMicToggle(); await tick(); release(); await tick();
+recs[recs.length - 1].ondataavailable({data:new Blob(['hum'])});
+aiMicToggle(); await tick(); await tick();
+eq([AI.rec, ta.value, note.textContent, seen], [null, textBefore, 'ai.chat.mic.err', null], 'a silent recording is not sent to the model, so Whisper invents no phrase');
+`)
+}
+

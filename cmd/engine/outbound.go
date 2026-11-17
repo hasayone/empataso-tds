@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/logbuf"
-	"github.com/egerkuzma/emtds/internal/render"
-	"github.com/egerkuzma/emtds/internal/router"
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/render"
+	"github.com/hasayone/empataso-tds/internal/router"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // outboundJob is one server-to-server request. The URL is already expanded.

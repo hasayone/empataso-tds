@@ -13,9 +13,9 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/atomicfile"
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 const (

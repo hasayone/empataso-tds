@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/security"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 type exportPostbackStats struct {

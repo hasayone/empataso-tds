@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 // TestClickLogsDestination — each exit type logs where the visitor went: the

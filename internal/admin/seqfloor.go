@@ -3,7 +3,7 @@ package admin
 import (
 	"context"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 func (s *Server) groupList() ([]config.Group, error) {

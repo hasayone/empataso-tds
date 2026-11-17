@@ -7,8 +7,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // refilterTracker отдаёт кампанию 7 с потоком Bot Protection (device reject, isp, bot — ИЛИ)

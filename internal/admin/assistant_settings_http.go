@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"sort"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // aiKeyView is the public state of one provider key.
@@ -43,7 +43,7 @@ type aiLimitCeilings struct {
 	TurnInputTokens int `json:"turn_input_tokens"`
 }
 
-// aiLimitMax are the largest values of the daily limits (0 means no limit): tokens for the
+// aiLimitMax are the largest values of the daily limits (null means no limit): tokens for the
 // two token limits, usd for the two dollar limits.
 type aiLimitMax struct {
 	Tokens int64   `json:"tokens"`
@@ -57,6 +57,9 @@ type aiLimitMax struct {
 // could not be used. LimitCeilings and LimitMax are the bounds the panel shows next to the limits.
 // Perms is the stored preset with the effective level of every resource in its resources, whatever
 // the preset; PermResources lists those resources in panel order with the highest level of each.
+// UserBudgetUSD and GroupBudgetUSD are the USD budgets by account id and by role id (no entry: no
+// budget); BudgetAccounts lists the accounts a budget can be set for and BudgetGroups the groups
+// (roles), empty while there is no role besides the administrator.
 type aiSettingsView struct {
 	Error           string               `json:"error,omitempty"`
 	Enabled         bool                 `json:"enabled"`
@@ -67,10 +70,14 @@ type aiSettingsView struct {
 	MaxOutputTokens int                  `json:"max_output_tokens"`
 	MaxSteps        int                  `json:"max_steps"`
 	TurnInputTokens int                  `json:"turn_input_tokens"`
-	DailyTokens     int64                `json:"daily_tokens"`
-	UserDailyTokens int64                `json:"user_daily_tokens"`
-	DailyUSD        float64              `json:"daily_usd"`
-	UserDailyUSD    float64              `json:"user_daily_usd"`
+	DailyTokens     *int64               `json:"daily_tokens"`
+	UserDailyTokens *int64               `json:"user_daily_tokens"`
+	DailyUSD        *float64             `json:"daily_usd"`
+	UserDailyUSD    *float64             `json:"user_daily_usd"`
+	UserBudgetUSD   map[string]float64   `json:"user_budget_usd"`
+	GroupBudgetUSD  map[string]float64   `json:"group_budget_usd"`
+	BudgetAccounts  []aiBudgetUser       `json:"budget_accounts"`
+	BudgetGroups    []aiBudgetGroup      `json:"budget_groups"`
 	Prices          map[string]aiPrice   `json:"prices"`
 	DefaultPrices   map[string]aiPrice   `json:"default_prices"`
 	PriceUnknown    []string             `json:"price_unknown"`
@@ -128,6 +135,9 @@ func (s *Server) aiSettingsView(st aiSettings, loadErr error, sess security.Sess
 		}
 	}
 	sort.Strings(v.PriceUnknown)
+	v.UserBudgetUSD, v.GroupBudgetUSD = aiBudgetsOrEmpty(st.UserBudgetUSD), aiBudgetsOrEmpty(st.GroupBudgetUSD)
+	_, _, users := s.aiUsageSnapshot()
+	v.BudgetAccounts, v.BudgetGroups = s.aiBudgetView(users)
 	return v
 }
 
@@ -273,16 +283,16 @@ func (s *Server) handleAITest(w http.ResponseWriter, r *http.Request) {
 }
 
 // aiStatusUsage is the usage of the asking user and of the whole team with their limits.
-// A limit of 0 means no limit.
+// A null limit means no limit.
 type aiStatusUsage struct {
-	Tokens          int64   `json:"tokens"`
-	USD             float64 `json:"usd"`
-	LimitTokens     int64   `json:"limit_tokens"`
-	LimitUSD        float64 `json:"limit_usd"`
-	TeamTokens      int64   `json:"team_tokens"`
-	TeamLimitTokens int64   `json:"team_limit_tokens"`
-	TeamUSD         float64 `json:"team_usd"`
-	TeamLimitUSD    float64 `json:"team_limit_usd"`
+	Tokens          int64    `json:"tokens"`
+	USD             float64  `json:"usd"`
+	LimitTokens     *int64   `json:"limit_tokens"`
+	LimitUSD        *float64 `json:"limit_usd"`
+	TeamTokens      int64    `json:"team_tokens"`
+	TeamLimitTokens *int64   `json:"team_limit_tokens"`
+	TeamUSD         float64  `json:"team_usd"`
+	TeamLimitUSD    *float64 `json:"team_limit_usd"`
 }
 
 // aiStatusView is the body of GET /api/ai/status. Provider, Model, Models, ModelInfo and Usage

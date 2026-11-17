@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // msgQueryTooHeavy is the error text of a statistics query stopped by its

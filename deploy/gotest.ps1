@@ -59,24 +59,11 @@ $Script:MaxCacheEntries = 20
 
 <#
 .SYNOPSIS
-  Читает переменную окружения EMTDS_*; пустое значение берёт из того же имени с префиксом KUZTDS_.
-#>
-function Get-EnvRaw {
-    param([string]$Name)
-    $v = [Environment]::GetEnvironmentVariable($Name)
-    if ([string]::IsNullOrWhiteSpace($v) -and $Name.StartsWith('EMTDS_')) {
-        $v = [Environment]::GetEnvironmentVariable('KUZTDS_' + $Name.Substring(6))
-    }
-    return $v
-}
-
-<#
-.SYNOPSIS
   Читает переменную окружения как число с плавающей точкой или возвращает значение по умолчанию.
 #>
 function Get-EnvDouble {
     param([string]$Name, [double]$Default)
-    $v = Get-EnvRaw -Name $Name
+    $v = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrWhiteSpace($v)) { return $Default }
     return [double]$v
 }
@@ -87,7 +74,7 @@ function Get-EnvDouble {
 #>
 function Get-EnvInt {
     param([string]$Name, [int]$Default)
-    $v = Get-EnvRaw -Name $Name
+    $v = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrWhiteSpace($v)) { return $Default }
     return [int]$v
 }
@@ -98,7 +85,7 @@ function Get-EnvInt {
 #>
 function Get-EnvString {
     param([string]$Name, [string]$Default)
-    $v = Get-EnvRaw -Name $Name
+    $v = [Environment]::GetEnvironmentVariable($Name)
     if ([string]::IsNullOrWhiteSpace($v)) { return $Default }
     return $v
 }
@@ -230,14 +217,12 @@ function Show-Status {
 
 <#
 .SYNOPSIS
-  Считает число запущенных контейнеров с label emtds.role=test и старым kuztds.role=test.
+  Считает число запущенных контейнеров с label emtds.role=test.
 #>
 function Get-RunningTestContainerCount {
     $n = 0
-    foreach ($label in @('label=emtds.role=test', 'label=kuztds.role=test')) {
-        $out = docker ps -q --filter $label 2>$null
-        if ($out) { $n += @($out -split "`n" | Where-Object { $_.Trim() }).Count }
-    }
+    $out = docker ps -q --filter 'label=emtds.role=test' 2>$null
+    if ($out) { $n += @($out -split "`n" | Where-Object { $_.Trim() }).Count }
     return $n
 }
 
@@ -427,20 +412,16 @@ function Open-InflightLock {
 
 <#
 .SYNOPSIS
-  Читает учётные данные ClickHouse из emtds-admin (или старого kuztds-admin) в env процесса (без записи на диск).
+  Читает учётные данные ClickHouse из emtds-admin в env процесса (без записи на диск).
 #>
 function Set-IntegrationProcessEnv {
-    foreach ($container in @('emtds-admin', 'kuztds-admin')) {
-        foreach ($prefix in @('EMTDS_', 'KUZTDS_')) {
-            $user = (docker exec $container printenv ($prefix + 'CLICKHOUSE_USER') 2>$null)
-            if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($user)) { continue }
-            $pass = (docker exec $container printenv ($prefix + 'CLICKHOUSE_PASSWORD') 2>$null)
-            $env:EMTDS_CLICKHOUSE_USER = $user.Trim()
-            $env:EMTDS_CLICKHOUSE_PASSWORD = "$pass".Trim()
-            return
-        }
+    $user = (docker exec emtds-admin printenv EMTDS_CLICKHOUSE_USER 2>$null)
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($user)) {
+        throw 'Не удалось прочитать EMTDS_CLICKHOUSE_USER и EMTDS_CLICKHOUSE_PASSWORD из emtds-admin (контейнер должен быть Up).'
     }
-    throw 'Не удалось прочитать CLICKHOUSE_USER и CLICKHOUSE_PASSWORD из emtds-admin или kuztds-admin (контейнер должен быть Up).'
+    $pass = (docker exec emtds-admin printenv EMTDS_CLICKHOUSE_PASSWORD 2>$null)
+    $env:EMTDS_CLICKHOUSE_USER = $user.Trim()
+    $env:EMTDS_CLICKHOUSE_PASSWORD = "$pass".Trim()
 }
 
 <#
@@ -530,7 +511,7 @@ try {
         $dockerArgs += '-e', 'EMTDS_CLICKHOUSE_ADDR=clickhouse:9000'
         $dockerArgs += '-e', 'EMTDS_CLICKHOUSE_USER'
         $dockerArgs += '-e', 'EMTDS_CLICKHOUSE_PASSWORD'
-        $dockerArgs += '--network', 'deploy_default'
+        $dockerArgs += '--network', 'emtds-infra_default'
     }
 
     $dockerArgs += $imageId

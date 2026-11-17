@@ -327,10 +327,13 @@ func urlAction(action string) bool {
 	}
 }
 
+// UnknownCountry — отдельное значение «страна без кода». Keitaro отдаёт его как Unknown или пустой код; в каталоге оно хранится строчными буквами.
+const UnknownCountry = "unknown"
+
 // countryCodes переводит имена и коды стран оффера в ISO2 в нижнем регистре.
 //
 // Параметры: raw — страны оффера.
-// Результат: коды и исходные значения, которые не удалось перевести. Пустые строки пропускаются.
+// Результат: коды и исходные значения, которые не удалось перевести. Пустой код и Unknown (в любом регистре) дают UnknownCountry: это страна без кода, а не ошибка. Остальной мусор попадает в список непереведённых.
 // Ошибки: нет.
 func countryCodes(raw []string) ([]string, []string) {
 	var out []string
@@ -338,13 +341,16 @@ func countryCodes(raw []string) ([]string, []string) {
 	seen := map[string]bool{}
 	for _, item := range raw {
 		item = strings.TrimSpace(item)
-		if item == "" {
-			continue
-		}
-		code, ok := CountryCode(item)
-		if !ok {
-			bad = append(bad, item)
-			continue
+		var code string
+		if item == "" || strings.EqualFold(item, UnknownCountry) {
+			code = UnknownCountry
+		} else {
+			var ok bool
+			code, ok = CountryCode(item)
+			if !ok {
+				bad = append(bad, item)
+				continue
+			}
 		}
 		code = strings.ToLower(code)
 		if seen[code] {

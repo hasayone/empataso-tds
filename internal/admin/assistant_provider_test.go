@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 const aiTestKey = "sk-test-KEY-0123456789abcdefghij"

@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 func linked(groups ...*config.Group) *config.Groups { return config.NewGroups(groups...) }

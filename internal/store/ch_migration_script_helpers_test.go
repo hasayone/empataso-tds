@@ -34,8 +34,8 @@ func splitCHMigration(body string) []string {
 
 // substituteMigrationDB rewrites production database names to the integration db.
 func substituteMigrationDB(db, script string) string {
-	s := strings.ReplaceAll(script, "kuztds.", db+".")
-	s = strings.ReplaceAll(s, "DATABASE IF NOT EXISTS kuztds", "DATABASE IF NOT EXISTS "+db)
+	s := strings.ReplaceAll(script, "emtds.", db+".")
+	s = strings.ReplaceAll(s, "DATABASE IF NOT EXISTS emtds", "DATABASE IF NOT EXISTS "+db)
 	return s
 }
 
@@ -107,13 +107,13 @@ func rejectForeignQualifiers(db, stmt string) error {
 	if regexp.MustCompile(`(?i)\bdefault\.`).MatchString(stmt) {
 		return fmt.Errorf("references default database")
 	}
-	if regexp.MustCompile("(?i)`kuztds`\\.").MatchString(stmt) {
-		return fmt.Errorf("references production database kuztds")
+	if regexp.MustCompile("(?i)`emtds`\\.").MatchString(stmt) {
+		return fmt.Errorf("references production database emtds")
 	}
 	if regexp.MustCompile(`(?i)\bemtds\.(?:events|conversions|postbacks|postback_log)\b`).MatchString(stmt) {
-		return fmt.Errorf("references production database kuztds")
+		return fmt.Errorf("references production database emtds")
 	}
-	if regexp.MustCompile(`(?i)\bKUZTDS\.`).MatchString(stmt) && !strings.EqualFold(db, "kuztds") {
+	if regexp.MustCompile(`(?i)\bEMTDS\.`).MatchString(stmt) && !strings.EqualFold(db, "emtds") {
 		return fmt.Errorf("references foreign database qualifier")
 	}
 	if regexp.MustCompile(`(?i)ALTER\s+TABLE\s+(events|conversions|postbacks|postback_log)\b`).MatchString(stmt) {

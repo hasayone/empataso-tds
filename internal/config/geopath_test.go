@@ -9,7 +9,6 @@ func TestDBIPASNPath(t *testing.T) {
 	unsetAll := func(t *testing.T) {
 		for _, k := range []string{"EMTDS_DBIP_ASN_DB", "EMTDS_ASN_DB", "EMTDS_GEO_DB"} {
 			t.Setenv(k, "")
-			t.Setenv("KUZTDS_"+k[len(EnvPrefix):], "")
 		}
 	}
 	cases := []struct {
@@ -44,19 +43,21 @@ func TestDBIPASNPath(t *testing.T) {
 	}
 }
 
-func TestDBIPASNPathLegacyName(t *testing.T) {
+// TestDBIPASNPathIgnoresRetiredName checks that a database path under the retired
+// variable prefix gives no DB-IP path.
+func TestDBIPASNPathIgnoresRetiredName(t *testing.T) {
 	t.Setenv("EMTDS_DBIP_ASN_DB", "")
 	t.Setenv("EMTDS_ASN_DB", "")
-	t.Setenv("KUZTDS_ASN_DB", filepath.Join("old", "asn.mmdb"))
-	if got, want := DBIPASNPath(), filepath.Join("old", "dbip-asn.mmdb"); got != want {
-		t.Fatalf("DBIPASNPath = %q, want %q", got, want)
+	t.Setenv("EMTDS_GEO_DB", "")
+	t.Setenv(retiredEnvName("ASN_DB"), filepath.Join("old", "asn.mmdb"))
+	if got := DBIPASNPath(); got != "" {
+		t.Fatalf("DBIPASNPath = %q, want empty", got)
 	}
 }
 
 func TestGeoFilePaths(t *testing.T) {
 	for _, k := range []string{"DBIP_ASN_DB", "ASN_DB", "GEO_DB"} {
 		t.Setenv("EMTDS_"+k, "")
-		t.Setenv("KUZTDS_"+k, "")
 	}
 	if got := GeoFilePaths(); got != (GeoFiles{}) {
 		t.Fatalf("nothing set: %+v", got)

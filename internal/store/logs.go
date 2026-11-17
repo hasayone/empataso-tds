@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 // LogFilter selects rows of the click journal. Every field is optional.

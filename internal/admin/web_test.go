@@ -213,7 +213,8 @@ func TestDashboardUIFiltersBrand(t *testing.T) {
 	mustNot(t, html, "EmpatASO", "EmpatASO branding removed")
 	mustNot(t, html, "base64,iVBOR", "embedded logo removed")
 	menuLine := spaFunctionLine(html, "userMenuItems")
-	must(t, menuLine, `tr('menu.integrations')`, "user menu integrations")
+	must(t, menuLine, "adminMenuEntries()", "user menu takes its entries from the settings list")
+	must(t, spaBetween(html, "const SETTINGS_TABS=[", "\n];"), "key:'menu.integrations', route:'integrations'", "user menu integrations")
 	mustNot(t, menuLine, `tr('menu.keitaro')`, "user menu without keitaro")
 	pagesAt := strings.Index(html, "const PAGES=")
 	pagesEnd := strings.Index(html[pagesAt:], "\n")
@@ -385,11 +386,20 @@ func TestEditorsDoNotMoveThePage(t *testing.T) {
 	must(t, html, `scrollbar-gutter:stable`, "no width jump when a page gets a scrollbar")
 }
 
-// TestNavDropdownNoBackground — the reports dropdown button has no hover/active background while the more button keeps it.
-func TestNavDropdownNoBackground(t *testing.T) {
+// TestNavDropdownHover — the reports dropdown button shares the hover and open-menu look of plain nav items, also in the brand scheme.
+func TestNavDropdownHover(t *testing.T) {
 	html := spaSource()
-	must(t, html, ".navdrop-btn:not(.navmore-btn):hover,.navdrop.active .navdrop-btn:not(.navmore-btn){background:transparent", "reports dropdown without background")
-	must(t, html, ".navdrop.active .navdrop-btn{color:var(--fg);background:var(--surface-2)}", "more button keeps the active background")
+	must(t, html, ".nav a:hover,.navdrop-btn:hover,.navdrop-btn[aria-expanded=true]{background:var(--surface-2);color:var(--fg)", "dropdown hover shares the nav item rule")
+	must(t, html, `:root[data-accent="brand"] .navdrop-btn:hover,:root[data-accent="brand"] .navdrop-btn[aria-expanded=true]`, "brand hover covers the dropdown button")
+	must(t, html, ".nav a.active,.navdrop.active .navdrop-btn{color:var(--fg);background:var(--surface-2)}", "active dropdown button shares the active nav item rule")
+	must(t, html, ".nav a.active::after,.navdrop.active .navdrop-btn:not(.navmore-btn)::after{", "active reports button gets the nav underline")
+	must(t, html, `:root[data-accent="brand"] .nav a.active,:root[data-accent="brand"] .navdrop.active .navdrop-btn{`, "brand scheme paints the active dropdown like an active item")
+	must(t, html, `:root[data-accent="brand"] .nav a.active::after,:root[data-accent="brand"] .navdrop.active .navdrop-btn::after{`, "brand scheme colours the dropdown underline")
+	mustNot(t, html, ".navdrop.active .navdrop-btn{color:var(--fg)}", "no colour-only active rule for the dropdown")
+	mustNot(t, html, ".navdrop-btn:not(.navmore-btn):hover", "no rule cancels the dropdown hover")
+	must(t, html, `aria-haspopup="menu" aria-expanded="false">${icon('report')}`, "reports button reports its menu state")
+	must(t, html, "anchor.setAttribute('aria-expanded','true')", "open menu marks its anchor expanded")
+	must(t, html, "qa('#nav .navdrop').forEach(d=>d.classList.toggle('active',REPORT_IDS.includes(page)))", "reports group follows the open page")
 }
 
 // TestRefreshSpin — a refresh click turns the icon a full half-second and holds it until the reload returns.
@@ -409,6 +419,104 @@ func must(t *testing.T, html, needle, what string) {
 	if !strings.Contains(html, needle) {
 		t.Errorf("not found in SPA: %s (looked for %q)", what, needle)
 	}
+}
+
+// TestSPAAIChosenModelsBlock checks that the allowed-models list shows the ticked models above the search with the default one
+// marked, in every language, and that the parameters of a ticked model are a form block per model with labelled fields.
+func TestSPAAIChosenModelsBlock(t *testing.T) {
+	html := spaSource()
+	picker := assistantFn(html, "aiModelPicker")
+	must(t, picker, "chosen=aiEl('div','aimp-sel')", "the block of the ticked models")
+	must(t, picker, "host.appendChild(chosen)}", "the block is added for the ticking list only")
+	if strings.Index(picker, "host.appendChild(chosen)}") > strings.Index(picker, "host.appendChild(bar);") {
+		t.Error("the block of the ticked models must sit above the search bar")
+	}
+	must(t, picker, "tr('ai.chat.model.default')", "the default mark reuses the list key")
+	must(t, picker, "tr('ai.chat.model.sel.none')", "an empty selection has a caption")
+	for _, lang := range []string{"'ai.chat.model.sel.none':'No models selected'", "'ai.chat.model.sel.none':'Модели не выбраны'", "'ai.chat.model.sel.none':'Моделі не обрано'"} {
+		must(t, html, lang, "the caption in each language")
+	}
+	must(t, html, `<div class="aipr"><div class="aipr-h">`, "a form block per ticked model")
+	must(t, html, `<label for="ai-pr-${k}-${i}">${tr(label)}</label>`, "a labelled price field")
+	mustNot(t, html, `<th>${tr('ai.set.price.model')}</th>`, "no column headers in the price block")
+	must(t, html, `<div class="aipr-row">${field('i','ai.set.price.in')}${field('o','ai.set.price.out')}</div>`, "input and output side by side")
+	must(t, html, `.aipr-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))`, "two columns at any width")
+	panel := dictBetween(t, html, "async function aiPanel(host,live){", "\n}\n")
+	if strings.Index(panel, `id="ai-limits"`) < strings.Index(panel, `id="ai-prices"`) {
+		t.Error("the folded limits must sit below the prices")
+	}
+	mustNot(t, panel, `id="ai-limits" open`, "the limits are folded by default")
+
+	for _, key := range []string{"'ai.chat.model.setdef':'Make default'", "'ai.chat.model.setdef':'Сделать моделью по умолчанию'", "'ai.chat.model.setdef':'Зробити моделлю за замовчуванням'",
+		"'ai.chat.model.remove':'Remove from selected'", "'ai.chat.model.remove':'Убрать из выбранных'", "'ai.chat.model.remove':'Прибрати з обраних'"} {
+		must(t, html, key, "the chip action labels in each language")
+	}
+	must(t, picker, "chipBtn('star','ai.chat.model.setdef'", "the star makes a model the default")
+	must(t, picker, "chipBtn('x','ai.chat.model.remove'", "the cross takes a model off")
+	must(t, html, ".aimp-sel .chip:hover .aimp-acts,.aimp-sel .chip:focus-within .aimp-acts{", "the chip actions show on hover and keyboard focus")
+	funcs := []string{"aiEl", "aiVal", "aiUSD", "aiModelNorm", "aiModelsMerge", "aiModelFilter", "aiModelPickable", "aiModelDefault", "aiModelNext", "aiCtxText", "aiModelMeta", "aiModelPicker"}
+	assistantNode(t, funcs, assistantFakeDOM+`const AI = {tick:0};`, `
+const models = aiModelsMerge([{id:'a/one', name:'One', tools:true}, {id:'b/two', name:'Two', tools:true}], []);
+const o = {models, multi:true, withDefault:true, sel:new Set(), defId:'', onChange(){}};
+const host = new El('div');
+aiModelPicker(host, o);
+const box = () => host.all().find(e => e.className === 'aimp-sel');
+const chips = () => box().all().filter(e => e.className.split(' ').includes('chip'));
+eq(host.children[0] === box(), true, 'the block is the first thing in the picker');
+eq([chips().length, box().textContent], [0, 'ai.chat.model.sel.none'], 'nothing selected: a short caption');
+const rowOf = id => host.all().filter(e => e.className.split(' ').includes('aimp-r')).find(r => r.textContent.includes(id));
+const first = rowOf('a/one').children[0].children[0];
+first.checked = true; first.onchange();
+eq([chips().length, chips()[0].textContent.includes('One'), chips()[0].className.includes('def')], [1, true, true], 'ticking shows the chip, the first one is the default');
+const second = rowOf('b/two').children[0].children[0];
+second.checked = true; second.onchange();
+eq(chips().length, 2, 'both chips are shown');
+eq(chips().filter(c => c.className.includes('def')).length, 1, 'one chip is the default');
+const radio = rowOf('b/two').children[1].children[0];
+radio.checked = true; radio.onchange();
+const def = chips().find(c => c.className.includes('def'));
+eq([def.textContent.includes('Two'), def.textContent.includes('ai.chat.model.default'), chips()[0] === def], [true, true, true], 'the default radio moves the mark and puts it first');
+chips()[0].onclick && chips()[0].onclick();
+eq([...o.sel].sort(), ['a/one', 'b/two'], 'a chip does not untick');
+const again = rowOf('a/one').children[0].children[0];
+again.checked = false; again.onchange();
+second.checked = false; second.onchange();
+eq([chips().length, box().textContent], [0, 'ai.chat.model.sel.none'], 'unticking removes the chips');
+
+// Chip actions: the star sets the default, the cross unticks, taking off the default hands it to the next name in alphabetical order.
+const ms = aiModelsMerge([{id:'m/c', name:'cherry', tools:true}, {id:'m/a', name:'Apple', tools:true}, {id:'m/b', name:'banana', tools:true}, {id:'m/n', name:'Plain', tools:false}], []);
+const o2 = {models:ms, multi:true, withDefault:true, sel:new Set(['m/a', 'm/b', 'm/c']), defId:'m/a', onChange(){ changed++; }};
+let changed = 0;
+const host2 = new El('div');
+aiModelPicker(host2, o2);
+const box2 = () => host2.all().find(e => e.className === 'aimp-sel');
+const chip2 = name => box2().all().filter(e => e.className.split(' ').includes('chip')).find(c => c.children[0].textContent === name);
+const rowOf2 = id => host2.all().filter(e => e.className.split(' ').includes('aimp-r')).find(r => r.textContent.includes(id));
+const act = (name, label) => chip2(name).all().find(b => b.tagName === 'BUTTON' && b.attrs['aria-label'] === label);
+eq(chip2('Apple').all().filter(e => e.tagName === 'BUTTON').map(b => b.attrs['aria-label']), ['ai.chat.model.remove'], 'the default chip has only the cross');
+eq(chip2('banana').all().filter(e => e.tagName === 'BUTTON').map(b => [b.attrs['aria-label'], b.title]), [['ai.chat.model.setdef', 'ai.chat.model.setdef'], ['ai.chat.model.remove', 'ai.chat.model.remove']], 'another chip has the star and the cross with labels');
+act('banana', 'ai.chat.model.setdef').onclick();
+eq([o2.defId, [...o2.sel].sort(), changed], ['m/b', ['m/a', 'm/b', 'm/c'], 1], 'the star sets the default and keeps the selection');
+eq(document.activeElement && document.activeElement.attrs['aria-label'], 'ai.chat.model.remove', 'the focus stays on the chip after the star');
+eq(rowOf2('m/b').children[1].children[0].checked, true, 'the default radio of the list follows the star');
+act('cherry', 'ai.chat.model.remove').onclick();
+eq([o2.defId, [...o2.sel].sort(), changed], ['m/b', ['m/a', 'm/b'], 2], 'the cross unticks a model and keeps the default');
+eq(rowOf2('m/c').children[0].children[0].checked, false, 'the list checkbox follows the cross');
+act('banana', 'ai.chat.model.remove').onclick();
+eq([o2.defId, [...o2.sel].sort()], ['m/a', ['m/a']], 'taking off the default hands it to the next selected model');
+o2.sel = new Set(['m/a', 'm/b', 'm/c']); o2.defId = 'm/c'; aiModelPicker(host2, o2);
+act('cherry', 'ai.chat.model.remove').onclick();
+eq(o2.defId, 'm/a', 'the last name in the alphabet hands the default to the first');
+o2.sel = new Set(['m/a', 'm/b', 'm/c']); o2.defId = 'm/a'; aiModelPicker(host2, o2);
+act('Apple', 'ai.chat.model.remove').onclick();
+eq(o2.defId, 'm/b', 'the default goes by visible name without case, not by list order');
+o2.sel = new Set(['m/a', 'm/n']); o2.defId = 'm/a'; aiModelPicker(host2, o2);
+eq(chip2('Plain').all().filter(e => e.tagName === 'BUTTON').map(b => b.attrs['aria-label']), ['ai.chat.model.remove'], 'a model without tools has no star');
+act('Apple', 'ai.chat.model.remove').onclick();
+eq([o2.defId, [...o2.sel]], ['', ['m/n']], 'no selectable model left: no default');
+act('Plain', 'ai.chat.model.remove').onclick();
+eq([o2.sel.size, box2().textContent], [0, 'ai.chat.model.sel.none'], 'nothing left: the short caption');
+`)
 }
 
 func mustNot(t *testing.T, html, needle, what string) {
@@ -685,6 +793,66 @@ func TestCatalogNames(t *testing.T) {
 	must(t, html, "#/flows/", "campaign address stays a slug path")
 }
 
+// TestHeaderSignals runs the header marks under node against fixtures of GET /api/system/signals: a newer commit paints a
+// yellow dot on the avatar, a failed service a red one that wins, the failure window opens once per set of failed services
+// in a tab and again after a recovery, a failed read keeps the last mark, and the poll goes on.
+func TestHeaderSignals(t *testing.T) {
+	html := spaSource()
+	must(t, html, `<span class="avatar">${esc((user||'a')[0])}</span><span class="dot sigdot" id="sigdot" hidden></span>`, "the dot sits on the avatar")
+	must(t, spaFunctionLine(html, "adminMenuEntries"), "...(t.id==='about'?sigMenuMark():{})", "the about entry reads the same mark")
+	must(t, spaFunctionLine(html, "app"), "sigStart();", "the poll starts with the app")
+	must(t, spaFunctionLine(html, "sigShow"), "go('settings/about')", "the window leads to About")
+	consts := regexp.MustCompile(`(?m)^const SIG(?:_EVERY)?=.*$`).FindAllString(html, -1)
+	if len(consts) != 2 {
+		t.Fatalf("found %d signal constants, want 2", len(consts))
+	}
+	prelude := strings.Join(consts, "\n") + `
+const tr = k => k, trFill = (k, m) => k + ':' + m.list;
+const mk = () => { const el = {hidden:true, title:'', cls:{}, removeAttribute(k){ el[k] = ''; }}; el.classList = {toggle:(c, on) => { el.cls[c] = !!on; }}; return el; };
+const dot = mk(), btn = mk();
+const q = sel => ({'#sigdot':dot, '#userbtn':btn})[sel] || null;
+const store = {};
+var sessionStorage = {getItem: k => k in store ? store[k] : null, setItem: (k, v) => { store[k] = String(v); }, removeItem: k => { delete store[k]; }};
+let answer = null, timers = [], shown = [];
+const call = async () => { if (answer instanceof Error) throw answer; return answer; };
+const setTimeout = (f, ms) => { timers.push(ms); return timers.length; };
+function sigShow(down){ shown.push(down.slice()); }
+`
+	assistantNode(t, []string{"sigMark", "sigNames", "sigPaint", "sigShouldShow", "sigTick"}, prelude, `
+const tick = async (a) => { answer = a; await sigTick(SIG.gen); };
+await tick({update:false, down:[]});
+eq([dot.hidden, shown.length, timers], [true, 0, [60000]], 'no marks: no dot, no window, the next read in a minute');
+await tick({update:true, down:[]});
+eq([dot.hidden, dot.cls.warn, dot.cls.bad, btn.title], [false, true, false, 'sig.update'], 'a newer commit: a yellow dot with the reason');
+await tick({update:true, down:['redis', 'rogue']});
+eq([dot.cls.bad, dot.cls.warn, SIG.data.down, shown, btn.title], [true, false, ['redis'], [['redis']], 'sig.down.text:sig.svc.redis'], 'a failure: a red dot and one window, unknown names dropped');
+await tick({update:true, down:['redis']});
+eq(shown.length, 1, 'the same failure does not open the window again');
+await tick(new Error('offline'));
+eq([dot.cls.bad, shown.length], [true, 1], 'a failed read keeps the last mark');
+await tick({update:false, down:['engine', 'redis']});
+eq(shown, [['redis'], ['engine', 'redis']], 'a new set of failed services opens the window');
+await tick({update:false, down:[]});
+eq([dot.hidden, btn.title, 'emtds-sig-down' in store], [true, '', false], 'a recovery clears the dot and forgets the failure');
+await tick({update:false, down:['redis']});
+eq(shown.length, 3, 'the next failure after a recovery is told again');
+eq(timers.length, 8, 'every read schedules the next one');
+`)
+}
+
+// TestPeriodButtonShowsLabel checks the period button of the header: the label is written on the button next to the calendar icon,
+// it hides only on the nav-short step that fitNav takes after the nav labels, and the period stays in title and aria-label.
+func TestPeriodButtonShowsLabel(t *testing.T) {
+	html := spaSource()
+	must(t, html, `<button class="ghost" id="period" type="button">${icon('calendar')}<span id="period-text"></span></button>`, "the label sits on the button")
+	must(t, html, `.top.nav-short #period-text,`, "the label hides only on the nav-short step")
+	mustNot(t, html, `.top.nav-icons #period-text`, "icon-only nav keeps the label")
+	must(t, html, `#period-text{white-space:nowrap}`, "the label never wraps the header")
+	must(t, spaFunctionLine(html, "paintChrome"), "pt.textContent=lab; b.title=lab; b.setAttribute('aria-label',lab);", "the label, title and aria-label are the period")
+	fit := spaFunctionLine(html, "fitNav")
+	must(t, fit, "['nav-icons','nav-short','nav-fold']", "the label goes after the nav labels and before the burger")
+}
+
 // TestNavExportAndCampaignTable — icon nav, HTML export, period label, campaign table.
 func TestNavExportAndCampaignTable(t *testing.T) {
 	html := spaSource()
@@ -744,7 +912,15 @@ func TestFlowsHeaderExportMenu(t *testing.T) {
 	must(t, flows, "dockHTML('flow','flowexport')", "flows dock with export")
 	must(t, flows, "exportFlows(false)", "CSV export action")
 	must(t, flows, "exportFlows(true)", "HTML export action")
-	must(t, flows, "tr('Create')", "create button label")
+	must(t, flows, "createBtn('newflow')", "create button from the shared helper")
+	createFn := spaFunctionLine(html, "createBtn")
+	must(t, createFn, "tr('Create')", "create button label")
+	must(t, createFn, `aria-label="${label}"`, "create button keeps its accessible name")
+	must(t, createFn, `class="primary mk"`, "create button class")
+	must(t, html, `@media(max-width:720px){button.mk{width:32px;padding:0}button.mk .mk-t{display:none}}`, "create shows only the plus on a narrow bar")
+	for _, id := range []string{"land-new", "net-new", "src-new", "off-new", "dom-new"} {
+		must(t, html, "createBtn('"+id+"')", "catalog create "+id)
+	}
 	must(t, flows, `id="fbar"`, "filter bar")
 	must(t, flows, `id="fsource"`, "source filter")
 	must(t, flows, `id="ffolder"`, "folder filter")
@@ -752,7 +928,7 @@ func TestFlowsHeaderExportMenu(t *testing.T) {
 	mustNot(t, flows, `id="flowcsv"`, "separate CSV export button")
 	mustNot(t, flows, `id="flowhtml"`, "separate HTML export button")
 	fbar := spaBetween(flows, `id="fbar"`, `id="fgrid"`)
-	must(t, fbar, `id="newflow"`, "create in filter bar")
+	must(t, fbar, `createBtn('newflow')`, "create in filter bar")
 	must(t, fbar, `id="fq"`, "search in filter bar")
 	must(t, flows, `class="toolbar bar-fit" id="fbar"`, "filter bar sizes to the row")
 	mustNot(t, fbar, `width:260px`, "search is not a fixed 260px")
@@ -762,19 +938,22 @@ func TestFlowsHeaderExportMenu(t *testing.T) {
 	must(t, html, `.toolbar.bar-fit .rgt{flex:0 1 auto;flex-wrap:nowrap;min-width:0`, "filters and refresh stay on one row")
 	must(t, html, `.toolbar.bar-fit .rgt>button{flex:none}`, "refresh keeps its size")
 	must(t, html, `.toolbar.bar-fit .rgt>.tags.pk,.toolbar.bar-fit .rgt>select:not(.pk-native){flex:1 1 calc(50% - 25px)`, "narrow bar leaves room for refresh beside the last filter")
+	must(t, html, `.toolbar.bar-fit{--bar-filter-w:140px}`, "one width token for the group and state filters")
+	must(t, html, `.toolbar.bar-fit .rgt>.tags.pk,.toolbar.bar-fit .rgt>select:not(.pk-native){flex:0 1 auto;width:var(--bar-filter-w);min-width:0}`, "group and state filters share one width")
+	must(t, html, `.toolbar.bar-fit .lft .sfld{flex:1 1 160px}`, "search takes the rest of the row and may shrink")
 	mustNot(t, html, `.toolbar.bar-fit .rgt{flex:0 0 420px`, "filter slot is not a fixed width")
 	mustNot(t, html, `.toolbar.bar-fit{flex-wrap:nowrap}`, "filters wrap as one group")
 	cat := spaFunctionLine(html, "catalogBar")
 	must(t, cat, `class="toolbar bar-fit"`, "catalog bar uses the same fit")
 	mustNot(t, cat, `width:260px`, "catalog search is not a fixed 260px")
-	nw := strings.Index(fbar, `id="newflow"`)
+	nw := strings.Index(fbar, `createBtn('newflow')`)
 	fq := strings.Index(fbar, `id="fq"`)
 	if nw < 0 || fq < 0 || nw >= fq {
 		t.Errorf("filter bar order create < search: new=%d search=%d", nw, fq)
 	}
 	ph := spaBetween(flows, `<div class="ph">`, `</div>
     <div class="toolbar bar-fit" id="fbar">`)
-	mustNot(t, ph, `id="newflow"`, "create not in page header")
+	mustNot(t, ph, `newflow`, "create not in page header")
 	mustNot(t, ph, `id="fq"`, "search not in page header")
 	dockFn := spaFunctionLine(html, "dockHTML")
 	page := strings.Index(dockFn, `id="${prefix}page"`)
@@ -884,11 +1063,23 @@ func TestKeitaroPage(t *testing.T) {
 	if menuLine == "" {
 		t.Fatal("user menu missing")
 	}
-	pbAt := strings.Index(menuLine, `tr('pb.title')`)
-	intAt := strings.Index(menuLine, `tr('menu.integrations')`)
-	setAt := strings.Index(menuLine, `tr('menu.settings')`)
-	if pbAt < 0 || intAt < 0 || setAt < 0 || pbAt >= intAt || intAt >= setAt {
-		t.Errorf("integrations must sit between postbacks and settings in the user menu")
+	must(t, menuLine, "adminMenuEntries()", "user menu takes its entries from the settings list")
+	list := spaBetween(html, "const SETTINGS_TABS=[", "\n];")
+	setAt := strings.Index(list, "id:'profile'")
+	usersAt := strings.Index(list, "id:'users'")
+	intAt := strings.Index(list, "id:'integrations'")
+	keysAt := strings.Index(list, "id:'keys'")
+	boardsAt := strings.Index(list, "id:'boards'")
+	pbAt := strings.Index(list, "id:'postbacks'")
+	aboutAt := strings.Index(list, "id:'about'")
+	if setAt < 0 || setAt >= usersAt || usersAt >= intAt || intAt >= keysAt || keysAt >= boardsAt || boardsAt >= pbAt || pbAt >= aboutAt {
+		t.Errorf("user menu order: settings, users, integrations, API keys, section settings, postbacks, about")
+	}
+	if got := strings.Count(list[boardsAt:aboutAt], "'-',"); got != 2 {
+		t.Errorf("want a separator before postbacks and before about, got %d", got)
+	}
+	if !strings.Contains(list[boardsAt:pbAt], "'-',") || !strings.Contains(list[pbAt:aboutAt], "'-',") {
+		t.Errorf("separators must sit before postbacks and before about")
 	}
 	mustNot(t, menuLine, `tr('menu.keitaro')`, "user menu uses integrations, not keitaro")
 	src := spaFunctionLine(html, "keitaroPanel")
@@ -938,9 +1129,9 @@ func TestKeitaroPage(t *testing.T) {
 	must(t, html[pagesAt:pagesAt+pagesEnd], "keitaro:integrations", "PAGES aliases keitaro to integrations")
 	must(t, html[pagesAt:pagesAt+pagesEnd], "integrations", "PAGES registers integrations")
 	for _, anchor := range []string{
-		`'menu.settings':'Profile'`,
-		`'menu.settings':'Профиль'`,
-		`'menu.settings':'Профіль'`,
+		`'menu.settings':'Settings'`,
+		`'menu.settings':'Настройки'`,
+		`'menu.settings':'Налаштування'`,
 	} {
 		i := strings.Index(html, anchor)
 		if i < 0 {
@@ -1161,10 +1352,10 @@ func TestSPAFlowTrafficOrder(t *testing.T) {
 }
 
 // TestSPAUsersPage checks the users tab, access helpers, Keitaro users import,
-// and that menu.users appears in all three interface dictionaries.
+// and that prof.users appears in all three interface dictionaries.
 func TestSPAUsersPage(t *testing.T) {
 	html := spaSource()
-	must(t, html, `data-ptab="users"`, "profile users tab")
+	must(t, spaBetween(html, "const SETTINGS_TABS=[", "\n];"), "{id:'users', key:'prof.users', route:'settings/users'", "profile users tab")
 	must(t, html, `id="kt-users"`, "keitaro users checkbox")
 	must(t, html, "/api/users", "users API")
 	must(t, html, "hiddenCols(", "hiddenCols helper")
@@ -1181,9 +1372,9 @@ func TestSPAUsersPage(t *testing.T) {
 	mustNot(t, src, "return src", "source column does not show the raw access_source")
 	must(t, html, "'prof.account'", "prof.account i18n")
 	for _, anchor := range []string{
-		`'menu.users':'Users'`,
-		`'menu.users':'Пользователи'`,
-		`'menu.users':'Користувачі'`,
+		`'prof.users':'Users'`,
+		`'prof.users':'Пользователи'`,
+		`'prof.users':'Користувачі'`,
 	} {
 		i := strings.Index(html, anchor)
 		if i < 0 {
@@ -1223,6 +1414,7 @@ func TestCodeEditorAndFilepick(t *testing.T) {
 	must(t, html, "/assets/ace/ace.js", "ace asset path")
 	must(t, html, "function codeEditor", "codeEditor helper")
 	must(t, html, `class="filepick"`, "filepick wrapper")
+	must(t, html, ".fld input:not([type=checkbox]):not([type=file]),.fld select{width:100%}", "hidden file input inside a field keeps its 1px width")
 	must(t, html, "ed.errors", "editor syntax error i18n")
 	mustNot(t, html, "<script src=", "ace scripts are injected only")
 	land := spaBetween(html, "async function openLandingFile", "\nasync function landings")
@@ -1295,10 +1487,11 @@ func TestSPASettingsPickers(t *testing.T) {
 	if menuLine == "" {
 		t.Fatal("user menu missing")
 	}
-	pbAt := strings.Index(menuLine, `tr('pb.title')`)
-	setAt := strings.Index(menuLine, `tr('menu.settings')`)
-	if pbAt < 0 || setAt < 0 || pbAt > setAt {
-		t.Errorf("postbacks must sit above settings in the user menu")
+	must(t, menuLine, "adminMenuEntries()", "user menu takes its entries from the settings list")
+	list := spaBetween(html, "const SETTINGS_TABS=[", "\n];")
+	must(t, list, "{id:'postbacks', key:'pb.title', icon:'send', tab:false, open:()=>openPostbacks(), allow:()=>pageAllowed(ME,'conversions')}", "postbacks entry of the menu")
+	if pbAt, aboutAt := strings.Index(list, "id:'postbacks'"), strings.Index(list, "id:'about'"); pbAt < 0 || aboutAt < pbAt {
+		t.Errorf("postbacks must sit above about in the user menu")
 	}
 	tz := spaFunctionLine(html, "bindTzPick")
 	if tz == "" {
@@ -1545,6 +1738,27 @@ func TestCatalogSearchAndGroups(t *testing.T) {
 	netCat := catalogBranch(html, "networks")
 	must(t, landCat, "['group','off.group',1]", "landings catalog group column")
 	must(t, netCat, "['group','off.group',1]", "networks catalog group column")
+}
+
+// TestSearchClearButton checks that the campaign and catalog search fields share the clear button.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestSearchClearButton(t *testing.T) {
+	html := spaSource()
+	field := spaFunctionLine(html, "searchField")
+	must(t, field, `class="s-clr icon sm ghost"`, "clear button uses the icon button style")
+	must(t, field, `hidden`, "clear button starts hidden")
+	must(t, field, `aria-label="${esc(tr('Clear'))}"`, "clear button label goes through tr")
+	must(t, field, `icon('x')`, "clear button uses the cross icon")
+	bind := spaFunctionLine(html, "bindSearchClear")
+	must(t, bind, `clr.hidden=!inp.value`, "button shows only while the input has text")
+	must(t, bind, `inp.focus()`, "focus returns to the input")
+	must(t, bind, `new Event('input'`, "clearing fires the page input handler")
+	must(t, spaFunctionLine(html, "catalogBar"), "searchField(", "catalog bar renders the field through the shared component")
+	must(t, spaFunctionLine(html, "bindCatalogBar"), "bindSearchClear(qi)", "catalog bar binds the clear button")
+	must(t, html, "${searchField(`<input id=\"fq\"", "campaign search uses the shared field")
+	must(t, html, "bindSearchClear(q('#fq'))", "campaign search binds the clear button")
+	must(t, html, `.sfld .s-clr:focus-visible{box-shadow:0 0 0 3px var(--focus)}`, "keyboard focus ring on the clear button")
+	must(t, html, `.sfld .s-clr[hidden]{display:none}`, "hidden attribute wins over the flex display")
 }
 
 // TestHeaderPattern — shared page header: catalog toolbar layout and refresh/export controls.
@@ -1826,7 +2040,7 @@ func TestSPAProfileAndReportFilters(t *testing.T) {
 	must(t, html, "function profile(", "profile page")
 	must(t, html, "/api/api-keys", "api key routes")
 	must(t, html, "#/settings/docs", "docs hash")
-	must(t, html, "#/settings/keys", "keys hash")
+	must(t, spaBetween(html, "const SETTINGS_TABS=[", "\n];"), "route:'settings/keys'", "keys route")
 	must(t, html, "Api-Key", "api key header")
 	must(t, html, "REP.conds", "report conditions")
 	rep := spaBetween(html, "async function report(", "async function keitaro(")
@@ -1851,9 +2065,9 @@ func TestSPAProfileAndReportFilters(t *testing.T) {
 	must(t, pages, "settings:profile", "PAGES keeps settings on profile")
 	must(t, pages, "keitaro", "PAGES still registers keitaro")
 	for _, anchor := range []string{
-		`'menu.settings':'Profile'`,
-		`'menu.settings':'Профиль'`,
-		`'menu.settings':'Профіль'`,
+		`'menu.settings':'Settings'`,
+		`'menu.settings':'Настройки'`,
+		`'menu.settings':'Налаштування'`,
 	} {
 		if !strings.Contains(html, anchor) {
 			t.Errorf("menu label missing: %s", anchor)
@@ -1868,6 +2082,13 @@ func TestAppearanceAccents(t *testing.T) {
 	must(t, html, `:root[data-accent="blue"]`, "blue accent tokens")
 	must(t, html, `:root[data-accent="green"]`, "green accent tokens")
 	must(t, html, `:root[data-accent="graphite"]`, "graphite accent tokens")
+	must(t, html, `:root[data-accent="brand"]{`, "brand accent tokens")
+	must(t, html, `const ACCENTS=['violet','blue','green','graphite','brand']`, "brand accent in the list")
+	must(t, html, `:root[data-accent="brand"] button.primary`, "brand primary button gradient")
+	must(t, html, `.swatch[data-accent-pick="brand"]`, "brand swatch")
+	for _, key := range []string{"accent.brand':'Brand'", "accent.brand':'Фирменная'", "accent.brand':'Фірмова'"} {
+		must(t, html, key, "brand accent label "+key)
+	}
 	must(t, html, `localStorage.getItem('emtds-accent')`, "remembered accent")
 	must(t, html, `data-accent-pick`, "accent swatch")
 	must(t, html, `function applyAccent(`, "applyAccent")
@@ -1988,6 +2209,32 @@ func TestApiKeysMenu(t *testing.T) {
 	mustNot(t, html, `data-revoke=`, "inline revoke button")
 }
 
+// TestKeyOnceCopy checks the dialog that shows a new key once: the key and the button share one
+// copy path, the key is a focusable full-width field, and the button reads «Copied» after a copy.
+// t is the test handle. It returns nothing. A missing marker or dictionary entry fails the test.
+func TestKeyOnceCopy(t *testing.T) {
+	html := spaSource()
+	fn := spaBetween(html, "function showKeyOnce(", "\nconst USER_ACCESS_SECTIONS")
+	must(t, fn, `id="key-once" class="key-once" role="button" tabindex="0"`, "key is a focusable button-like field")
+	must(t, fn, `title="${esc(tr('key.copy'))}" aria-label="${esc(tr('key.copy'))}"`, "hint and label go through tr")
+	must(t, fn, `copyBtn.onclick=copyKey;`, "button uses the shared copy function")
+	must(t, fn, `keyEl.onclick=copyKey;`, "click on the key uses the same copy function")
+	must(t, fn, `e.key==='Enter'||e.key===' '`, "Enter and Space copy the key")
+	must(t, fn, `copyBtn.textContent=tr('cf.ns.copied')`, "button reads Copied after copying")
+	must(t, fn, `copyBtn.textContent=tr('key.copy')`, "button label returns after a pause")
+	must(t, fn, `copyBtn.isConnected`, "label reset skips a closed dialog")
+	mustNot(t, fn, `navigator.clipboard`, "no second clipboard implementation")
+	must(t, spaFunctionLine(html, "copyText"), `if(after) after();`, "copyText reports success to the caller")
+	must(t, html, `.modal .key-once{display:block;box-sizing:border-box;width:100%;`, "key field spans the dialog")
+	must(t, html, `overflow-wrap:anywhere;word-break:break-all`, "long key wraps inside the field")
+	must(t, html, `.modal .key-once:focus-visible{`, "keyboard focus ring on the key")
+	for _, lang := range []string{"en", "ru", "uk"} {
+		if !trKeyDefined(html, lang, "cf.ns.copied") {
+			t.Errorf("key cf.ns.copied missing for lang %q", lang)
+		}
+	}
+}
+
 // TestApiKeyDialogAccess checks the key dialog: type, role, the shared access editor, the
 // dangerous actions block, the presets, the list caption and the OpenAPI and MCP docs card.
 // t is the test handle. It returns nothing. A missing marker or dictionary entry fails the test.
@@ -2035,7 +2282,8 @@ func TestApiKeyDialogAccess(t *testing.T) {
 func TestProfileTabsSections(t *testing.T) {
 	html := spaSource()
 	must(t, html, `class="vseg" role="tablist"`, "profile tab list")
-	must(t, html, `role="tab" data-ptab="profile"`, "profile tab")
+	must(t, html, `role="tab" data-ptab="${t.id}"`, "profile tab")
+	must(t, spaBetween(html, "const SETTINGS_TABS=[", "\n];"), "{id:'profile', key:'menu.settings', route:'settings'", "the first tab is the settings tab")
 	must(t, html, `<section class="setsec">`, "settings section")
 	must(t, html, `'set.sec.access':'Компания и доступ'`, "ru access section")
 	must(t, html, `.setsec h2{`, "section heading style")

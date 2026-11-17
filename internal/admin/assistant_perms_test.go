@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // TestAIPermsLevels checks the level of each resource under every preset, the cut of domains to

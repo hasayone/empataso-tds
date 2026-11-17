@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // mustAPIKey generates one key into set.

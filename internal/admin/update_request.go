@@ -12,8 +12,8 @@ import (
 	"regexp"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/cron"
 )
 
 // reUpdateUser validates a user login for inclusion in a request file.
@@ -133,17 +133,14 @@ func (s *Server) applyPreconditions(snap updateSnapshot, target, confirm string)
 	if snap.Agent == nil || !snap.Agent.Fresh(snap.Now, updateAgentMaxAge) || !snap.Agent.Inbox {
 		return "updater_absent"
 	}
-	if !snap.Agent.Signing {
-		return "unsigned"
-	}
 	if snap.Check == nil || !snap.Check.Fresh(snap.Now, updateCheckFreshAge) || snap.Check.Error != "" || snap.Check.Ahead == 0 {
 		return "no_update"
 	}
 	if target != snap.Check.Target.Commit {
 		return "target_mismatch"
 	}
-	if !snap.Check.Signed {
-		return "unsigned"
+	if block := signatureBlock(snap); block != "" {
+		return block
 	}
 	if len(snap.Check.ManualSteps) > 0 {
 		return "manual_steps"

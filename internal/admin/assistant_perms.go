@@ -4,7 +4,7 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // Levels of what the assistant may do on one resource. Each level includes the ones before it:

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // mcpOperationID is the operationId alphabet and length cmd/mcp accepts without rewriting.
@@ -25,7 +25,7 @@ var mcpForbidden = []string{
 	"POST /api/keitaro/import", "POST /api/keitaro/purge", "PUT /api/cron", "POST /api/cron/run",
 	"GET /api/cron", "DELETE /api/logs", "PUT /api/groups",
 	"DELETE /api/landings/{id}/files/{path...}",
-	"GET /api/version", "GET /api/update", "GET /api/update/log",
+	"GET /api/version", "GET /api/system", "GET /api/system/signals", "GET /api/update", "GET /api/update/log",
 	"POST /api/update/apply", "POST /api/update/rollback", "POST /api/update/check",
 	"GET /api/ai/settings", "PUT /api/ai/settings", "POST /api/ai/test", "GET /api/ai/models", "GET /api/ai/status",
 	"GET /api/ai/chats", "POST /api/ai/chats", "GET /api/ai/chats/{id}", "DELETE /api/ai/chats/{id}",

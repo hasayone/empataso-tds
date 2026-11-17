@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // render.Expand URL-encodes [KEY] because it is the visitor's ?q=. remoteValue

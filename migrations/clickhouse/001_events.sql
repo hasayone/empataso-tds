@@ -1,9 +1,9 @@
--- Table names are qualified with the kuztds database: CH init scripts run in
+-- Table names are qualified with the emtds database: CH init scripts run in
 -- the default DB context, so without the prefix tables would land elsewhere.
-CREATE DATABASE IF NOT EXISTS kuztds;
+CREATE DATABASE IF NOT EXISTS emtds;
 
 -- Single events table. Partitioning by day + TTL = auto-cleanup.
-CREATE TABLE IF NOT EXISTS kuztds.events
+CREATE TABLE IF NOT EXISTS emtds.events
 (
     ts          DateTime       DEFAULT now(),
     group_id    LowCardinality(String),
@@ -41,7 +41,7 @@ ORDER BY (group_id, stream_name, ts)
 TTL ts + INTERVAL 21 DAY;
 
 -- Postbacks (long-term storage).
-CREATE TABLE IF NOT EXISTS kuztds.postbacks
+CREATE TABLE IF NOT EXISTS emtds.postbacks
 (
     ts          DateTime DEFAULT now(),
     domain      String,

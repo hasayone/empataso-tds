@@ -8,7 +8,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // campaignLinkKinds lists grant resources validated on campaign save links.

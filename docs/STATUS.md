@@ -5,7 +5,7 @@
 Snapshot as of 2026-11-15. For details: `docs/USAGE.md`, `TODO.md`, `docs/wiki/README.md`.
 
 ## Done (in `main`, tests green)
-- **Rename to EmTDS**: `EMTDS_*` variables with a fallback to the old `KUZTDS_*` (`config.Env`), session cookie `emtds_admin` (the old `kuztds_admin` is still accepted), headers `X-Emtds-*` (the old `X-Kuztds-*` are accepted), image `emtds:local`, containers `emtds-*`, compose project `emtds-app`, state volume `emtds-app_emtds_state`, server paths `/opt/emtds`, `/etc/emtds`, `/var/lib/emtds`, nginx `emtds*.conf`. The ClickHouse database and user stay `kuztds`: renaming them is a data migration. Server switch-over: `deploy/migrate-emtds.sh`, `docs/wiki/emtds-migration.md`.
+- **EmTDS naming**: `EMTDS_*` variables, session cookie `emtds_admin`, headers `X-Emtds-*`, image `emtds:local`, containers `emtds-*`, compose project `emtds-app`, state volume `emtds-app_emtds_state`, server paths `/opt/emtds`, `/etc/emtds`, `/var/lib/emtds`, nginx `emtds*.conf`. A new launch creates the ClickHouse database and user `emtds`.
 - **API keys for AI agents and MCP**: a key is `ADMIN` or `USER` (role or its own access), dangerous actions (`keitaro_import`, `keitaro_purge`, `logs_delete`, `groups_replace`, `cron`, `boards`, `landing_files`) are granted per key, cookie-only routes stay closed to keys, error answers carry a stable `code`, each key has a rate limit and a JSONL audit of its writes, `GET /api/openapi.json` describes the routes a session may use. `cmd/mcp` (`make mcp`) turns that schema into MCP tools over stdio. Docs: `docs/wiki/admin-api.md`, `docs/wiki/mcp.md`.
 - **Domains and integrations**: the domain list with roles, Cloudflare (zones, DNS, `ssl` and `always_use_https`), Namecheap registration, domain checks. Docs: `docs/wiki/offers-landings.md`, `docs/wiki/namecheap.md`.
 - **Catalogs, boards and access**: offers, landings (local files, PHP), networks, sources, sections (boards), users and roles, first-login form and password recovery code, admin hash on the state volume. Docs: `docs/wiki/boards.md`, `users.md`, `roles.md`.
@@ -271,7 +271,7 @@ EMTDS_DATA_DIR=../database EMTDS_GROUPS_FILE=configs/test_groups.json \
 EMTDS_TRUSTED_PROXIES=127.0.0.1/32 EMTDS_POSTBACK_KEY=pbsecret EMTDS_API_KEY=apikey123 \
 EMTDS_KEYS_DIR=/tmp/emtds-keys EMTDS_GEO_DB=internal/geo/testdata/GeoLite2-City-Test.mmdb \
 EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
-EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CLICKHOUSE_DB=emtds EMTDS_CLICKHOUSE_USER=emtds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/engine
 
 # admin :8090 (admin / admin123)
@@ -279,7 +279,7 @@ EMTDS_ADMIN_PASSWORD_HASH="$(cat /tmp/admin.hash)" EMTDS_ADMIN_PASSWORD_FILE=/tm
 EMTDS_ADMIN_COOKIE_SECURE=false EMTDS_ENGINE_URL=http://localhost:8080 \
 EMTDS_GROUPS_FILE=configs/test_groups.json EMTDS_DATA_DIR=../database EMTDS_KEYS_DIR=/tmp/emtds-keys \
 EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
-EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CLICKHOUSE_DB=emtds EMTDS_CLICKHOUSE_USER=emtds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/admin
 
 # cron (optional; add EMTDS_CRON_FILE / EMTDS_GEO_DB / EMTDS_ASN_DB to the admin too,

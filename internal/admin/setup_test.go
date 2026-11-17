@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 func setupServer(t *testing.T, hash, dir string) *Server {

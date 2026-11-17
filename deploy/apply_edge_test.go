@@ -324,8 +324,8 @@ func TestApplyEdgeCheckMode(t *testing.T) {
 	}
 }
 
-// TestApplyEdgeLegacyServerEnv читает server.env со старыми ключами KUZTDS_* и не дописывает дубли EMTDS_*.
-func TestApplyEdgeLegacyServerEnv(t *testing.T) {
+// TestApplyEdgeIgnoresRemovedPrefix не читает ключи server.env с удалённым префиксом: адрес берётся из curl и пишется как EMTDS_PUBLIC_IP.
+func TestApplyEdgeIgnoresRemovedPrefix(t *testing.T) {
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("bash не найден в PATH")
@@ -334,28 +334,35 @@ func TestApplyEdgeLegacyServerEnv(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tmpEnv := filepath.Join(t.TempDir(), "server.env")
-	content := "KUZTDS_PUBLIC_IP=203.0.113.77\nKUZTDS_TRUSTED_PROXIES=172.18.0.1/32\nKUZTDS_ADMIN_TRUSTED_PROXIES=172.18.0.1/32\nKUZTDS_ENGINE_PUBLISH=127.0.0.1:18081:8080\n"
+	tmp := t.TempDir()
+	tmpEnv := filepath.Join(tmp, "server.env")
+	removed := "KU" + "ZTDS_"
+	content := removed + "PUBLIC_IP=203.0.113.77\nEMTDS_TRUSTED_PROXIES=172.18.0.1/32\nEMTDS_ADMIN_TRUSTED_PROXIES=172.18.0.1/32\n" + removed + "ENGINE_PUBLISH=127.0.0.1:18081:8080\n"
 	if err := os.WriteFile(tmpEnv, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	curlDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(curlDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeFakeCurl(t, curlDir, "198.51.100.20")
 	cmd := exec.Command(bash, filepath.Join(dir, "apply-edge.sh"), "--check")
 	cmd.Dir = dir
-	cmd.Env = edgeEnvWithoutPublicIP("KUZTDS_SERVER_ENV=" + tmpEnv)
+	cmd.Env = edgeEnvWithoutPublicIP("EMTDS_SERVER_ENV="+tmpEnv, "PATH="+curlDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("--check: %v\n%s", err, out)
 	}
 	outS := string(out)
-	if !strings.Contains(outS, "public_ip=203.0.113.77") || !strings.Contains(outS, "server 127.0.0.1:18081;") {
-		t.Fatalf("--check: старые ключи не прочитаны:\n%s", out)
+	if !strings.Contains(outS, "public_ip=198.51.100.20") || strings.Contains(outS, "203.0.113.77") || strings.Contains(outS, "18081") {
+		t.Fatalf("--check: ключ с удалённым префиксом прочитан:\n%s", out)
 	}
 	after, err := os.ReadFile(tmpEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(after) != content {
-		t.Fatalf("server.env со старыми ключами изменён:\n%s", after)
+	if !strings.Contains(string(after), "EMTDS_PUBLIC_IP=198.51.100.20") {
+		t.Fatalf("EMTDS_PUBLIC_IP не записан:\n%s", after)
 	}
 }
 
@@ -452,7 +459,7 @@ func TestApplyEdgeSourceSafeGlobals(t *testing.T) {
 func edgeEnvWithoutPublicIP(extra ...string) []string {
 	out := make([]string, 0, len(os.Environ())+len(extra))
 	for _, e := range os.Environ() {
-		if strings.HasPrefix(e, "EMTDS_PUBLIC_IP=") || strings.HasPrefix(e, "KUZTDS_PUBLIC_IP=") {
+		if strings.HasPrefix(e, "EMTDS_PUBLIC_IP=") {
 			continue
 		}
 		out = append(out, e)
@@ -590,20 +597,20 @@ func TestComposeEdgeEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := string(data)
-	if !strings.Contains(s, "EMTDS_TRUSTED_PROXIES: ${EMTDS_TRUSTED_PROXIES:-${KUZTDS_TRUSTED_PROXIES:-}}") {
+	if !strings.Contains(s, "EMTDS_TRUSTED_PROXIES: ${EMTDS_TRUSTED_PROXIES:-}") {
 		t.Fatal("docker-compose.app.yml: нет EMTDS_TRUSTED_PROXIES у engine")
 	}
-	if !strings.Contains(s, "EMTDS_PUBLIC_IP: ${EMTDS_PUBLIC_IP:-${KUZTDS_PUBLIC_IP:-}}") {
+	if !strings.Contains(s, "EMTDS_PUBLIC_IP: ${EMTDS_PUBLIC_IP:-}") {
 		t.Fatal("docker-compose.app.yml: нет EMTDS_PUBLIC_IP у admin")
 	}
-	if !strings.Contains(s, "EMTDS_ADMIN_TRUSTED_PROXIES: ${EMTDS_ADMIN_TRUSTED_PROXIES:-${KUZTDS_ADMIN_TRUSTED_PROXIES:-}}") {
+	if !strings.Contains(s, "EMTDS_ADMIN_TRUSTED_PROXIES: ${EMTDS_ADMIN_TRUSTED_PROXIES:-}") {
 		t.Fatal("docker-compose.app.yml: нет EMTDS_ADMIN_TRUSTED_PROXIES у admin")
 	}
 }
 
-// TestApplyEdgeRemovesLegacyConfigs подключает apply-edge.sh через source и проверяет, что install_rendered
-// убирает kuztds*.conf и /etc/nginx/kuztds в бэкап, а restore_from_backup возвращает их и удаляет emtds*.conf.
-func TestApplyEdgeRemovesLegacyConfigs(t *testing.T) {
+// TestApplyEdgeInstallRestoreConfigs подключает apply-edge.sh через source и проверяет, что install_rendered
+// кладёт в бэкап только emtds*.conf, не трогает чужие файлы, а restore_from_backup возвращает старое и удаляет новые emtds*.conf.
+func TestApplyEdgeInstallRestoreConfigs(t *testing.T) {
 	bash, err := exec.LookPath("bash")
 	if err != nil {
 		t.Skip("bash не найден в PATH")
@@ -623,29 +630,24 @@ func TestApplyEdgeRemovesLegacyConfigs(t *testing.T) {
 		}
 	}
 	confD := filepath.Join(tmp, "conf.d")
-	legacyDir := filepath.Join(tmp, "nginx-kuztds")
 	rendered := filepath.Join(tmp, "rendered")
 	for _, name := range []string{"emtds.conf", "emtds-admin-host.conf", "emtds-engine.conf", "cloudflare-realip.conf", "cloudflare-geo.conf"} {
 		write(filepath.Join(rendered, name), "new "+name+"\n")
 	}
-	write(filepath.Join(confD, "kuztds.conf"), "old server_name\n")
-	write(filepath.Join(confD, "kuztds-engine.conf"), "old upstream\n")
+	write(filepath.Join(confD, "emtds.conf"), "old server_name\n")
 	write(filepath.Join(confD, "other.conf"), "foreign\n")
-	write(filepath.Join(legacyDir, "cloudflare-realip.conf"), "old snippet\n")
 
 	script := `set -euo pipefail
 source "$1"
 EDGE_CONF_D=$2/conf.d
-EDGE_NGINX_LEGACY_DIR=$2/nginx-kuztds
 EDGE_NGINX_EMTDS_DIR=$2/nginx-emtds
 EDGE_BACKUP_ROOT=$2/backup
 install_rendered "$2/rendered"
 LC_ALL=C ls "$EDGE_CONF_D" | tr '\n' ' '; echo
-[[ ! -e "$EDGE_NGINX_LEGACY_DIR" ]] || { echo legacy-dir-left; exit 1; }
 LC_ALL=C ls "$EDGE_BACKUP_DIR/conf.d" | tr '\n' ' '; echo
 restore_from_backup "$EDGE_BACKUP_DIR"
 LC_ALL=C ls "$EDGE_CONF_D" | tr '\n' ' '; echo
-cat "$EDGE_NGINX_LEGACY_DIR/cloudflare-realip.conf"
+cat "$EDGE_CONF_D/emtds.conf"
 `
 	cmd := exec.Command(bash, "-c", script, "bash", filepath.Join(dir, "apply-edge.sh"), tmp)
 	cmd.Env = append(os.Environ(), "EMTDS_INSTALL_STATE_DIR="+filepath.Join(tmp, "state"))
@@ -660,14 +662,14 @@ cat "$EDGE_NGINX_LEGACY_DIR/cloudflare-realip.conf"
 	if got, want := strings.Fields(lines[0]), []string{"emtds-admin-host.conf", "emtds-engine.conf", "emtds.conf", "other.conf"}; strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("после установки в conf.d %v, ждали %v", got, want)
 	}
-	if got, want := strings.Fields(lines[1]), []string{"kuztds-engine.conf", "kuztds.conf"}; strings.Join(got, " ") != strings.Join(want, " ") {
+	if got, want := strings.Fields(lines[1]), []string{"emtds.conf"}; strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("в бэкапе conf.d %v, ждали %v", got, want)
 	}
-	if got, want := strings.Fields(lines[2]), []string{"kuztds-engine.conf", "kuztds.conf", "other.conf"}; strings.Join(got, " ") != strings.Join(want, " ") {
+	if got, want := strings.Fields(lines[2]), []string{"emtds.conf", "other.conf"}; strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("после отката в conf.d %v, ждали %v", got, want)
 	}
-	if lines[3] != "old snippet" {
-		t.Fatalf("после отката каталог /etc/nginx/kuztds не вернулся: %q", lines[3])
+	if lines[3] != "old server_name" {
+		t.Fatalf("после отката emtds.conf не вернулся: %q", lines[3])
 	}
 }
 
@@ -1067,7 +1069,6 @@ type edgeApplyFixture struct {
 
 // edgeApplyBody переопределяет пути на каталог $2, подменяет проверку root и запускает main с флагами $3...
 const edgeApplyBody = `EDGE_CONF_D=$2/conf.d
-EDGE_NGINX_LEGACY_DIR=$2/nginx-kuztds
 EDGE_NGINX_EMTDS_DIR=$2/nginx-emtds
 EDGE_BACKUP_ROOT=$2/backup
 EDGE_NGINX_CONF=$2/nginx.conf
@@ -1471,5 +1472,260 @@ func TestApplyEdgeTuneEventsUsage(t *testing.T) {
 	var ee *exec.ExitError
 	if !errors.As(err, &ee) || ee.ExitCode() != 2 {
 		t.Fatalf("неизвестный флаг: ждали код 2, получили %v", err)
+	}
+}
+
+// requireOpenSSL пропускает тест, если openssl нет в PATH.
+func requireOpenSSL(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("openssl"); err != nil {
+		t.Skip("openssl не найден в PATH")
+	}
+}
+
+// opensslOut запускает openssl с аргументами args и возвращает stdout; код выхода возвращается отдельно.
+func opensslOut(t *testing.T, args ...string) (string, int) {
+	t.Helper()
+	cmd := exec.Command("openssl", args...)
+	var o bytes.Buffer
+	cmd.Stdout = &o
+	if err := cmd.Run(); err != nil {
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			t.Fatal(err)
+		}
+		return o.String(), ee.ExitCode()
+	}
+	return o.String(), 0
+}
+
+// TestApplyEdgeEnsureIPCertCreates: без файлов ensure_ip_cert создаёт пару: ключ 0600, сертификат 0644,
+// SAN на нужный IP, срок около 10 лет, ключ подходит к сертификату.
+func TestApplyEdgeEnsureIPCertCreates(t *testing.T) {
+	requireOpenSSL(t)
+	state := t.TempDir()
+	edgeSourced(t, "ensure_ip_cert 203.0.113.55\n", []string{"EMTDS_INSTALL_STATE_DIR=" + state})
+	crt := filepath.Join(state, "tls", "ip.crt")
+	key := filepath.Join(state, "tls", "ip.key")
+	for path, want := range map[string]os.FileMode{key: 0o600, crt: 0o644} {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("файл не создан: %v", err)
+		}
+		if info.Mode().Perm() != want {
+			t.Fatalf("права %s: %v, ждали %v", path, info.Mode().Perm(), want)
+		}
+	}
+	text, code := opensslOut(t, "x509", "-in", crt, "-noout", "-text")
+	if code != 0 || !strings.Contains(text, "IP Address:203.0.113.55") {
+		t.Fatalf("в сертификате нет SAN IP (код %d):\n%s", code, text)
+	}
+	if _, code := opensslOut(t, "x509", "-in", crt, "-noout", "-checkend", "315000000"); code != 0 {
+		t.Fatal("сертификат истекает раньше, чем через 10 лет минус несколько дней")
+	}
+	if _, code := opensslOut(t, "x509", "-in", crt, "-noout", "-checkend", "316000000"); code == 0 {
+		t.Fatal("срок сертификата больше 10 лет")
+	}
+	certKey, _ := opensslOut(t, "x509", "-in", crt, "-noout", "-pubkey")
+	privKey, _ := opensslOut(t, "pkey", "-in", key, "-pubout")
+	if certKey == "" || certKey != privKey {
+		t.Fatal("ключ не подходит к сертификату")
+	}
+}
+
+// writeCertPair создаёт в каталоге dir настоящую пару ip.crt и ip.key (самоподписанный сертификат на
+// 30 дней для адреса ip) и возвращает пути сертификата и ключа.
+func writeCertPair(t *testing.T, dir, ip string) (crt, key string) {
+	t.Helper()
+	requireOpenSSL(t)
+	mustMkdir(t, dir)
+	crt, key = filepath.Join(dir, "ip.crt"), filepath.Join(dir, "ip.key")
+	out, err := exec.Command("openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-sha256", "-days", "30",
+		"-subj", "/CN="+ip, "-keyout", key, "-out", crt).CombinedOutput()
+	if err != nil {
+		t.Fatalf("openssl req: %v\n%s", err, out)
+	}
+	for path, mode := range map[string]os.FileMode{crt: 0o644, key: 0o600} {
+		if err := os.Chmod(path, mode); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return crt, key
+}
+
+// dirNames возвращает отсортированные имена записей каталога dir (включая скрытые).
+func dirNames(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	return names
+}
+
+// assertCertPair проверяет, что в каталоге tls лежит ровно пара ip.crt и ip.key нужных прав и ключ
+// подходит к сертификату: временных файлов не осталось.
+func assertCertPair(t *testing.T, tls string) {
+	t.Helper()
+	if got := strings.Join(dirNames(t, tls), ","); got != "ip.crt,ip.key" {
+		t.Fatalf("в %s ждали только ip.crt и ip.key, найдено: %s", tls, got)
+	}
+	for name, want := range map[string]os.FileMode{"ip.key": 0o600, "ip.crt": 0o644} {
+		info, err := os.Stat(filepath.Join(tls, name))
+		if err != nil || info.Mode().Perm() != want {
+			t.Fatalf("%s: права %v (%v), ждали %v", name, info, err, want)
+		}
+	}
+	certKey, code := opensslOut(t, "x509", "-in", filepath.Join(tls, "ip.crt"), "-noout", "-pubkey")
+	privKey, _ := opensslOut(t, "pkey", "-in", filepath.Join(tls, "ip.key"), "-pubout")
+	if code != 0 || certKey == "" || certKey != privKey {
+		t.Fatal("ключ не подходит к сертификату или сертификат не читается как x509")
+	}
+}
+
+// TestApplyEdgeEnsureIPCertKeepsExisting: валидная пара не пересоздаётся (байты те же, временных файлов
+// нет), но права ключа приводятся к 0600.
+func TestApplyEdgeEnsureIPCertKeepsExisting(t *testing.T) {
+	state := t.TempDir()
+	tls := filepath.Join(state, "tls")
+	crt, key := writeCertPair(t, tls, "203.0.113.55")
+	if err := os.Chmod(key, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	crtBefore, keyBefore := readEdgeFile(t, crt), readEdgeFile(t, key)
+	edgeSourced(t, "ensure_ip_cert 203.0.113.55\n", []string{"EMTDS_INSTALL_STATE_DIR=" + state})
+	if readEdgeFile(t, crt) != crtBefore || readEdgeFile(t, key) != keyBefore {
+		t.Fatal("валидная пара изменена")
+	}
+	assertCertPair(t, tls)
+}
+
+// TestApplyEdgeEnsureIPCertRecreatesBroken: пара, которую нельзя использовать, создаётся заново целиком:
+// пустой или битый сертификат, пустой или потерянный ключ, потерянный сертификат, ключ от другого сертификата.
+func TestApplyEdgeEnsureIPCertRecreatesBroken(t *testing.T) {
+	requireOpenSSL(t)
+	cases := []struct {
+		name  string
+		spoil func(t *testing.T, crt, key string)
+	}{
+		{"пустой сертификат", func(t *testing.T, crt, _ string) { mustWrite(t, crt, "", 0o644) }},
+		{"битый сертификат", func(t *testing.T, crt, _ string) { mustWrite(t, crt, "CRT-SENTINEL\n", 0o644) }},
+		{"пустой ключ", func(t *testing.T, _, key string) { mustWrite(t, key, "", 0o600) }},
+		{"нет ключа", func(t *testing.T, _, key string) { _ = os.Remove(key) }},
+		{"нет сертификата", func(t *testing.T, crt, _ string) { _ = os.Remove(crt) }},
+		{"чужой ключ", func(t *testing.T, _, key string) {
+			_, other := writeCertPair(t, filepath.Join(t.TempDir(), "other"), "203.0.113.99")
+			mustWrite(t, key, readEdgeFile(t, other), 0o600)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := t.TempDir()
+			tls := filepath.Join(state, "tls")
+			crt, key := writeCertPair(t, tls, "203.0.113.55")
+			tc.spoil(t, crt, key)
+			edgeSourced(t, "ensure_ip_cert 203.0.113.55\n", []string{"EMTDS_INSTALL_STATE_DIR=" + state})
+			assertCertPair(t, tls)
+			if text, code := opensslOut(t, "x509", "-in", crt, "-noout", "-text"); code != 0 || !strings.Contains(text, "IP Address:203.0.113.55") {
+				t.Fatalf("новый сертификат без SAN IP (код %d):\n%s", code, text)
+			}
+		})
+	}
+}
+
+// opensslReqStub кладёт в PATH заглушку openssl: команда req пишет мусор в файлы -keyout и -out и
+// выходит с кодом STUB_REQ_RC, остальные команды выполняет настоящий openssl. Возвращает окружение запуска.
+func opensslReqStub(t *testing.T, state string) []string {
+	t.Helper()
+	requireOpenSSL(t)
+	realSSL, err := exec.LookPath("openssl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(t.TempDir(), "bin")
+	writeStub(t, bin, "openssl", `if [ "$1" = req ]; then
+	while [ $# -gt 0 ]; do
+		case "$1" in -keyout) k=$2;; -out) c=$2;; esac
+		shift
+	done
+	echo partial >"$k"
+	echo partial >"$c"
+	exit "${STUB_REQ_RC:-0}"
+fi
+exec `+realSSL+` "$@"
+`)
+	return []string{
+		"EMTDS_INSTALL_STATE_DIR=" + state,
+		"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"),
+	}
+}
+
+// TestApplyEdgeEnsureIPCertFails: сбой openssl и «успешный» openssl с неверным результатом дают код 1,
+// не оставляют временных файлов и не трогают прежние файлы (замена атомарна).
+func TestApplyEdgeEnsureIPCertFails(t *testing.T) {
+	state := t.TempDir()
+	tls := filepath.Join(state, "tls")
+	env := opensslReqStub(t, state)
+	_, errOut, code := edgeRun(t, "ensure_ip_cert 203.0.113.55\n", append(env, "STUB_REQ_RC=1"))
+	if code != 1 || !strings.Contains(errOut, "не удалось создать самоподписанный сертификат") {
+		t.Fatalf("сбой openssl: код %d\n%s", code, errOut)
+	}
+	if names := dirNames(t, tls); len(names) != 0 {
+		t.Fatalf("после сбоя в %s остались файлы: %v", tls, names)
+	}
+
+	mustWrite(t, filepath.Join(tls, "ip.crt"), "OLD-CRT\n", 0o644)
+	mustWrite(t, filepath.Join(tls, "ip.key"), "OLD-KEY\n", 0o600)
+	_, errOut, code = edgeRun(t, "ensure_ip_cert 203.0.113.55\n", append(env, "STUB_REQ_RC=0"))
+	if code != 1 || !strings.Contains(errOut, "не удалось создать самоподписанный сертификат") {
+		t.Fatalf("openssl с неверным результатом: код %d\n%s", code, errOut)
+	}
+	if readEdgeFile(t, filepath.Join(tls, "ip.crt")) != "OLD-CRT\n" || readEdgeFile(t, filepath.Join(tls, "ip.key")) != "OLD-KEY\n" {
+		t.Fatal("прежние файлы изменены при неудачной замене")
+	}
+	if got := strings.Join(dirNames(t, tls), ","); got != "ip.crt,ip.key" {
+		t.Fatalf("остались временные файлы: %s", got)
+	}
+}
+
+// TestApplyEdgeEnsureIPCertMoveOrder: готовые временные файлы переименовываются сначала ключ, затем сертификат.
+func TestApplyEdgeEnsureIPCertMoveOrder(t *testing.T) {
+	data, err := os.ReadFile("apply-edge.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := shellFunc(t, string(data), "ensure_ip_cert")
+	key := strings.Index(body, `mv -f "$tmp_key" "$key"`)
+	crt := strings.Index(body, `mv -f "$tmp_crt" "$crt"`)
+	if key < 0 || crt < 0 || key > crt {
+		t.Fatalf("ensure_ip_cert: ключ должен переименовываться раньше сертификата (%d, %d)", key, crt)
+	}
+	if strings.Contains(body, `-keyout "$key"`) || strings.Contains(body, `-out "$crt"`) {
+		t.Fatal("ensure_ip_cert: openssl не должен писать сразу в рабочие файлы")
+	}
+}
+
+// TestApplyEdgeCertBeforeNginxCheck: полный запуск создаёт сертификат до nginx -t, --check ничего не пишет.
+func TestApplyEdgeCertBeforeNginxCheck(t *testing.T) {
+	requireOpenSSL(t)
+	checkOnly := newEdgeApplyFixture(t, ubuntuNginxConf)
+	if _, errOut, code := checkOnly.run(t, nil, "--check"); code != 0 {
+		t.Fatalf("--check: код %d\n%s", code, errOut)
+	}
+	if _, err := os.Stat(filepath.Join(checkOnly.root, "state", "tls")); err == nil {
+		t.Fatal("--check создал каталог сертификата")
+	}
+	f := newEdgeApplyFixture(t, ubuntuNginxConf)
+	f.stub(t, "nginx", "[ -f \"$STUB_CERT\" ] && [ -f \"$STUB_KEY\" ] || { echo 'нет сертификата до nginx -t' >&2; exit 1; }\nexit 0\n")
+	env := []string{
+		"STUB_CERT=" + filepath.Join(f.root, "state", "tls", "ip.crt"),
+		"STUB_KEY=" + filepath.Join(f.root, "state", "tls", "ip.key"),
+	}
+	if _, errOut, code := f.run(t, env); code != 0 {
+		t.Fatalf("apply: код %d\n%s", code, errOut)
 	}
 }

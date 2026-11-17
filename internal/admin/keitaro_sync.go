@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/atomicfile"
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/cron"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/cron"
 )
 
 // Keitaro catch-up timing: ticker delays, lag behind "now", look-back windows,

@@ -8,15 +8,9 @@
 
 set -euo pipefail
 
-REDIS_CONTAINER="${EMTDS_REDIS_CONTAINER:-deploy-redis-1}"
-REDIS_STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-${KUZTDS_INSTALL_STATE_DIR:-}}"
-if [[ -z "$REDIS_STATE_DIR" ]]; then
-	REDIS_STATE_DIR=/etc/emtds
-	if [[ ! -e /etc/emtds && -d /etc/kuztds ]]; then
-		REDIS_STATE_DIR=/etc/kuztds
-	fi
-fi
-REDIS_SERVER_ENV="${EMTDS_SERVER_ENV:-${KUZTDS_SERVER_ENV:-${REDIS_STATE_DIR}/server.env}}"
+REDIS_CONTAINER="${EMTDS_REDIS_CONTAINER:-emtds-infra-redis-1}"
+REDIS_STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-/etc/emtds}"
+REDIS_SERVER_ENV="${EMTDS_SERVER_ENV:-${REDIS_STATE_DIR}/server.env}"
 REDIS_CHECK_MODE=0
 REDIS_WANT_MAXMEMORY=
 REDIS_WANT_MEMORY=
@@ -42,7 +36,7 @@ usage() {
 	printf '  --check              показать текущие значения и цель, ничего не менять\n' >&2
 	printf '  --maxmemory РАЗМЕР   цель для CONFIG SET maxmemory (512mb, 2gb); по умолчанию по RAM сервера\n' >&2
 	printf '  --memory РАЗМЕР      цель для лимита памяти контейнера (768m, 3g); по умолчанию по RAM сервера\n' >&2
-	printf 'контейнер: EMTDS_REDIS_CONTAINER (по умолчанию deploy-redis-1); пароль Redis берётся из\n' >&2
+	printf 'контейнер: EMTDS_REDIS_CONTAINER (по умолчанию emtds-infra-redis-1); пароль Redis берётся из\n' >&2
 	printf 'EMTDS_REDIS_PASSWORD или из server.env и передаётся в redis-cli через REDISCLI_AUTH, в вывод не попадает\n' >&2
 }
 
@@ -133,16 +127,13 @@ env_file_value() {
 
 # Назначение: подготовить пароль Redis для redis-cli. Значение уходит только в переменную
 # REDISCLI_AUTH процесса; ни в аргументы, ни в вывод оно не попадает.
-# Параметры: нет (EMTDS_REDIS_PASSWORD, затем KUZTDS_REDIS_PASSWORD, затем server.env).
+# Параметры: нет (EMTDS_REDIS_PASSWORD, затем server.env).
 # Результат: экспортирует REDISCLI_AUTH, если пароль задан.
 # Ошибки: нет.
 load_redis_password() {
-	local pw=${EMTDS_REDIS_PASSWORD:-${KUZTDS_REDIS_PASSWORD:-}}
+	local pw=${EMTDS_REDIS_PASSWORD:-}
 	if [[ -z "$pw" ]]; then
 		pw=$(env_file_value "$REDIS_SERVER_ENV" EMTDS_REDIS_PASSWORD)
-	fi
-	if [[ -z "$pw" ]]; then
-		pw=$(env_file_value "$REDIS_SERVER_ENV" KUZTDS_REDIS_PASSWORD)
 	fi
 	if [[ -n "$pw" ]]; then
 		export REDISCLI_AUTH="$pw"

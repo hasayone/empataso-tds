@@ -38,7 +38,7 @@ var docTags = []docTag{
 	{"automation", "Automation (cron)", "Автоматизация (cron)", "Автоматизація (cron)", []string{"/api/cron"}},
 	{"checker", "Checker", "Чекер", "Чекер", []string{"/api/checker"}},
 	{"keitaro", "Keitaro transfer", "Перенос из Keitaro", "Перенесення з Keitaro", []string{"/api/keitaro"}},
-	{"updates", "Version and updates", "Версия и обновления", "Версія та оновлення", []string{"/api/version", "/api/update"}},
+	{"updates", "Version and updates", "Версия и обновления", "Версія та оновлення", []string{"/api/version", "/api/update", "/api/system"}},
 	{"ai", "AI", "AI-ассистент", "AI-асистент", []string{"/api/ai"}},
 	{"accounts", "Sign-in, users, roles and keys", "Вход, пользователи, роли и ключи", "Вхід, користувачі, ролі та ключі",
 		[]string{"/api/me", "/api/password", "/api/logout", "/api/login", "/api/setup", "/api/recover",

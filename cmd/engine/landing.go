@@ -12,9 +12,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/render"
-	"github.com/egerkuzma/emtds/internal/server"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/render"
+	"github.com/hasayone/empataso-tds/internal/server"
 )
 
 // landingBodyLimit is the maximum landing body read from disk or from PHP.

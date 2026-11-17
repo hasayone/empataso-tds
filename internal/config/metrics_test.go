@@ -20,24 +20,23 @@ func TestValidInstance(t *testing.T) {
 	}
 }
 
-// TestInstanceAndMetricsDirEnv checks the defaults, the EMTDS_ names and the KUZTDS_ fallback.
+// TestInstanceAndMetricsDirEnv checks the defaults, that the retired variable names
+// are not read, and the EMTDS_ names.
 func TestInstanceAndMetricsDirEnv(t *testing.T) {
 	t.Setenv("EMTDS_INSTANCE", "")
-	t.Setenv("KUZTDS_INSTANCE", "")
 	t.Setenv("EMTDS_METRICS_DIR", "")
-	t.Setenv("KUZTDS_METRICS_DIR", "")
 	if Instance() != DefaultInstance || MetricsDir() != DefaultMetricsDir {
 		t.Fatalf("defaults: %q %q", Instance(), MetricsDir())
 	}
-	t.Setenv("KUZTDS_INSTANCE", " old ")
-	t.Setenv("KUZTDS_METRICS_DIR", "/old")
-	if Instance() != "old" || MetricsDir() != "/old" {
-		t.Fatalf("legacy names: %q %q", Instance(), MetricsDir())
+	t.Setenv(retiredEnvName("INSTANCE"), " old ")
+	t.Setenv(retiredEnvName("METRICS_DIR"), "/old")
+	if Instance() != DefaultInstance || MetricsDir() != DefaultMetricsDir {
+		t.Fatalf("retired names must be ignored: %q %q", Instance(), MetricsDir())
 	}
 	t.Setenv("EMTDS_INSTANCE", "engine2")
 	t.Setenv("EMTDS_METRICS_DIR", "/new")
 	if Instance() != "engine2" || MetricsDir() != "/new" {
-		t.Fatalf("new names win: %q %q", Instance(), MetricsDir())
+		t.Fatalf("product names: %q %q", Instance(), MetricsDir())
 	}
 	if got, want := MetricsPath("/new", "engine2"), filepath.Join("/new", "engine2.json"); got != want {
 		t.Fatalf("path %q, want %q", got, want)

@@ -2,9 +2,9 @@
 
 # EmTDS
 
-[![CI](https://github.com/egerkuzma/emtds/actions/workflows/ci.yml/badge.svg)](https://github.com/egerkuzma/emtds/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/egerkuzma/emtds)](https://goreportcard.com/report/github.com/egerkuzma/emtds)
-[![Go version](https://img.shields.io/github/go-mod/go-version/egerkuzma/emtds)](go.mod)
+[![CI](https://github.com/hasayone/empataso-tds/actions/workflows/ci.yml/badge.svg)](https://github.com/hasayone/empataso-tds/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/hasayone/empataso-tds)](https://goreportcard.com/report/github.com/hasayone/empataso-tds)
+[![Go version](https://img.shields.io/github/go-mod/go-version/hasayone/empataso-tds)](go.mod)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 **A fast, secure, self-hosted Traffic Distribution System (TDS) written in Go.**
@@ -263,7 +263,7 @@ pipeline** (real-IP resolution → blacklist → geo → device/OS/browser/brand
 → uniqueness → stream routing → bot toggles → macro rendering). Logging to
 ClickHouse is asynchronous and never blocks the response.
 
-![Performance benchmark on Apple M1](docs/img/performance.png)
+> Numbers are from a single run on an Apple M1 laptop. A full load test of the current build has not been run.
 
 | Scenario | Requests/sec | p50 | p99 | Errors |
 |---|--:|--:|--:|--:|
@@ -290,7 +290,7 @@ popular legacy PHP TDS — on the **same Apple M1**, through the **same request
 pipeline** (geo, search-engine IP-list checks, macro rendering, per-request
 logging) and the **same load generator**.
 
-![EmTDS vs zTDS — head-to-head benchmark](docs/img/vs-ztds.png)
+> Measured on the Apple M1 laptop; a full load test of the current build has not been run.
 
 | | EmTDS (Go) | zTDS (PHP) |
 |---|--:|--:|
@@ -332,7 +332,7 @@ brew install go docker
 
 ### 1. Clone & start infrastructure
 ```bash
-git clone https://github.com/egerkuzma/emtds.git emtds
+git clone https://github.com/hasayone/empataso-tds.git emtds
 cd emtds
 make infra-up          # ClickHouse + Redis via docker compose; schema auto-applied
 ```
@@ -349,8 +349,8 @@ EMTDS_GROUPS_FILE=configs/groups.example.json \
 EMTDS_TRUSTED_PROXIES=127.0.0.1/32 \
 EMTDS_POSTBACK_KEY=secret EMTDS_API_KEY=apikey \
 EMTDS_REDIS_ADDR=localhost:6379 \
-EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=kuztds \
-EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=emtds \
+EMTDS_CLICKHOUSE_USER=emtds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/engine
 ```
 
@@ -363,8 +363,8 @@ EMTDS_ENGINE_URL=http://localhost:8080 \
 EMTDS_GROUPS_FILE=configs/groups.example.json \
 EMTDS_DATA_DIR=./data EMTDS_KEYS_DIR=./keys \
 EMTDS_REDIS_ADDR=localhost:6379 \
-EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=kuztds \
-EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=emtds \
+EMTDS_CLICKHOUSE_USER=emtds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/admin
 ```
 
@@ -416,16 +416,44 @@ Between the minimum and the recommendation the installer warns and continues;
 clicks and conversions are kept for a year, so disk sizing follows your daily
 click volume.
 
-In `.env`, the ClickHouse password (`CLICKHOUSE_PASSWORD`) must not be empty,
-and the admin password (`EMTDS_ADMIN_PASSWORD`) must not be empty or `admin`.
-Run the script as a file with `bash`, not as `curl | bash`.
+### One-command install
+
+As root, on a clean server. Run the script as a file with `bash`, not as
+`curl | bash`:
 
 ```bash
-git clone https://github.com/egerkuzma/emtds.git emtds
+curl -fsSLo /root/emtds-install.sh https://raw.githubusercontent.com/hasayone/empataso-tds/main/deploy/install.sh && bash /root/emtds-install.sh --repo https://github.com/hasayone/empataso-tds.git --channel main
+```
+
+The loader clones the repository into `/opt/emtds`, moves it to the version of
+the channel (`main` or `release`; `release` without `--channel`) and continues
+the install from there. It creates `.env` with the ClickHouse password and the
+first-login token itself. Optional flags: `--allowed-signers FILE` (turn on
+signature checks, see [docs/wiki/updates.md](docs/wiki/updates.md)) and
+`--no-edge` (no nginx).
+
+**First-login token.** At the end the installer prints the sign-in address
+(for example `https://203.0.113.10/`, self-signed certificate) and the
+`EMTDS_SETUP_TOKEN` token. Save it: the first-login form asks for the token
+together with the login, password and email of the main administrator, and
+without it the administrator cannot be created (`403`).
+
+**Settings → About** shows the version, build commit, available update, "What's
+new" and the server state. Changes are recorded in
+[CHANGELOG.md](CHANGELOG.md); updates, signing and rollback are described in
+[docs/wiki/updates.md](docs/wiki/updates.md).
+
+### Install from a clone
+
+In `.env`, the ClickHouse password (`CLICKHOUSE_PASSWORD`) must not be empty;
+the admin password (`EMTDS_ADMIN_PASSWORD`) may be empty (the administrator is
+created in the first-login form) but not `admin`. Without `.env` the installer
+creates it.
+
+```bash
+git clone https://github.com/hasayone/empataso-tds.git emtds
 cd emtds
-cp .env.example .env
-nano .env        # CLICKHOUSE_PASSWORD and EMTDS_ADMIN_PASSWORD
-sudo bash deploy/install.sh
+sudo bash deploy/install.sh --repo https://github.com/hasayone/empataso-tds.git --channel main
 ```
 
 The installer:
@@ -434,7 +462,7 @@ The installer:
 - installs Docker from download.docker.com only when `docker compose` is not
   available yet, and does not change an already working Docker setup;
 - builds the `emtds:local` image (the state volume is `emtds-app_emtds_state`, mounted at `/var/lib/emtds`);
-- starts ClickHouse and Redis with the `deploy` compose project, then
+- starts ClickHouse and Redis with the `emtds-infra` compose project, then
   `deploy/docker-compose.app.yml`;
 - picks memory limits from the host RAM and writes them to
   `/etc/emtds/compose.infra.yml` and `/etc/emtds/compose.app.yml`;
@@ -444,18 +472,21 @@ The installer:
 - treats the install as successful only after the engine and admin logs show
   `clickhouse connected` and `redis connected`, and `/healthz` and
   `/api/health` respond;
-- when nginx is installed, runs `deploy/apply-edge.sh`: the `emtds*.conf` files
+- unless `--no-edge` is given, runs `deploy/apply-edge.sh`: the `emtds*.conf` files
   from `deploy/nginx` (backup, `nginx -t`, rollback) and the keys
   `EMTDS_PUBLIC_IP` / `EMTDS_TRUSTED_PROXIES` in `/etc/emtds/server.env`. They
-  use the self-signed IP certificate `/etc/emtds/tls/ip.crt` and `ip.key`; the
-  scripts do not create it. Without nginx the stack is installed without the edge;
+  use the self-signed IP certificate `/etc/emtds/tls/ip.crt` and `ip.key`; if
+  the files are missing `apply-edge.sh` creates them (RSA 2048, 10 years) and
+  leaves existing ones alone. A missing nginx is installed as a package
+  (Ubuntu 22.04 and 24.04, Debian 12); only `--no-edge` skips nginx and the edge;
 - enables the `emtds-watchdog.timer` watchdog ([docs/wiki/watchdog.md](docs/wiki/watchdog.md)).
 
-On success it writes the marker `/etc/emtds/installed` and deletes
-`deploy/install.sh`. A second run while the marker exists does nothing.
-`git checkout` can restore the script file, but the marker blocks another run.
-If the install failed, there is no marker and the script remains: fix the error
-from the message and run again. Containers are not stopped on failure.
+On success it writes the marker `/etc/emtds/installed`. A second run while the
+marker exists does nothing: it prints the `/etc/emtds/up.sh` and
+`update.sh --check` commands. `deploy/install.sh` stays in the git clone so the
+tree stays clean; the marker blocks a repeated install. If the install failed,
+there is no marker: fix the error from the message and run again. Containers
+are not stopped on failure.
 
 ### Restart
 
@@ -469,9 +500,9 @@ Do not run `make infra-up` or bare `docker compose` on the server without the fi
 
 ### Updating
 
-After the first install, the update agent is set up automatically (`deploy/update.sh --install`). It checks for a new commit or release on a schedule and shows it in **Profile → Updates**.
+After the first install, the update agent is set up automatically (`deploy/update.sh --install`). Every hour it checks for a new commit (channel `main`) or release and shows it in **Settings → About** together with "What's new" from [CHANGELOG.md](CHANGELOG.md): every noticeable change goes into `[Unreleased]` as one line. Only fast-forward updates from the pinned `origin` are accepted; signature checking is off while `/etc/emtds/allowed_signers` has no keys.
 
-Updates are applied manually only — via the button or CLI:
+Updates are applied manually only — via the "Update" button or CLI:
 
 ```bash
 # Apply the latest version for the configured channel:
@@ -511,6 +542,8 @@ Full reference — channels, signing, rollback, manual steps, error codes: [docs
 
 Everything is configured via `EMTDS_*` environment variables; **secrets are never
 written to files in the repo**. Full reference: [`docs/USAGE.md`](docs/USAGE.md).
+Former names are not read: no other environment prefix takes effect, the session
+cookie is only `emtds_admin`, and API keys are only `em_…`.
 
 ### Engine (most-used)
 | Variable | Purpose |
@@ -774,8 +807,9 @@ page — drafts survive moving around the panel.
   lists it is in, and the state of the geo databases.
 - **Automation** — the cron service: a card per job with its switch, interval,
   settings, last result and "Run now"; Telegram with a test message.
-- **Profile** (user menu) — password, company name and logo, API keys for
-  scripts and AI agents, users, boards. **Integrations** — Keitaro import,
+- **Settings** (user menu) — password, company name and logo, API keys for
+  scripts and AI agents, users, boards, **About** (version, update, server
+  state). **Integrations** — Keitaro import,
   Cloudflare, Namecheap.
 - **Catalogs and access** — offers, landings, affiliate networks, traffic
   sources, domains, the report, bot protection, HTML pages, roles. All of it is
@@ -869,7 +903,7 @@ internal/
 migrations/clickhouse/   schema (auto-applied by make infra-up)
 deploy/                  docker-compose.yml (ClickHouse + Redis for local dev),
                          docker-compose.app.yml, install.sh, apply-edge.sh,
-                         migrate-emtds.sh, watchdog.sh, nginx/
+                         watchdog.sh, nginx/
 configs/                 example & test group configs
 docs/                    USAGE / ARCHITECTURE / SECURITY / STATUS (+ *.ru.md),
                          wiki/ (Russian)

@@ -33,10 +33,11 @@ func TestParseUniqMax(t *testing.T) {
 	}
 }
 
-// TestUniqMaxFromEnv reads the variable, with the KUZTDS_ fallback of config.Env.
+// TestUniqMaxFromEnv reads the variable and checks that the retired prefix (assembled
+// from parts) is not read.
 func TestUniqMaxFromEnv(t *testing.T) {
 	t.Setenv(UniqMaxEnv, "")
-	t.Setenv("KUZTDS_UNIQ_MAX_SECONDS", "")
+	t.Setenv("KU"+"ZTDS_UNIQ_MAX_SECONDS", "900")
 	if got, err := UniqMaxFromEnv(); got != DefaultUniqMax || err != nil {
 		t.Fatalf("unset: %v %v", got, err)
 	}

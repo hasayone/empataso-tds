@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // maxAnnounce bounds one run: a backlog after downtime becomes a summary, not

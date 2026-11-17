@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 func originColumnSet(ready bool) map[string]map[string]bool {

@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // aiTurnSettings turns the assistant on with the canary as the Anthropic key and two models.

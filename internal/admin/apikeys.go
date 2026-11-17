@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // msgKeyExpired is the error text, code key_expired, of a request whose API key has expired.

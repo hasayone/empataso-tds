@@ -6,7 +6,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -22,6 +22,15 @@ func NewRedisSessions(rdb redis.UniversalClient) *RedisSessions {
 }
 
 func (s *RedisSessions) key(token string) string { return "sess:" + token }
+
+// Ping checks that Redis answers. ctx bounds the wait.
+// It returns nil on success, an error when s has no client, and the Redis error otherwise.
+func (s *RedisSessions) Ping(ctx context.Context) error {
+	if s == nil || s.rdb == nil {
+		return errors.New("redis: not connected")
+	}
+	return s.rdb.Ping(ctx).Err()
+}
 
 func (s *RedisSessions) Create(ctx context.Context, token string, sess security.Session, ttl time.Duration) error {
 	b, err := json.Marshal(sess)

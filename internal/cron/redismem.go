@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // Redis memory alert defaults. Redis runs with noeviction: when maxmemory is

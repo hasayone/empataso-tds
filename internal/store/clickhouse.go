@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -115,6 +116,16 @@ func (c *CH) Close() error {
 		return nil
 	}
 	return c.conn.Close()
+}
+
+// Ping checks that the ClickHouse server answers on the open connection.
+// ctx bounds the wait. It returns nil on success, an error when c is nil or closed, and the
+// driver error when the server does not answer.
+func (c *CH) Ping(ctx context.Context) error {
+	if c == nil || c.conn == nil {
+		return errors.New("clickhouse: not connected")
+	}
+	return c.conn.Ping(ctx)
 }
 
 // StatsSummary — aggregates over a period (for the admin dashboard).

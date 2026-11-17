@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 // countGroup returns the number of events of one group.

@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 func recoveryFixture(t *testing.T, withUser bool, limit LoginLimiter) (*httptest.Server, string, *bytes.Buffer) {

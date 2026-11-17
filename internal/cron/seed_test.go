@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/hasayone/empataso-tds/internal/detect"
 )
 
 func countGeo(c Config, kind string) (n int) {

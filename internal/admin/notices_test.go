@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/cron"
 )
 
 func writeCronStatus(t *testing.T, cronFile string, st cron.Status) {

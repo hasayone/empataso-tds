@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // botProtectionGroup builds a campaign shaped like a Keitaro import: a first stream

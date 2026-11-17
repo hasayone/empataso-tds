@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 const (
@@ -18,6 +18,12 @@ const (
 	updateCheckEvery = time.Minute
 	// updateFreshAge is the maximum age of check.json for it to trigger a notification.
 	updateFreshAge = 24 * time.Hour
+	// updateMainAnnounceEvery is the minimum period between two target announcements on the
+	// main channel, where every push is a new target. It equals the default check period of the
+	// updater (EMTDS_UPDATE_CHECK_HOURS=1); cron has no way to read that setting, so the value is fixed.
+	updateMainAnnounceEvery = time.Hour
+	// updateMainChannel is the channel name of the main branch in check.json.
+	updateMainChannel = "main"
 	// updateResultMaxAge is the maximum age of a finished state to be announced.
 	updateResultMaxAge = 24 * time.Hour
 	// updateSubjectLimit is the maximum number of commit subjects in the target message.
@@ -148,6 +154,11 @@ func (r *Runner) checkUpdates(ctx context.Context, t Telegram) {
 	if checkErr != nil && !errors.Is(checkErr, os.ErrNotExist) {
 		r.log.Warn("cron: update check: cannot read check.json", "err", checkErr)
 	}
+	if checkErr == nil {
+		if checkErr = check.Validate(); checkErr != nil {
+			r.log.Warn("cron: update check: check.json ignored", "err", checkErr)
+		}
+	}
 
 	var state StateFile
 	stateErr := ReadUpdateJSON(filepath.Join(dir, UpdateStateFile), UpdateMaxJSON, &state)
@@ -167,14 +178,12 @@ func (r *Runner) checkUpdates(ctx context.Context, t Telegram) {
 	if checkErr == nil && shouldAnnounceTarget(check, announced, now) {
 		msg := buildTargetMsg(check, msgs)
 		if !t.Configured() {
-			announced.Target = check.Target.Commit
-			announced.At = now
+			announced.markTarget(check.Target.Commit, now)
 			changed = true
 		} else if err := r.notify(ctx, t, msg); err != nil {
 			r.log.Warn("cron: update target notification not sent", "err", err)
 		} else {
-			announced.Target = check.Target.Commit
-			announced.At = now
+			announced.markTarget(check.Target.Commit, now)
 			changed = true
 			r.log.Info("cron: update target announced", "target", check.Target.Commit[:12])
 		}
@@ -204,14 +213,37 @@ func (r *Runner) checkUpdates(ctx context.Context, t Telegram) {
 	}
 }
 
+// markTarget records commit as the target announced at now.
+// A.Target and A.TargetAt keep the deduplication and the main channel pause; A.At is the
+// time of the latest announcement of any kind.
+func (a *Announced) markTarget(commit string, now time.Time) {
+	a.Target = commit
+	a.TargetAt = now
+	a.At = now
+}
+
 // shouldAnnounceTarget reports whether check contains a new target that has
-// not yet been announced. All six conditions from the brief must hold.
+// not yet been announced and that the main channel pause allows to announce now.
 func shouldAnnounceTarget(check CheckFile, announced Announced, now time.Time) bool {
 	return check.Fresh(now, updateFreshAge) &&
 		check.Error == "" &&
 		check.Ahead > 0 &&
 		ValidCommit(check.Target.Commit) &&
-		check.Target.Commit != announced.Target
+		check.Target.Commit != announced.Target &&
+		!targetPaused(check, announced, now)
+}
+
+// targetPaused reports whether a target of the main channel was announced less than
+// updateMainAnnounceEvery before now. Every push to main is a new target, so a busy day would
+// otherwise send a message per push; the target that is current when the pause ends is announced
+// and the ones in between are not. Other channels are never paused, and a time in the future
+// (the clock moved back) does not pause.
+func targetPaused(check CheckFile, announced Announced, now time.Time) bool {
+	if check.Channel != updateMainChannel || announced.TargetAt.IsZero() {
+		return false
+	}
+	elapsed := now.Sub(announced.TargetAt)
+	return elapsed >= 0 && elapsed < updateMainAnnounceEvery
 }
 
 // shouldAnnounceResult reports whether state describes a finished run whose
@@ -233,10 +265,10 @@ func shouldAnnounceResult(state StateFile, announced Announced, now time.Time) b
 
 // buildTargetMsg composes the Telegram message for a newly available update target.
 func buildTargetMsg(check CheckFile, msgs *updateMsgT) string {
-	cur := refLabel(check.Current)
-	tgt := refLabel(check.Target)
+	cur := escNotify(refLabel(check.Current))
+	tgt := escNotify(refLabel(check.Target))
 	var sb strings.Builder
-	fmt.Fprintf(&sb, msgs.newUpdate, check.Channel, cur, tgt, check.Ahead)
+	fmt.Fprintf(&sb, msgs.newUpdate, escNotify(check.Channel), cur, tgt, check.Ahead)
 	if check.Signed {
 		sb.WriteString(msgs.signed)
 	}
@@ -270,11 +302,11 @@ func buildResultMsg(state StateFile, msgs *updateMsgT) string {
 	case StateRefused:
 		prefix = msgs.resultRefused
 	default:
-		prefix = state.Result
+		prefix = escNotify(state.Result)
 	}
 	var sb strings.Builder
 	sb.WriteString(prefix)
-	fmt.Fprintf(&sb, msgs.fromTo, sha12(state.From), sha12(state.To))
+	fmt.Fprintf(&sb, msgs.fromTo, escNotify(sha12(state.From)), escNotify(sha12(state.To)))
 	if state.Reason != "" {
 		reason := escNotify(state.Reason)
 		runes := []rune(reason)
@@ -317,9 +349,9 @@ func sha12(s string) string {
 	return s[:12]
 }
 
-// escNotify escapes HTML special characters in s so that user-supplied text
-// from JSON files cannot inject markup. Applied to commit subjects, state
-// reasons and any other field originating outside the binary.
+// escNotify escapes HTML special characters in s so that text from the JSON files of the
+// shared volume cannot inject markup. Applied to every such field placed into a message:
+// channel, version labels, commits, subjects and reasons.
 func escNotify(s string) string {
 	return html.EscapeString(s)
 }

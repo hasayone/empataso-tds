@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // section is a panel area a user may be granted. Names are stored in users.json access.sections.
@@ -112,6 +112,7 @@ var cookieRoutes = append([]string{
 	"POST /api/domains/{id}/ns", "POST /api/domains/{id}/cloudflare",
 	"POST /api/domains/{id}/admin-dns", "POST /api/domains/connected/ack",
 	"POST /api/update/apply", "POST /api/update/rollback", "POST /api/update/check",
+	"GET /api/system", "GET /api/system/signals",
 }, aiRoutePatterns...)
 
 // actionRoutes maps each dangerous action to the routes it unlocks for an API key.
@@ -328,6 +329,8 @@ func addAdminRoutes(m map[string]routeRule, rule func(section) routeRule) {
 	// Update routes: explicitly admin-only regardless of isAdminSection evaluation.
 	updateAdmin := routeRule{sec: secSettings, admin: true}
 	m["GET /api/version"] = updateAdmin
+	m["GET /api/system"] = updateAdmin
+	m["GET /api/system/signals"] = updateAdmin
 	m["GET /api/update"] = updateAdmin
 	m["GET /api/update/log"] = updateAdmin
 	m["POST /api/update/apply"] = updateAdmin

@@ -19,12 +19,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/admin"
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/cron"
-	"github.com/egerkuzma/emtds/internal/geo"
-	"github.com/egerkuzma/emtds/internal/security"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/admin"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/geo"
+	"github.com/hasayone/empataso-tds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 func main() {
@@ -55,6 +55,7 @@ func main() {
 		KeitaroBase:  strings.TrimSpace(os.Getenv("KEITARO_BASE_URL")),
 		KeitaroKey:   os.Getenv("KEITARO_API_KEY"),
 		PublicIP:     strings.TrimSpace(config.Env("EMTDS_PUBLIC_IP")),
+		SetupToken:   config.SetupToken(),
 
 		CIDKeyFile:    cidKeyFile(config.Env("EMTDS_CID_KEY_FILE"), config.Env("EMTDS_GROUPS_FILE")),
 		SecretValues:  secretValues(),
@@ -136,6 +137,7 @@ func main() {
 var secretEnvNames = []string{
 	"EMTDS_CLICKHOUSE_PASSWORD", "EMTDS_REDIS_PASSWORD", "EMTDS_POSTBACK_KEY", "EMTDS_CID_KEY",
 	"EMTDS_API_KEY", "EMTDS_ADMIN_PASSWORD", "EMTDS_ADMIN_PASSWORD_HASH", "KEITARO_API_KEY",
+	config.EnvSetupToken,
 }
 
 // secretValues returns the non-empty values of secretEnvNames. A secret moved to a file

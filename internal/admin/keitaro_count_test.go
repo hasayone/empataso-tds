@@ -66,11 +66,16 @@ func TestCountByOffsetErrors(t *testing.T) {
 }
 
 // keitaroPagedFake serves total campaigns and honours limit and offset like Keitaro.
-// It records the largest response and how many requests came in.
+// It records the largest response and how many campaign requests came in; log reads of the version
+// probe answer 404 and are not counted.
 func keitaroPagedFake(t *testing.T, total int, maxBody *atomic.Int64, hits *atomic.Int32) *httptest.Server {
 	t.Helper()
 	var mu sync.Mutex
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/log") {
+			http.Error(w, "no log", http.StatusNotFound)
+			return
+		}
 		hits.Add(1)
 		if r.Header.Get("Api-Key") == "" || r.URL.Path != "/admin_api/v1/campaigns" {
 			http.Error(w, "no", http.StatusUnauthorized)

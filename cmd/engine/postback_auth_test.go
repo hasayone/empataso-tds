@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/server"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/server"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // authDeps builds a minimal engineDeps for auth tests. cs replaces the store

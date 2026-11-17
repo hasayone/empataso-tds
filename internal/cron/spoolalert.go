@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // Spool alert. The engines park click events on disk while ClickHouse is away;
@@ -26,12 +26,12 @@ const (
 	spoolReasonNoDedup  = "nodedup"  // connected, but the events table does not deduplicate
 	spoolReasonNoSpool  = "nospool"  // ClickHouse is configured and the engine has no disk queue
 	// Reasons of the postback path.
-	spoolReasonPostbackLog  = "pblog"    // journal lines were lost
-	spoolReasonOutboundDrop = "outdrop"  // outbound jobs were dropped without a disk copy
-	spoolReasonRetryExpired  = "retryexp" // postbacks were written off: their click never appeared
+	spoolReasonPostbackLog   = "pblog"     // journal lines were lost
+	spoolReasonOutboundDrop  = "outdrop"   // outbound jobs were dropped without a disk copy
+	spoolReasonRetryExpired  = "retryexp"  // postbacks were written off: their click never appeared
 	spoolReasonRetryOverflow = "retryover" // a signed click was refused: the retry ceiling was full
-	spoolReasonQueueFull     = "qfull"   // a postback was refused: the store queue was full
-	spoolReasonPostbackQ     = "pbqueue" // the postback or outbound queue is stuck or set segments aside
+	spoolReasonQueueFull     = "qfull"     // a postback was refused: the store queue was full
+	spoolReasonPostbackQ     = "pbqueue"   // the postback or outbound queue is stuck or set segments aside
 )
 
 // spoolReasons lists every reason in the order the alert names them.
@@ -246,11 +246,11 @@ var spoolTexts = map[string]*spoolText{
 		raise: "⚠️ EmTDS: the disk queues (click events, postbacks) need attention (%s): %s",
 		clear: "✅ EmTDS: the disk queues (click events, postbacks) are in order again (%s).",
 		reason: map[string]string{
-			spoolReasonBacklog:      "events have waited on disk for more than 10 minutes although ClickHouse is connected",
-			spoolReasonRejected:     "segments were set aside in rejected/ and are not written; look at them before deleting",
-			spoolReasonNoDedup:      "the events table does not deduplicate, so a batch that may be stored is not repeated and is counted as lost",
-			spoolReasonNoSpool:      "the engine runs without a disk queue: events are lost when ClickHouse is unavailable; mount the spool volume",
-			spoolReasonPostbackLog:  "postback journal lines were lost",
+			spoolReasonBacklog:       "events have waited on disk for more than 10 minutes although ClickHouse is connected",
+			spoolReasonRejected:      "segments were set aside in rejected/ and are not written; look at them before deleting",
+			spoolReasonNoDedup:       "the events table does not deduplicate, so a batch that may be stored is not repeated and is counted as lost",
+			spoolReasonNoSpool:       "the engine runs without a disk queue: events are lost when ClickHouse is unavailable; mount the spool volume",
+			spoolReasonPostbackLog:   "postback journal lines were lost",
 			spoolReasonOutboundDrop:  "outbound postbacks were dropped: the send queue was full and had no disk copy, or the network never answered within the attempt ceiling",
 			spoolReasonRetryExpired:  "postbacks were written off: their click never appeared within the wait",
 			spoolReasonRetryOverflow: "a signed click was refused with 404 because the retry queue was full, so the lead was not kept",
@@ -262,11 +262,11 @@ var spoolTexts = map[string]*spoolText{
 		raise: "⚠️ EmTDS: дисковые очереди (события кликов, постбэки) требуют внимания (%s): %s",
 		clear: "✅ EmTDS: дисковые очереди (события кликов, постбэки) снова в порядке (%s).",
 		reason: map[string]string{
-			spoolReasonBacklog:      "события ждут на диске дольше 10 минут, хотя ClickHouse подключён",
-			spoolReasonRejected:     "сегменты отложены в rejected/ и не записываются; посмотрите их, прежде чем удалять",
-			spoolReasonNoDedup:      "таблица events не дедуплицирует, поэтому пачка с неизвестной судьбой не повторяется и считается потерянной",
-			spoolReasonNoSpool:      "engine работает без дисковой очереди: при недоступном ClickHouse события теряются; подключите том спула",
-			spoolReasonPostbackLog:  "строки журнала постбэков потеряны",
+			spoolReasonBacklog:       "события ждут на диске дольше 10 минут, хотя ClickHouse подключён",
+			spoolReasonRejected:      "сегменты отложены в rejected/ и не записываются; посмотрите их, прежде чем удалять",
+			spoolReasonNoDedup:       "таблица events не дедуплицирует, поэтому пачка с неизвестной судьбой не повторяется и считается потерянной",
+			spoolReasonNoSpool:       "engine работает без дисковой очереди: при недоступном ClickHouse события теряются; подключите том спула",
+			spoolReasonPostbackLog:   "строки журнала постбэков потеряны",
 			spoolReasonOutboundDrop:  "исходящие постбэки сброшены: очередь отправки была полна и копии на диске не было, либо сеть не ответила за отведённые попытки",
 			spoolReasonRetryExpired:  "постбэки списаны: клик не появился за время ожидания",
 			spoolReasonRetryOverflow: "подписанный клик отклонён с 404: очередь повторов была полна, лид не сохранён",
@@ -278,11 +278,11 @@ var spoolTexts = map[string]*spoolText{
 		raise: "⚠️ EmTDS: дискові черги (події кліків, постбеки) потребують уваги (%s): %s",
 		clear: "✅ EmTDS: дискові черги (події кліків, постбеки) знову в порядку (%s).",
 		reason: map[string]string{
-			spoolReasonBacklog:      "події чекають на диску довше 10 хвилин, хоча ClickHouse підключено",
-			spoolReasonRejected:     "сегменти відкладено в rejected/ і не записуються; перегляньте їх, перш ніж видаляти",
-			spoolReasonNoDedup:      "таблиця events не дедуплікує, тому пачка з невідомою долею не повторюється і вважається втраченою",
-			spoolReasonNoSpool:      "engine працює без дискової черги: коли ClickHouse недоступний, події втрачаються; підключіть том спулу",
-			spoolReasonPostbackLog:  "рядки журналу постбеків втрачено",
+			spoolReasonBacklog:       "події чекають на диску довше 10 хвилин, хоча ClickHouse підключено",
+			spoolReasonRejected:      "сегменти відкладено в rejected/ і не записуються; перегляньте їх, перш ніж видаляти",
+			spoolReasonNoDedup:       "таблиця events не дедуплікує, тому пачка з невідомою долею не повторюється і вважається втраченою",
+			spoolReasonNoSpool:       "engine працює без дискової черги: коли ClickHouse недоступний, події втрачаються; підключіть том спулу",
+			spoolReasonPostbackLog:   "рядки журналу постбеків втрачено",
 			spoolReasonOutboundDrop:  "вихідні постбеки скинуто: черга відправки була повна і копії на диску не було, або мережа не відповіла за відведені спроби",
 			spoolReasonRetryExpired:  "постбеки списано: клік не з'явився за час очікування",
 			spoolReasonRetryOverflow: "підписаний клік відхилено з 404: черга повторів була повна, лід не збережено",

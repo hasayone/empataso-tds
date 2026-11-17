@@ -6,14 +6,19 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 const (
 	keitaroCheckTimeout = 20 * time.Second
+	// keitaroVersionTimeout ограничивает чтение журналов для определения версии.
+	keitaroVersionTimeout = 10 * time.Second
+	// keitaroVersionDays — глубина окна журналов для определения версии.
+	keitaroVersionDays = 90
 )
 
 // keitaroImportReq is the body of POST /api/keitaro/import.
@@ -79,7 +84,9 @@ func (s *Server) handleKeitaroStatus(w http.ResponseWriter, r *http.Request) {
 // so the campaign list is not downloaded (see keitaroCountCampaigns). The count found is
 // remembered per tracker origin and speeds up the next check.
 // It returns 503 when the origin or key is empty.
-// On success it returns ok, the campaign count, api "v1" and an empty product_version.
+// On success it returns ok, the campaign count, api "v1", product_version ("10", "11" or empty when
+// the signals are missing or disagree), version_signals (the votes behind it) and version_conflict.
+// The version comes from read-only samples of the click and conversion logs (see keitaroDetectVersion).
 // A tracker error is 502. Error bodies omit api and product_version.
 // The key is removed from the error text. The settings file is not written.
 func (s *Server) handleKeitaroCheck(w http.ResponseWriter, r *http.Request) {
@@ -97,9 +104,55 @@ func (s *Server) handleKeitaroCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.ktCount.set(base, n)
+	verdict := keitaroDetectVersion(ctx, s.keitaroClient(creds))
+	s.ktVersion.set(base, verdict.Version)
+	votes := verdict.Votes
+	if votes == nil {
+		votes = []ktimport.VersionVote{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"ok": true, "campaigns": n, "api": "v1", "product_version": "",
+		"ok": true, "campaigns": n, "api": "v1",
+		"product_version": verdict.Version, "version_signals": votes, "version_conflict": verdict.Conflict,
 	})
+}
+
+// keitaroVersionHint remembers the tracker version of the last connection check for one origin.
+type keitaroVersionHint struct {
+	mu      sync.Mutex
+	base    string
+	version string
+}
+
+// get returns the version remembered for base, or an empty string when none is stored for that origin
+// or the last check could not decide.
+func (h *keitaroVersionHint) get(base string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.base != base {
+		return ""
+	}
+	return h.version
+}
+
+// set stores version as the version of base; an empty version forgets the earlier one.
+func (h *keitaroVersionHint) set(base, version string) {
+	h.mu.Lock()
+	h.base, h.version = base, version
+	h.mu.Unlock()
+}
+
+// keitaroDetectVersion собирает голоса версии из свежих записей журналов и считает итог.
+// Запросы только читают и идут тем же клиентом, что проверка соединения; сбой запроса не прерывает проверку.
+//
+// Параметры: ctx — отмена и общий срок проверки; client — клиент трекера.
+// Результат: версия, голоса и признак противоречия; без голосов версия пуста.
+// Ошибки: нет.
+func keitaroDetectVersion(ctx context.Context, client *ktimport.Client) ktimport.VersionVerdict {
+	ctx, cancel := context.WithTimeout(ctx, keitaroVersionTimeout)
+	defer cancel()
+	now := time.Now().UTC()
+	from := now.AddDate(0, 0, -keitaroVersionDays).Format(keitaroTimeLayout)
+	return ktimport.DetectVersion(client.ProbeVersion(ctx, from, now.Format(keitaroTimeLayout)))
 }
 
 // needsTracker reports whether the request has to call the tracker.

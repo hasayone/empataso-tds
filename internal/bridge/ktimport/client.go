@@ -19,8 +19,13 @@ type Client struct {
 	Key      string
 	HTTP     *http.Client
 	Progress func(stage string, done, total int)
+	// Version — версия Keitaro (Keitaro10 или Keitaro11), по которой журналы просят колонки идентификаторов.
+	// Пусто — версия не определена: колонки идентификаторов не просятся.
+	Version string
 	// extRejected — последнее чтение журнала откатилось на базовые колонки.
 	extRejected bool
+	// idRejected — последнее чтение журнала откатилось с колонок идентификаторов версии.
+	idRejected bool
 }
 
 const (

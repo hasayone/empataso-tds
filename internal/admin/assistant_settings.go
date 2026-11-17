@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"math"
@@ -10,23 +11,25 @@ import (
 	"strings"
 )
 
-// Built-in values of the assistant settings. A limit left out of ai.json takes the
-// default; a limit stored as zero means no limit.
+// Built-in values of the assistant settings. A daily limit left out of ai.json takes the
+// default: the two token limits have none (no limit), the two USD limits are the amounts below.
 const (
-	aiDefaultMaxOutput             = 2048
-	aiDefaultMaxSteps              = 6
-	aiDefaultTurnInput             = 60000
-	aiDefaultDailyTokens     int64 = 2_000_000
-	aiDefaultUserDailyTokens int64 = 300_000
-	aiDefaultDailyUSD              = 5.0
-	aiDefaultUserDailyUSD          = 2.0
+	aiDefaultMaxOutput    = 2048
+	aiDefaultMaxSteps     = 6
+	aiDefaultTurnInput    = 60000
+	aiDefaultDailyUSD     = 5.0
+	aiDefaultUserDailyUSD = 2.0
 )
+
+// aiNoLimit is the stored value of a daily limit the administrator switched off. In the API
+// the same state is JSON null; zero is a real limit that refuses every call it counts.
+const aiNoLimit = -1
 
 // Bounds of the values a PUT accepts. aiMaxOutputCap, aiMaxStepsCap and aiTurnInputCap are the
 // hard ceilings of the per-turn limits, which have no unlimited form: 32000 output tokens is
 // the largest answer the supported models give, 20 steps bounds the tool loop, and 200000
 // input tokens is the context window of the smallest supported model. The daily limits take
-// 0 for no limit and are bound by aiTokensCap and aiUSDCap.
+// null for no limit or a value from 0 to aiTokensCap and aiUSDCap.
 const (
 	aiSettingsBody  = 1 << 18
 	aiMaxOutputCap  = 32000
@@ -41,24 +44,38 @@ const (
 	aiKeyMaskPrefix = "••••"
 )
 
-// aiLimits holds the effective limits of the settings: defaults applied, zero meaning no limit
-// for the four daily values.
+// aiLimits holds the effective limits of the settings with the defaults applied. A nil daily
+// limit means no limit; a zero one refuses every call it counts.
 type aiLimits struct {
 	MaxOutput       int
 	MaxSteps        int
 	TurnInput       int
-	DailyTokens     int64
-	UserDailyTokens int64
-	DailyUSD        float64
-	UserDailyUSD    float64
+	DailyTokens     *int64
+	UserDailyTokens *int64
+	DailyUSD        *float64
+	UserDailyUSD    *float64
 }
 
-// aiOr returns *p, or def when p is nil.
-func aiOr[T any](p *T, def T) T {
-	if p == nil {
+// aiPtr returns a pointer to a copy of v.
+func aiPtr[T any](v T) *T { return &v }
+
+// aiDailyLimit returns the effective daily limit of the stored value p: def when p is missing
+// (nil def: no limit), nil when p is aiNoLimit, otherwise p cut to ceiling.
+func aiDailyLimit[T int64 | float64](p *T, ceiling T, def *T) *T {
+	p = aiClampDaily(p, ceiling)
+	switch {
+	case p == nil:
 		return def
+	case *p < 0:
+		return nil
 	}
-	return *p
+	return p
+}
+
+// aiOverLimit reports whether used passes the daily limit lim: never for nil (no limit),
+// always for a zero limit, otherwise when used is above lim.
+func aiOverLimit[T int64 | float64](used T, lim *T) bool {
+	return lim != nil && (*lim == 0 || used > *lim)
 }
 
 // aiClampTurn returns the effective per-turn limit for v: def when v is not positive,
@@ -73,15 +90,18 @@ func aiClampTurn(v, def, ceiling int) int {
 	return v
 }
 
-// aiClampDaily returns the stored daily limit p made safe: nil (the default) for a negative
-// or NaN value, ceiling for a value above it, otherwise p itself. Zero stays zero, no limit.
+// aiClampDaily returns the stored daily limit p made safe: nil (the default) for NaN,
+// aiNoLimit for any negative value, ceiling for a value above it, otherwise p itself.
 func aiClampDaily[T int64 | float64](p *T, ceiling T) *T {
 	if p == nil {
 		return nil
 	}
 	switch {
-	case math.IsNaN(float64(*p)) || *p < 0:
+	case math.IsNaN(float64(*p)):
 		return nil
+	case *p < 0:
+		v := T(aiNoLimit)
+		return &v
 	case *p > ceiling:
 		v := ceiling
 		return &v
@@ -96,17 +116,17 @@ func (st aiSettings) limits() aiLimits {
 		MaxOutput:       aiClampTurn(st.MaxOutputTokens, aiDefaultMaxOutput, aiMaxOutputCap),
 		MaxSteps:        aiClampTurn(st.MaxSteps, aiDefaultMaxSteps, aiMaxStepsCap),
 		TurnInput:       aiClampTurn(st.TurnInputTokens, aiDefaultTurnInput, aiTurnInputCap),
-		DailyTokens:     aiOr(aiClampDaily(st.DailyTokens, aiTokensCap), aiDefaultDailyTokens),
-		UserDailyTokens: aiOr(aiClampDaily(st.UserDailyTokens, aiTokensCap), aiDefaultUserDailyTokens),
-		DailyUSD:        aiOr(aiClampDaily(st.DailyUSD, aiUSDCap), aiDefaultDailyUSD),
-		UserDailyUSD:    aiOr(aiClampDaily(st.UserDailyUSD, aiUSDCap), aiDefaultUserDailyUSD),
+		DailyTokens:     aiDailyLimit(st.DailyTokens, aiTokensCap, nil),
+		UserDailyTokens: aiDailyLimit(st.UserDailyTokens, aiTokensCap, nil),
+		DailyUSD:        aiDailyLimit(st.DailyUSD, aiUSDCap, aiPtr(aiDefaultDailyUSD)),
+		UserDailyUSD:    aiDailyLimit(st.UserDailyUSD, aiUSDCap, aiPtr(aiDefaultUserDailyUSD)),
 	}
 }
 
 // aiNormalize fills what a stored file may lack: a known provider, non-nil maps and
 // lists, and the effective per-turn limits (default for a missing or non-positive value,
-// the ceiling for a larger one). Daily limits that are negative or above their ceiling are
-// reset to the default or cut to the ceiling; zero stays zero. Keys of unknown providers and
+// the ceiling for a larger one). A daily limit that is NaN goes back to the default, a negative
+// one becomes aiNoLimit and a larger one is cut to the ceiling; zero stays zero. Keys of unknown providers and
 // empty keys are dropped, and the permissions are made safe by aiNormalizePerms.
 func aiNormalize(st aiSettings) aiSettings {
 	if !aiKnownProvider(st.Provider) {
@@ -128,6 +148,8 @@ func aiNormalize(st aiSettings) aiSettings {
 	st.UserDailyTokens = aiClampDaily(st.UserDailyTokens, aiTokensCap)
 	st.DailyUSD = aiClampDaily(st.DailyUSD, aiUSDCap)
 	st.UserDailyUSD = aiClampDaily(st.UserDailyUSD, aiUSDCap)
+	st.UserBudgetUSD = aiSanitizeBudgets(st.UserBudgetUSD)
+	st.GroupBudgetUSD = aiSanitizeBudgets(st.GroupBudgetUSD)
 	st.Perms = aiNormalizePerms(st.Perms)
 	return st
 }
@@ -276,45 +298,73 @@ type aiSettingsPut struct {
 	MaxOutputTokens *int                `json:"max_output_tokens"`
 	MaxSteps        *int                `json:"max_steps"`
 	TurnInputTokens *int                `json:"turn_input_tokens"`
-	DailyTokens     *int64              `json:"daily_tokens"`
-	UserDailyTokens *int64              `json:"user_daily_tokens"`
-	DailyUSD        *float64            `json:"daily_usd"`
-	UserDailyUSD    *float64            `json:"user_daily_usd"`
+	DailyTokens     aiDailyPut[int64]   `json:"daily_tokens"`
+	UserDailyTokens aiDailyPut[int64]   `json:"user_daily_tokens"`
+	DailyUSD        aiDailyPut[float64] `json:"daily_usd"`
+	UserDailyUSD    aiDailyPut[float64] `json:"user_daily_usd"`
+	UserBudgetUSD   *map[string]float64 `json:"user_budget_usd"`
+	GroupBudgetUSD  *map[string]float64 `json:"group_budget_usd"`
 	Prices          *map[string]aiPrice `json:"prices"`
 	Perms           *aiPerms            `json:"perms"`
 }
 
+// aiDailyPut is one daily limit of a PUT body. Set is true when the field is in the body;
+// Null is true when it is JSON null, which switches the limit off; otherwise V is the limit.
+type aiDailyPut[T int64 | float64] struct {
+	Set  bool
+	Null bool
+	V    T
+}
+
+// aiDailyOf returns the PUT value v for a daily limit.
+func aiDailyOf[T int64 | float64](v T) aiDailyPut[T] { return aiDailyPut[T]{Set: true, V: v} }
+
+// UnmarshalJSON reads a daily limit of a PUT body: null switches the limit off, a number sets it.
+// It returns the decoding error of a value that is neither.
+func (p *aiDailyPut[T]) UnmarshalJSON(b []byte) error {
+	p.Set = true
+	if string(bytes.TrimSpace(b)) == "null" {
+		p.Null = true
+		return nil
+	}
+	return json.Unmarshal(b, &p.V)
+}
+
 // aiBadLimit builds the 400 ai_bad_limit error for the limit field name that accepts min to max.
 // The params are field, min and max, so a client can word the refusal itself; the English text
-// is the fallback and says that 0 means no limit when min is 0.
+// is the fallback and says how to switch the limit off when min is 0.
 func aiBadLimit(name string, min, max float64) *aiError {
 	lo, hi := strconv.FormatFloat(min, 'f', -1, 64), strconv.FormatFloat(max, 'f', -1, 64)
 	text := name + " must be from " + lo + " to " + hi
 	if min == 0 {
-		text += ", 0 means no limit"
+		text += ", null or an empty field means no limit"
 	}
 	return newAIErrorP(http.StatusBadRequest, aiErrBadLimit, text,
 		map[string]any{"field": name, "min": min, "max": max})
 }
 
-// aiMergeCount sets *dst to *src when src is set, after checking that it is a finite number
-// from 0 (no limit) to limit. name is the field name for the ai_bad_limit error.
-func aiMergeCount[T int64 | float64](dst **T, src *T, limit T, name string) error {
-	if src == nil {
+// aiMergeCount applies the daily limit src of a PUT to *dst when the field is set: null stores
+// aiNoLimit, a number must be finite and from 0 to limit. name is the field name for the
+// ai_bad_limit error.
+func aiMergeCount[T int64 | float64](dst **T, src aiDailyPut[T], limit T, name string) error {
+	if !src.Set {
 		return nil
 	}
-	f := float64(*src)
-	if math.IsNaN(f) || math.IsInf(f, 0) || *src < 0 || *src > limit {
+	if src.Null {
+		*dst = aiPtr(T(aiNoLimit))
+		return nil
+	}
+	f := float64(src.V)
+	if math.IsNaN(f) || math.IsInf(f, 0) || src.V < 0 || src.V > limit {
 		return aiBadLimit(name, 0, float64(limit))
 	}
-	v := *src
-	*dst = &v
+	*dst = aiPtr(src.V)
 	return nil
 }
 
 // aiMergeSettings applies a PUT body on top of the stored settings.
 // cur is the stored (normalized) settings; the result is what to store. It returns an *aiError:
-// ai_bad_request for a bad field (params field and reason, perms included), ai_bad_model with the reason
+// ai_bad_request for a bad field (params field and reason, perms and the budget maps included), ai_bad_model with the reason
 // not_allowed when the default model is not in allowed_models, ai_bad_limit for a limit out of range.
 // The result may be enabled only with a non-empty allowed_models (ai_bad_request, field
 // allowed_models, reason required) and with a key of its provider (field keys, reason required),
@@ -370,6 +420,20 @@ func aiMergeSettings(cur aiSettings, p aiSettingsPut) (aiSettings, error) {
 	if err := aiMergeLimits(&next, p); err != nil {
 		return cur, err
 	}
+	if p.UserBudgetUSD != nil {
+		b, err := aiCleanBudgets("user_budget_usd", *p.UserBudgetUSD)
+		if err != nil {
+			return cur, err
+		}
+		next.UserBudgetUSD = b
+	}
+	if p.GroupBudgetUSD != nil {
+		b, err := aiCleanBudgets("group_budget_usd", *p.GroupBudgetUSD)
+		if err != nil {
+			return cur, err
+		}
+		next.GroupBudgetUSD = b
+	}
 	if p.Prices != nil {
 		prices, err := aiCleanPrices(*p.Prices)
 		if err != nil {
@@ -394,8 +458,9 @@ func aiMergeSettings(cur aiSettings, p aiSettingsPut) (aiSettings, error) {
 }
 
 // aiMergeLimits applies the limit fields of p to next. A per-turn limit must be from 1 to its
-// ceiling (it has no unlimited form); a daily limit may be 0, which is stored as zero and
-// means no limit. A value outside its range is an ai_bad_limit error and nothing is applied.
+// ceiling (it has no unlimited form); a daily limit is null for no limit or a value from 0,
+// where 0 refuses every call it counts. A value outside its range is an ai_bad_limit error and
+// nothing is applied.
 func aiMergeLimits(next *aiSettings, p aiSettingsPut) error {
 	for _, c := range []struct {
 		src   *int

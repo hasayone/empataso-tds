@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 func TestOriginMigrationMatchesFields(t *testing.T) {
@@ -13,7 +13,7 @@ func TestOriginMigrationMatchesFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "ALTER TABLE kuztds.events " + alterSQL("events", waveOrigin) + "; ALTER TABLE kuztds.conversions " + alterSQL("conversions", waveOrigin) + ";"
+	want := "ALTER TABLE emtds.events " + alterSQL("events", waveOrigin) + "; ALTER TABLE emtds.conversions " + alterSQL("conversions", waveOrigin) + ";"
 	if normSQL(migrationSQLBody(string(raw))) != normSQL(want) {
 		t.Fatalf("migration\n%s\nwant\n%s", normSQL(migrationSQLBody(string(raw))), normSQL(want))
 	}

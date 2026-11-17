@@ -3,7 +3,7 @@ package main
 import (
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // The group is taken from the first path segment, so a link dressed up as a

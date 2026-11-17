@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 const (

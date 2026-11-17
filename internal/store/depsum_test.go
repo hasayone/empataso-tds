@@ -25,7 +25,7 @@ func TestDepSumField(t *testing.T) {
 		t.Fatal(err)
 	}
 	text := string(raw)
-	if !strings.Contains(text, "ALTER TABLE kuztds.conversions") || !strings.Contains(text, "ADD COLUMN IF NOT EXISTS depsum Float64") {
+	if !strings.Contains(text, "ALTER TABLE emtds.conversions") || !strings.Contains(text, "ADD COLUMN IF NOT EXISTS depsum Float64") {
 		t.Fatalf("migration %s", text)
 	}
 	if strings.Contains(strings.ToUpper(text), "UPDATE") || strings.Contains(text, "postbacks") || strings.Contains(text, "events") {

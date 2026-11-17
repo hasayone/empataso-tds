@@ -11,7 +11,7 @@ func TestRootMigrationMatchesFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "ALTER TABLE kuztds.events " + alterSQL("events", waveRoot) + "; ALTER TABLE kuztds.conversions " + alterSQL("conversions", waveRoot) + ";"
+	want := "ALTER TABLE emtds.events " + alterSQL("events", waveRoot) + "; ALTER TABLE emtds.conversions " + alterSQL("conversions", waveRoot) + ";"
 	if normSQL(migrationSQLBody(string(raw))) != normSQL(want) {
 		t.Fatalf("migration\n%s\nwant\n%s", normSQL(migrationSQLBody(string(raw))), normSQL(want))
 	}

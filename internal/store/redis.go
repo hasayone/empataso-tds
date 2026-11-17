@@ -6,7 +6,7 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 	"github.com/redis/go-redis/v9"
 )
 

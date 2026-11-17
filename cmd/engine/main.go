@@ -27,17 +27,17 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/detect"
-	"github.com/egerkuzma/emtds/internal/fetch"
-	"github.com/egerkuzma/emtds/internal/geo"
-	"github.com/egerkuzma/emtds/internal/ipindex"
-	"github.com/egerkuzma/emtds/internal/logbuf"
-	"github.com/egerkuzma/emtds/internal/render"
-	"github.com/egerkuzma/emtds/internal/router"
-	"github.com/egerkuzma/emtds/internal/seplist"
-	"github.com/egerkuzma/emtds/internal/server"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/detect"
+	"github.com/hasayone/empataso-tds/internal/fetch"
+	"github.com/hasayone/empataso-tds/internal/geo"
+	"github.com/hasayone/empataso-tds/internal/ipindex"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/render"
+	"github.com/hasayone/empataso-tds/internal/router"
+	"github.com/hasayone/empataso-tds/internal/seplist"
+	"github.com/hasayone/empataso-tds/internal/server"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // IP lists the engine keeps in memory (names = <name>.dat files).
@@ -45,7 +45,7 @@ var ipLists = []string{
 	"ip_blacklist",
 	"ip_google", "ip_bing", "ip_yandex", "ip_yahoo", "ip_mail", "ip_baidu",
 	"ip_others",
-	"wap",      // carriers (with labels like #beeline etc.)
+	"wap",              // carriers (with labels like #beeline etc.)
 	"ip_proxy",         // datacenter, VPN and proxy ranges; filled by cron
 	"ip_private_relay", // iCloud Private Relay egress ranges, never counted as proxy; filled by cron
 }
@@ -245,7 +245,7 @@ func main() {
 		groups: groups, domains: domains, offers: offers, landings: landings, sources: sources, networks: networks, s2s: s2s,
 		outbound: make(chan outboundJob, 64),
 		fetcher:  fetcher,
-		dataDir: dataDir, keyFiles: keyFiles, postbackKey: postbackKey, pbAuth: pbAuth, keys: apiKeys{env: apiEnv, set: keySet},
+		dataDir:  dataDir, keyFiles: keyFiles, postbackKey: postbackKey, pbAuth: pbAuth, keys: apiKeys{env: apiEnv, set: keySet},
 		trashMode: trashMode, trashURL: trashURL, curlCacheMin: curlCacheMin,
 		botPath:   botPath,
 		cids:      newCIDSigner(config.Env("EMTDS_CID_KEY"), cidKeyPath(config.Env("EMTDS_CID_KEY_FILE"), groupsFile), log),

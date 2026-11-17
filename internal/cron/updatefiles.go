@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/atomicfile"
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
 )
 
 // File names inside the update directory.
@@ -105,6 +105,9 @@ type CheckCommit struct {
 // CheckFile is the result of the latest update check written by the updater.
 // Schema must equal 1. Commits is capped at 200 entries, Subject at 200 chars,
 // Notes at 16 KiB.
+// Notes is what is new in the target: the added lines of the CHANGELOG.md diff between
+// the current commit and the target, or, when that diff is empty, the annotation of the
+// target tag (subject and body, without a signature block).
 type CheckFile struct {
 	Schema      int           `json:"schema"`
 	At          time.Time     `json:"at"`
@@ -163,8 +166,12 @@ type ReadyFile struct {
 
 // Announced tracks the last update target and run result announced via Telegram.
 // Written and read exclusively by cron to deduplicate notifications.
+// Target is the commit announced last and TargetAt the time of that announcement; the
+// main channel announces a new target at most once per updateMainAnnounceEvery after TargetAt.
+// ResultID is the run announced last. At is the time of the latest announcement of either kind.
 type Announced struct {
 	Target   string    `json:"target"`
+	TargetAt time.Time `json:"target_at,omitempty"`
 	ResultID string    `json:"result_id"`
 	At       time.Time `json:"at"`
 }
@@ -258,6 +265,48 @@ func ValidTag(s string) bool { return reTag.MatchString(s) }
 
 // ValidChannel reports whether s is a valid update channel name (release or main).
 func ValidChannel(s string) bool { return s == "release" || s == "main" }
+
+// reRefVersion matches a version label of check.json: letters, digits and . _ + - only.
+var reRefVersion = regexp.MustCompile(`^[A-Za-z0-9._+\-]{1,64}$`)
+
+// validRef checks the identifiers of one CheckRef. name is "current" or "target" and prefixes
+// the error. An empty field is allowed; a filled one must be a 40-hex commit, a vX.Y.Z tag
+// and a plain version label. It returns the first violation.
+func validRef(name string, ref CheckRef) error {
+	if ref.Commit != "" && !ValidCommit(ref.Commit) {
+		return fmt.Errorf("updatefiles: check %s: invalid commit", name)
+	}
+	if ref.Tag != "" && !ValidTag(ref.Tag) {
+		return fmt.Errorf("updatefiles: check %s: invalid tag", name)
+	}
+	if ref.Version != "" && !reRefVersion.MatchString(ref.Version) {
+		return fmt.Errorf("updatefiles: check %s: invalid version", name)
+	}
+	return nil
+}
+
+// Validate checks the fields of check.json that reach a shell command, a message or a link:
+// the channel (release or main), the commits and tags of current and target, the versions and
+// the commit list. The volume that holds the file is writable by the engine process, so the
+// admin and the cron service treat the content as untrusted and ignore a file that fails.
+// It returns nil for a valid file and an error naming the first bad field otherwise.
+func (s CheckFile) Validate() error {
+	if !ValidChannel(s.Channel) {
+		return errors.New("updatefiles: check: invalid channel")
+	}
+	if err := validRef("current", s.Current); err != nil {
+		return err
+	}
+	if err := validRef("target", s.Target); err != nil {
+		return err
+	}
+	for _, c := range s.Commits {
+		if !ValidCommit(c.SHA) {
+			return errors.New("updatefiles: check: invalid commit in the list")
+		}
+	}
+	return nil
+}
 
 // UpdateRequest is a command written by admin to the inbox and read by the updater.
 // Action is one of: apply, rollback, check.

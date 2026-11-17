@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // ownPostbacks returns the templates of other owners that the managed ones must never disturb.

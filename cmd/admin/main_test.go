@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/admin"
+	"github.com/hasayone/empataso-tds/internal/admin"
 )
 
 func TestDomainWatchInterval(t *testing.T) {

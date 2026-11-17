@@ -4,7 +4,7 @@ import (
 	"regexp"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // subIDExtraRe matches the sub_id_N fields beyond the twelve the dictionaries list:

@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 func uiServer(t *testing.T, uiPath string) *httptest.Server {

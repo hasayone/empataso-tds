@@ -14,9 +14,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/atomicfile"
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // Paths — the files the service reads and writes.
@@ -74,6 +74,8 @@ type Status struct {
 	// Written on every save so the updater can read them via -probe.
 	Version string `json:"version,omitempty"`
 	Commit  string `json:"commit,omitempty"`
+	// Env is the environment of the cron process, production or development (config.Environment).
+	Env string `json:"env,omitempty"`
 }
 
 // GeoSeen remembers a download well enough to ask "anything newer?" next time.
@@ -192,7 +194,7 @@ func New(paths Paths, pb PostbackSource, log *slog.Logger) *Runner {
 		vtBase:         "https://www.virustotal.com",
 		vtPause:        16 * time.Second, // the public API allows 4 requests a minute
 		now:            time.Now,
-		disk:           diskFree,
+		disk:           DiskFree,
 		dbipAllowed:    dbipURLAllowed,
 		dbipLimit:      dbipMaxBytes,
 		probeIP:        net.IPv4(8, 8, 8, 8),
@@ -452,7 +454,7 @@ func (r *Runner) save() {
 	defer r.saveMu.Unlock()
 	r.mu.Lock()
 	bi := config.Build()
-	r.st.Version, r.st.Commit = bi.Version, bi.Commit
+	r.st.Version, r.st.Commit, r.st.Env = bi.Version, bi.Commit, bi.Env
 	b, err := json.MarshalIndent(r.st, "", "  ")
 	r.mu.Unlock()
 	if err == nil {

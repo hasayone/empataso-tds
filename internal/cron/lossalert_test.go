@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 var testLossAlert = LossAlert{Repeat: 6 * time.Hour, RecoverAfter: 10 * time.Minute, Lang: "en"}

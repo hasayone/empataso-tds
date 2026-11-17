@@ -5,23 +5,16 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
-const (
-	// boardHeader names the section header sent by the panel and API clients.
-	boardHeader = "X-Emtds-Board"
-	// legacyBoardHeader is the section header of clients built before the rename; it is still read.
-	legacyBoardHeader = "X-Kuztds-Board"
-)
+// boardHeader names the section header sent by the panel and API clients.
+const boardHeader = "X-Emtds-Board"
 
-// requestBoard returns the trimmed section header of r: X-Emtds-Board first, then X-Kuztds-Board.
+// requestBoard returns the trimmed X-Emtds-Board section header of r, or "" when it is absent.
 func requestBoard(r *http.Request) string {
-	if v := strings.TrimSpace(r.Header.Get(boardHeader)); v != "" {
-		return v
-	}
-	return strings.TrimSpace(r.Header.Get(legacyBoardHeader))
+	return strings.TrimSpace(r.Header.Get(boardHeader))
 }
 
 const boardKey ctxKey = 1

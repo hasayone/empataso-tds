@@ -202,6 +202,7 @@ var allowedBoardIcons = map[string]struct{}{
 	"sofa":           {},
 	"sparkles":       {},
 	"speaker":        {},
+	"square":         {},
 	"star":           {},
 	"sticker":        {},
 	"store":          {},

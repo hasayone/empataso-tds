@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 func loadBook[T any](t *testing.T, name string, list []T, idOf func(T) string) *config.Book[T] {

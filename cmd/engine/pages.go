@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/render"
+	"github.com/hasayone/empataso-tds/internal/render"
 )
 
 // pageStatInterval is the minimum gap between stats of one page name and of

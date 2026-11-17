@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // loginBody posts the credentials to base and returns the response, closed by the test.

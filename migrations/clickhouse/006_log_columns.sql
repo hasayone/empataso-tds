@@ -1,11 +1,11 @@
-ALTER TABLE kuztds.events
+ALTER TABLE emtds.events
 	ADD COLUMN IF NOT EXISTS site String,
 	ADD COLUMN IF NOT EXISTS ad_campaign_id String,
 	ADD COLUMN IF NOT EXISTS creative_id String,
 	ADD COLUMN IF NOT EXISTS external_id String,
 	ADD COLUMN IF NOT EXISTS xrw LowCardinality(String);
 
-ALTER TABLE kuztds.conversions
+ALTER TABLE emtds.conversions
 	ADD COLUMN IF NOT EXISTS region LowCardinality(String),
 	ADD COLUMN IF NOT EXISTS lang LowCardinality(String),
 	ADD COLUMN IF NOT EXISTS os LowCardinality(String),

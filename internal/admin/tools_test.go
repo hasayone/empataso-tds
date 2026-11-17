@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/cron"
-	"github.com/egerkuzma/emtds/internal/geo"
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/geo"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // toolsServer is an admin with a data directory, the MaxMind test databases

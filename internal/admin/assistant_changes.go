@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // Statuses of a stored change that come before the write starts, end without one, or belong to a

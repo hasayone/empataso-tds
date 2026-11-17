@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/atomicfile"
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // runVirusTotal asks VirusTotal about every domain the streams send traffic

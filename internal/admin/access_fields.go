@@ -6,8 +6,8 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // moneyFields maps a money group to the journal fields it covers. Hiding the

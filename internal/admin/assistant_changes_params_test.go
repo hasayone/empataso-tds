@@ -12,7 +12,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // chgAnswer writes err the way a handler of the assistant answers it and returns the status and

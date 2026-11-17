@@ -11,7 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // create queues the creation of campaign id and fails the test unless the answer is 202.

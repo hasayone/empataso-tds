@@ -18,7 +18,7 @@ func TestEventsCIDIndex(t *testing.T) {
 	for _, s := range splitCHMigration(string(raw)) {
 		stmts = append(stmts, migrationCollapseWS(s))
 	}
-	want := "ALTER TABLE kuztds.events " + strings.TrimPrefix(eventsCIDIndexSQL, "ALTER TABLE events ") + ";"
+	want := "ALTER TABLE emtds.events " + strings.TrimPrefix(eventsCIDIndexSQL, "ALTER TABLE events ") + ";"
 	if len(stmts) != 1 || stmts[0] != want {
 		t.Fatalf("migration statements %q, want %q", stmts, want)
 	}

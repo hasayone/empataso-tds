@@ -15,7 +15,7 @@ func migrationDirForTest() string {
 }
 
 func TestValidateMigrationScriptRealFiles(t *testing.T) {
-	db := "kuztds_it_unit_test"
+	db := "emtds_it_unit_test"
 	dir := migrationDirForTest()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -36,15 +36,15 @@ func TestValidateMigrationScriptRealFiles(t *testing.T) {
 }
 
 func TestValidateMigrationScriptRejectsUnsafe(t *testing.T) {
-	db := "kuztds_it_reject_test"
+	db := "emtds_it_reject_test"
 	cases := []struct {
 		name, sql string
 	}{
-		{"use", "USE kuztds;"},
+		{"use", "USE emtds;"},
 		{"drop", "DROP TABLE x.events;"},
 		{"truncate", "TRUNCATE TABLE " + db + ".events;"},
-		{"kuztds_qual", "ALTER TABLE KUZTDS.events ADD COLUMN IF NOT EXISTS x String;"},
-		{"backtick_kuztds", "ALTER TABLE `kuztds`.events ADD COLUMN IF NOT EXISTS x String;"},
+		{"emtds_qual", "ALTER TABLE EMTDS.events ADD COLUMN IF NOT EXISTS x String;"},
+		{"backtick_emtds", "ALTER TABLE `emtds`.events ADD COLUMN IF NOT EXISTS x String;"},
 		{"unqualified_alter", "ALTER TABLE events ADD COLUMN IF NOT EXISTS x String;"},
 		{"alter_delete", "ALTER TABLE " + db + ".events DELETE WHERE 1;"},
 		{"insert", "INSERT INTO " + db + ".events VALUES (1);"},
@@ -67,8 +67,8 @@ func TestValidateMigrationScriptRejectsUnsafe(t *testing.T) {
 }
 
 func TestValidateMigrationScriptAllowsSubstituted(t *testing.T) {
-	db := "kuztds_it_ok_test"
-	sql := "CREATE DATABASE IF NOT EXISTS kuztds;\nALTER TABLE kuztds.events ADD COLUMN IF NOT EXISTS site String;\nALTER TABLE kuztds.events ADD INDEX IF NOT EXISTS idx_cid cid TYPE bloom_filter(0.01) GRANULARITY 1;"
+	db := "emtds_it_ok_test"
+	sql := "CREATE DATABASE IF NOT EXISTS emtds;\nALTER TABLE emtds.events ADD COLUMN IF NOT EXISTS site String;\nALTER TABLE emtds.events ADD INDEX IF NOT EXISTS idx_cid cid TYPE bloom_filter(0.01) GRANULARITY 1;"
 	if err := validateMigrationScript(db, sql); err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestValidateMigrationScriptAllowsSubstituted(t *testing.T) {
 // A migration may not shrink the deduplication window below the one the engine
 // relies on; a larger window is fine.
 func TestValidateMigrationScriptDedupWindowFloor(t *testing.T) {
-	db := "kuztds_it_dedup_test"
+	db := "emtds_it_dedup_test"
 	for window, ok := range map[int]bool{1: false, eventsDedupWindow - 1: false, eventsDedupWindow: true, eventsDedupWindow * 2: true} {
 		sql := fmt.Sprintf("ALTER TABLE %s.events MODIFY SETTING non_replicated_deduplication_window = %d;", db, window)
 		if err := validateMigrationScript(db, sql); (err == nil) != ok {
@@ -87,8 +87,8 @@ func TestValidateMigrationScriptDedupWindowFloor(t *testing.T) {
 }
 
 func TestValidateMigrationScriptAllowsDedupWindow(t *testing.T) {
-	db := "kuztds_it_dedup_test"
-	sql := "ALTER TABLE kuztds.events\n\tMODIFY SETTING non_replicated_deduplication_window = 10000;"
+	db := "emtds_it_dedup_test"
+	sql := "ALTER TABLE emtds.events\n\tMODIFY SETTING non_replicated_deduplication_window = 10000;"
 	if err := validateMigrationScript(db, sql); err != nil {
 		t.Fatal(err)
 	}

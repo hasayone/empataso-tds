@@ -6,9 +6,9 @@ import (
 	"os"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/ipindex"
-	"github.com/egerkuzma/emtds/internal/seplist"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/ipindex"
+	"github.com/hasayone/empataso-tds/internal/seplist"
 )
 
 // groupsWatcher re-reads the groups config when its file changes and swaps it

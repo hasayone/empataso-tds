@@ -20,10 +20,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/detect"
-	"github.com/egerkuzma/emtds/internal/security"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/detect"
+	"github.com/hasayone/empataso-tds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // errPrivateAddr is the dial refusal for an address that is not a public IP.
@@ -319,13 +319,9 @@ func (s *Server) probePhase(ctx context.Context, host, service string) (bool, st
 	return true, ""
 }
 
-// healthzHeader returns the healthz header X-Emtds-{name}, or X-Kuztds-{name} sent by an
-// engine built before the rename when the new header is absent.
+// healthzHeader returns the healthz header X-Emtds-{name} of h, or "" when it is absent.
 func healthzHeader(h http.Header, name string) string {
-	if v := h.Get("X-Emtds-" + name); v != "" {
-		return v
-	}
-	return h.Get("X-Kuztds-" + name)
+	return h.Get("X-Emtds-" + name)
 }
 
 // healthzServiceOK reports whether the healthz service header matches the expectation.
@@ -477,6 +473,7 @@ func (s *Server) handleBotPut(w http.ResponseWriter, r *http.Request) {
 	}
 	s.writeBotProfile(w, http.StatusOK, merged)
 }
+
 // handleFacts writes the click and conversion breakdown of the catalog tables.
 //
 // Filters come from condsFrom. For a viewer who may not see the conversion status the

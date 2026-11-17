@@ -5,5 +5,5 @@
 -- 10000 blocks, about one batch a second, covers hours. MODIFY SETTING changes
 -- table metadata only: no part is rewritten and no mutation starts. It is
 -- idempotent; ensureSchema runs the same statement at engine start.
-ALTER TABLE kuztds.events
+ALTER TABLE emtds.events
 	MODIFY SETTING non_replicated_deduplication_window = 10000;

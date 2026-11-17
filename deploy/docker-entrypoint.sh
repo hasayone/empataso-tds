@@ -12,16 +12,14 @@ ensure_state_dirs() {
 }
 
 # Назначение: заполнить EMTDS_ADMIN_PASSWORD_HASH argon2id-хэшем пароля админки.
-# Параметры: нет. Читает EMTDS_ADMIN_PASSWORD и EMTDS_ADMIN_PASSWORD_HASH,
-# пустые значения берёт из старых KUZTDS_ADMIN_PASSWORD и KUZTDS_ADMIN_PASSWORD_HASH.
+# Параметры: нет. Читает EMTDS_ADMIN_PASSWORD и EMTDS_ADMIN_PASSWORD_HASH.
 # Результат: хэш экспортирован и пароль убран из окружения, код 0.
 # Пустые пароль и хэш тоже код 0: первый вход задаёт их формой, процесс стартует без хэша.
 # Ошибки: emtds-admin -hash завершился с ошибкой или вернул пустой вывод — выход 1.
 # Пароль и хэш в сообщения не попадают.
 prepare_admin_hash() {
-    EMTDS_ADMIN_PASSWORD="${EMTDS_ADMIN_PASSWORD:-${KUZTDS_ADMIN_PASSWORD:-}}"
-    EMTDS_ADMIN_PASSWORD_HASH="${EMTDS_ADMIN_PASSWORD_HASH:-${KUZTDS_ADMIN_PASSWORD_HASH:-}}"
-    unset KUZTDS_ADMIN_PASSWORD KUZTDS_ADMIN_PASSWORD_HASH
+    EMTDS_ADMIN_PASSWORD="${EMTDS_ADMIN_PASSWORD:-}"
+    EMTDS_ADMIN_PASSWORD_HASH="${EMTDS_ADMIN_PASSWORD_HASH:-}"
     if [ -n "$EMTDS_ADMIN_PASSWORD_HASH" ]; then
         export EMTDS_ADMIN_PASSWORD_HASH
         unset EMTDS_ADMIN_PASSWORD

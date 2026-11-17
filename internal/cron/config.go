@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/atomicfile"
-	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
+	"github.com/hasayone/empataso-tds/internal/detect"
 )
 
 // Job names, as used in the config, the status file and "run now" requests.

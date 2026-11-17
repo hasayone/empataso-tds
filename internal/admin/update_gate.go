@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/cron"
 )
 
 // updatePendingTick is how often the pending watcher checks the pending file.

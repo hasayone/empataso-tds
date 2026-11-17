@@ -11,7 +11,11 @@ import (
 )
 
 // postmanSecret matches a real-looking API key. The collection may only carry the placeholder.
-var postmanSecret = regexp.MustCompile(`(?:em_|kz_)[0-9a-fA-F]{32,}`)
+var postmanSecret = regexp.MustCompile(`em_[0-9a-fA-F]{32,}`)
+
+// retiredProdIP is the address of the former production server. It is assembled from parts so
+// that no source file spells it out, and the collection must never contain it.
+var retiredProdIP = strings.Join([]string{"212", "2", "33", "246"}, ".")
 
 // TestPostmanCollectionMatchesCatalog requires the collection built from the full OpenAPI
 // document to contain every routeDocs route and no other route, and the same set as that document.
@@ -40,7 +44,7 @@ func TestPostmanCollectionMatchesCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if postmanSecret.Match(raw) || privateAddr.Match(raw) || strings.Contains(string(raw), "212.2.33.246") {
+	if postmanSecret.Match(raw) || privateAddr.Match(raw) || strings.Contains(string(raw), retiredProdIP) {
 		t.Fatal("the collection contains a secret or a private address")
 	}
 	if !strings.Contains(string(raw), postmanPlaceholderKey) || !strings.Contains(string(raw), postmanExampleHost) {

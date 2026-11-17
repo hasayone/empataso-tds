@@ -5,7 +5,7 @@
 ## Что проверяет
 
 - `docker.service` и `nginx.service` включены и запущены.
-- Сеть `deploy_default`, контейнеры `deploy-clickhouse-1` и `deploy-redis-1`: если стоят — `docker start`, если их нет — `compose up -d` проекта `deploy` без `--force-recreate`.
+- Сеть `emtds-infra_default`, контейнеры `emtds-infra-clickhouse-1` и `emtds-infra-redis-1`: если стоят — `docker start`, если их нет — `compose -p emtds-infra up -d` без `--force-recreate`.
 - `emtds-engine`, `emtds-admin`, `emtds-php`, `emtds-cron`: остановленные поднимает `docker start`. Пропавший engine или admin — `compose up -d --no-deps` без `--force-recreate`. php и cron заново не создаёт.
 - Проба движка `http://127.0.0.1:18080/healthz` (порт из `EMTDS_ENGINE_PUBLISH`). Если контейнер давно running, а проба молчит — `docker restart emtds-engine`. Сразу после старта ждёт `start_period`.
 - Админка: если контейнер running, restart нет — перенос Keitaro живёт в памяти процесса. Стоящую админку только стартует.

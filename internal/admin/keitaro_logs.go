@@ -9,10 +9,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/logbuf"
-	"github.com/egerkuzma/emtds/internal/store"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // logSkipTally counts log rows skipped for empty sub_id or zero time.
@@ -191,6 +191,7 @@ func (s *Server) importLogRows(ctx context.Context, req keitaroImportReq, li log
 	defer noteUnknownCampaignLoss(losses, tally)
 	defer noteLogSkipLosses(losses, skip)
 	client := s.keitaroClient(li.creds)
+	client.Version = s.ktVersion.get(client.Base)
 	var clickIdx keitaroClickFillIndex
 	if req.Clicks {
 		if s.cfg.Warehouse == nil || li.host == "" {
@@ -283,10 +284,15 @@ func formatLogCampaignIDs(ids []int) string {
 // losses receives the line. client is the reader just used. ref is conversions or clicks.
 // A client that accepted the wide set adds nothing. It does not return an error.
 func noteExtendedColumns(losses *[]ktimport.Loss, client *ktimport.Client, ref string) {
-	if client == nil || !client.ExtendedColumnsRejected() {
+	if client == nil {
 		return
 	}
-	*losses = append(*losses, ktimport.Loss{Kind: "approximated", Ref: ref, Detail: "расширенные колонки недоступны"})
+	if client.IDColumnsRejected() {
+		*losses = append(*losses, ktimport.Loss{Kind: "approximated", Ref: ref, Detail: "колонки идентификаторов Keitaro " + client.Version + " недоступны"})
+	}
+	if client.ExtendedColumnsRejected() {
+		*losses = append(*losses, ktimport.Loss{Kind: "approximated", Ref: ref, Detail: "расширенные колонки недоступны"})
+	}
 }
 
 // noteOddConversionStatuses records conversions whose status is outside the known set.
@@ -340,7 +346,7 @@ func (s *Server) importConversions(ctx context.Context, client *ktimport.Client,
 	var maxTS time.Time
 	var odd int
 	n, err := client.FetchConversions(ctx, span.from, span.to, func(row ktimport.ConversionRow) error {
-		if oddConversionStatus(row.Status) {
+		if oddConversionStatus(row.EffectiveStatus()) {
 			odd++
 		}
 		var snap *store.ClickFill
@@ -523,7 +529,8 @@ func clickFillFromEvent(ev logbuf.Event) store.ClickFill {
 // row is the log line. host is the tracker hostname stored as the domain.
 // place supplies the group id and the group name.
 // GroupID is the id keitaroGroup returns first. ClickTS is the click time.
-// OriginalStatus is the raw original status, or the raw status when that is blank.
+// Status is the row status, or the Keitaro 11 event_type when the status is blank (EffectiveStatus).
+// OriginalStatus is the raw original status, or that status when it is blank.
 // PrevStatus is the previous status, lowercased and trimmed.
 // Site and XRW stay empty: the tracker log is not their source.
 // Country is the ISO code. Device is the engine device word.
@@ -537,9 +544,10 @@ func conversionInsert(row ktimport.ConversionRow, host string, place logPlace, c
 		ts = parseKeitaroTime(row.ClickDatetime)
 	}
 	groupID, groupName := keitaroGroup(row.Campaign, int(row.CampaignID), place)
+	status := row.EffectiveStatus()
 	original := row.OriginalStatus
 	if strings.TrimSpace(original) == "" {
-		original = row.Status
+		original = status
 	}
 	out := store.ConversionInsert{
 		TS:              ts,
@@ -552,7 +560,7 @@ func conversionInsert(row ktimport.ConversionRow, host string, place logPlace, c
 		GroupName:       groupName,
 		StreamName:      row.Stream,
 		CID:             row.SubID,
-		Status:          strings.ToLower(strings.TrimSpace(row.Status)),
+		Status:          strings.ToLower(strings.TrimSpace(status)),
 		OfferID:         catalogNum(int(row.OfferID)),
 		LandingID:       catalogNum(int(row.LandingID)),
 		SourceID:        catalogNum(int(row.SourceID)),

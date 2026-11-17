@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/cron"
 )
 
 // TestUpdateSyntax проверяет синтаксис bash, shebang и отсутствие CRLF.
@@ -61,7 +61,7 @@ func TestUpdateForbiddenSubstrings(t *testing.T) {
 	}
 	forbidden := []string{
 		"compose down", "volume rm", "docker rm ", "system prune", "network prune", "image prune",
-		"set -x", "empataso", "-p deploy", "--project-directory", "docker.sock", "privileged",
+		"set -x", "empataso", "-p emtds-infra", "--project-directory", "docker.sock", "privileged",
 	}
 	for i, line := range strings.Split(string(data), "\n") {
 		low := strings.ToLower(line)
@@ -583,10 +583,6 @@ case "$cmd" in
     ;;
   logs) printf 'clickhouse connected\nredis connected\nevents_lost=3\n' ;;
   ps)
-    if [[ "$*" == *kuztds* ]]; then
-      [[ -n "${FAKE_KUZTDS:-}" ]] && echo deadbeef
-      exit 0
-    fi
     echo abc123
     ;;
   image)
@@ -1082,7 +1078,7 @@ func TestUpdateScenarioM(t *testing.T) {
 
 	envFile := filepath.Join(te.StateDir, "update.env")
 	envData := readFile(envFile)
-	for _, want := range []string{"EMTDS_UPDATE_REPO=git@git.example.com:owner/emtds.git\n", "EMTDS_UPDATE_CHANNEL=main\n", "TDS_DIR=" + te.TDSDir + "\n"} {
+	for _, want := range []string{"EMTDS_UPDATE_REPO=git@git.example.com:owner/emtds.git\n", "EMTDS_UPDATE_CHANNEL=main\n", "EMTDS_UPDATE_CHECK_HOURS=1\n", "TDS_DIR=" + te.TDSDir + "\n"} {
 		if !strings.Contains(envData, want) {
 			t.Fatalf("update.env без %q:\n%s", want, envData)
 		}
@@ -1097,8 +1093,8 @@ func TestUpdateScenarioM(t *testing.T) {
 	if pub == "" || !strings.Contains(out, pub) || strings.Contains(out, "PRIVATE KEY") {
 		t.Fatalf("вывод --install: ожидали .pub без приватного ключа:\n%s", out)
 	}
-	if !strings.Contains(out, "known_hosts") || !strings.Contains(out, "allowed_signers") {
-		t.Fatalf("нет подсказок known_hosts и allowed_signers:\n%s", out)
+	if !strings.Contains(out, "known_hosts") || !strings.Contains(out, "allowed_signers") || !strings.Contains(out, "подписи выключена") {
+		t.Fatalf("нет подсказок known_hosts и allowed_signers или сообщения о выключенной подписи:\n%s", out)
 	}
 	unit := readFile(filepath.Join(te.Sandbox, "etc", "systemd", "system", "emtds-update.service"))
 	if !strings.Contains(unit, "TimeoutStartSec=1800") || !strings.Contains(unit, "update.sh --timer") || !strings.Contains(unit, "Type=oneshot") {
@@ -1374,13 +1370,265 @@ func TestUpdateComposePublicPort(t *testing.T) {
 	}
 }
 
-// TestUpdateRefusesBeforeMigration: контейнеры kuztds-* останавливают прогон до изменений.
-func TestUpdateRefusesBeforeMigration(t *testing.T) {
+// agent читает agent.json тома как cron.AgentFile.
+func (te *testEnv) agent(t *testing.T) cron.AgentFile {
+	t.Helper()
+	var af cron.AgentFile
+	if err := cron.ReadUpdateJSON(filepath.Join(te.VolDir, "update", "agent.json"), cron.UpdateMaxJSON, &af); err != nil {
+		t.Fatalf("agent.json: %v", err)
+	}
+	return af
+}
+
+// TestUpdateNoSigningMain: без allowed_signers на канале main применение и откат идут без --unsigned
+// и по кнопке, агент и --status сообщают «подпись выключена».
+func TestUpdateNoSigningMain(t *testing.T) {
+	ready := []string{"FAKE_ADMIN_READY=1"}
+
+	t.Run("cli", func(t *testing.T) {
+		te := newTestEnv(t)
+		te.writeUpdateEnv(t, "main")
+		_, target := te.advance(t, false, nil)
+		te.mustRun(t, nil, "--channel", "--keitaro-idle")
+		if sf := te.state(t); sf.Result != cron.StateOK || sf.To != target {
+			t.Fatalf("state.json: %+v", sf)
+		}
+		if cf := te.check(t); cf.Signed || cf.Error != "" {
+			t.Fatalf("check.json: %+v", cf)
+		}
+	})
+
+	t.Run("button", func(t *testing.T) {
+		te := newTestEnv(t)
+		te.writeUpdateEnv(t, "main")
+		prev, target := te.advance(t, false, nil)
+		now := time.Now().Unix()
+
+		te.writeRequest(t, request(t, "apply", target, "00000000000000c1", now))
+		te.mustRun(t, ready, "--timer")
+		if sf := te.state(t); sf.Result != cron.StateOK || sf.To != target || sf.Action != "apply" || sf.User != "admin" {
+			t.Fatalf("apply по кнопке: %+v", sf)
+		}
+		if got := te.git(t, "rev-parse", "HEAD"); got != target {
+			t.Fatalf("HEAD=%s, ожидали %s", got, target)
+		}
+
+		te.writeRequest(t, request(t, "rollback", "", "00000000000000c2", now))
+		te.mustRun(t, ready, "--timer")
+		if sf := te.state(t); sf.Result != cron.StateOK || sf.To != prev || sf.Action != "rollback" {
+			t.Fatalf("rollback по кнопке: %+v", sf)
+		}
+		if got := te.git(t, "rev-parse", "HEAD"); got != prev {
+			t.Fatalf("HEAD=%s, ожидали %s", got, prev)
+		}
+
+		if af := te.agent(t); af.Signing {
+			t.Fatalf("agent.json: signing=true без allowed_signers: %+v", af)
+		}
+		if out := te.mustRun(t, nil, "--status"); !strings.Contains(out, "signing: off") {
+			t.Fatalf("--status без «signing: off»:\n%s", out)
+		}
+	})
+
+	t.Run("force_push", func(t *testing.T) {
+		te := newTestEnv(t)
+		te.writeUpdateEnv(t, "main")
+		deployed := te.commit(t, "deployed", false, map[string]string{"deployed.txt": "d\n"})
+		te.git(t, "push", "-q", "origin", "HEAD:main")
+		te.git(t, "checkout", "-q", "-b", "rewritten", "HEAD~1")
+		rewritten := te.commit(t, "rewritten", false, map[string]string{"rewritten.txt": "r\n"})
+		te.git(t, "push", "-q", "-f", "origin", "rewritten:main")
+		te.git(t, "checkout", "-q", "--detach", deployed)
+
+		te.mustFail(t, "не является потомком HEAD", nil, "--check")
+		if cf := te.check(t); cf.Error == "" {
+			t.Fatalf("check.json без error при перезаписанном origin/main: %+v", cf)
+		}
+		te.mustFail(t, "не является потомком HEAD", nil, "--channel", "--keitaro-idle")
+
+		te.writeRequest(t, request(t, "apply", rewritten, "00000000000000d1", time.Now().Unix()))
+		te.mustRun(t, ready, "--timer")
+		te.assertRefused(t, "00000000000000d1", "check_failed")
+		if strings.Contains(te.journal(), "DOCKER_BUILD") {
+			t.Fatal("сборка цели после force-push")
+		}
+		if got := te.git(t, "rev-parse", "HEAD"); got != deployed {
+			t.Fatalf("HEAD=%s, ожидали %s", got, deployed)
+		}
+	})
+}
+
+// TestUpdateSigningLoosePerms: allowed_signers с ключом и небезопасными правами не выключает подпись:
+// agent.json и --status сообщают «включена», проверка и запрос кнопки отклоняются.
+func TestUpdateSigningLoosePerms(t *testing.T) {
+	te := newTestEnv(t)
+	te.writeUpdateEnv(t, "main")
+	te.writeAllowedSigners(t)
+	if err := os.Chmod(filepath.Join(te.StateDir, "allowed_signers"), 0o666); err != nil {
+		t.Fatal(err)
+	}
+	_, target := te.advance(t, true, nil)
+
+	te.mustFail(t, "небезопасные права", nil, "--check")
+	te.writeRequest(t, request(t, "apply", target, "00000000000000e1", time.Now().Unix()))
+	te.mustRun(t, []string{"FAKE_ADMIN_READY=1"}, "--timer")
+	te.assertRefused(t, "00000000000000e1", "check_failed")
+	if strings.Contains(te.journal(), "DOCKER_BUILD") {
+		t.Fatal("сборка при небезопасных правах allowed_signers")
+	}
+	if af := te.agent(t); !af.Signing {
+		t.Fatalf("agent.json: signing=false при файле с ключом: %+v", af)
+	}
+	if out := te.mustRun(t, nil, "--status"); !strings.Contains(out, "signing: on") {
+		t.Fatalf("--status без «signing: on»:\n%s", out)
+	}
+}
+
+// TestUpdatePinnedOrigin: перед fetch origin возвращается на адрес из update.env.
+func TestUpdatePinnedOrigin(t *testing.T) {
 	te := newTestEnv(t)
 	te.writeUpdateEnv(t, "main")
 	te.advance(t, false, nil)
-	te.mustFail(t, "migrate-emtds.sh", []string{"FAKE_KUZTDS=1"}, "--channel", "--keitaro-idle", "--unsigned")
-	if strings.Contains(te.journal(), "DOCKER_BUILD") {
-		t.Fatal("сборка до миграции")
+	te.git(t, "remote", "set-url", "origin", filepath.Join(te.Sandbox, "evil.git"))
+
+	te.mustRun(t, nil, "--check")
+	if got := te.git(t, "remote", "get-url", "origin"); got != te.RepoDir {
+		t.Fatalf("origin=%q, ожидали адрес из update.env %q", got, te.RepoDir)
+	}
+}
+
+// commitChangelog публикует в origin/main коммит с CHANGELOG.md и оставляет рабочее дерево на нём.
+func (te *testEnv) commitChangelog(t *testing.T, body string) {
+	t.Helper()
+	te.commit(t, "changelog", false, map[string]string{"CHANGELOG.md": body})
+	te.git(t, "push", "-q", "origin", "HEAD:main")
+}
+
+// TestUpdateNotesFromChangelog: notes — добавленные строки CHANGELOG.md без «+» и заголовков diff.
+func TestUpdateNotesFromChangelog(t *testing.T) {
+	te := newTestEnv(t)
+	te.writeUpdateEnv(t, "main")
+	te.commitChangelog(t, "# Changelog\n\n## [Unreleased]\n- старая запись\n")
+	te.advance(t, false, map[string]string{"CHANGELOG.md": "# Changelog\n\n## [Unreleased]\n- новая запись\n- старая запись\n"})
+
+	te.mustRun(t, nil, "--check")
+	if cf := te.check(t); cf.Notes != "- новая запись" {
+		t.Fatalf("notes=%q", cf.Notes)
+	}
+}
+
+// TestUpdateNotesFromTagWithoutSignature: без diff CHANGELOG.md notes — тема и тело аннотации тега, блока подписи нет.
+func TestUpdateNotesFromTagWithoutSignature(t *testing.T) {
+	te := newTestEnv(t)
+	te.writeUpdateEnv(t, "release")
+	_, target := te.advance(t, false, nil)
+	te.git(t, "tag", "-s", "-m", "Тема релиза", "-m", "Тело релиза", "v1.2.3", target)
+	te.git(t, "push", "-q", "origin", "refs/tags/v1.2.3")
+
+	te.mustRun(t, nil, "--check")
+	cf := te.check(t)
+	if cf.Notes != "Тема релиза\n\nТело релиза" || strings.Contains(cf.Notes, "SIGNATURE") {
+		t.Fatalf("notes=%q", cf.Notes)
+	}
+	if cf.Target.Tag != "v1.2.3" {
+		t.Fatalf("check.json: %+v", cf)
+	}
+}
+
+// TestUpdateNotesTruncationKeepsJSON: обрезка notes до 16 КиБ не рвёт escape-последовательность и JSON.
+func TestUpdateNotesTruncationKeepsJSON(t *testing.T) {
+	te := newTestEnv(t)
+	te.writeUpdateEnv(t, "main")
+	te.advance(t, false, map[string]string{"CHANGELOG.md": "a" + strings.Repeat(`"`, 20000) + "\n"})
+
+	te.mustRun(t, nil, "--check")
+	cf := te.check(t)
+	if len(cf.Notes) != 16384 || !strings.HasPrefix(cf.Notes, `a"`) || strings.Trim(cf.Notes[1:], `"`) != "" {
+		t.Fatalf("notes: длина %d", len(cf.Notes))
+	}
+}
+
+// TestUpdateSigningUnreadablePolicy: битый симлинк или каталог на месте allowed_signers не выключают подпись:
+// --status показывает «on», проверка и запрос кнопки отклоняются, сборки нет.
+func TestUpdateSigningUnreadablePolicy(t *testing.T) {
+	cases := map[string]func(t *testing.T, path string){
+		"broken_symlink": func(t *testing.T, path string) {
+			if err := os.Symlink(filepath.Join(filepath.Dir(path), "missing"), path); err != nil {
+				t.Fatal(err)
+			}
+		},
+		"directory": func(t *testing.T, path string) { mustMkdir(t, path) },
+	}
+	for name, plant := range cases {
+		plant := plant
+		t.Run(name, func(t *testing.T) {
+			te := newTestEnv(t)
+			te.writeUpdateEnv(t, "main")
+			plant(t, filepath.Join(te.StateDir, "allowed_signers"))
+			_, target := te.advance(t, false, nil)
+
+			if out := te.mustRun(t, nil, "--status"); !strings.Contains(out, "signing: on") {
+				t.Fatalf("--status без «signing: on»:\n%s", out)
+			}
+			te.mustFail(t, "не обычный файл", nil, "--check")
+			te.mustFail(t, "", nil, "--channel", "--keitaro-idle")
+			te.writeRequest(t, request(t, "apply", target, "00000000000000f1", time.Now().Unix()))
+			te.mustRun(t, []string{"FAKE_ADMIN_READY=1"}, "--timer")
+			te.assertRefused(t, "00000000000000f1", "check_failed")
+			if strings.Contains(te.journal(), "DOCKER_BUILD") {
+				t.Fatal("сборка неподписанной цели при нечитаемой политике подписи")
+			}
+			if af := te.agent(t); !af.Signing {
+				t.Fatalf("agent.json: signing=false: %+v", af)
+			}
+		})
+	}
+}
+
+// TestUpdateRollbackChain: кнопка откатывает ровно на один шаг; повторный откат отклоняется,
+// старая запись apply A→B не уводит дальше.
+func TestUpdateRollbackChain(t *testing.T) {
+	te := newTestEnv(t)
+	te.writeUpdateEnv(t, "main")
+	ready := []string{"FAKE_ADMIN_READY=1"}
+	_, b := te.advance(t, false, nil)
+	te.mustRun(t, nil, "--channel", "--keitaro-idle")
+	_, c := te.advance(t, false, nil)
+	te.mustRun(t, nil, "--channel", "--keitaro-idle")
+	if got := te.git(t, "rev-parse", "HEAD"); got != c {
+		t.Fatalf("HEAD=%s, ожидали %s", got, c)
+	}
+	now := time.Now().Unix()
+
+	te.writeRequest(t, request(t, "rollback", "", "0000000000000a01", now))
+	te.mustRun(t, ready, "--timer")
+	if sf := te.state(t); sf.Result != cron.StateOK || sf.Action != "rollback" || sf.To != b {
+		t.Fatalf("первый откат: %+v", sf)
+	}
+	if got := te.git(t, "rev-parse", "HEAD"); got != b {
+		t.Fatalf("HEAD=%s, ожидали %s", got, b)
+	}
+
+	ups := te.count("DOCKER_COMPOSE_UP engine")
+	te.writeRequest(t, request(t, "rollback", "", "0000000000000a02", now))
+	te.mustRun(t, ready, "--timer")
+	te.assertRefused(t, "0000000000000a02", "no_previous")
+	if got := te.git(t, "rev-parse", "HEAD"); got != b {
+		t.Fatalf("после второго отката HEAD=%s, ожидали %s", got, b)
+	}
+	if te.count("DOCKER_COMPOSE_UP engine") != ups {
+		t.Fatal("второй откат по кнопке пересоздал сервисы")
+	}
+}
+
+// TestUpdateStatusStripsControl: управляющие символы из state.json тома не попадают в вывод --status.
+func TestUpdateStatusStripsControl(t *testing.T) {
+	te := newTestEnv(t)
+	te.writeUpdateEnv(t, "main")
+	mustWrite(t, filepath.Join(te.VolDir, "update", "state.json"), "{\"reason\":\"\x1b[31mred\x1b]0;title\x07 ж\"}", 0o644)
+
+	out := te.mustRun(t, nil, "--status")
+	if strings.ContainsAny(out, "\x1b\x07") || !strings.Contains(out, "red") || !strings.Contains(out, "ж") {
+		t.Fatalf("--status: %q", out)
 	}
 }

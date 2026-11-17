@@ -19,8 +19,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // env is a runner over a temp directory with Telegram and VirusTotal pointed
@@ -560,8 +560,8 @@ func TestDiskErrorAndDefaultPath(t *testing.T) {
 		t.Errorf("default path = %q; want the data directory", asked)
 	}
 	// The real probe works on this platform for a directory that exists.
-	if free, total, err := diskFree(e.dir); err != nil || total == 0 || free > total {
-		t.Errorf("diskFree = %d, %d, %v", free, total, err)
+	if free, total, err := DiskFree(e.dir); err != nil || total == 0 || free > total {
+		t.Errorf("DiskFree = %d, %d, %v", free, total, err)
 	}
 }
 

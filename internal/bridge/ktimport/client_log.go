@@ -41,7 +41,7 @@ var clickLogExtra = []string{"ad_campaign_id", "external_id", "creative_id"}
 // и ни одна строка ещё не отдана, чтение повторяется базовым набором.
 // Ошибки: путь вне AllowLog, сеть, статус не 200 уже на базовом наборе, строка не JSON, ошибка fn, журнал не двигается.
 func (c *Client) FetchConversions(ctx context.Context, from, to string, fn func(ConversionRow) error) (int, error) {
-	return fetchLog(c, ctx, "/admin_api/v1/conversions/log", from, to, conversionLogColumns, conversionLogExtra, "conversions", "postback_datetime", fn)
+	return fetchLog(c, ctx, conversionsLogPath, from, to, conversionLogColumns, conversionLogExtra, KeysFor(c.version()).conversionColumns(), "conversions", "postback_datetime", fn)
 }
 
 // FetchClicks читает журнал кликов постранично и отдаёт строки в fn.
@@ -50,7 +50,27 @@ func (c *Client) FetchConversions(ctx context.Context, from, to string, fn func(
 // Результат: сколько строк передано в fn. Откат на базовые колонки такой же, как у конверсий.
 // Ошибки: путь вне AllowLog, сеть, статус не 200 уже на базовом наборе, строка не JSON, ошибка fn, журнал не двигается.
 func (c *Client) FetchClicks(ctx context.Context, from, to string, fn func(ClickRow) error) (int, error) {
-	return fetchLog(c, ctx, "/admin_api/v1/clicks/log", from, to, clickLogColumns, clickLogExtra, "clicks", "datetime", fn)
+	return fetchLog(c, ctx, clicksLogPath, from, to, clickLogColumns, clickLogExtra, KeysFor(c.version()).clickColumns(), "clicks", "datetime", fn)
+}
+
+// version возвращает версию Keitaro клиента; nil-клиент даёт пустую строку.
+func (c *Client) version() string {
+	if c == nil {
+		return ""
+	}
+	return c.Version
+}
+
+// IDColumnsRejected сообщает, что последнее чтение журнала откатилось с колонок идентификаторов версии.
+//
+// Параметры: нет.
+// Результат: true, если журнал не принял колонки идентификаторов и чтение повторено без них.
+// Ошибки: нет. nil-клиент даёт false.
+func (c *Client) IDColumnsRejected() bool {
+	if c == nil {
+		return false
+	}
+	return c.idRejected
 }
 
 // ExtendedColumnsRejected сообщает, что последнее чтение журнала откатилось на базовые колонки.
@@ -65,17 +85,29 @@ func (c *Client) ExtendedColumnsRejected() bool {
 	return c.extRejected
 }
 
-// fetchLog читает журнал расширенным набором и один раз откатывается на базовый.
+// fetchLog читает журнал расширенным набором с колонками идентификаторов версии и откатывается по шагам:
+// сначала без колонок идентификаторов, затем на базовый набор.
 //
 // Параметры: path — журнал; from и to — границы; base — колонки без sub id; extra — добавка;
-// stage — имя прогресса; sortBy — сортировка; fn — обработчик строки.
-// Результат: число строк. Флаг отката сбрасывается в начале и ставится только перед повтором.
+// ids — колонки идентификаторов версии клиента, пусто без версии; stage — имя прогресса;
+// sortBy — сортировка; fn — обработчик строки.
+// Результат: число строк. Флаги отката сбрасываются в начале и ставятся только перед повтором.
 // Ошибки: те же, что у fetchRows. Повтор бывает, когда статус не 200 и ни одна строка не отдана.
-func fetchLog[T any](c *Client, ctx context.Context, path, from, to string, base, extra []string, stage, sortBy string, fn func(T) error) (int, error) {
+func fetchLog[T any](c *Client, ctx context.Context, path, from, to string, base, extra, ids []string, stage, sortBy string, fn func(T) error) (int, error) {
 	if c != nil {
-		c.extRejected = false
+		c.extRejected, c.idRejected = false, false
 	}
-	n, err := fetchRows(c, ctx, path, from, to, logColumns(joinCols(base, extra)), stage, logPageLimit, sortBy, fn)
+	wide := joinCols(base, extra)
+	if len(ids) > 0 {
+		n, err := fetchRows(c, ctx, path, from, to, logColumns(joinCols(wide, ids)), stage, logPageLimit, sortBy, fn)
+		if n != 0 || !statusRejected(err) {
+			return n, err
+		}
+		if c != nil {
+			c.idRejected = true
+		}
+	}
+	n, err := fetchRows(c, ctx, path, from, to, logColumns(wide), stage, logPageLimit, sortBy, fn)
 	if n != 0 || !statusRejected(err) {
 		return n, err
 	}

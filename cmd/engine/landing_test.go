@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/logbuf"
-	"github.com/egerkuzma/emtds/internal/render"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/render"
 )
 
 func TestLocalLandingHTMLAndAssets(t *testing.T) {
@@ -96,12 +96,11 @@ func TestLocalLandingHTMLAndAssets(t *testing.T) {
 }
 
 func TestLandingPHPProxy(t *testing.T) {
-	var gotPath, gotQuery, gotCID, gotLegacyCID, gotIP string
+	var gotPath, gotQuery, gotCID, gotIP string
 	php := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
 		gotCID = r.Header.Get("X-Emtds-Cid")
-		gotLegacyCID = r.Header.Get("X-Kuztds-Cid")
 		gotIP = r.Header.Get("X-Forwarded-For")
 		w.Header().Set("Content-Type", "text/html")
 		_, _ = w.Write([]byte("<head></head><a href=\"{offer}\">go</a>"))
@@ -121,9 +120,6 @@ func TestLandingPHPProxy(t *testing.T) {
 	})
 	if gotPath != "/7/index.php" || gotQuery != "x=1" || gotCID != "0123456789" || gotIP != "203.0.113.8" {
 		t.Fatalf("php saw path %s query %s cid %s ip %s", gotPath, gotQuery, gotCID, gotIP)
-	}
-	if gotLegacyCID != gotCID {
-		t.Fatalf("php saw X-Kuztds-Cid %q, want %q", gotLegacyCID, gotCID)
 	}
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "<base href=\"/l/7/\">") {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // keywordRig returns a rig with seven campaigns in every state the fill tells apart. The

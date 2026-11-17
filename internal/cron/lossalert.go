@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // Event loss alert. Every engine writes its metrics to a file; the cron service

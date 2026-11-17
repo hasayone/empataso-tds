@@ -13,7 +13,8 @@ import (
 	"sync"
 	"unicode/utf8"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // JSONStore reads and writes a JSON array. Save replaces the whole file.
@@ -217,11 +218,12 @@ func validOffer(o config.Offer) string {
 	return ""
 }
 
-// validOfferCountries checks each entry is a two-letter Latin country code.
+// validOfferCountries checks each entry is a two-letter Latin country code or unknown, the country without a code.
 // It returns an empty string when the list is valid, otherwise a client error message.
 func validOfferCountries(codes []string) string {
 	for _, code := range codes {
-		if !offerCountryCodeRe.MatchString(strings.TrimSpace(code)) {
+		code = strings.TrimSpace(code)
+		if !offerCountryCodeRe.MatchString(code) && !strings.EqualFold(code, ktimport.UnknownCountry) {
 			return "countries: each code must be 2 letters"
 		}
 	}

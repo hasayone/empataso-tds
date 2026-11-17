@@ -1,6 +1,6 @@
 package admin
 
-import "github.com/egerkuzma/emtds/internal/store"
+import "github.com/hasayone/empataso-tds/internal/store"
 
 // foldedStatus is the status of every row foldConfirmed returns. The interface
 // counts it as a confirmed conversion, like a lead or a sale.

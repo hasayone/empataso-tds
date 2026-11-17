@@ -12,7 +12,7 @@ import (
 
 // TestCHRootMigrationDefaults checks migration 015 on a throwaway database.
 // A click written before the columns exist must read root_cid as empty.
-// The production database kuztds is never used. A missing ClickHouse skips the test.
+// The production database emtds is never used. A missing ClickHouse skips the test.
 func TestCHRootMigrationDefaults(t *testing.T) {
 	addr, user, pass := chITEnv(t)
 	files := make([]string, 0, len(chMigrationAll))

@@ -16,7 +16,7 @@ import (
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 // batchConn is a driver.Conn whose PrepareBatch records the context it gets
@@ -142,8 +142,8 @@ func TestDedupWindowOf(t *testing.T) {
 		ddl  string
 		want int
 	}{
-		{"CREATE TABLE kuztds.events (...) ENGINE = MergeTree ORDER BY ts SETTINGS index_granularity = 8192", 0},
-		{"CREATE TABLE kuztds.events (...) ENGINE = MergeTree ORDER BY ts SETTINGS non_replicated_deduplication_window = 10000, index_granularity = 8192", 10000},
+		{"CREATE TABLE emtds.events (...) ENGINE = MergeTree ORDER BY ts SETTINGS index_granularity = 8192", 0},
+		{"CREATE TABLE emtds.events (...) ENGINE = MergeTree ORDER BY ts SETTINGS non_replicated_deduplication_window = 10000, index_granularity = 8192", 10000},
 		{"... SETTINGS index_granularity = 8192, non_replicated_deduplication_window=500", 500},
 		{"", 0},
 	}
@@ -198,7 +198,7 @@ func (f *ddlConn) QueryRow(context.Context, string, ...any) driver.Row {
 	if f.readFail.Load() {
 		return ddlRow{err: errors.New("connection reset")}
 	}
-	ddl := "CREATE TABLE kuztds.events (ts DateTime) ENGINE = MergeTree ORDER BY ts SETTINGS index_granularity = 8192"
+	ddl := "CREATE TABLE emtds.events (ts DateTime) ENGINE = MergeTree ORDER BY ts SETTINGS index_granularity = 8192"
 	if f.window > 0 {
 		ddl += ", non_replicated_deduplication_window = " + strconv.Itoa(f.window)
 	}

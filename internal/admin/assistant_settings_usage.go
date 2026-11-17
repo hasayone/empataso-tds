@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // aiTally counts the tokens and the US dollars of one subject.
@@ -155,10 +155,14 @@ func aiQuotaErr(what string) *aiError {
 // aiReserve holds the room for one provider call and checks the daily limits.
 // uid is the user (see aiUsageUID), model the model of the call and st the settings.
 // The reservation is turn_input_tokens plus max_output_tokens and, when the model has a
-// price, their cost; reservations in flight count against the limits too. A limit of 0 is
-// not checked, and a model without a price is not checked against the USD limits. It
-// returns an ai_quota error (429) when a limit of the user or of the team would be
-// exceeded. Every successful call is followed by exactly one aiCommit.
+// price, their cost; reservations in flight count against the limits too. A switched-off limit
+// is not checked, a limit of 0 refuses every call it counts, and a model without a price is not
+// checked against the USD limits or budgets.
+// The USD budgets of st (the user's own and the one of its group, the role of its record, summed
+// over the accounts that hold the role) are checked against the day's spent money plus this
+// reservation; the length of a chat never enters. It returns an ai_quota error (429) when a limit
+// of the user or of the team would be exceeded, or a budget would be passed (params scope:
+// user_budget or group_budget). Every successful call is followed by exactly one aiCommit.
 func (s *Server) aiReserve(uid, model string, st aiSettings) (aiReservation, error) {
 	lim := st.limits()
 	r := aiReservation{UID: uid, Model: model, In: lim.TurnInput, Out: lim.MaxOutput,
@@ -167,6 +171,7 @@ func (s *Server) aiReserve(uid, model string, st aiSettings) (aiReservation, err
 		r.Price, r.Priced = p, true
 		r.USD = aiCost(p, lim.TurnInput, lim.MaxOutput)
 	}
+	gid, members := s.aiBudgetScope(uid, st)
 	u := &s.ai.usage
 	u.mu.Lock()
 	defer u.mu.Unlock()
@@ -175,15 +180,20 @@ func (s *Server) aiReserve(uid, model string, st aiSettings) (aiReservation, err
 		return aiReservation{}, newAIError(http.StatusTooManyRequests, aiErrQuota,
 			"the usage counters are damaged, calls resume on the next UTC day or after the file is repaired")
 	}
+	if r.Priced {
+		if scope := aiBudgetOver(st, uid, gid, members, u.users, u.heldUsers, r.USD); scope != "" {
+			return aiReservation{}, aiBudgetErr(scope)
+		}
+	}
 	mine, heldMine := u.users[uid], u.heldUsers[uid]
 	switch {
-	case lim.UserDailyTokens > 0 && mine.Tokens+heldMine.Tokens+r.Tokens > lim.UserDailyTokens:
+	case aiOverLimit(mine.Tokens+heldMine.Tokens+r.Tokens, lim.UserDailyTokens):
 		return aiReservation{}, aiQuotaErr("the daily token")
-	case lim.DailyTokens > 0 && u.total.Tokens+u.held.Tokens+r.Tokens > lim.DailyTokens:
+	case aiOverLimit(u.total.Tokens+u.held.Tokens+r.Tokens, lim.DailyTokens):
 		return aiReservation{}, aiQuotaErr("the daily team token")
-	case r.Priced && lim.UserDailyUSD > 0 && mine.USD+heldMine.USD+r.USD > lim.UserDailyUSD:
+	case r.Priced && aiOverLimit(mine.USD+heldMine.USD+r.USD, lim.UserDailyUSD):
 		return aiReservation{}, aiQuotaErr("the daily USD")
-	case r.Priced && lim.DailyUSD > 0 && u.total.USD+u.held.USD+r.USD > lim.DailyUSD:
+	case r.Priced && aiOverLimit(u.total.USD+u.held.USD+r.USD, lim.DailyUSD):
 		return aiReservation{}, aiQuotaErr("the daily team USD")
 	}
 	u.held.Tokens += r.Tokens

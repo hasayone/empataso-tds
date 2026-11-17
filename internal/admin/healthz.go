@@ -3,7 +3,7 @@ package admin
 import (
 	"net/http"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // handleHealthz answers GET /healthz for liveness probes without authentication.

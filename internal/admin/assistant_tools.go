@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 const (

@@ -4,8 +4,8 @@ import (
 	"context"
 	"strconv"
 
-	"github.com/egerkuzma/emtds/internal/config"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // campaignMapScope selects which stored groups may participate in log campaign mapping.

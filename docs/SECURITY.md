@@ -38,7 +38,7 @@ A normative document: requirements + what's already done (✅) and what's planne
   `EMTDS_ADMIN_PASSWORD_FILE`.
 - ✅ Sessions: 256-bit token (`crypto/rand`), stored in Redis (TTL) or in-memory.
 - ✅ Cookie: `HttpOnly`, `Secure` (configurable), `SameSite=Strict`, limited TTL.
-- ✅ API keys (`Api-Key`, prefix `em_`; keys issued before `em_` start with `kz_` and keep working) for scripts and AI agents: type USER or
+- ✅ API keys (`Api-Key`, prefix `em_`) for scripts and AI agents: type USER or
   ADMIN, limited to sections or a role; dangerous actions (Keitaro import, log
   purge, group replace, cron, boards, landing files) must be granted to the key
   explicitly, while key, user and integration management is cookie-session only.

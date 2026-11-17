@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   Local only. The generator is grafana/k6 in its own container on the
-  deploy_default network with CPU and memory limits. Clicks carry sub_id_12 =
+  emtds-infra_default network with CPU and memory limits. Clicks carry sub_id_12 =
   "lt-<Run>-<n>", so a run is counted and removed by that mark only.
 
   Actions:
@@ -37,8 +37,8 @@
 
   Chaos (actions clicks, chaos and postbacks, -ChaosTarget other than none).
   A background job waits -ChaosAt seconds after the k6 container starts, then:
-    clickhouse  docker pause deploy-clickhouse-1, docker unpause after -ChaosFor s
-    redis       the same for deploy-redis-1
+    clickhouse  docker pause emtds-infra-clickhouse-1, docker unpause after -ChaosFor s
+    redis       the same for emtds-infra-redis-1
     engine      recreates only the engine (engine-recreate); needs the Keitaro
                 job idle, which is checked before the load starts
   Only pause and unpause are used: never stop, rm or down. The container is
@@ -119,7 +119,7 @@ $ErrorActionPreference = 'Stop'
 $Script:TdsDir = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $Script:StateDir = Join-Path $env:LOCALAPPDATA 'emtds-load'
 $Script:K6Image = 'grafana/k6:latest'
-$Script:Watched = @('emtds-engine', 'emtds-admin', 'deploy-clickhouse-1', 'deploy-redis-1')
+$Script:Watched = @('emtds-engine', 'emtds-admin', 'emtds-infra-clickhouse-1', 'emtds-infra-redis-1')
 
 <#
 .SYNOPSIS
@@ -133,12 +133,12 @@ function Set-ChLogin {
 
 <#
 .SYNOPSIS
-  Runs one ClickHouse query in database kuztds and returns its text output. Throws on a non-zero exit.
+  Runs one ClickHouse query in database emtds and returns its text output. Throws on a non-zero exit.
 #>
 function Invoke-Ch {
     param([string]$Query, [string]$Format = 'TSV')
     Set-ChLogin
-    $out = docker exec deploy-clickhouse-1 clickhouse-client --user $env:EMTDS_LT_CHU --password $env:EMTDS_LT_CHP -d kuztds --format $Format -q $Query
+    $out = docker exec emtds-infra-clickhouse-1 clickhouse-client --user $env:EMTDS_LT_CHU --password $env:EMTDS_LT_CHP -d emtds --format $Format -q $Query
     if ($LASTEXITCODE -ne 0) { throw "clickhouse query failed: $Query" }
     return $out
 }
@@ -341,8 +341,8 @@ function Wait-EngineSettled {
 function Get-ChaosContainer {
     param([string]$Target)
     switch ($Target) {
-        'clickhouse' { return 'deploy-clickhouse-1' }
-        'redis' { return 'deploy-redis-1' }
+        'clickhouse' { return 'emtds-infra-clickhouse-1' }
+        'redis' { return 'emtds-infra-redis-1' }
         default { return '' }
     }
 }
@@ -496,14 +496,14 @@ function Stop-StatsSampler {
 
 <#
 .SYNOPSIS
-  Runs a k6 script in a limited container on deploy_default with the state directory as /data.
+  Runs a k6 script in a limited container on emtds-infra_default with the state directory as /data.
 #>
 function Invoke-K6 {
     param([string]$Script, [string[]]$EnvPairs)
     $envArgs = @()
     foreach ($e in $EnvPairs) { $envArgs += @('-e', $e) }
     $scripts = Join-Path $Script:TdsDir 'deploy\loadtest'
-    docker run --rm --name "emtds-load-$Run" --label emtds.role=load --network deploy_default `
+    docker run --rm --name "emtds-load-$Run" --label emtds.role=load --network emtds-infra_default `
         --cpus $GenCpus --memory 2g -v "${Script:StateDir}:/data" -v "${scripts}:/scripts:ro" @envArgs `
         $Script:K6Image run --quiet --no-color "/scripts/$Script"
 }
@@ -771,11 +771,11 @@ function Invoke-Cleanup {
     $after = Invoke-Ch "SELECT count() FROM events WHERE ts > now() - INTERVAL 2 DAY AND startsWith(sub_id_12, 'lt-')"
     $targets = Get-Content -Raw (Join-Path $Script:StateDir 'targets.json') | ConvertFrom-Json
     $ips = [Collections.Generic.HashSet[string]]::new([string[]]@($targets | ForEach-Object { $_.ip }))
-    $keys = @('uniq*:*', 'st:*' | ForEach-Object { docker exec deploy-redis-1 redis-cli --scan --pattern $_ }) |
+    $keys = @('uniq*:*', 'st:*' | ForEach-Object { docker exec emtds-infra-redis-1 redis-cli --scan --pattern $_ }) |
         Where-Object { $_ -and $ips.Contains(($_ -split ':', 3)[2]) }
     for ($i = 0; $i -lt $keys.Count; $i += 500) {
         $chunk = $keys[$i..([math]::Min($i + 499, $keys.Count - 1))]
-        docker exec deploy-redis-1 redis-cli unlink @chunk | Out-Null
+        docker exec emtds-infra-redis-1 redis-cli unlink @chunk | Out-Null
     }
     [ordered]@{ events_lt_before = [int64]$before; events_lt_after = [int64]$after; redis_keys_removed = $keys.Count } | ConvertTo-Json
 }

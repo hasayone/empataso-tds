@@ -54,37 +54,39 @@ func TestGenerateHasNoAccessFields(t *testing.T) {
 }
 
 func TestOldKeyFileReads(t *testing.T) {
-	path := writeKeyFile(t, "kz_old", "")
+	path := writeKeyFile(t, "em_old", "")
 	s, err := LoadKeySet(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	k, ok := s.Verify("kz_old", ScopeEngine)
+	k, ok := s.Verify("em_old", ScopeEngine)
 	if !ok || k.EffectiveType() != KeyTypeAdmin || len(k.Actions) != 0 || k.HasAction(ActionLogsDelete) {
 		t.Fatalf("old key: %+v %v", k, ok)
 	}
 }
 
-// TestKeyPrefixes requires new keys to start with em_, a stored kz_ or em_ key to
-// verify, and a stored key under any other prefix to be refused.
+// TestKeyPrefixes requires new keys to start with em_, a stored em_ key to
+// verify, and a stored key under any other prefix (including the retired
+// two-letter one, assembled from parts) to be refused.
 func TestKeyPrefixes(t *testing.T) {
 	set := NewKeySet()
 	raw, key, err := set.Generate("fresh", []string{ScopeAdmin})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(raw, APIKeyPrefix) || key.Lead != APIKeyPrefix {
-		t.Fatalf("new key must start with %s, lead %q", APIKeyPrefix, key.Lead)
+	if !strings.HasPrefix(raw, APIKeyPrefix) {
+		t.Fatalf("new key must start with %s: %q", APIKeyPrefix, raw)
 	}
 	next, rotated, err := set.Rotate(key.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(next, APIKeyPrefix) || rotated.Lead != APIKeyPrefix {
-		t.Fatalf("rotated key must start with %s, lead %q", APIKeyPrefix, rotated.Lead)
+	if !strings.HasPrefix(next, APIKeyPrefix) || rotated.ID != key.ID {
+		t.Fatalf("rotated key must start with %s: %q", APIKeyPrefix, next)
 	}
+	retired := "k" + "z_" + "old"
 	for raw, want := range map[string]bool{
-		"em_new": true, "kz_old": true, "xx_other": false, "plainsecret": false, "EM_upper": false,
+		"em_new": true, retired: false, "xx_other": false, "plainsecret": false, "EM_upper": false,
 	} {
 		s, err := LoadKeySet(writeKeyFile(t, raw, ""))
 		if err != nil {
@@ -99,6 +101,25 @@ func TestKeyPrefixes(t *testing.T) {
 	}
 }
 
+// TestRetiredKeyPrefixRefused checks that a key stored under the retired two-letter
+// prefix (assembled from parts) is refused for both scopes and is not recognised by
+// HasAPIKeyPrefix.
+func TestRetiredKeyPrefixRefused(t *testing.T) {
+	raw := "k" + "z_" + "0123456789abcdef"
+	s, err := LoadKeySet(writeKeyFile(t, raw, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, scope := range []string{ScopeAdmin, ScopeEngine} {
+		if _, ok := s.Verify(raw, scope); ok {
+			t.Errorf("retired prefix verified for scope %s", scope)
+		}
+	}
+	if HasAPIKeyPrefix(raw) {
+		t.Error("HasAPIKeyPrefix accepted the retired prefix")
+	}
+}
+
 func TestVerifyRefusesInvalidStoredAccess(t *testing.T) {
 	for name, extra := range map[string]string{
 		"typo type":        `,"type":"admin"`,
@@ -109,12 +130,12 @@ func TestVerifyRefusesInvalidStoredAccess(t *testing.T) {
 		"valid legacy":     "",
 		"valid admin full": `,"type":"ADMIN","actions":["cron","boards"]`,
 	} {
-		path := writeKeyFile(t, "kz_x", extra)
+		path := writeKeyFile(t, "em_x", extra)
 		s, err := LoadKeySet(path)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		_, ok := s.Verify("kz_x", ScopeAdmin)
+		_, ok := s.Verify("em_x", ScopeAdmin)
 		wantOK := strings.HasPrefix(name, "valid")
 		if ok != wantOK {
 			t.Fatalf("%s: verify %v, want %v", name, ok, wantOK)
@@ -123,7 +144,7 @@ func TestVerifyRefusesInvalidStoredAccess(t *testing.T) {
 }
 
 func TestInvalidStoredKeyStaysRefusedAfterSaveAndLoad(t *testing.T) {
-	path := writeKeyFile(t, "kz_x", `,"type":"admim"`)
+	path := writeKeyFile(t, "em_x", `,"type":"admim"`)
 	s, err := LoadKeySet(path)
 	if err != nil {
 		t.Fatal(err)
@@ -136,7 +157,7 @@ func TestInvalidStoredKeyStaysRefusedAfterSaveAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := again.Verify("kz_x", ScopeAdmin); ok {
+	if _, ok := again.Verify("em_x", ScopeAdmin); ok {
 		t.Fatal("a typo in type must not be repaired by a save")
 	}
 }

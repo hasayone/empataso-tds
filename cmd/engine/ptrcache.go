@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/detect"
+	"github.com/hasayone/empataso-tds/internal/detect"
 )
 
 const (

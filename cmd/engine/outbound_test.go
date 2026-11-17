@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // logCapture is a slog.Handler that records log messages for assertion in tests.

@@ -3,8 +3,8 @@ package admin
 import (
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 func TestKeitaroFlagRulesReachConfig(t *testing.T) {

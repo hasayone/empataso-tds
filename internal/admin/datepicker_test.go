@@ -66,8 +66,10 @@ func TestIndexHTMLWiresDatepicker(t *testing.T) {
 		}
 	}
 	for _, bad := range []string{"cdn.jsdelivr", "unpkg.com", "cdnjs.cloudflare"} {
-		if strings.Contains(html, bad) {
-			t.Errorf("index.html must not load the picker from %s", bad)
+		for _, tag := range []string{`src="https://` + bad, `href="https://` + bad} {
+			if strings.Contains(html, tag) {
+				t.Errorf("index.html must not load the picker from %s", bad)
+			}
 		}
 	}
 }

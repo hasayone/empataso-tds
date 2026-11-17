@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/cron"
-	"github.com/egerkuzma/emtds/internal/logbuf"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
 func syncTarget(s *Server, creds ktCreds) keitaroSyncTarget {

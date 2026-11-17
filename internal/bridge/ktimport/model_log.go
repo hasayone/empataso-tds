@@ -48,6 +48,23 @@ type ConversionRow struct {
 	ExternalID       FlexString `json:"external_id"`
 	CreativeID       FlexString `json:"creative_id"`
 	Subs             [30]string
+	// EventID — conversion_id у Keitaro 10 или event_id у Keitaro 11; ключ выбирает KeysOfRow по самой строке.
+	EventID string
+	// EventType — event_type у Keitaro 11; у Keitaro 10 пусто, тип лежит в Status.
+	EventType string
+}
+
+// EffectiveStatus возвращает тип конверсии строки.
+//
+// Параметры: нет.
+// Результат: status, если он не пуст; иначе event_type (Keitaro 11). Значение не меняется и не сверяется
+// со списком типов: пользовательский тип проходит как есть.
+// Ошибки: нет.
+func (r ConversionRow) EffectiveStatus() string {
+	if strings.TrimSpace(r.Status) != "" {
+		return r.Status
+	}
+	return r.EventType
 }
 
 // UnmarshalJSON читает строку конверсии и складывает sub_id_1..sub_id_30 в Subs.
@@ -98,11 +115,13 @@ func (r *ConversionRow) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-	subs, err := packSubs(data)
+	raw, err := rawFields(data)
 	if err != nil {
 		return err
 	}
+	keys := KeysOfRow(raw)
 	*r = ConversionRow{
+		EventID: string(raw[keys.Conversion]), EventType: string(raw[keys.Type]),
 		SubID: aux.SubID, Status: aux.Status, Revenue: aux.Revenue, Cost: aux.Cost,
 		CampaignID: aux.CampaignID, StreamID: aux.StreamID, OfferID: aux.OfferID, LandingID: aux.LandingID,
 		NetworkID: aux.NetworkID, SourceID: aux.SourceID, Campaign: aux.Campaign, Stream: aux.Stream,
@@ -114,7 +133,7 @@ func (r *ConversionRow) UnmarshalJSON(data []byte) error {
 		DeviceModel: aux.DeviceModel, Referrer: aux.Referrer, SearchEngine: aux.SearchEngine,
 		Keyword: aux.Keyword, ISP: aux.ISP, AdCampaignID: aux.AdCampaignID,
 		ExternalID: aux.ExternalID, CreativeID: aux.CreativeID,
-		Subs: subs,
+		Subs: packSubs(raw),
 	}
 	return nil
 }
@@ -156,6 +175,8 @@ type ClickRow struct {
 	ExternalID     FlexString `json:"external_id"`
 	CreativeID     FlexString `json:"creative_id"`
 	Subs           [30]string
+	// EventID — click_id у Keitaro 10 или event_id у Keitaro 11; ключ выбирает KeysOfRow по самой строке.
+	EventID string
 }
 
 // UnmarshalJSON читает строку клика и складывает sub_id_1..sub_id_30 в Subs.
@@ -203,11 +224,12 @@ func (r *ClickRow) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
-	subs, err := packSubs(data)
+	raw, err := rawFields(data)
 	if err != nil {
 		return err
 	}
 	*r = ClickRow{
+		EventID: string(raw[KeysOfRow(raw).Click]),
 		SubID: aux.SubID, Datetime: aux.Datetime, CampaignID: aux.CampaignID, Campaign: aux.Campaign,
 		StreamID: aux.StreamID, Stream: aux.Stream, OfferID: aux.OfferID, LandingID: aux.LandingID,
 		NetworkID: aux.NetworkID, SourceID: aux.SourceID, CountryCode: aux.CountryCode,
@@ -217,26 +239,22 @@ func (r *ClickRow) UnmarshalJSON(data []byte) error {
 		IP: aux.IP, Referrer: aux.Referrer, SearchEngine: aux.SearchEngine, Keyword: aux.Keyword,
 		UserAgent: aux.UserAgent, Destination: aux.Destination, Cost: aux.Cost, Revenue: aux.Revenue,
 		AdCampaignID: aux.AdCampaignID, ExternalID: aux.ExternalID, CreativeID: aux.CreativeID,
-		Subs: subs,
+		Subs: packSubs(raw),
 	}
 	return nil
 }
 
 // packSubs собирает sub_id_1..sub_id_30 из JSON строки журнала.
 //
-// Параметры: data — JSON объекта строки.
+// Параметры: raw — ключи строки (rawFields).
 // Результат: индекс 0 соответствует sub_id_1. Отсутствующий ключ даёт пустую строку.
-// Ошибки: тело не JSON-объект.
-func packSubs(data []byte) ([30]string, error) {
-	var raw map[string]FlexString
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return [30]string{}, err
-	}
+// Ошибки: нет.
+func packSubs(raw map[string]FlexString) [30]string {
 	var out [30]string
 	for i := 1; i <= len(out); i++ {
 		out[i-1] = string(raw[fmt.Sprintf("sub_id_%d", i)])
 	}
-	return out, nil
+	return out
 }
 
 // FlexString принимает JSON-строку или число и хранит текст.

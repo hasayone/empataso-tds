@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/cron"
 )
 
 // updateCheckWindow is the minimum interval between /api/update/check requests.
@@ -45,11 +45,13 @@ type versionView struct {
 	Mismatch    bool              `json:"mismatch"`
 }
 
-// cronVersionView holds the version and commit fields extracted from the raw cron status JSON.
-// Fields are populated only when both Version and Commit are non-empty in the status file.
+// cronVersionView holds the version, commit and environment fields extracted from the raw cron status JSON.
+// The view is set only when Version or Commit is non-empty in the status file; Env is empty for a cron
+// that predates the field.
 type cronVersionView struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
+	Env     string `json:"env,omitempty"`
 }
 
 // handleVersion serves GET /api/version.
@@ -65,10 +67,17 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	writeJSON(w, http.StatusOK, s.collectVersions(r.Context()))
+}
+
+// collectVersions gathers the builds of admin, engine and cron, the images and the mismatch flag.
+// ctx bounds the call to the engine. The engine is nil with a short engine_error when it does not
+// answer, and cron is nil without a readable status file; neither is an error for the caller.
+func (s *Server) collectVersions(ctx context.Context) versionView {
 	adminBuild := config.Build()
 	out := versionView{Admin: adminBuild}
 
-	engineBuild, engineErr := s.fetchEngineVersion(r.Context())
+	engineBuild, engineErr := s.fetchEngineVersion(ctx)
 	out.Engine = engineBuild
 	if engineErr != "" {
 		out.EngineError = engineErr
@@ -115,7 +124,7 @@ func (s *Server) handleVersion(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, out)
+	return out
 }
 
 // fetchEngineVersion gets the engine's build info from GET /internal/version.
@@ -240,7 +249,8 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	unsigned := false
 	if out.Check != nil {
 		target = out.Check.Target.Commit
-		unsigned = out.Check.Ahead > 0 && out.Check.Error == "" && !out.Check.Signed
+		unsigned = out.Agent != nil && out.Agent.Signing &&
+			out.Check.Ahead > 0 && out.Check.Error == "" && !out.Check.Signed
 	}
 	out.CLI = updateCLI(target, unsigned)
 
@@ -262,14 +272,11 @@ func (s *Server) computeApplyBlock(snap updateSnapshot) string {
 	if snap.Agent == nil || !snap.Agent.Fresh(snap.Now, updateAgentMaxAge) || !snap.Agent.Inbox {
 		return "updater_absent"
 	}
-	if !snap.Agent.Signing {
-		return "unsigned"
-	}
 	if snap.Check == nil || !snap.Check.Fresh(snap.Now, updateCheckFreshAge) || snap.Check.Error != "" || snap.Check.Ahead == 0 {
 		return "no_update"
 	}
-	if !snap.Check.Signed {
-		return "unsigned"
+	if block := signatureBlock(snap); block != "" {
+		return block
 	}
 	if len(snap.Check.ManualSteps) > 0 {
 		return "manual_steps"
@@ -287,6 +294,9 @@ func (s *Server) computeApplyBlock(snap updateSnapshot) string {
 }
 
 // computeRollbackBlock returns the code of the first condition that blocks a rollback, or "".
+// The updater rolls back one step only: after a successful rollback the last history entry is
+// the rollback itself, so state.json with action rollback and result ok yields "no_previous".
+// Any later run or refusal rewrites state.json, and the updater stays the final judge then.
 func (s *Server) computeRollbackBlock(snap updateSnapshot) string {
 	if snap.InboxDir == "" {
 		return "inbox_absent"
@@ -300,9 +310,6 @@ func (s *Server) computeRollbackBlock(snap updateSnapshot) string {
 	if snap.Agent == nil || !snap.Agent.Fresh(snap.Now, updateAgentMaxAge) || !snap.Agent.Inbox {
 		return "updater_absent"
 	}
-	if !snap.Agent.Signing {
-		return "unsigned"
-	}
 	if snap.KeitaroBusy || s.ktJob.updatingBool() {
 		return "keitaro_running"
 	}
@@ -312,18 +319,36 @@ func (s *Server) computeRollbackBlock(snap updateSnapshot) string {
 	if snap.State != nil && snap.State.Result == cron.StateRunning && snap.State.FinishedAt == nil {
 		return "running"
 	}
+	if snap.State != nil && snap.State.Action == "rollback" && snap.State.Result == cron.StateOK {
+		return "no_previous"
+	}
+	return ""
+}
+
+// signatureBlock returns "unsigned" when the signature policy blocks an apply, or "".
+// The policy is on when agent.json says signing is enabled (allowed_signers holds a key); the
+// target must then carry a verified signature in check.json. With the policy off nothing is
+// blocked here. A rollback never calls it: the updater verifies the signature of the previous version.
+// snap is the shared state; a nil Agent means no policy and returns "".
+func signatureBlock(snap updateSnapshot) string {
+	if snap.Agent != nil && snap.Agent.Signing && (snap.Check == nil || !snap.Check.Signed) {
+		return "unsigned"
+	}
 	return ""
 }
 
 // updateCLI returns the four CLI command strings for copying.
-// target is the commit SHA from check.json; "<sha>" is used when empty.
-// When unsigned is true (check exists, ahead > 0, no error, not signed)
+// target is the commit SHA from check.json; "<sha>" is used when empty. A target that is not a
+// 40-hex commit never reaches a command: the result is an empty list.
+// When unsigned is true (signing is enabled, check exists, ahead > 0, no error, not signed)
 // the --unsigned flag is appended to the --channel and --to commands so that
 // update.sh does not reject an unsigned target.
 func updateCLI(target string, unsigned bool) []string {
 	targetArg := target
 	if targetArg == "" {
 		targetArg = "<sha>"
+	} else if !cron.ValidCommit(targetArg) {
+		return []string{}
 	}
 	unsignedSuffix := ""
 	if unsigned {
@@ -381,7 +406,7 @@ func (s *Server) updateNotice(now time.Time) (string, bool) {
 	if !check.Fresh(now, updateCheckFreshAge) || check.Error != "" || check.Ahead <= 0 {
 		return "", false
 	}
-	if !cron.ValidChannel(check.Channel) {
+	if check.Validate() != nil {
 		return "", false
 	}
 	cur := check.Current.Commit
@@ -404,6 +429,9 @@ func (s *Server) updateNotice(now time.Time) (string, bool) {
 
 // readUpdateFiles reads agent.json, check.json and state.json from updateDir.
 // Returns nil for each file that is absent, unreadable or a symlink.
+// check is also nil when it fails cron.CheckFile.Validate: the volume is writable by the
+// engine process, so a file with a foreign commit, tag or channel is not trusted and the
+// callers see "no update" instead of a target that could reach a command line.
 // When updateDir is empty all three pointers are nil.
 func readUpdateFiles(updateDir string) (agent *cron.AgentFile, check *cron.CheckFile, state *cron.StateFile) {
 	if updateDir == "" {
@@ -411,6 +439,9 @@ func readUpdateFiles(updateDir string) (agent *cron.AgentFile, check *cron.Check
 	}
 	agent = readUpdateFileOrNil[cron.AgentFile](filepath.Join(updateDir, cron.UpdateAgentFile), cron.UpdateMaxJSON)
 	check = readUpdateFileOrNil[cron.CheckFile](filepath.Join(updateDir, cron.UpdateCheckFile), cron.UpdateMaxJSON)
+	if check != nil && check.Validate() != nil {
+		check = nil
+	}
 	state = readUpdateFileOrNil[cron.StateFile](filepath.Join(updateDir, cron.UpdateStateFile), cron.UpdateMaxJSON)
 	return
 }

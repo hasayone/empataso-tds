@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // adminDNSTimeout bounds one admin DNS create or update through Cloudflare.

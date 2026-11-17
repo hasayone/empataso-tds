@@ -3,7 +3,7 @@ package main
 import (
 	"net/http"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // xrwMaxBytes is the stored length of the X-Requested-With header.

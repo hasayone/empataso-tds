@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // withOrigin appends a path token to a redirect that stays on this tracker.

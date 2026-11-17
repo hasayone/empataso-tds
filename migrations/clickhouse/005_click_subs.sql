@@ -1,4 +1,4 @@
-ALTER TABLE kuztds.events
+ALTER TABLE emtds.events
 	ADD COLUMN IF NOT EXISTS sub_id_1 String,
 	ADD COLUMN IF NOT EXISTS sub_id_2 String,
 	ADD COLUMN IF NOT EXISTS sub_id_3 String,
@@ -16,7 +16,7 @@ ALTER TABLE kuztds.events
 	ADD COLUMN IF NOT EXISTS source_id LowCardinality(String),
 	ADD COLUMN IF NOT EXISTS network_id LowCardinality(String);
 
-ALTER TABLE kuztds.conversions
+ALTER TABLE emtds.conversions
 	ADD COLUMN IF NOT EXISTS sub_id_1 String,
 	ADD COLUMN IF NOT EXISTS sub_id_2 String,
 	ADD COLUMN IF NOT EXISTS sub_id_3 String,

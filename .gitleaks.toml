@@ -1,0 +1,23 @@
+# Конфигурация gitleaks для EmTDS: правила по умолчанию плюс узкое исключение для тестовых фикстур.
+title = "EmTDS gitleaks"
+minVersion = "v8.25.0"
+
+[extend]
+useDefault = true
+
+# Исключение действует только на правило generic-api-key и только когда одновременно:
+# файл — один из трёх тестовых, а строка присваивает значение одной из констант-фикстур.
+# Остальные правила в этих файлах и любые другие строки в них проверяются как обычно.
+[[allowlists]]
+description = "Вымышленные ключи в константах тестов: testKey, aiTestKey, aiLongToken, aiLongToken2"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = [
+  '''^cmd/mcp/main_test\.go$''',
+  '''^internal/admin/assistant_provider_test\.go$''',
+  '''^internal/admin/assistant_tools_test\.go$''',
+]
+regexTarget = "line"
+regexes = [
+  '''\b(?:testKey|aiTestKey|aiLongToken2?)\s*(?::=|=)''',
+]

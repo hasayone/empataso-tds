@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // chgReferer is the IP filter planted in a stream of the campaign g1 by withIPStream.

@@ -25,7 +25,8 @@ func TestRouteDocSPAPage(t *testing.T) {
 		`<a href="/api/openapi.json" target="_blank" rel="noopener">`, `curl -H "Api-Key: em_..."`,
 		"tr('key.docs.err.'+c)", "tr('key.act.'+o.action)", "deniedCard(model.denied)", "const base=pub?'#':'#/settings/docs/';",
 		"history.replaceState(null, '', base+a.dataset.docjump)", "const publicURL=origin+'/docs';", "copyText(publicURL, e.currentTarget)",
-		"call('PUT','/api/docs/settings',{public:pubBox.checked})", `href="/api/docs.md?lang=`,
+		"call('PUT','/api/docs/settings',{public:pubBox.checked})", `id="docs-md" href="'+base+'md"`,
+		"if(anchor==='md'){ await apiDocsMarkdownView(pub); return; }",
 		"apiDocsHighlight(text, lang)", "API_DOC_METHOD_TONES[o.method]", "o.destructive?badge('bad'",
 	} {
 		must(t, page, want, "apiDocs: "+want)
@@ -41,11 +42,24 @@ func TestRouteDocSPAPage(t *testing.T) {
 		must(t, html, css, "docs style "+css)
 	}
 	must(t, page, "API_DOCS_FILTER.q=''; API_DOCS_FILTER.method='';", "every open starts with all methods")
+	if strings.Contains(page, `target="_blank" rel="noopener">'+icon('landings')`) {
+		t.Error("the Markdown button must open the viewer inside the admin, not the raw text in a new tab")
+	}
+	view := spaFunctionLine(html, "apiDocsMarkdownView")
+	for _, want := range []string{
+		"'/api/docs.md?lang='+encodeURIComponent(lang)", "apiDocsMarkdown(text)", `download="emtds-api-'+esc(lang)+'.md"`,
+		"location.hash==='#/settings/docs/md'", "location.pathname==='/docs'&&location.hash==='#md'", "data-mdjump", `id="docs-back"`,
+		`download="emtds-openapi.json"`, `download="emtds.postman_collection.json"`,
+	} {
+		must(t, view, want, "apiDocsMarkdownView: "+want)
+	}
+	must(t, spaFunctionLine(html, "publicDocsView"), "window.addEventListener('hashchange', paint)", "the public page follows #md")
+	must(t, html, ".apidoc-md h3{", "markdown viewer style")
 	must(t, spaFunctionLine(html, "boot"), "if(location.pathname==='/docs'){ publicDocsView(); return; }", "/docs skips sign-in")
 	must(t, spaFunctionLine(html, "publicDocsView"), "apiDocs(location.hash.slice(1), true)", "the public page reuses apiDocs")
 	must(t, spaFunctionLine(html, "render"), "if(location.pathname==='/docs') return;", "the router leaves the public page alone")
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
-	for _, fn := range []string{"apiDocText", "apiDocOp", "apiDocsModel", "apiDocsFilter", "apiDocsHits", "apiDocsMark", "apiDocsCurl", "apiDocsSample", "apiDocsHighlight"} {
+	for _, fn := range []string{"apiDocText", "apiDocOp", "apiDocsModel", "apiDocsFilter", "apiDocsHits", "apiDocsMark", "apiDocsCurl", "apiDocsSample", "apiDocsHighlight", "apiDocsMarkdown"} {
 		must(t, pure, "function "+fn+"(", fn+" in the pure block")
 	}
 	keys := []string{

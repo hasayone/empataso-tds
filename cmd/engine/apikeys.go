@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // apiKeys is the set of credentials accepted by ?api= mode.

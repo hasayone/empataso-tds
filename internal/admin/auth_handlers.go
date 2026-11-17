@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -166,9 +166,6 @@ func (s *Server) issueSession(w http.ResponseWriter, r *http.Request, uid string
 		HttpOnly: true, Secure: s.cookieSecure(r), SameSite: http.SameSiteStrictMode,
 		Expires: time.Now().Add(s.cfg.SessionTTL),
 	})
-	if _, err := r.Cookie(legacyCookieName); err == nil {
-		s.expireCookie(w, r, legacyCookieName)
-	}
 	return csrf, nil
 }
 
@@ -181,15 +178,10 @@ func (s *Server) expireCookie(w http.ResponseWriter, r *http.Request, name strin
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	for _, name := range []string{cookieName, legacyCookieName} {
-		if c, err := r.Cookie(name); err == nil {
-			_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
-		}
+	if c, err := r.Cookie(cookieName); err == nil {
+		_ = s.cfg.Sessions.Delete(r.Context(), c.Value)
 	}
 	s.expireCookie(w, r, cookieName)
-	if _, err := r.Cookie(legacyCookieName); err == nil {
-		s.expireCookie(w, r, legacyCookieName)
-	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "logged_out"})
 }
 

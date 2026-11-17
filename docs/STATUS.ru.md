@@ -5,7 +5,7 @@
 Снимок на 2026-11-15. Для деталей: `docs/USAGE.md`, `TODO.md`, `docs/wiki/README.md`.
 
 ## Готово (в `main`, тесты зелёные)
-- **Переименование в EmTDS**: переменные `EMTDS_*` с запасным чтением старых `KUZTDS_*` (`config.Env`), cookie сессии `emtds_admin` (старая `kuztds_admin` принимается), заголовки `X-Emtds-*` (старые `X-Kuztds-*` принимаются), образ `emtds:local`, контейнеры `emtds-*`, проект compose `emtds-app`, том состояния `emtds-app_emtds_state`, пути на сервере `/opt/emtds`, `/etc/emtds`, `/var/lib/emtds`, nginx `emtds*.conf`. База и пользователь ClickHouse остаются `kuztds`: их переименование — перенос данных. Переход сервера: `deploy/migrate-emtds.sh`, `docs/wiki/emtds-migration.md`.
+- **Имена EmTDS**: переменные `EMTDS_*`, cookie сессии `emtds_admin`, заголовки `X-Emtds-*`, образ `emtds:local`, контейнеры `emtds-*`, проект compose `emtds-app`, том состояния `emtds-app_emtds_state`, пути на сервере `/opt/emtds`, `/etc/emtds`, `/var/lib/emtds`, nginx `emtds*.conf`. Новый запуск создаёт базу и пользователя ClickHouse `emtds`.
 - **API-ключи для ИИ-агентов и MCP**: ключ типа `ADMIN` или `USER` (роль или свой доступ), опасные действия (`keitaro_import`, `keitaro_purge`, `logs_delete`, `groups_replace`, `cron`, `boards`, `landing_files`) выдаются ключу отдельно, маршруты только для куки ключу закрыты, ответы с ошибкой несут стабильный `code`, у каждого ключа свой лимит запросов и журнал записей в JSONL, `GET /api/openapi.json` описывает маршруты, доступные сессии. `cmd/mcp` (`make mcp`) превращает схему в инструменты MCP по stdio. Вики: `docs/wiki/admin-api.md`, `docs/wiki/mcp.md`.
 - **Домены и интеграции**: список доменов с ролями, Cloudflare (зоны, DNS, `ssl` и `always_use_https`), регистрация в Namecheap, проверка доменов. Вики: `docs/wiki/offers-landings.md`, `docs/wiki/namecheap.md`.
 - **Каталоги, разделы и доступ**: офферы, лендинги (локальные файлы, PHP), сети, источники, разделы (boards), пользователи и роли, форма первого входа и код сброса пароля, хэш админки на томе состояния. Вики: `docs/wiki/boards.md`, `users.md`, `roles.md`.
@@ -279,7 +279,7 @@ EMTDS_DATA_DIR=../database EMTDS_GROUPS_FILE=configs/test_groups.json \
 EMTDS_TRUSTED_PROXIES=127.0.0.1/32 EMTDS_POSTBACK_KEY=pbsecret EMTDS_API_KEY=apikey123 \
 EMTDS_KEYS_DIR=/tmp/emtds-keys EMTDS_GEO_DB=internal/geo/testdata/GeoLite2-City-Test.mmdb \
 EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
-EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CLICKHOUSE_DB=emtds EMTDS_CLICKHOUSE_USER=emtds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/engine
 
 # админка :8090 (admin / admin123)
@@ -287,7 +287,7 @@ EMTDS_ADMIN_PASSWORD_HASH="$(cat /tmp/admin.hash)" EMTDS_ADMIN_PASSWORD_FILE=/tm
 EMTDS_ADMIN_COOKIE_SECURE=false EMTDS_ENGINE_URL=http://localhost:8080 \
 EMTDS_GROUPS_FILE=configs/test_groups.json EMTDS_DATA_DIR=../database EMTDS_KEYS_DIR=/tmp/emtds-keys \
 EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
-EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CLICKHOUSE_DB=emtds EMTDS_CLICKHOUSE_USER=emtds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/admin
 
 # cron (опционально; добавь EMTDS_CRON_FILE / EMTDS_GEO_DB / EMTDS_ASN_DB и админке,

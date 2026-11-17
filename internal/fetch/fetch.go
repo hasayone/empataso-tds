@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 	"golang.org/x/sync/singleflight"
 )
 

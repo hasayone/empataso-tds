@@ -13,10 +13,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/logbuf"
-	"github.com/egerkuzma/emtds/internal/security"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 type captureLog struct {
@@ -280,6 +280,10 @@ func keitaroFake(t *testing.T, mode string) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		if mode == "count" && r.URL.Path == "/admin_api/v1/campaigns" {
 			_, _ = w.Write([]byte(`[{},{},{}]`))
+			return
+		}
+		if mode == "count" && strings.HasSuffix(r.URL.Path, "/log") {
+			_, _ = w.Write([]byte(`{"rows":[],"total":0}`))
 			return
 		}
 		switch r.URL.Path {

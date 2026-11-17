@@ -8,7 +8,7 @@ import (
 	"net/netip"
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/ipindex"
+	"github.com/hasayone/empataso-tds/internal/ipindex"
 )
 
 // RealIP determines the client's real IP, trusting the proxy headers

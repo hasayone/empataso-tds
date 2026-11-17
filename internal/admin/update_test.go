@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/cron"
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // --- helpers ---
@@ -167,7 +167,7 @@ func freshCheck() cron.CheckFile {
 // --- auth tests ---
 
 // TestUpdateRoutesRequire403ForNonAdmin verifies that non-admin sessions
-// (including a regular user with all user sections) get 403 on all six update routes.
+// (including a regular user with all user sections) get 403 on all seven update routes.
 func TestUpdateRoutesRequire403ForNonAdmin(t *testing.T) {
 	dir := t.TempDir()
 	s, srv := newUpdateServer(t, dir, dir)
@@ -190,6 +190,7 @@ func TestUpdateRoutesRequire403ForNonAdmin(t *testing.T) {
 
 	routes := []struct{ method, path string }{
 		{http.MethodGet, "/api/version"},
+		{http.MethodGet, "/api/system"},
 		{http.MethodGet, "/api/update"},
 		{http.MethodGet, "/api/update/log"},
 		{http.MethodPost, "/api/update/apply"},
@@ -205,7 +206,7 @@ func TestUpdateRoutesRequire403ForNonAdmin(t *testing.T) {
 }
 
 // TestUpdateRoutesRequire403ForUserKey verifies that USER API keys
-// get 403 on all six update routes.
+// get 403 on all seven update routes.
 func TestUpdateRoutesRequire403ForUserKey(t *testing.T) {
 	dir := t.TempDir()
 	s, srv := newUpdateServer(t, dir, dir)
@@ -220,6 +221,7 @@ func TestUpdateRoutesRequire403ForUserKey(t *testing.T) {
 
 	routes := []struct{ method, path string }{
 		{http.MethodGet, "/api/version"},
+		{http.MethodGet, "/api/system"},
 		{http.MethodGet, "/api/update"},
 		{http.MethodGet, "/api/update/log"},
 		{http.MethodPost, "/api/update/apply"},
@@ -616,12 +618,12 @@ func TestUpdateApply409Codes(t *testing.T) {
 		t.Errorf("updater_absent: %d %s", code, body)
 	}
 
-	// unsigned (agent.Signing=false).
+	// Signing off (agent.Signing=false) is not a block: the next condition, no_update, answers.
 	writeAgentFile(t, dir, cron.AgentFile{Schema: 1, At: time.Now(), Inbox: true, Signing: false})
 	code, body = callJSON(t, c, http.MethodPost, srv.URL+"/api/update/apply", csrf,
 		`{"target":"`+anotherCommit+`","confirm":"`+anotherCommit[:7]+`"}`)
-	if code != http.StatusConflict || !strings.Contains(string(body), "unsigned") {
-		t.Errorf("unsigned (agent): %d %s", code, body)
+	if code != http.StatusConflict || strings.Contains(string(body), "unsigned") || !strings.Contains(string(body), "no_update") {
+		t.Errorf("signing off: %d %s", code, body)
 	}
 
 	// no_update: no check.json.
@@ -640,7 +642,7 @@ func TestUpdateApply409Codes(t *testing.T) {
 		t.Errorf("target_mismatch: %d %s", code, body)
 	}
 
-	// unsigned (check.Signed=false).
+	// unsigned: signing is on (freshAgent has Signing true) and check.Signed=false.
 	ch := freshCheck()
 	ch.Signed = false
 	writeCheckFile(t, dir, ch)
@@ -1015,6 +1017,95 @@ func TestUpdateCLIUnsigned(t *testing.T) {
 	}
 	if strings.Contains(unsigned[3], "--unsigned") {
 		t.Errorf("--rollback should not carry --unsigned: %q", unsigned[3])
+	}
+}
+
+// TestSignatureBlock covers the signature policy: only an agent with signing on blocks a target
+// that has no verified signature, and a missing check counts as unsigned under that policy.
+func TestSignatureBlock(t *testing.T) {
+	signedCheck := &cron.CheckFile{Signed: true}
+	unsignedCheck := &cron.CheckFile{Signed: false}
+	cases := []struct {
+		name string
+		snap updateSnapshot
+		want string
+	}{
+		{"no agent", updateSnapshot{Check: unsignedCheck}, ""},
+		{"signing off, unsigned target", updateSnapshot{Agent: &cron.AgentFile{Signing: false}, Check: unsignedCheck}, ""},
+		{"signing off, no check", updateSnapshot{Agent: &cron.AgentFile{Signing: false}}, ""},
+		{"signing on, signed target", updateSnapshot{Agent: &cron.AgentFile{Signing: true}, Check: signedCheck}, ""},
+		{"signing on, unsigned target", updateSnapshot{Agent: &cron.AgentFile{Signing: true}, Check: unsignedCheck}, "unsigned"},
+		{"signing on, no check", updateSnapshot{Agent: &cron.AgentFile{Signing: true}}, "unsigned"},
+	}
+	for _, c := range cases {
+		if got := signatureBlock(c.snap); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// TestUpdateWithoutSigningPolicy verifies the whole path with signing off: GET /api/update has no
+// unsigned block and no --unsigned in the commands, an unsigned target applies, and a rollback
+// is allowed. With signing on, the same unsigned target is blocked, the commands carry
+// --unsigned, and the rollback is still left to the updater.
+func TestUpdateWithoutSigningPolicy(t *testing.T) {
+	dir := t.TempDir()
+	inboxDir := t.TempDir()
+	_, srv := newUpdateServer(t, dir, inboxDir)
+	c, csrf := loginAdmin(t, srv.URL)
+	restore := config.SetBuildForTest(config.BuildInfo{
+		Version: "v1.0.0", Commit: validCommit, CommitDate: "2026-01-01T00:00:00Z", Channel: "main",
+	})
+	defer restore()
+
+	agent := freshAgent()
+	agent.Signing = false
+	writeAgentFile(t, dir, agent)
+	check := freshCheck()
+	check.Signed = false
+	writeCheckFile(t, dir, check)
+
+	v := getUpdate(t, c, srv.URL)
+	if !v.CanApply || v.ApplyBlock != "" || !v.CanRollback || v.RollbackBlock != "" {
+		t.Fatalf("signing off: apply %v %q, rollback %v %q", v.CanApply, v.ApplyBlock, v.CanRollback, v.RollbackBlock)
+	}
+	for _, cmd := range v.CLI {
+		if strings.Contains(cmd, "--unsigned") {
+			t.Errorf("signing off: command carries --unsigned: %q", cmd)
+		}
+	}
+	code, body := callJSON(t, c, http.MethodPost, srv.URL+"/api/update/apply", csrf,
+		`{"target":"`+anotherCommit+`","confirm":"`+anotherCommit[:7]+`"}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("apply of an unsigned target with signing off: %d %s", code, body)
+	}
+	if err := os.Remove(filepath.Join(inboxDir, cron.UpdateRequestFile)); err != nil {
+		t.Fatal(err)
+	}
+	code, body = callJSON(t, c, http.MethodPost, srv.URL+"/api/update/rollback", csrf, `{"confirm":"rollback"}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("rollback with signing off: %d %s", code, body)
+	}
+	if err := os.Remove(filepath.Join(inboxDir, cron.UpdateRequestFile)); err != nil {
+		t.Fatal(err)
+	}
+
+	agent.Signing = true
+	writeAgentFile(t, dir, agent)
+	v = getUpdate(t, c, srv.URL)
+	if v.CanApply || v.ApplyBlock != "unsigned" {
+		t.Fatalf("signing on: apply %v %q, want blocked as unsigned", v.CanApply, v.ApplyBlock)
+	}
+	if !v.CanRollback || v.RollbackBlock != "" {
+		t.Fatalf("signing on: rollback %v %q, want allowed", v.CanRollback, v.RollbackBlock)
+	}
+	if !strings.Contains(v.CLI[1], "--unsigned") || !strings.Contains(v.CLI[2], "--unsigned") {
+		t.Errorf("signing on: commands lack --unsigned: %q", v.CLI)
+	}
+	code, body = callJSON(t, c, http.MethodPost, srv.URL+"/api/update/apply", csrf,
+		`{"target":"`+anotherCommit+`","confirm":"`+anotherCommit[:7]+`"}`)
+	if code != http.StatusConflict || !strings.Contains(string(body), "unsigned") {
+		t.Fatalf("apply of an unsigned target with signing on: %d %s", code, body)
 	}
 }
 

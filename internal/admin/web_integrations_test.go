@@ -280,30 +280,43 @@ func TestIntegrationsCalloutsSurviveSwitch(t *testing.T) {
 		must(t, kt, "{id:'"+id+"',hidden:true,cls:'mt'}", id+" starts collapsed")
 	}
 	must(t, kt, "calloutSet(q('#kt-status'),", "check result goes through calloutSet")
-	must(t, kt, "calloutSet(q('#kt-api'),tr('kt.api'))", "API hint goes through calloutSet")
+	must(t, kt, "calloutSet(q('#kt-api'),ktApiText(r))", "API hint goes through calloutSet")
 	must(t, kt, "calloutSet(q('#kt-check-err'),msg)", "check error goes through calloutSet")
 }
 
-// TestNoLegacyEnvNameInUI checks that no user-facing text names the old KUZTDS_ variables.
-// t is the test handle. It returns nothing and fails when the SPA mentions one.
-func TestNoLegacyEnvNameInUI(t *testing.T) {
-	if strings.Contains(spaSource(), "KUZTDS_") {
-		t.Error("the SPA names a KUZTDS_ variable; the product variables are EMTDS_")
+// TestNoRetiredNamesInUI checks that no user-facing text carries a retired product
+// name, variable prefix or key prefix. The names are assembled from parts so that no
+// source file spells them out. t is the test handle; it fails when the SPA mentions one.
+func TestNoRetiredNamesInUI(t *testing.T) {
+	html := strings.ToLower(spaSource())
+	for _, name := range []string{"ku" + "ztds", "k" + "z_"} {
+		if strings.Contains(html, name) {
+			t.Errorf("the SPA mentions the retired name %q", name)
+		}
 	}
 }
 
-// TestKeitaroAPIHintIsHonest checks that the hint after a successful check names the API and
-// does not guess a product number.
-// t is the test handle. It returns nothing and fails when a translation guesses the version.
+// TestKeitaroAPIHintIsHonest checks that the hint after a successful check names the API, shows a
+// version only from the answer, and says "not determined" in all three languages when there are no
+// signs or they disagree. t is the test handle. It returns nothing and fails when a translation guesses the version.
 func TestKeitaroAPIHintIsHonest(t *testing.T) {
 	html := spaSource()
 	for _, lang := range []string{
-		`'kt.api':'Admin API v1. The tracker does not report its own version through this API.'`,
-		`'kt.api':'Admin API v1. Версию Keitaro этот API не сообщает.'`,
-		`'kt.api':'Admin API v1. Версію Keitaro цей API не повертає.'`,
+		`'kt.api':'Admin API v1. Keitaro version is not determined: the tracker gives no signs.'`,
+		`'kt.api':'Admin API v1. Версия Keitaro не определена: признаков нет.'`,
+		`'kt.api':'Admin API v1. Версію Keitaro не визначено: ознак немає.'`,
+		`'kt.api.ver':'Admin API v1. Keitaro {v}. Signs: {signs}.'`,
+		`'kt.api.ver':'Admin API v1. Keitaro {v}. Признаки: {signs}.'`,
+		`'kt.api.ver':'Admin API v1. Keitaro {v}. Ознаки: {signs}.'`,
+		`'kt.api.conflict':'Admin API v1. Keitaro version is not determined: the signs disagree ({signs}).'`,
+		`'kt.api.conflict':'Admin API v1. Версия Keitaro не определена: признаки противоречат ({signs}).'`,
+		`'kt.api.conflict':'Admin API v1. Версію Keitaro не визначено: ознаки суперечать ({signs}).'`,
 	} {
 		must(t, html, lang, "kt.api text")
 	}
+	kt := spaFunctionLine(html, "keitaroPanel")
+	must(t, kt, "const ver=(r&&r.product_version)||'';", "the version comes from the check answer")
+	must(t, kt, "if(r&&r.version_conflict) return trFill('kt.api.conflict'", "a conflict is named, not resolved")
 	for _, bad := range []string{"10 или 11", "10 або 11", "version 10 or 11"} {
 		mustNot(t, html, bad, "guessed product number")
 	}
@@ -346,7 +359,7 @@ func TestSPACheckerIntegration(t *testing.T) {
 var aiSetKeys = []string{
 	"int.desc.ai", "ai.set.beta", "ai.set.intro", "ai.set.enabled", "ai.set.provider", "ai.set.key", "ai.set.test",
 	"ai.set.keydel", "ai.set.keydel.ask", "ai.set.test.ok", "ai.set.models", "ai.set.models.none", "ai.set.model",
-	"ai.set.limits", "ai.set.limits.hint", "ai.set.l.maxout", "ai.set.l.steps", "ai.set.l.turnin", "ai.set.l.daily",
+	"ai.set.limits", "ai.set.limits.hint", "ai.set.limits.day", "ai.set.limits.day.hint", "ai.set.l.maxout", "ai.set.l.steps", "ai.set.l.turnin", "ai.set.l.daily",
 	"ai.set.l.userdaily", "ai.set.l.dailyusd", "ai.set.l.userdailyusd", "ai.set.nolimit", "ai.set.nolimit.warn",
 	"ai.set.limit.range", "ai.set.limit.upto", "ai.set.usage.team", "ai.set.usage.you", "ai.set.usage.me", "ai.set.test.dropped", "ai.set.err.limit.range", "ai.set.err.limit.min", "ai.set.err.limit.daily", "ai.set.err.limit.daily.min", "ai.set.err.price", "ai.set.err.load", "ai.set.prices", "ai.set.price.model", "ai.set.price.in",
 	"ai.set.price.out", "ai.set.price.unknown", "ai.set.usage", "ai.set.usage.tokens", "ai.set.usage.usd",
@@ -482,14 +495,14 @@ const trFill = (k, m) => k + JSON.stringify(m);
 const fmt = n => 'n' + n;
 const aiUSD = n => '$' + n;
 const field = k => AI_LIMITS.find(f => f[0] === k);
-const cur0 = {max_output_tokens:2048, max_steps:6, turn_input_tokens:60000, daily_tokens:2000000, user_daily_tokens:0, daily_usd:5, user_daily_usd:0,
+const cur0 = {max_output_tokens:2048, max_steps:6, turn_input_tokens:60000, daily_tokens:2000000, user_daily_tokens:null, daily_usd:5, user_daily_usd:null,
   limit_ceilings:{max_output_tokens:32000, max_steps:20, turn_input_tokens:200000}, limit_max:{tokens:1000000000000, usd:1000000}};
 `
 }
 
 // TestSPAAIIntegrationNoLimitBoxes runs the limit fields under node: each of the four daily limits has a "No limit" box that is
-// ticked and disables the field when the stored limit is 0, a ticked box sends 0 and an unticked one needs a number above 0 within
-// limit_max, and the per-turn limits have no box.
+// ticked and disables the field when the limit is null, a ticked box or an empty field sends null, a typed number from 0 within
+// limit_max is a real limit, and the per-turn limits have no box.
 func TestSPAAIIntegrationNoLimitBoxes(t *testing.T) {
 	html := spaSource()
 	panel := dictBetween(t, html, "async function aiPanel(host,live){", "\n}\n")
@@ -512,20 +525,24 @@ for (const k of AI_LIMITS.map(f => f[0])) {
   eq([k, h.includes('id="ai-n-' + k + '"')], [k, daily.includes(k)], 'the No limit box is on the daily limits only');
 }
 let h = aiLimitFieldHTML(field('user_daily_tokens'), cur0);
-eq([h.includes('id="ai-n-user_daily_tokens" checked'), h.includes('disabled'), h.includes('value=""')], [true, true, true], 'a stored 0 ticks the box, disables and empties the field');
+eq([h.includes('id="ai-n-user_daily_tokens" checked'), h.includes('disabled'), h.includes('value=""')], [true, true, true], 'a null limit ticks the box, disables and empties the field');
 h = aiLimitFieldHTML(field('daily_tokens'), cur0);
 eq([h.includes('checked'), h.includes('disabled'), h.includes('value="2000000"')], [false, false, true], 'a stored number keeps the box off');
-eq(h.includes('min="1" max="1000000000000"'), true, 'daily tokens: min 1, max limit_max.tokens');
+eq(h.includes('min="0" max="1000000000000"'), true, 'daily tokens: min 0, max limit_max.tokens');
+h = aiLimitFieldHTML(field('user_daily_usd'), {...cur0, user_daily_usd:0});
+eq([h.includes('checked'), h.includes('value="0"')], [false, true], 'a stored 0 is a real limit: the box stays off and the field shows 0');
 h = aiLimitFieldHTML(field('daily_usd'), cur0);
-eq([h.includes('min="0.01" max="1000000"'), h.includes('step="any"')], [true, true], 'daily USD: above 0, up to limit_max.usd, decimals');
-eq(h.replace(/&quot;/g, '"').includes('ai.set.limit.upto{"min":"$0.01","max":"$1000000"}'), true, 'the hint gives the range of a daily USD limit');
+eq([h.includes('min="0" max="1000000"'), h.includes('step="any"')], [true, true], 'daily USD: from 0, up to limit_max.usd, decimals');
+eq(h.replace(/&quot;/g, '"').includes('ai.set.limit.upto{"min":"$0","max":"$1000000"}'), true, 'the hint gives the range of a daily USD limit');
 
-eq(aiLimitValue(field('daily_tokens'), '', true, aiLimitBounds(field('daily_tokens'), cur0)), 0, 'a ticked box sends 0');
-eq(aiLimitValue(field('daily_usd'), '12', true, aiLimitBounds(field('daily_usd'), cur0)), 0, 'a ticked box wins over the text');
+eq(aiLimitValue(field('daily_tokens'), '', true, aiLimitBounds(field('daily_tokens'), cur0)), null, 'a ticked box sends null');
+eq(aiLimitValue(field('daily_usd'), '12', true, aiLimitBounds(field('daily_usd'), cur0)), null, 'a ticked box wins over the text');
+eq(aiLimitValue(field('daily_tokens'), '', false, aiLimitBounds(field('daily_tokens'), cur0)), null, 'an empty field is no limit');
 const bt = aiLimitBounds(field('daily_tokens'), cur0), bu = aiLimitBounds(field('daily_usd'), cur0);
-eq([aiLimitValue(field('daily_tokens'), '500', false, bt), aiLimitValue(field('daily_usd'), '0.25', false, bu)], [500, 0.25], 'a number above 0');
-for (const bad of ['', '0', '-3', '1.5', 'abc', '1000000000001']) eq(Number.isNaN(aiLimitValue(field('daily_tokens'), bad, false, bt)), true, 'daily tokens refuse "' + bad + '"');
-for (const bad of ['', '0', '-1', 'x', '1000001']) eq(Number.isNaN(aiLimitValue(field('daily_usd'), bad, false, bu)), true, 'daily USD refuse "' + bad + '"');
+eq([aiLimitValue(field('daily_tokens'), '500', false, bt), aiLimitValue(field('daily_usd'), '0.25', false, bu)], [500, 0.25], 'a number');
+eq([aiLimitValue(field('daily_tokens'), '0', false, bt), aiLimitValue(field('daily_usd'), '0', false, bu)], [0, 0], 'zero is a limit');
+for (const bad of ['-3', '1.5', 'abc', '1000000000001']) eq(Number.isNaN(aiLimitValue(field('daily_tokens'), bad, false, bt)), true, 'daily tokens refuse "' + bad + '"');
+for (const bad of ['-1', 'x', '1000001']) eq(Number.isNaN(aiLimitValue(field('daily_usd'), bad, false, bu)), true, 'daily USD refuse "' + bad + '"');
 eq(aiLimitValue(field('max_steps'), '0', true, aiLimitBounds(field('max_steps'), cur0)), NaN, 'a per-turn limit has no No limit box, 0 is refused');
 `)
 }
@@ -565,16 +582,18 @@ func TestSPAAIIntegrationUsageCard(t *testing.T) {
 	prelude := aiLimitPrelude(t, html)
 	assistantNode(t, []string{"aiPct", "aiLim", "aiUseCards", "aiUseCardsHTML"}, strings.Replace(prelude, "const trFill = (k, m) => k + JSON.stringify(m);",
 		"const trFill = (k, m) => k.replace('ai.chat.usage.', '') + ':' + (m.limit !== undefined ? m.used + '/' + m.limit : m.used !== undefined ? m.used : m.login);", 1), `
-const cur = {daily_tokens:2000000, daily_usd:5, user_daily_tokens:0, user_daily_usd:2,
+const cur = {daily_tokens:2000000, daily_usd:5, user_daily_tokens:null, user_daily_usd:2,
   usage_today:{day:'2026-11-16', tokens:500000, usd:4.5, users:[], me:{uid:'u1', login:'admin', tokens:1234, usd:0.5}}};
 eq(aiPct(5, 10), 0.5, 'share');
-eq([aiPct(20, 10), aiPct(0, 10), aiPct(5, 0), aiPct(5, undefined)], [1, 0, null, null], 'a share is capped at 1, a missing limit has none');
+eq([aiPct(20, 10), aiPct(0, 10), aiPct(5, 0), aiPct(5, null), aiPct(5, undefined)], [1, 0, 1, null, null], 'a share is capped at 1, a zero limit is used up, a missing limit has none');
 const cards = aiUseCards(cur);
 eq(cards.length, 2, 'two cards');
 eq(cards[0].title, 'T:ai.set.usage.team', 'the team card');
 eq(cards[0].rows.map(r => [r.label, r.text, r.pct]), [['T:ai.set.usage.tokens', 'of:n500000/n2000000', 0.25], ['T:ai.set.usage.usd', 'of:$4.5/$5', 0.9]], 'team against the daily limits');
 eq(cards[1].title, 'ai.set.usage.me:admin', 'the card of the user names the login');
-eq(cards[1].rows.map(r => [r.text, r.pct]), [['nolimit:n1234', null], ['of:$0.5/$2', 0.25]], 'the user against the per-user limits, 0 reads as no limit');
+eq(cards[1].rows.map(r => [r.text, r.pct]), [['nolimit:n1234', null], ['of:$0.5/$2', 0.25]], 'the user against the per-user limits, null reads as no limit');
+const off = aiUseCards({...cur, daily_tokens:null, daily_usd:null});
+eq(off[0].rows.map(r => [r.text, r.pct]), [['nolimit:n500000', null], ['nolimit:$4.5', null]], 'a card without ceilings shows only what was spent');
 const out = aiUseCardsHTML(cur);
 eq((out.match(/role="progressbar"/g) || []).length, 3, 'a bar for every limited row only');
 eq(out.includes('aria-valuenow="90"') && out.includes('ai-bar hot'), true, 'a row near its limit is marked hot');
@@ -637,7 +656,7 @@ eq(await aiCatalogLoad('gemini'), [], 'an empty answer is an empty catalog');
 }
 
 // TestSPAAIIntegrationSavesOnlyChanges runs the body of the settings save under node: what equals the loaded settings is not sent
-// (enabled, provider, allowed models in any order, default model, prices, limits), a daily limit is 0 only with its box ticked, an
+// (enabled, provider, allowed models in any order, default model, prices, limits), a daily limit is null with its box ticked or an empty field, an
 // invalid limit stops the save and names its field, and a key goes only when one was typed.
 func TestSPAAIIntegrationSavesOnlyChanges(t *testing.T) {
 	html := spaSource()
@@ -657,7 +676,7 @@ func TestSPAAIIntegrationSavesOnlyChanges(t *testing.T) {
 const cur = Object.assign({}, cur0, {enabled:true, provider:'openrouter', model:'a/b', allowed_models:['a/b', 'c/d'], keys:{openrouter:{has_key:true, mask:'sk-1'}, openai:{has_key:true, mask:'sk-2'}}, prices:{'a/b':{input_per_m:1, output_per_m:2}}});
 const form = over => {
   const limits = {};
-  for (const f of AI_LIMITS) limits[f[0]] = {raw: cur[f[0]] ? String(cur[f[0]]) : '', none: !!f[3] && cur[f[0]] === 0};
+  for (const f of AI_LIMITS) limits[f[0]] = {raw: cur[f[0]] != null ? String(cur[f[0]]) : '', none: !!f[3] && cur[f[0]] == null};
   return Object.assign({enabled:true, provider:'openrouter', models:['c/d', 'a/b'], model:'a/b', prices:{'a/b':{input_per_m:1, output_per_m:2}}, keys:{}, limits}, over);
 };
 const withLimit = (k, v) => { const s = form(); s.limits[k] = v; return s; };
@@ -686,13 +705,15 @@ eq(aiSettingsBody(cur, form({prices:{'a/b':{input_per_m:1, output_per_m:3}}})).b
 eq(aiSettingsBody(cur, form({prices:{}})).body, {prices:{}}, 'prices cleared');
 eq(aiSettingsBody(cur, withLimit('max_steps', {raw:'8', none:false})).body, {max_steps:8}, 'a changed per-turn limit');
 eq(aiSettingsBody(cur, withLimit('max_steps', {raw:' 6 ', none:false})).body, {}, 'the same number typed with spaces is no change');
-eq(aiSettingsBody(cur, withLimit('daily_tokens', {raw:'', none:true})).body, {daily_tokens:0}, 'No limit sends 0');
-eq(aiSettingsBody(cur, withLimit('user_daily_tokens', {raw:'', none:true})).body, {}, 'a limit already 0 is not sent again');
+eq(aiSettingsBody(cur, withLimit('daily_tokens', {raw:'', none:true})).body, {daily_tokens:null}, 'No limit sends null');
+eq(aiSettingsBody(cur, withLimit('daily_usd', {raw:'', none:false})).body, {daily_usd:null}, 'an emptied field sends null');
+eq(aiSettingsBody(cur, withLimit('user_daily_tokens', {raw:'', none:true})).body, {}, 'a limit already off is not sent again');
 eq(aiSettingsBody(cur, withLimit('user_daily_tokens', {raw:'500', none:false})).body, {user_daily_tokens:500}, 'a limit set where there was none');
 eq(aiSettingsBody(cur, withLimit('daily_usd', {raw:'7.5', none:false})).body, {daily_usd:7.5}, 'dollars');
-for (const [k, v] of [['daily_tokens', {raw:'0', none:false}], ['user_daily_usd', {raw:'', none:false}], ['max_steps', {raw:'', none:true}], ['max_steps', {raw:'21', none:false}], ['daily_usd', {raw:'-1', none:false}]]) {
+eq(aiSettingsBody(cur, withLimit('user_daily_usd', {raw:'0', none:false})).body, {user_daily_usd:0}, 'zero dollars is a limit');
+for (const [k, v] of [['max_steps', {raw:'', none:true}], ['max_steps', {raw:'21', none:false}], ['daily_usd', {raw:'-1', none:false}], ['daily_tokens', {raw:'2.5', none:false}]]) {
   const r = aiSettingsBody(cur, withLimit(k, v));
-  eq([r.body, r.bad], [null, k], 'a zero or an empty or an out of range value is not sent as a limit: ' + k + ' ' + v.raw);
+  eq([r.body, r.bad], [null, k], 'an empty per-turn limit or an out of range value is not sent: ' + k + ' ' + v.raw);
 }
 eq(aiSettingsBody(cur, form({keys:{openrouter:'sk-1', openai:''}})).body, {keys:{openrouter:'sk-1'}}, 'only a typed key goes');
 eq(aiSettingsBody(cur, form({keys:{openai:''}})).body, {}, 'an empty key goes nowhere');
@@ -731,11 +752,11 @@ func TestSPAAIIntegrationLimitError(t *testing.T) {
 	html := spaSource()
 	assistantNode(t, []string{"aiLimitBounds", "aiLimitError"}, aiLimitPrelude(t, html), `
 const none = '"none":"T:ai.set.nolimit"}';
-eq(aiLimitError(field('daily_usd'), cur0), 'ai.set.err.limit.daily{"name":"T:ai.set.l.dailyusd","min":"$0.01","max":"$1000000",' + none, 'a daily limit in dollars');
-eq(aiLimitError(field('daily_tokens'), cur0), 'ai.set.err.limit.daily{"name":"T:ai.set.l.daily","min":"n1","max":"n1000000000000",' + none, 'a daily limit in tokens');
+eq(aiLimitError(field('daily_usd'), cur0), 'ai.set.err.limit.daily{"name":"T:ai.set.l.dailyusd","min":"$0","max":"$1000000",' + none, 'a daily limit in dollars');
+eq(aiLimitError(field('daily_tokens'), cur0), 'ai.set.err.limit.daily{"name":"T:ai.set.l.daily","min":"n0","max":"n1000000000000",' + none, 'a daily limit in tokens');
 eq(aiLimitError(field('max_steps'), cur0), 'ai.set.err.limit.range{"name":"T:ai.set.l.steps","min":"n1","max":"n20",' + none, 'a per-turn limit with its ceiling');
 eq(aiLimitError(field('max_steps'), {}), 'ai.set.err.limit.min{"name":"T:ai.set.l.steps","min":"n1","max":"",' + none, 'a per-turn limit with no ceiling');
-eq(aiLimitError(field('daily_usd'), {}), 'ai.set.err.limit.daily.min{"name":"T:ai.set.l.dailyusd","min":"$0.01","max":"",' + none, 'a daily limit with no upper bound');
+eq(aiLimitError(field('daily_usd'), {}), 'ai.set.err.limit.daily.min{"name":"T:ai.set.l.dailyusd","min":"$0","max":"",' + none, 'a daily limit with no upper bound');
 `)
 }
 

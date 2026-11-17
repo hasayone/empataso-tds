@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // cyrillic matches one Cyrillic letter; a Russian or Ukrainian text must hold at least one.

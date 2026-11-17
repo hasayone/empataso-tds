@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // MacroDeps — data for expanding output macros.

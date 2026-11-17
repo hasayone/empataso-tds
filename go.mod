@@ -1,4 +1,4 @@
-module github.com/egerkuzma/emtds
+module github.com/hasayone/empataso-tds
 
 go 1.25.0
 

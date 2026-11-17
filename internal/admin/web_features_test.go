@@ -9,7 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // TestSpaKeepsUnknownRules checks that saving a stream copies the rule keys the editor
@@ -509,7 +510,7 @@ func TestSpaRoleKeys(t *testing.T) {
 func TestSpaRolesUI(t *testing.T) {
 	html := spaSource()
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
-	for _, name := range []string{"hiddenFields", "columnHidden", "offerPayoutHidden", "accessModes", "grantBody", "hideChoices", "userRoleField", "roleChoices", "roleNameOf"} {
+	for _, name := range []string{"hiddenFields", "columnHidden", "offerPayoutHidden", "accessModes", "grantBody", "byFieldOrder", "hideChoices", "userRoleField", "roleChoices", "roleNameOf"} {
 		must(t, pure, "function "+name+"(", name+" is in the pure block")
 	}
 	role := spaFunctionLine(html, "openRoleEditor")
@@ -522,6 +523,13 @@ func TestSpaRolesUI(t *testing.T) {
 	must(t, access, "readAccessEditor(box, false)", "the user editor reads the shared editor")
 	must(t, access, "if(u.role_id)", "a user with a role has no own access to edit")
 	must(t, spaFunctionLine(html, "accessEditorHTML"), "hideChoices(FIELDS&&FIELDS.fields, hid)", "hidden fields come from the field catalog")
+	must(t, spaFunctionLine(html, "boot"), "FIELDS.fields=byFieldOrder(info.fields", "the field catalog is sorted once by the display order")
+	order := spaBetween(html, "const FIELD_ORDER=[", "];")
+	for _, f := range store.StaticFields() {
+		if !strings.Contains(order, "'"+f.Name+"'") && !strings.HasPrefix(f.Name, "sub_id_") {
+			t.Errorf("field %s is missing from FIELD_ORDER", f.Name)
+		}
+	}
 	must(t, spaFunctionLine(html, "deleteRole"), "'DELETE','/api/roles/'", "roles are deleted")
 	must(t, spaFunctionLine(html, "reloadRoles"), "'POST','/api/roles/reload'", "roles are re-read")
 	must(t, spaFunctionLine(html, "loadRoles"), "errText(e)", "an unavailable store gives a translated reason")
@@ -861,6 +869,9 @@ func TestSpaAutomationLayout(t *testing.T) {
 	html := spaSource()
 	must(t, html, "column-count:2", "automation two-column masonry")
 	must(t, html, `id="cron-arrange"`, "arrange settings control")
+	if st, gear := strings.Index(html, `<span id="cronstate">`), strings.Index(html, `id="cron-arrange"`); st < 0 || gear < 0 || st > gear {
+		t.Error("the service status stands left of the arrange gear in the automation header")
+	}
 	must(t, html, "hd-act", "job header actions wrapper")
 	must(t, html, "function cronCardOrder(", "cron card order helper")
 	must(t, html, "emtds-cron-order", "cron order storage key")
@@ -1022,10 +1033,11 @@ func TestSpaBoardChromeIcon(t *testing.T) {
 		must(t, spaFunctionLine(html, fn), "paintBoardChrome()", fn+" repaints the button visibility")
 	}
 	must(t, spaFunctionLine(html, "deleteBoardRow"), "boardSaveId(''); resetBoardCaches();", "deleting the open section returns the tab to the default one")
-	must(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "go('settings/boards')", "the first section is created from the profile menu")
-	must(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "if(!multi&&!admin) return;", "admins keep the sections entry with only the default section")
+	must(t, spaBetween(html, "const SETTINGS_TABS=[", "\n];"), "route:'settings/boards'", "the first section is created from the settings tab of the menu")
+	mustNot(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "go('settings/boards')", "the sections switcher has no settings entry of its own")
+	must(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "if(!multi) return;", "with only the default section the switcher adds nothing")
 	must(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "const multi=boardChromeVisible(BOARDS);", "profile menu lists sections under the header button rule")
-	must(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "if(multi) items.push(...boardSwitchRows());", "section rows only when there is something to switch to")
+	must(t, spaFunctionLine(html, "appendBoardUserMenuItems"), "items.push(...boardSwitchRows());", "section rows only when there is something to switch to")
 	mustNot(t, chrome, "iconToneClass(", "no separate tint rule on the header button")
 	must(t, spaFunctionLine(html, "boardName"), "boardRowById(s)", "name and icon read the same row")
 	must(t, spaFunctionLine(html, "switchBoard"), "paintBoardChrome()", "switch repaints the header")
@@ -1069,18 +1081,21 @@ func TestSpaBoardPanel(t *testing.T) {
 	mustNot(t, spaFunctionLine(html, "openBoardImport"), `hint">${esc(tr('board.empty'))}</p><div id="bi-body"`, "empty hint is not shown before the list loads")
 	userMenuLine := spaFunctionLine(html, "userMenuItems")
 	must(t, userMenuLine, "userTypeLabel(ME&&ME.type)", "account caption is the translated type")
-	profileAt := strings.Index(userMenuLine, "tr('menu.settings')")
+	tabsAt := strings.Index(userMenuLine, "adminMenuEntries()")
 	boardsAt := strings.Index(userMenuLine, "appendBoardUserMenuItems")
-	if profileAt < 0 || boardsAt < 0 || profileAt > boardsAt {
-		t.Errorf("profile sits above sections: profile=%d boards=%d", profileAt, boardsAt)
+	if tabsAt < 0 || boardsAt < 0 || tabsAt > boardsAt {
+		t.Errorf("settings entries sit above sections: tabs=%d boards=%d", tabsAt, boardsAt)
 	}
-	must(t, userMenuLine, "icon:'send'", "postbacks icon send")
-	must(t, userMenuLine, "icon:'tools'", "integrations icon tools")
-	must(t, userMenuLine, "icon:'user'", "users icon user")
+	must(t, spaBetween(html, "const SETTINGS_TABS=[", "\n];"), "icon:'send'", "postbacks icon send")
+	must(t, spaBetween(html, "const SETTINGS_TABS=[", "\n];"), "icon:'tools'", "integrations icon tools")
+	must(t, spaFunctionLine(html, "adminMenuEntries"), "icon:t.icon", "settings entries take their icon from the tab")
+	tabs := spaBetween(html, "const SETTINGS_TABS=[", "\n];")
+	must(t, tabs, "icon:'user'", "users icon user")
+	must(t, tabs, "icon:'settings'", "settings and section settings use the gear")
+	must(t, tabs, "key:'board.settings'", "section settings tab caption")
 	appendBoardLine := spaFunctionLine(html, "appendBoardUserMenuItems")
 	must(t, appendBoardLine, "tr('board.sections')", "profile menu sections caption")
-	must(t, appendBoardLine, "tr('board.settings')", "profile menu section settings")
-	must(t, appendBoardLine, "icon:'settings'", "section settings uses the gear")
+	mustNot(t, appendBoardLine, "tr('board.settings')", "the switcher has no section settings entry")
 	must(t, spaFunctionLine(html, "boardIconButtonHTML"), "board-icon-btn", "icon control is a button")
 	must(t, spaFunctionLine(html, "openBoardIconPicker"), "board-icon-grid", "icon picker is a grid")
 	must(t, spaFunctionLine(html, "openBoardIconPicker"), "tr('board.all')", "icon grid caption")
@@ -1102,10 +1117,10 @@ func TestSpaBoardPanel(t *testing.T) {
 	mustNot(t, spaFunctionLine(html, "applyBoardsPayload"), "boardStoredId()", "payload does not treat main as unset")
 	must(t, spaFunctionLine(html, "boardStoredId"), "setItem(BOARD_KEY,'main')", "legacy empty storage migrates to main")
 	profileLine := spaFunctionLine(html, "profile")
-	must(t, profileLine, "arg==='boards'", "profile opens boards tab")
-	must(t, profileLine, "#/settings/boards", "profile boards hash")
-	must(t, profileLine, "meIsAdmin()", "boards tab is admin-only")
-	must(t, profileLine, "go('settings/boards')", "boards tab navigation")
+	must(t, profileLine, "settingsTabs().find(t=>t.id===arg)", "profile opens the tab named by the address")
+	must(t, profileLine, "boards:boardsPage", "boards tab opens the sections page")
+	must(t, profileLine, "go(settingsTabs().find(t=>t.id===b.dataset.ptab).route)", "tab navigation follows the tab route")
+	must(t, spaBetween(html, "const SETTINGS_TABS=[", "\n];"), "{id:'boards', key:'board.settings', route:'settings/boards', icon:'settings', allow:()=>meIsAdmin()}", "boards tab is admin-only")
 	must(t, html, "function boardsPage(", "boards settings page")
 	must(t, spaFunctionLine(html, "patchBoard"), "call('PATCH','/api/boards/", "boards PATCH API")
 	must(t, spaFunctionLine(html, "deleteBoardRow"), "call('DELETE','/api/boards/", "boards DELETE API")
@@ -1382,4 +1397,72 @@ func TestSpaKeywordStatsUI(t *testing.T) {
 		t.Error("the API docs page has no Russian text or response sample for the keyword statistics")
 	}
 	must(t, spaFunctionLine(html, "keywords"), "arg==='lists'", "the lists tab lives at #/keywords/lists")
+}
+
+// TestSPAAboutWiring checks the static wiring of the settings tabs, the about tab and the first-run token field:
+// the tab order, no trace of the old updates tab and its dictionary keys, the new keys in all three languages,
+// the server block kept out of the polling loop and the token sent only when the field is on the form.
+// t is the test handle. It returns nothing and fails on a missing marker.
+func TestSPAAboutWiring(t *testing.T) {
+	html := spaSource()
+	tabs := spaBetween(html, "const SETTINGS_TABS=[", "\n];")
+	last := -1
+	for _, id := range []string{"profile", "users", "keys", "boards", "about"} {
+		at := strings.Index(tabs, "id:'"+id+"'")
+		if at <= last {
+			t.Errorf("tab %q is missing or out of order in SETTINGS_TABS", id)
+		}
+		last = at
+	}
+	for _, id := range []string{"docs", "pbdocs", "updates"} {
+		mustNot(t, tabs, "id:'"+id+"'", "docs pages and the old updates name are not tabs")
+	}
+	for _, gone := range []string{"settings/updates", "updatesPage", "data-ptab=\"updates\"", "'prof.title':", "'prof.tab':", "'upd.tab':", "'prof.updates':", "'menu.api':", "'menu.users':", "'upd.versions':"} {
+		mustNot(t, html, gone, "the old updates tab and its keys are gone")
+	}
+	must(t, html, `href="#/settings/about"`, "the update banner leads to the about tab")
+	must(t, spaFunctionLine(html, "userMenuItems"), "go('settings/about')", "the version line leads to the about tab")
+
+	about := spaBetween(html, "async function aboutPage(", "\n// keyRevokedAt")
+	if about == "" {
+		t.Fatal("aboutPage not found in SPA")
+	}
+	if n := strings.Count(about, "get('/api/system',null)"); n != 1 {
+		t.Errorf("aboutPage reads /api/system %d times, want once in loadServer", n)
+	}
+	must(t, about, "async function loadServer(){", "the server block has its own loader")
+	poll := spaBetween(about, "setTimeout(()=>{", "},2000)")
+	must(t, poll, "render();", "the polling loop redraws the update data")
+	mustNot(t, poll, "loadServer", "the polling loop does not read the server block")
+	must(t, about, "q('#about-sys-refresh',body).onclick=loadServer;", "the server block has its own button")
+	must(t, about, "esc(ch.notes)", "what is new goes through esc")
+	mustNot(t, about, "innerHTML=ch.notes", "what is new is never written raw")
+
+	setup := spaFunctionLine(html, "setupView")
+	must(t, setup, "tokenRequired=false", "the form takes the token flag")
+	must(t, setup, "if(tokenInput) form.token=tokenInput.value.trim();", "the token is sent only when the field is on the form")
+	must(t, setup, "setupView(setupMessage(e),'',ip,tokenRequired)", "the field stays after an error")
+	must(t, spaFunctionLine(html, "boot"), "setupView('', '', setup.public_ip||'', !!setup.token_required)", "boot passes token_required")
+
+	for _, key := range []string{
+		"menu.settings", "about.tab", "about.version", "about.update", "about.server", "about.changelog", "about.stale", "about.steps.cmd", "about.server.err",
+		"about.cpus", "about.load", "about.mem", "about.disk", "about.uptime", "about.free", "about.ms", "about.hb", "about.busy",
+		"about.state.ok", "about.state.down", "about.state.not_configured", "setup.token", "setup.token.hint", "setup.token.bad",
+		"upd.sign.off", "upd.sign.on", "upd.block.unsigned", "upd.notes",
+	} {
+		for _, lang := range []string{"en", "ru", "uk"} {
+			if !trKeyDefined(html, lang, key) {
+				t.Errorf("key %q missing for lang %q", key, lang)
+			}
+		}
+	}
+	for lang, want := range map[string]string{
+		"en": `'menu.settings':'Settings'`, "ru": `'menu.settings':'Настройки'`, "uk": `'menu.settings':'Налаштування'`,
+	} {
+		must(t, html, want, "the settings caption in "+lang)
+	}
+	must(t, html, `'about.tab':'About'`, "en about tab")
+	must(t, html, `'about.tab':'О системе'`, "ru about tab")
+	must(t, html, `'about.tab':'Про систему'`, "uk about tab")
+	must(t, html, `'upd.block.unsigned':'Подпись включена, цель не подписана'`, "ru unsigned block text")
 }

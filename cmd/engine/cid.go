@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/atomicfile"
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
 )
 
 const (

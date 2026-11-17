@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 func pathEnv(t *testing.T, groups *config.Groups, domains *config.Book[config.Domain]) (*cidSigner, http.Handler, *captureIns, func()) {

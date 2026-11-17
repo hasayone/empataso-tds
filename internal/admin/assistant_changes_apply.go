@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // aiChgCall is one internal write: the route, the id on its path, the body, the section header,

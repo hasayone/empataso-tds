@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // viewsMaxBody caps a PUT /api/me/views body in bytes.

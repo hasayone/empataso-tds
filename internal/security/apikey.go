@@ -14,7 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/egerkuzma/emtds/internal/atomicfile"
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
 )
 
 const (
@@ -38,17 +38,13 @@ const (
 	apiKeyGenAttempts = 3
 )
 
-const (
-	// APIKeyPrefix starts every key issued now.
-	APIKeyPrefix = "em_"
-	// LegacyAPIKeyPrefix starts keys issued before the em_ prefix; Verify still accepts them.
-	LegacyAPIKeyPrefix = "kz_"
-)
+// APIKeyPrefix starts every key the tracker issues.
+const APIKeyPrefix = "em_"
 
-// HasAPIKeyPrefix reports whether raw starts with APIKeyPrefix or LegacyAPIKeyPrefix.
+// HasAPIKeyPrefix reports whether raw starts with APIKeyPrefix.
 // raw is the secret as sent by the client. There is no error.
 func HasAPIKeyPrefix(raw string) bool {
-	return strings.HasPrefix(raw, APIKeyPrefix) || strings.HasPrefix(raw, LegacyAPIKeyPrefix)
+	return strings.HasPrefix(raw, APIKeyPrefix)
 }
 
 var (
@@ -72,10 +68,8 @@ var (
 // APIKey is one admin or engine credential, stored without the raw secret.
 //
 // ID is 12 hex characters from crypto/rand. Prefix is the first 8 hex
-// characters of the secret that follows the lead, so a table can show which key
-// is which. Lead is the text before that secret: APIKeyPrefix for a key issued
-// or rotated now; a record written before the field existed has none and its
-// key starts with LegacyAPIKeyPrefix. Hash is hex(sha256(raw)) and is written to the key file; Public
+// characters of the secret that follows APIKeyPrefix, so a table can show which
+// key is which. Hash is hex(sha256(raw)) and is written to the key file; Public
 // clears it before an API response. Scopes contains ScopeAdmin, ScopeEngine,
 // or both. RevokedAt is nil while the key is active, so the key file omits
 // revoked_at for a live key.
@@ -89,7 +83,6 @@ type APIKey struct {
 	ID        string     `json:"id"`
 	Name      string     `json:"name"`
 	Prefix    string     `json:"prefix"`
-	Lead      string     `json:"lead,omitempty"`
 	Hash      string     `json:"hash,omitempty"`
 	Scopes    []string   `json:"scopes"`
 	CreatedAt time.Time  `json:"created_at"`
@@ -276,8 +269,8 @@ func (s *KeySet) Generate(name string, scopes []string) (raw string, key APIKey,
 
 // Verify reports whether raw is an active key that has scope.
 //
-// An empty raw, or one that starts with neither APIKeyPrefix nor
-// LegacyAPIKeyPrefix, returns a zero key and false. Otherwise the SHA-256 of raw is
+// An empty raw, or one that does not start with APIKeyPrefix, returns a zero key
+// and false. Otherwise the SHA-256 of raw is
 // looked up in byHash (the hash is not a secret, so the map key is enough to
 // find it) and the stored hash is compared again with subtle.ConstantTimeCompare.
 // A miss, a mismatch, a revoked or expired key, a key without scope, or a key whose
@@ -290,7 +283,7 @@ func (s *KeySet) Verify(raw, scope string) (APIKey, bool) {
 
 // lookup returns a copy of the record whose hash matches raw.
 //
-// raw must carry APIKeyPrefix or LegacyAPIKeyPrefix. The SHA-256 of raw is
+// raw must carry APIKeyPrefix. The SHA-256 of raw is
 // looked up in byHash and compared again with subtle.ConstantTimeCompare. The
 // copy keeps the invalid mark. A miss returns a zero key and false. There is no error.
 func (s *KeySet) lookup(raw string) (APIKey, bool) {
@@ -339,7 +332,6 @@ func (s *KeySet) Rotate(id string) (raw string, key APIKey, err error) {
 			delete(s.byHash, k.Hash)
 		}
 		k.Prefix = prefix
-		k.Lead = APIKeyPrefix
 		k.Hash = hash
 		s.byHash[hash] = k
 		return raw, k.clone(), nil
@@ -504,7 +496,6 @@ func newAPIKey(name string, scopes []string) (string, *APIKey, error) {
 		ID:        id,
 		Name:      name,
 		Prefix:    prefix,
-		Lead:      APIKeyPrefix,
 		Hash:      hash,
 		Scopes:    append([]string{}, scopes...),
 		CreatedAt: time.Now().UTC(),

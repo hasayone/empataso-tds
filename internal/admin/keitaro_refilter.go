@@ -8,8 +8,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/config"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // keitaroRefilterMax is the most campaigns one filters_only request may list in campaign_ids.

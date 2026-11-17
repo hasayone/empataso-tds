@@ -5,7 +5,7 @@
 -- The engine and the admin run the same ALTER on start, so an existing
 -- installation is upgraded without anyone applying this file by hand; it is
 -- here so that a fresh database is complete from its first second.
-ALTER TABLE kuztds.events
+ALTER TABLE emtds.events
     ADD COLUMN IF NOT EXISTS asn UInt32,
     ADD COLUMN IF NOT EXISTS org LowCardinality(String),
     ADD COLUMN IF NOT EXISTS timezone LowCardinality(String),

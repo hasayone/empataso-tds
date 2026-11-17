@@ -29,7 +29,7 @@ ALLOWED_SIGNERS="${ETC_DIR}/allowed_signers"
 # Параметры, считанные из update.env.
 REPO=
 CHANNEL=release
-CHECK_HOURS=6
+CHECK_HOURS=1
 KEEP_IMAGES=3
 KEEP_BACKUPS=5
 TDS_DIR=
@@ -92,12 +92,13 @@ _deadline() {
 }
 
 # Назначение: экранировать строку для встраивания в JSON без jq.
-# Параметры: $1 — строка; $2 — лимит символов (по умолчанию 200; обрезка по символам UTF-8).
-# Результат: JSON-строка в кавычках на stdout.
+# Параметры: $1 — строка; $2 — лимит символов исходной строки (по умолчанию 200; обрезка по символам UTF-8 до экранирования).
+# Результат: JSON-строка в кавычках на stdout; обрезка не рвёт escape-последовательность.
 # Ошибки: нет.
 json_str() {
 	local LC_ALL=C.UTF-8
 	local s=${1:-} lim=${2:-200}
+	s=${s:0:$lim}
 	s=${s//\\/\\\\}
 	s=${s//\"/\\\"}
 	s=${s//$'\t'/\\t}
@@ -105,7 +106,15 @@ json_str() {
 	s=${s//$'\n'/\\n}
 	# Удалить оставшиеся управляющие символы (0–8, 11–12, 14–31, 127).
 	s=$(printf '%s' "$s" | LC_ALL=C tr -d '\000-\010\013\014\016-\037\177' 2>/dev/null || printf '%s' "$s")
-	printf '"%s"' "${s:0:$lim}"
+	printf '"%s"' "$s"
+}
+
+# Назначение: убрать управляющие символы (кроме табуляции и перевода строки) из данных тома перед печатью в терминал.
+# Параметры: stdin — текст; UTF-8 не портится.
+# Результат: очищенный текст на stdout.
+# Ошибки: нет.
+strip_control() {
+	LC_ALL=C tr -d '\000-\010\013-\037\177'
 }
 
 # Назначение: заменить секреты на *** в строке.
@@ -294,15 +303,7 @@ read_update_env() {
 # Результат: устанавливает STATE_DIR.
 # Ошибки: нет.
 determine_state_dir() {
-	STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-${KUZTDS_INSTALL_STATE_DIR:-}}"
-	if [[ -z "$STATE_DIR" ]]; then
-		STATE_DIR="${SBX}/etc/emtds"
-		if [[ -n "$SBX" ]]; then
-			: # в sandbox STATE_DIR = SBX/etc/emtds
-		elif [[ ! -e /etc/emtds && -d /etc/kuztds ]]; then
-			STATE_DIR=/etc/kuztds
-		fi
-	fi
+	STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-${SBX}/etc/emtds}"
 }
 
 # Назначение: проверить предусловия применения (шаг 1 плана).
@@ -315,14 +316,6 @@ check_environment() {
 		die "нужны права root"
 	fi
 	determine_state_dir
-	# Отказ, если ещё не мигрировали (STATE_DIR — старый kuztds).
-	if [[ "$STATE_DIR" == */kuztds ]]; then
-		die "STATE_DIR=${STATE_DIR}: сначала запустите deploy/migrate-emtds.sh"
-	fi
-	# Контейнеры kuztds-* свидетельствуют о незавершённой миграции.
-	if docker ps -aq --filter 'name=kuztds-' 2>/dev/null | grep -q .; then
-		die "обнаружены контейнеры kuztds-*; сначала deploy/migrate-emtds.sh"
-	fi
 	# Нет .git — не репозиторий.
 	if [[ ! -d "${TDS_DIR}/.git" ]]; then
 		die "${TDS_DIR}: нет .git; для первой установки: update.sh --adopt --to <sha>"
@@ -507,10 +500,26 @@ confirm_force_version() {
 	[[ ${#input} -ge 7 && "${sha:0:7}" == "${input:0:7}" ]] || die "подтверждение не совпадает, отменено"
 }
 
+# Назначение: выяснить, включена ли проверка подписи (политика одна: файл allowed_signers).
+# Параметры: нет.
+# Результат: 1 (выключена) только если пути $ALLOWED_SIGNERS нет совсем либо это обычный читаемый файл без строк ключа;
+#   иначе 0: ключ в файле, а также всё, что не удаётся прочитать как обычный файл (битый симлинк, каталог,
+#   сбой grep). Права файла здесь не проверяются: отказ по правам и по типу выдаёт verify_signature,
+#   так что порча файла не выключает проверку тихо.
+# Ошибки: нет.
+signing_enabled() {
+	[[ -e "$ALLOWED_SIGNERS" || -L "$ALLOWED_SIGNERS" ]] || return 1
+	[[ -f "$ALLOWED_SIGNERS" && -r "$ALLOWED_SIGNERS" ]] || return 0
+	local rc=0
+	LC_ALL=C grep -qvE '^[[:space:]]*($|#)' "$ALLOWED_SIGNERS" 2>/dev/null || rc=$?
+	(( rc != 1 ))
+}
+
 # Назначение: проверить SSH-подпись коммита или тега.
 # Параметры: $1 — sha; $2 — тег (или пусто для коммита).
-# Результат: устанавливает SIGNED (true/false) и SIGNER.
-# Ошибки: нет (отказ — только при применении без --unsigned).
+# Результат: устанавливает SIGNED (true/false) и SIGNER; при выключенной подписи SIGNED=false.
+# Ошибки: подпись включена, а allowed_signers не обычный файл или у него небезопасные права — код 1 через die
+#   (проверка не пропускается).
 SIGNED=false
 SIGNER=""
 
@@ -518,11 +527,8 @@ verify_signature() {
 	local sha=$1 tag=${2:-}
 	SIGNED=false
 	SIGNER=""
-	[[ -f "$ALLOWED_SIGNERS" ]] || return 0
-	# Пустой файл или без ключевых строк — подпись не настроена.
-	local _key_lines
-	_key_lines=$(LC_ALL=C grep -cvE '^[[:space:]]*($|#)' "$ALLOWED_SIGNERS" 2>/dev/null || echo 0)
-	(( _key_lines > 0 )) || return 0
+	signing_enabled || return 0
+	[[ -f "$ALLOWED_SIGNERS" ]] || die "${ALLOWED_SIGNERS}: не обычный файл"
 	check_secure_file "$ALLOWED_SIGNERS" 022
 	local out
 	if [[ -n "$tag" ]]; then
@@ -542,6 +548,14 @@ verify_signature() {
 		SIGNER=$(printf '%s' "$out" | LC_ALL=C grep -oE 'Good.*signing key: [^ ]+' | head -1 | \
 			sed 's/.*signing key: //' || true)
 	fi
+}
+
+# Назначение: решить, можно ли применять цель без обхода подписи.
+# Параметры: нет (читает SIGNED после verify_signature).
+# Результат: 0, если подпись выключена или цель проверена (SIGNED=true); иначе 1.
+# Ошибки: нет.
+signature_gate() {
+	! signing_enabled || [[ "$SIGNED" == true ]]
 }
 
 # ------------------------------------------------------------------
@@ -641,7 +655,7 @@ INFRA_ERROR=""
 # Ошибки: не отвечает — код 1, причина в INFRA_ERROR.
 check_infra_health() {
 	# Имена контейнеров из deploy/docker-compose.yml инфраструктуры.
-	local ch_ctr=deploy-clickhouse-1 redis_ctr=deploy-redis-1
+	local ch_ctr=emtds-infra-clickhouse-1 redis_ctr=emtds-infra-redis-1
 	INFRA_ERROR=""
 	if ! docker exec "$ch_ctr" sh -c 'wget -qO- http://127.0.0.1:8123/ping 2>/dev/null || curl -fsS http://127.0.0.1:8123/ping 2>/dev/null' 2>/dev/null | grep -qi ok; then
 		INFRA_ERROR="ClickHouse недоступен (${ch_ctr})"
@@ -667,7 +681,7 @@ vol_write() {
 	local name=$1
 	# Имя файла — белый список (только безопасные имена без слэшей).
 	case "$name" in
-		agent.json|check.json|state.json|log.txt|pending|announced.json) ;;
+		agent.json|check.json|state.json|log.txt|pending) ;;
 		*) die "vol_write: недопустимое имя файла: ${name}";;
 	esac
 	local n="$name"
@@ -785,11 +799,7 @@ write_agent_json() {
 	repo=$(printf '%s' "$REPO" | LC_ALL=C sed 's|//[^@]*@|//***@|g')
 	channel=$CHANNEL
 	signing=false
-	if [[ -f "$ALLOWED_SIGNERS" ]]; then
-		local _asl
-		_asl=$(LC_ALL=C grep -cvE '^[[:space:]]*($|#)' "$ALLOWED_SIGNERS" 2>/dev/null || echo 0)
-		(( _asl > 0 )) && signing=true
-	fi
+	signing_enabled && signing=true
 	docker_ok=false
 	docker info >/dev/null 2>&1 && docker_ok=true
 	inbox=false
@@ -1413,18 +1423,32 @@ build_commits_json() {
 	printf '%s]' "$arr"
 }
 
+# Назначение: собрать заметки «что нового» для цели.
+# Параметры: $1 — текущий sha; $2 — sha цели; $3 — тег цели (или пусто).
+# Результат: на stdout добавленные строки CHANGELOG.md между версиями без ведущего «+»;
+#   если таких строк нет — тема и тело аннотации тега (без блока подписи); иначе пусто.
+#   Длину ограничивает json_str при записи check.json (16 КиБ).
+# Ошибки: нет.
+build_notes() {
+	local cur=$1 target=$2 tag=${3:-} notes
+	notes=$(git_cmd diff --no-color -U0 "${cur}..${target}" -- CHANGELOG.md 2>/dev/null | \
+		LC_ALL=C sed -n '/^+++/d; s/^+//p' || true)
+	if [[ -z "$notes" && -n "$tag" ]]; then
+		notes=$(git_cmd for-each-ref --format='%(contents:subject)%0a%0a%(contents:body)' "refs/tags/${tag}" 2>/dev/null || true)
+	fi
+	printf '%s' "$notes"
+}
+
 # Назначение: записать check.json для выбранной цели (подпись, ручные шаги, коммиты, заметки).
 # Параметры: $1 — текущий sha.
 # Результат: check.json в томе; SIGNED, SIGNER, MANUAL_STEPS обновлены.
 # Ошибки: vol_write — код 1.
 write_check_for_target() {
-	local cur_sha=$1 ahead notes=""
+	local cur_sha=$1 ahead notes
 	verify_signature "$TARGET_SHA" "$TARGET_TAG"
 	collect_manual_steps "$TARGET_SHA"
 	ahead=$(git_cmd rev-list --count "${cur_sha}..${TARGET_SHA}" 2>/dev/null || echo 0)
-	if [[ -n "$TARGET_TAG" ]]; then
-		notes=$(git_cmd tag -l --format='%(contents)' "$TARGET_TAG" 2>/dev/null || true)
-	fi
+	notes=$(build_notes "$cur_sha" "$TARGET_SHA" "$TARGET_TAG")
 	_CHECK_COMMITS_JSON=$(build_commits_json "$cur_sha" "$TARGET_SHA" 200)
 	write_check_json "$cur_sha" "$TARGET_SHA" "$TARGET_TAG" "$TARGET_VER" \
 		"$ahead" "$SIGNED" "$SIGNER" "$(manual_steps_json)" "$notes" ""
@@ -1611,9 +1635,9 @@ do_update() {
 		return 0
 	fi
 	write_check_for_target "$cur_sha"
-	if [[ "$SIGNED" != true ]]; then
+	if ! signature_gate; then
 		[[ $F_UNSIGNED -eq 1 ]] || \
-			die "цель ${TARGET_SHA:0:12} без проверенной подписи (нет allowed_signers или подпись не прошла); применение без подписи — только CLI с --unsigned"
+			die "подпись включена (allowed_signers), цель ${TARGET_SHA:0:12} без проверенной подписи; обход — только CLI --unsigned"
 		logbuf "внимание: применение без проверенной подписи (--unsigned)"
 	fi
 	check_manual_steps "$TARGET_SHA"
@@ -1639,13 +1663,17 @@ load_mask_words() {
 }
 
 # Назначение: найти версию, с которой выкатили текущий HEAD.
-# Параметры: $1 — текущий sha.
+# Параметры: $1 — текущий sha; $2 — 1: учитывать только последнюю запись history (один шаг назад), по умолчанию 0.
 # Результат: sha предыдущей версии на stdout.
-# Ошибки: нет записи apply ok с to == HEAD — код 1.
+# Ошибки: нет записи apply ok с to == HEAD (при $2=1 — последняя запись не такая) — код 1.
 previous_version() {
 	local hist="${VAR_DIR}/history" prev
 	[[ -f "$hist" && ! -L "$hist" ]] || return 1
-	prev=$(awk -v cur="$1" '$3 == "apply" && $6 == "ok" && $5 == cur && length($4) == 40 && $4 ~ /^[0-9a-f]+$/ { p = $4 } END { print p }' "$hist")
+	prev=$(awk -v cur="$1" -v last_only="${2:-0}" '
+		NF == 0 { next }
+		$3 == "apply" && $6 == "ok" && $5 == cur && length($4) == 40 && $4 ~ /^[0-9a-f]+$/ { p = $4; hit = 1; next }
+		{ hit = 0 }
+		END { if (last_only != 1 || hit) print p }' "$hist")
 	[[ -n "$prev" ]] || return 1
 	printf '%s' "$prev"
 }
@@ -1678,9 +1706,10 @@ do_status() {
 	printf 'HEAD:    %s\n' "${cur_sha:0:12}"
 	printf 'channel: %s\n' "${CHANNEL:-?}"
 	printf 'repo:    %s\n' "$(printf '%s' "${REPO:-?}" | LC_ALL=C sed 's|//[^@]*@|//***@|g')"
+	printf 'signing: %s\n' "$(signing_enabled && echo on || echo off)"
 	printf 'lock:    %s\n' "$(flock -n "${LOCK_FILE}" true 2>/dev/null && echo free || echo held)"
 	if [[ -n "$VOL_NAME" ]]; then
-		local state; state=$(vol_read state.json 65536 2>/dev/null || printf '')
+		local state; state=$(vol_read state.json 65536 2>/dev/null | strip_control || printf '')
 		[[ -n "$state" ]] && printf 'state:   %s\n' "$state" || printf 'state:   (нет)\n'
 	fi
 }
@@ -1698,7 +1727,7 @@ do_dry_run() {
 	printf 'state_dir: %s\n' "$STATE_DIR"
 	printf 'channel:   %s\n' "$CHANNEL"
 	printf 'repo:      %s\n' "$(printf '%s' "$REPO" | LC_ALL=C sed 's|//[^@]*@|//***@|g')"
-	printf 'signing:   %s\n' "$([ -f "$ALLOWED_SIGNERS" ] && echo on || echo off)"
+	printf 'signing:   %s\n' "$(signing_enabled && echo on || echo off)"
 	if ( check_environment ) >/dev/null 2>&1; then
 		printf 'env:       ok\n'
 	else
@@ -1810,7 +1839,7 @@ do_install() {
 		[[ -n "$repo_val" ]] || die "задайте --repo URL"
 		validate_repo_url "$repo_val" || die "недопустимый repo"
 		local ch_val="${opt_channel:-release}"
-		printf 'EMTDS_UPDATE_REPO=%s\nEMTDS_UPDATE_CHANNEL=%s\nEMTDS_UPDATE_CHECK_HOURS=6\nEMTDS_UPDATE_KEEP_IMAGES=3\nEMTDS_UPDATE_KEEP_BACKUPS=5\nTDS_DIR=%s\n' \
+		printf 'EMTDS_UPDATE_REPO=%s\nEMTDS_UPDATE_CHANNEL=%s\nEMTDS_UPDATE_CHECK_HOURS=1\nEMTDS_UPDATE_KEEP_IMAGES=3\nEMTDS_UPDATE_KEEP_BACKUPS=5\nTDS_DIR=%s\n' \
 			"$repo_val" "$ch_val" "${opt_tds_dir:-/opt/emtds}" > "${UPDATE_ENV}.tmp"
 		chmod 0600 "${UPDATE_ENV}.tmp"
 		mv -f "${UPDATE_ENV}.tmp" "$UPDATE_ENV"
@@ -1846,8 +1875,8 @@ do_install() {
 			printf 'Положите ключ хоста вручную: ssh-keyscan -t ed25519 <host> > %s (сверьте отпечаток)\n' "$KNOWN_HOSTS"
 		fi
 	fi
-	if [[ ! -f "$ALLOWED_SIGNERS" ]]; then
-		printf 'Создайте файл %s в формате:\n  <email> namespaces="git" ssh-ed25519 AAAA...\n' "$ALLOWED_SIGNERS"
+	if ! signing_enabled; then
+		printf 'Проверка подписи выключена: в %s нет ключей.\nЧтобы включить, добавьте строки вида (файл 0644, владелец root):\n  <email> namespaces="git" ssh-ed25519 AAAA...\n' "$ALLOWED_SIGNERS"
 	fi
 	# Копия скрипта.
 	if [[ -n "$SELF" && -f "$SELF" && "$SELF" != "${LIB_DIR}/update.sh" ]]; then
@@ -2067,7 +2096,7 @@ refuse_request() {
 		"$REQ_USER" "$now" "$now" || true
 }
 
-# Назначение: выполнить запрос кнопки apply: цель обязана совпасть со свежим --check и быть подписанной.
+# Назначение: выполнить запрос кнопки apply: цель обязана совпасть со свежим --check и пройти signature_gate.
 # Параметры: нет (REQ_*).
 # Результат: прогон применения или отказ refused.
 # Ошибки: нет (результат в state.json).
@@ -2079,26 +2108,28 @@ handle_request_apply() {
 	resolve_target "" || { refuse_request target; return 0; }
 	[[ "$TARGET_SHA" == "$REQ_TARGET" ]] || { refuse_request target_mismatch; return 0; }
 	verify_signature "$TARGET_SHA" "$TARGET_TAG"
-	[[ "$SIGNED" == true ]] || { refuse_request unsigned; return 0; }
+	signature_gate || { refuse_request unsigned; return 0; }
 	collect_manual_steps "$TARGET_SHA"
 	[[ ${#MANUAL_STEPS[@]} -eq 0 ]] || { refuse_request manual_steps; return 0; }
 	log "запрос ${REQ_ACTION} ${REQ_ID} принят"
 	do_apply apply "$TARGET_SHA" "$TARGET_TAG" "$REQ_USER" 0 || true
 }
 
-# Назначение: выполнить запрос кнопки rollback: только на предыдущую версию с проверенной подписью.
+# Назначение: выполнить запрос кнопки rollback: один шаг назад, только если последняя запись history —
+#   успешный apply на текущий HEAD; предыдущая версия должна пройти signature_gate.
+#   Цепочка откатов кнопкой невозможна: после отката последняя запись — rollback, и запрос получает no_previous.
 # Параметры: нет (REQ_*).
-# Результат: прогон отката или отказ refused.
+# Результат: прогон отката или отказ refused (no_previous, no_image, unsigned).
 # Ошибки: нет (результат в state.json).
 handle_request_rollback() {
 	local cur_sha prev_sha tag
 	prepare_stack
 	cur_sha=$(git_cmd rev-parse HEAD)
-	prev_sha=$(previous_version "$cur_sha") || { refuse_request no_previous; return 0; }
+	prev_sha=$(previous_version "$cur_sha" 1) || { refuse_request no_previous; return 0; }
 	docker inspect "emtds:${prev_sha:0:12}" >/dev/null 2>&1 || { refuse_request no_image; return 0; }
 	tag=$(git_cmd tag --points-at "$prev_sha" -l 'v*.*.*' 2>/dev/null | sort -V | tail -1 || true)
 	verify_signature "$prev_sha" "$tag"
-	[[ "$SIGNED" == true ]] || { refuse_request unsigned; return 0; }
+	signature_gate || { refuse_request unsigned; return 0; }
 	log "запрос ${REQ_ACTION} ${REQ_ID} принят"
 	do_apply rollback "$prev_sha" "$tag" "$REQ_USER" 1 || true
 }
@@ -2220,6 +2251,9 @@ run_self_test() {
 	_assert "$(json_str $'bell\a!')" '"bell!"' json_str_control
 	_assert "$(json_str "abcdefgh" 4)" '"abcd"' json_str_trunc
 	_assert "$(LC_ALL=C json_str 'жжж' 2)" '"жж"' json_str_utf8
+	_assert "$(json_str $'ab\ncd' 3)" '"ab\n"' json_str_trunc_nl
+	_assert "$(json_str 'a\b' 2)" '"a\\"' json_str_trunc_backslash
+	_assert "$(json_str 'a"b' 2)" '"a\""' json_str_trunc_quote
 
 	_assert_rc 0 repo_git_at validate_repo_url 'git@github.com:owner/emtds.git'
 	_assert_rc 0 repo_ssh validate_repo_url 'ssh://git@github.com/owner/repo.git'
@@ -2279,6 +2313,30 @@ run_self_test() {
 	chmod 0644 "$_pt"; _assert_rc 0 perm_644 _check_perm "$_pt" 022
 	chmod 0600 "$_pt"; _assert_rc 0 perm_600_077 _check_perm "$_pt" 077
 	chmod 0640 "$_pt"; _assert_rc 1 perm_640_077 _check_perm "$_pt" 077
+
+	# signing_enabled и signature_gate: политика определяется только строками ключей.
+	_sign_on() { ( ALLOWED_SIGNERS=$1; signing_enabled ); }
+	_gate() { ( ALLOWED_SIGNERS=$1; SIGNED=$2; signature_gate ); }
+	local _as="${tmp}/allowed_signers"
+	_assert_rc 1 signing_absent _sign_on "$_as"
+	printf '\n# только комментарий\n' > "$_as"
+	_assert_rc 1 signing_comments_only _sign_on "$_as"
+	printf 'signer@example.com namespaces="git" ssh-ed25519 AAAA\n' > "$_as"
+	chmod 0666 "$_as"
+	_assert_rc 0 signing_key_loose_perms _sign_on "$_as"
+	_assert_rc 1 gate_on_unsigned _gate "$_as" false
+	_assert_rc 0 gate_on_signed _gate "$_as" true
+	: > "$_as"
+	_assert_rc 0 gate_off_unsigned _gate "$_as" false
+	rm -f -- "$_as"
+	ln -s "${tmp}/missing" "$_as"
+	_assert_rc 0 signing_broken_symlink _sign_on "$_as"
+	rm -f -- "$_as"
+	mkdir "$_as"
+	_assert_rc 0 signing_directory _sign_on "$_as"
+	_assert_rc 1 gate_dir_unsigned _gate "$_as" false
+
+	_assert "$(printf 'a\033[31mж\tb\n' | strip_control)" $'a[31mж\tb' strip_control_esc
 
 	# file:// и локальные пути отклоняются вне sandbox, разрешены в sandbox.
 	_vno()  { ( SBX="" validate_repo_url "$1" ); }

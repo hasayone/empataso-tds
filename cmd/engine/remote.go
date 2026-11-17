@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/fetch"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/fetch"
 )
 
 // remoteValue loads the value for [REMOTE]:

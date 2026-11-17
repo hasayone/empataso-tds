@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // aiOpenRouterModels is an OpenRouter /models answer: a model with tools and a price that differs
@@ -413,7 +413,7 @@ func TestAIModelsPutChecksCatalog(t *testing.T) {
 func TestAIModelsReserveUsesCatalogPrice(t *testing.T) {
 	m := newAIModelsEnv(t)
 	m.models("")
-	st := aiUsageSettings(aiTestPtr(int64(0)), aiTestPtr(int64(0)), aiTestPtr(0.0), aiTestPtr(0.0))
+	st := aiUsageSettings(aiTestOff[int64](), aiTestOff[int64](), aiTestOff[float64](), aiTestOff[float64]())
 	st.Provider = aiProviderOpenRouter
 	r, err := m.s.aiReserve("u", "vendor/cheap", st)
 	if err != nil || !r.Priced || r.Price.InputPerM != 0.2 {

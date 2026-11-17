@@ -11,21 +11,15 @@ TDS_DIR=
 if [[ -n "$SELF" ]]; then
 	TDS_DIR=$(dirname "$(dirname "$SELF")")
 fi
-STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-${KUZTDS_INSTALL_STATE_DIR:-}}"
-if [[ -z "$STATE_DIR" ]]; then
-	STATE_DIR=/etc/emtds
-	if [[ ! -e /etc/emtds && -d /etc/kuztds ]]; then
-		STATE_DIR=/etc/kuztds
-	fi
-fi
-SERVER_ENV="${EMTDS_SERVER_ENV:-${KUZTDS_SERVER_ENV:-$STATE_DIR/server.env}}"
+STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-/etc/emtds}"
+SERVER_ENV="${EMTDS_SERVER_ENV:-$STATE_DIR/server.env}"
 INFRA_OVERRIDE="$STATE_DIR/compose.infra.yml"
 APP_OVERRIDE="$STATE_DIR/compose.app.yml"
-UNIT_DIR="${EMTDS_WATCHDOG_UNIT_DIR:-${KUZTDS_WATCHDOG_UNIT_DIR:-/etc/systemd/system}}"
-LOCK_FILE="${EMTDS_WATCHDOG_LOCK:-${KUZTDS_WATCHDOG_LOCK:-/run/emtds-watchdog.lock}}"
+UNIT_DIR="${EMTDS_WATCHDOG_UNIT_DIR:-/etc/systemd/system}"
+LOCK_FILE="${EMTDS_WATCHDOG_LOCK:-/run/emtds-watchdog.lock}"
 UPDATE_LOCK_FILE="${EMTDS_UPDATE_LOCK:-/run/emtds-update.lock}"
 APP_CONTAINERS=(emtds-engine emtds-admin emtds-cron emtds-php)
-INFRA_CONTAINERS=(deploy-clickhouse-1 deploy-redis-1)
+INFRA_CONTAINERS=(emtds-infra-clickhouse-1 emtds-infra-redis-1)
 
 # Назначение: короткое сообщение сторожа в journald.
 # Параметры: текст.
@@ -50,19 +44,6 @@ env_value() {
 		val=${val:1:${#val}-2}
 	elif [[ "$val" == \'*\' && "$val" == *\' ]]; then
 		val=${val:1:${#val}-2}
-	fi
-	printf '%s' "$val"
-}
-
-# Назначение: значение EMTDS_<имя> из env-файла, при пустом — старое KUZTDS_<имя>.
-# Параметры: $1 — путь; $2 — имя без префикса.
-# Результат: значение на stdout, может быть пустым.
-# Ошибки: нет.
-env_value_compat() {
-	local file=$1 name=$2 val
-	val=$(env_value "$file" "EMTDS_${name}")
-	if [[ -z "$val" ]]; then
-		val=$(env_value "$file" "KUZTDS_${name}")
 	fi
 	printf '%s' "$val"
 }
@@ -176,7 +157,7 @@ infra_compose() {
 	[[ -f "$SERVER_ENV" ]] && envf+=("$SERVER_ENV")
 	[[ -f "$TDS_DIR/.env" ]] || return 1
 	[[ -f "$TDS_DIR/deploy/docker-compose.yml" ]] || return 1
-	local args=(docker compose -p deploy)
+	local args=(docker compose -p emtds-infra)
 	local f
 	for f in "${envf[@]}"; do
 		args+=(--env-file "$f")
@@ -209,7 +190,7 @@ app_compose() {
 	timeout 90 "${args[@]}" "$@"
 }
 
-# Назначение: Docker слушает, сеть deploy_default есть.
+# Назначение: Docker слушает, сеть emtds-infra_default есть.
 # Параметры: нет.
 # Результат: код 0.
 # Ошибки: docker не поднялся, код 1.
@@ -223,10 +204,10 @@ ensure_docker() {
 		sleep 2
 	done
 	docker info >/dev/null 2>&1 || { log "docker не отвечает"; return 1; }
-	if docker network inspect deploy_default >/dev/null 2>&1; then
+	if docker network inspect emtds-infra_default >/dev/null 2>&1; then
 		return 0
 	fi
-	log "сеть deploy_default отсутствует, infra up -d"
+	log "сеть emtds-infra_default отсутствует, infra up -d"
 	infra_compose up -d
 }
 
@@ -274,10 +255,6 @@ ensure_app_container() {
 	fi
 	if [[ "$service" == php || "$service" == cron ]]; then
 		log "${name} нет, php/cron не создаём"
-		return 1
-	fi
-	if [[ "$(container_state "kuztds-${service}")" != missing ]]; then
-		log "${name} нет, есть старый kuztds-${service}: сначала deploy/migrate-emtds.sh, новый контейнер не создаём"
 		return 1
 	fi
 	log "app up -d --no-deps ${service}"
@@ -356,9 +333,9 @@ run_check() {
 	ensure_infra || rc=1
 	ensure_app_container emtds-php php || true
 	ensure_app_container emtds-cron cron || true
-	engine_url="http://$(publish_listen "$(env_value_compat "$SERVER_ENV" ENGINE_PUBLISH)" "127.0.0.1:18080")/healthz"
-	admin_url="http://$(publish_listen "$(env_value_compat "$SERVER_ENV" ADMIN_PUBLISH)" "127.0.0.1:8090")/api/health"
-	ch_url="http://$(publish_listen "$(env_value_compat "$SERVER_ENV" CH_HTTP_PUBLISH)" "127.0.0.1:8123")/ping"
+	engine_url="http://$(publish_listen "$(env_value "$SERVER_ENV" EMTDS_ENGINE_PUBLISH)" "127.0.0.1:18080")/healthz"
+	admin_url="http://$(publish_listen "$(env_value "$SERVER_ENV" EMTDS_ADMIN_PUBLISH)" "127.0.0.1:8090")/api/health"
+	ch_url="http://$(publish_listen "$(env_value "$SERVER_ENV" EMTDS_CH_HTTP_PUBLISH)" "127.0.0.1:8123")/ping"
 	ensure_engine_health "$engine_url" || rc=1
 	ensure_admin "$admin_url" || true
 	if ! http_ok "$ch_url"; then
@@ -411,7 +388,7 @@ Unit=emtds-watchdog.service
 WantedBy=timers.target
 EOF
 	chmod 0644 "$service" "$timer"
-	if [[ "${EMTDS_WATCHDOG_SKIP_SYSTEMCTL:-${KUZTDS_WATCHDOG_SKIP_SYSTEMCTL:-}}" == 1 ]]; then
+	if [[ "${EMTDS_WATCHDOG_SKIP_SYSTEMCTL:-}" == 1 ]]; then
 		log "юниты записаны в ${UNIT_DIR}"
 		return 0
 	fi

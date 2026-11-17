@@ -35,7 +35,6 @@
 - [Чекер](checker.md)
 - [Сторож трекера](watchdog.md)
 - [Обновление EmTDS](updates.md)
-- [Переход KuzTDS → EmTDS на сервере](emtds-migration.md)
 - [Регистрация доменов через Namecheap](namecheap.md)
 - [Оформление: схема, цвет элементов, панель, поиск в полях выбора, файлы, кнопки](appearance.md)
 

@@ -3,7 +3,7 @@ package router
 import (
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 func TestSelect_Model(t *testing.T) {

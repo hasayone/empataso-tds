@@ -3,7 +3,7 @@ package main
 import (
 	"net/http"
 
-	"github.com/egerkuzma/emtds/internal/server"
+	"github.com/hasayone/empataso-tds/internal/server"
 )
 
 // setEngineCookie sends c to the visitor, marked Secure when the request came

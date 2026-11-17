@@ -24,7 +24,7 @@
 | `cmd/mcp` | MCP-сервер для ИИ-агента по stdio (`make mcp`, см. [wiki/mcp.md](wiki/mcp.md)) | — |
 | `cmd/loadgen` | генератор кликов по тестовым кампаниям (см. [wiki/loadgen.md](wiki/loadgen.md)) | — |
 
-Переменная `EMTDS_*` при пустом значении берётся из той же с прежним префиксом `KUZTDS_`. База и пользователь ClickHouse по-прежнему называются `kuztds` (значения по умолчанию у `EMTDS_CLICKHOUSE_DB` и `EMTDS_CLICKHOUSE_USER`).
+Новый запуск создаёт базу и пользователя ClickHouse `emtds` (значения по умолчанию у `EMTDS_CLICKHOUSE_DB` и `EMTDS_CLICKHOUSE_USER`).
 
 Хранилища: **ClickHouse** (логи/конверсии), **Redis** (уникальность/лимиты/
 фаервол/сессии). Оба опциональны — без них движок работает, пропуская
@@ -47,8 +47,8 @@ go run ./cmd/admin -hash 'мой-пароль'   # выведет $argon2id$...
 EMTDS_DATA_DIR=../database EMTDS_GROUPS_FILE=configs/groups.example.json \
 EMTDS_TRUSTED_PROXIES=127.0.0.1/32 EMTDS_POSTBACK_KEY=secret EMTDS_API_KEY=apikey \
 EMTDS_REDIS_ADDR=localhost:6379 \
-EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=kuztds \
-EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CLICKHOUSE_ADDR=localhost:9000 EMTDS_CLICKHOUSE_DB=emtds \
+EMTDS_CLICKHOUSE_USER=emtds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/engine
 
 # админка (открыть http://localhost:8090, логин admin)
@@ -56,7 +56,7 @@ EMTDS_ADMIN_PASSWORD_HASH='<хэш>' EMTDS_ADMIN_PASSWORD_FILE=./admin.hash \
 EMTDS_ENGINE_URL=http://localhost:8080 EMTDS_GROUPS_FILE=configs/groups.example.json \
 EMTDS_DATA_DIR=../database EMTDS_KEYS_DIR=./keys \
 EMTDS_REDIS_ADDR=localhost:6379 EMTDS_CLICKHOUSE_ADDR=localhost:9000 \
-EMTDS_CLICKHOUSE_DB=kuztds EMTDS_CLICKHOUSE_USER=kuztds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
+EMTDS_CLICKHOUSE_DB=emtds EMTDS_CLICKHOUSE_USER=emtds EMTDS_CLICKHOUSE_PASSWORD=devpassword \
 go run ./cmd/admin
 
 # cron-сервис (опционально) — настраивается потом на странице Automation.
@@ -158,7 +158,7 @@ go run ./cmd/cron
 ## Веб-интерфейс админки
 
 Одна **верхняя панель**: навигация, выбор периода, переключатель темы, меню
-пользователя (Профиль, Интеграции, Выход). Сайдбаров нет; каждая страница занимает всю
+пользователя (Настройки, Интеграции, Выход). Сайдбаров нет; каждая страница занимает всю
 ширину и имеет свой адрес (`#/flows/promo`, `#/tools/8.8.8.8`), так что
 «назад/вперёд» и ссылки работают. Светлая и тёмная темы: кнопка солнце/луна
 переключает и запоминает выбор в браузере (`localStorage`); пока выбор не
@@ -180,8 +180,8 @@ go run ./cmd/cron
 подгружаются из данных за период через `GET /api/logs/filters`; поле IP;
 люди/боты; CSV; строка открывает детали визита — маршрут, местоположение, сеть,
 User-Agent, реферер), **Conversions**, **Keywords**, **Lists** (редактор
-`.dat`), **Tools** (ниже), **Automation** (ниже), **Профиль** (меню пользователя:
-пароль, название и логотип компании, API-ключи, пользователи, разделы).
+`.dat`), **Tools** (ниже), **Automation** (ниже), **Настройки** (меню пользователя:
+пароль, название и логотип компании, API-ключи, пользователи, разделы, О системе).
 
 Остальные страницы описаны в [вики](wiki/README.md): офферы и лендинги,
 партнёрские сети, источники трафика, домены, отчёт, интеграции (перенос из

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // aiModelsTTL is how long a fetched model catalog is served without asking the provider.

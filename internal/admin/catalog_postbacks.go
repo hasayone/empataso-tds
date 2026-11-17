@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 func (s *Server) handleCampaignPostbacksGet(w http.ResponseWriter, r *http.Request) {

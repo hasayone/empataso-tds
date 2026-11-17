@@ -3,7 +3,7 @@ package store
 import (
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // Engine Redis defaults. A visitor request waits on Redis for uniqueness,

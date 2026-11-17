@@ -1,5 +1,7 @@
 package config
 
+import "os"
+
 // Build-info variables are injected at link time via -X flags when the binary
 // is assembled by the CI pipeline or update.sh.
 // An empty or non-hex commit means the binary was built outside the pipeline.
@@ -10,12 +12,32 @@ var (
 	channel    string
 )
 
-// BuildInfo carries the version metadata embedded in the binary at build time.
+// Values of BuildInfo.Env.
+const (
+	EnvProduction  = "production"
+	EnvDevelopment = "development"
+)
+
+// envVar names the variable the installer sets to production in server.env of the server.
+const envVar = "EMTDS_ENV"
+
+// BuildInfo carries the version metadata embedded in the binary at build time and the
+// environment the process runs in.
 type BuildInfo struct {
 	Version    string `json:"version"`
 	Commit     string `json:"commit"`
 	CommitDate string `json:"commit_date"`
 	Channel    string `json:"channel"`
+	Env        string `json:"env"`
+}
+
+// Environment returns EnvProduction when EMTDS_ENV is exactly "production" and EnvDevelopment
+// otherwise, so a local stack or a test never looks like the production server.
+func Environment() string {
+	if os.Getenv(envVar) == EnvProduction {
+		return EnvProduction
+	}
+	return EnvDevelopment
 }
 
 // Build returns the build metadata for the running binary.
@@ -25,10 +47,11 @@ type BuildInfo struct {
 //     treated as a development build: Version "dev", Commit "", Channel "dev".
 //   - version empty with a valid commit → first 12 characters of commit.
 //   - channel outside "release", "main", "dev" → "dev".
+//   - env is Environment() of the process, read on every call.
 func Build() BuildInfo {
 	c := commit
 	if !isValidBuildCommit(c) {
-		return BuildInfo{Version: "dev", Commit: "", CommitDate: commitDate, Channel: "dev"}
+		return BuildInfo{Version: "dev", Commit: "", CommitDate: commitDate, Channel: "dev", Env: Environment()}
 	}
 	ch := channel
 	if ch != "release" && ch != "main" && ch != "dev" {
@@ -38,7 +61,7 @@ func Build() BuildInfo {
 	if v == "" {
 		v = c[:12]
 	}
-	return BuildInfo{Version: v, Commit: c, CommitDate: commitDate, Channel: ch}
+	return BuildInfo{Version: v, Commit: c, CommitDate: commitDate, Channel: ch, Env: Environment()}
 }
 
 // isValidBuildCommit reports whether s is a 40-character lowercase hex string.

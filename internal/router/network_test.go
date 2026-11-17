@@ -4,7 +4,7 @@ import (
 	"net/url"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 func rs(r config.Rules) *config.Stream {

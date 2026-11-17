@@ -15,7 +15,7 @@ import (
 
 	"github.com/toon-format/toon-go"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // TestToonFromJSONSpecExamples checks the encoder against the examples of the TOON specification

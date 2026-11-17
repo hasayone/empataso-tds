@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/render"
+	"github.com/hasayone/empataso-tds/internal/render"
 )
 
 // errPHPOff is returned when a PHP file is requested and EMTDS_PHP_URL is empty.
@@ -102,7 +102,7 @@ func (s *landingServer) servePHPAsset(w http.ResponseWriter, r *http.Request, id
 
 // proxyPHP fetches id/name from the PHP origin.
 // r supplies the query and the visitor headers that are copied.
-// ip is X-Forwarded-For. cid is sent as X-Emtds-Cid and X-Kuztds-Cid.
+// ip is X-Forwarded-For. cid is sent as X-Emtds-Cid.
 // origin is sent as X-Emtds-Origin and may be empty.
 // The result carries the body, the status, Location and Content-Type.
 // err is set on transport failure, a timeout, or an oversized body.
@@ -137,8 +137,6 @@ func (s *landingServer) fetchPHP(r *http.Request, id, name, ip, cid, origin stri
 	}
 	req.Header.Set("X-Emtds-Cid", cid)
 	req.Header.Set("X-Emtds-Origin", origin)
-	// Uploaded PHP landings may read HTTP_X_KUZTDS_CID, so the old name is sent too.
-	req.Header.Set("X-Kuztds-Cid", cid)
 	if r != nil {
 		if ua := r.Header.Get("User-Agent"); ua != "" {
 			req.Header.Set("User-Agent", ua)

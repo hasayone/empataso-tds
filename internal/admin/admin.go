@@ -22,11 +22,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/cron"
-	"github.com/egerkuzma/emtds/internal/logbuf"
-	"github.com/egerkuzma/emtds/internal/security"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/cron"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // StatsProvider — source of statistics (implemented by store.CH).
@@ -245,6 +245,11 @@ type Config struct {
 	// AdminTrustedProxies lists CIDRs that may set X-Forwarded-For and X-Forwarded-Proto.
 	// An empty slice uses localhost only. Invalid CIDRs fail server construction.
 	AdminTrustedProxies []string
+
+	// SetupToken is the first-run token (EMTDS_SETUP_TOKEN). When it is not empty, POST /api/setup
+	// must carry the same value in the token field. Empty means the first-run form needs no token.
+	// The value is a secret: it is never logged and never returned by the API.
+	SetupToken string
 }
 
 // slogLogger — minimal logger interface (to avoid pulling in a hard dependency).
@@ -329,6 +334,8 @@ type Server struct {
 	ktSource string
 	// ktCount is the last campaign count found by the connection check.
 	ktCount keitaroCountHint
+	// ktVersion is the tracker version found by the last connection check; log imports ask id columns by it.
+	ktVersion keitaroVersionHint
 	// ktConns holds tracker connections from keitaro.json; empty uses ktBase and ktKey only.
 	ktConns    []keitaroConn
 	ktFileList bool
@@ -422,22 +429,22 @@ type Server struct {
 	// three POST update routes so that two concurrent calls cannot both pass the
 	// request_pending check and both write a request file.
 	updateWriteMu sync.Mutex
+
+	// procRoot is the directory GET /api/system reads loadavg, meminfo and uptime from;
+	// empty means /proc. Tests point it at a fake tree.
+	procRoot string
+	// diskStat returns the free and total bytes of the filesystem holding path; nil means
+	// cron.DiskFree. Tests replace it.
+	diskStat func(path string) (free, total uint64, err error)
 }
 
-const (
-	// cookieName names the session cookie the panel issues.
-	cookieName = "emtds_admin"
-	// legacyCookieName is the session cookie issued before the rename; it is still accepted.
-	legacyCookieName = "kuztds_admin"
-)
+// cookieName names the session cookie the panel issues.
+const cookieName = "emtds_admin"
 
-// sessionCookie returns the session cookie of r: emtds_admin first, then kuztds_admin.
-// The error is http.ErrNoCookie when neither is present.
+// sessionCookie returns the emtds_admin session cookie of r.
+// The error is http.ErrNoCookie when it is absent.
 func sessionCookie(r *http.Request) (*http.Cookie, error) {
-	if c, err := r.Cookie(cookieName); err == nil {
-		return c, nil
-	}
-	return r.Cookie(legacyCookieName)
+	return r.Cookie(cookieName)
 }
 
 // New creates an admin server.
@@ -734,6 +741,8 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "POST /api/keitaro/purge", http.HandlerFunc(s.handleKeitaroPurge))
 
 	s.handle(mux, "GET /api/version", http.HandlerFunc(s.handleVersion))
+	s.handle(mux, "GET /api/system", http.HandlerFunc(s.handleSystem))
+	s.handle(mux, "GET /api/system/signals", http.HandlerFunc(s.handleSignals))
 	s.handle(mux, "GET /api/update", http.HandlerFunc(s.handleUpdate))
 	s.handle(mux, "GET /api/update/log", http.HandlerFunc(s.handleUpdateLog))
 	s.handle(mux, "POST /api/update/apply", http.HandlerFunc(s.handleUpdateApply))

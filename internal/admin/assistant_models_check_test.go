@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // aiBodyParams returns the "params" object of an error body, nil when there is none.

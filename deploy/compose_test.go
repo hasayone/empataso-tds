@@ -102,3 +102,54 @@ func TestComposeInfraLoopback(t *testing.T) {
 		}
 	}
 }
+
+// TestComposeInfraNetworkName проверяет, что проект инфраструктуры называется emtds-infra,
+// а приложение подключается к его сети emtds-infra_default.
+func TestComposeInfraNetworkName(t *testing.T) {
+	infra, err := os.ReadFile("docker-compose.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.ReplaceAll(string(infra), "\r\n", "\n"), "\nname: emtds-infra\n") {
+		t.Fatal("docker-compose.yml: нет name: emtds-infra")
+	}
+	app, err := os.ReadFile("docker-compose.app.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	as := string(app)
+	if !strings.Contains(as, "name: emtds-infra_default") {
+		t.Fatal("docker-compose.app.yml: внешняя сеть должна называться emtds-infra_default")
+	}
+	if strings.Contains(as, "deploy_default") {
+		t.Fatal("docker-compose.app.yml: сеть deploy_default не используется")
+	}
+}
+
+// TestComposeAdminSetupTokenAndInbox проверяет, что токен первого входа передаётся только admin,
+// а каталог запросов обновления задан одним фиксированным путём хоста без переопределения переменной.
+func TestComposeAdminSetupTokenAndInbox(t *testing.T) {
+	data, err := os.ReadFile("docker-compose.app.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := strings.ReplaceAll(string(data), "\r\n", "\n")
+	adminIdx := strings.Index(s, "\n  admin:\n")
+	cronIdx := strings.Index(s, "\n  cron:\n")
+	if adminIdx < 0 || cronIdx < adminIdx {
+		t.Fatal("docker-compose.app.yml: не найдены секции admin и cron")
+	}
+	admin := s[adminIdx:cronIdx]
+	if !strings.Contains(admin, "EMTDS_SETUP_TOKEN: ${EMTDS_SETUP_TOKEN:-}") {
+		t.Fatal("admin: нет EMTDS_SETUP_TOKEN: ${EMTDS_SETUP_TOKEN:-}")
+	}
+	if rest := s[:adminIdx] + s[cronIdx:]; strings.Contains(rest, "EMTDS_SETUP_TOKEN") {
+		t.Fatal("токен первого входа нужен только admin")
+	}
+	if !strings.Contains(admin, "      - /var/lib/emtds-update/inbox:/var/lib/emtds/update-inbox\n") {
+		t.Fatal("admin: inbox должен монтироваться с фиксированного пути /var/lib/emtds-update/inbox")
+	}
+	if strings.Contains(s, "EMTDS_UPDATE_INBOX:-") || strings.Count(s, "emtds-update/inbox") != 1 {
+		t.Fatal("путь inbox переопределяется переменной или задан не один раз")
+	}
+}

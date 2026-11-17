@@ -15,8 +15,8 @@ import (
 
 	"math/rand"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/geo"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/geo"
 )
 
 // Empty — the "no data" value.

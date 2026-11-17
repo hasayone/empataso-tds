@@ -5,8 +5,8 @@ import (
 	"net/netip"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // visitUnique decides uniqueness of one request inside the group's window.

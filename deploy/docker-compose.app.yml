@@ -2,7 +2,6 @@
 # ClickHouse и Redis поднимает deploy/docker-compose.yml, это другой проект.
 # Запуск из каталога tds, когда инфраструктура уже работает:
 #   docker compose -f deploy/docker-compose.app.yml up -d --build
-# Переменные EMTDS_* при пустом значении берутся из старых KUZTDS_*.
 name: emtds-app
 
 services:
@@ -20,11 +19,13 @@ services:
     container_name: emtds-engine
     command: ["engine"]
     ports:
-      - "${EMTDS_ENGINE_PUBLISH:-${KUZTDS_ENGINE_PUBLISH:-127.0.0.1:8080:8080}}"
+      - "${EMTDS_ENGINE_PUBLISH:-127.0.0.1:8080:8080}"
     stop_grace_period: 30s
     restart: unless-stopped
     environment:
       EMTDS_LISTEN: ":8080"
+      # Окружение для «О системе»: production пишет install.sh в server.env, локально development.
+      EMTDS_ENV: ${EMTDS_ENV:-development}
       EMTDS_DATA_DIR: /var/lib/emtds/data
       EMTDS_KEYS_DIR: /var/lib/emtds/keys
       EMTDS_GROUPS_FILE: /var/lib/emtds/groups.json
@@ -39,10 +40,10 @@ services:
       EMTDS_REDIS_PASSWORD: ""
       EMTDS_UNIQ_MAX_SECONDS: ${EMTDS_UNIQ_MAX_SECONDS:-86400}
       EMTDS_CLICKHOUSE_ADDR: clickhouse:9000
-      EMTDS_CLICKHOUSE_DB: kuztds
-      EMTDS_CLICKHOUSE_USER: kuztds
+      EMTDS_CLICKHOUSE_DB: ${EMTDS_CLICKHOUSE_DB:-emtds}
+      EMTDS_CLICKHOUSE_USER: ${EMTDS_CLICKHOUSE_USER:-emtds}
       EMTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
-      EMTDS_TRUSTED_PROXIES: ${EMTDS_TRUSTED_PROXIES:-${KUZTDS_TRUSTED_PROXIES:-}}
+      EMTDS_TRUSTED_PROXIES: ${EMTDS_TRUSTED_PROXIES:-}
       # Имя экземпляра и каталог файлов метрик; их читает cron для тревоги о потерях.
       EMTDS_INSTANCE: engine
       EMTDS_METRICS_DIR: /var/lib/emtds/metrics
@@ -92,13 +93,14 @@ services:
     container_name: emtds-admin
     command: ["admin"]
     ports:
-      - "${EMTDS_ADMIN_PUBLISH:-${KUZTDS_ADMIN_PUBLISH:-127.0.0.1:8090:8090}}"
+      - "${EMTDS_ADMIN_PUBLISH:-127.0.0.1:8090:8090}"
     stop_grace_period: 15s
     restart: unless-stopped
     environment:
       EMTDS_ADMIN_LISTEN: ":8090"
-      EMTDS_ADMIN_USER: ${EMTDS_ADMIN_USER:-${KUZTDS_ADMIN_USER:-admin}}
-      EMTDS_ADMIN_PASSWORD: ${EMTDS_ADMIN_PASSWORD:-${KUZTDS_ADMIN_PASSWORD:-}}
+      EMTDS_ENV: ${EMTDS_ENV:-development}
+      EMTDS_ADMIN_USER: ${EMTDS_ADMIN_USER:-admin}
+      EMTDS_ADMIN_PASSWORD: ${EMTDS_ADMIN_PASSWORD:-}
       EMTDS_ADMIN_COOKIE_SECURE: "false"
       EMTDS_ADMIN_PASSWORD_FILE: /var/lib/emtds/admin.hash
       EMTDS_ENGINE_URL: http://engine:8080
@@ -115,19 +117,21 @@ services:
       EMTDS_REDIS_PASSWORD: ""
       EMTDS_UNIQ_MAX_SECONDS: ${EMTDS_UNIQ_MAX_SECONDS:-86400}
       EMTDS_CLICKHOUSE_ADDR: clickhouse:9000
-      EMTDS_CLICKHOUSE_DB: kuztds
-      EMTDS_CLICKHOUSE_USER: kuztds
+      EMTDS_CLICKHOUSE_DB: ${EMTDS_CLICKHOUSE_DB:-emtds}
+      EMTDS_CLICKHOUSE_USER: ${EMTDS_CLICKHOUSE_USER:-emtds}
       EMTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       KEITARO_BASE_URL: ${KEITARO_BASE_URL:-}
       KEITARO_API_KEY: ${KEITARO_API_KEY:-}
-      EMTDS_PUBLIC_IP: ${EMTDS_PUBLIC_IP:-${KUZTDS_PUBLIC_IP:-}}
-      EMTDS_ADMIN_TRUSTED_PROXIES: ${EMTDS_ADMIN_TRUSTED_PROXIES:-${KUZTDS_ADMIN_TRUSTED_PROXIES:-}}
+      EMTDS_PUBLIC_IP: ${EMTDS_PUBLIC_IP:-}
+      EMTDS_ADMIN_TRUSTED_PROXIES: ${EMTDS_ADMIN_TRUSTED_PROXIES:-}
+      # Токен первого входа: пока администратора нет, форма создания требует его. Генерирует install.sh.
+      EMTDS_SETUP_TOKEN: ${EMTDS_SETUP_TOKEN:-}
       GOMEMLIMIT: ${EMTDS_GOMEMLIMIT:-}
       EMTDS_UPDATE_INBOX_DIR: /var/lib/emtds/update-inbox
     volumes:
       - emtds_state:/var/lib/emtds
       # Каталог запросов кнопки обновления; его читает хостовый updater.
-      - ${EMTDS_UPDATE_INBOX:-/var/lib/emtds-update/inbox}:/var/lib/emtds/update-inbox
+      - /var/lib/emtds-update/inbox:/var/lib/emtds/update-inbox
     networks:
       - tdsnet
     depends_on:
@@ -146,6 +150,7 @@ services:
     command: ["cron"]
     restart: unless-stopped
     environment:
+      EMTDS_ENV: ${EMTDS_ENV:-development}
       EMTDS_DATA_DIR: /var/lib/emtds/data
       EMTDS_KEYS_DIR: /var/lib/emtds/keys
       EMTDS_GROUPS_FILE: /var/lib/emtds/groups.json
@@ -153,8 +158,8 @@ services:
       EMTDS_GEO_DB: /var/lib/emtds/geo/city.mmdb
       EMTDS_ASN_DB: /var/lib/emtds/geo/asn.mmdb
       EMTDS_CLICKHOUSE_ADDR: clickhouse:9000
-      EMTDS_CLICKHOUSE_DB: kuztds
-      EMTDS_CLICKHOUSE_USER: kuztds
+      EMTDS_CLICKHOUSE_DB: ${EMTDS_CLICKHOUSE_DB:-emtds}
+      EMTDS_CLICKHOUSE_USER: ${EMTDS_CLICKHOUSE_USER:-emtds}
       EMTDS_CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
       # Только для алерта о памяти Redis: Telegram шлёт один cron.
       EMTDS_REDIS_ADDR: redis:6379
@@ -173,11 +178,10 @@ services:
 networks:
   tdsnet:
     external: true
-    name: deploy_default
+    name: emtds-infra_default
 
 volumes:
-  # Имя тома не зависит от имени проекта. EMTDS_STATE_VOLUME=kuztds-app_kuztds_state
-  # оставляет приложение на старом томе без копирования (откат и запасной путь).
+  # Имя тома не зависит от имени проекта; EMTDS_STATE_VOLUME переопределяет его.
   emtds_state:
     name: ${EMTDS_STATE_VOLUME:-emtds-app_emtds_state}
   # Очередь событий на диске, только у engine. Том не входит в бэкап update.sh и

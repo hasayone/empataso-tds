@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // assistantCatalogBases are the catalogs whose records the assistant may propose to change.

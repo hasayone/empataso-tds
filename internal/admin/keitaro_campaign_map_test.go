@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 func TestRecordAcceptedImportManifestSkipsConflict(t *testing.T) {

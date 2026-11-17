@@ -1,6 +1,8 @@
 package admin
 
 import (
+	"crypto/sha256"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -11,7 +13,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // adminProfile is the environment administrator identity stored beside the password hash.
@@ -23,10 +25,12 @@ type adminProfile struct {
 
 // setupView is the body of GET /api/setup.
 // Needed is true until the first-run form has written the password.
-// PublicIP is Config.PublicIP and may be empty. No secret is included.
+// PublicIP is Config.PublicIP and may be empty. TokenRequired is true only while the form is
+// open and Config.SetupToken is set, so the panel knows to ask for it. The token is never included.
 type setupView struct {
-	Needed   bool   `json:"needed"`
-	PublicIP string `json:"public_ip"`
+	Needed        bool   `json:"needed"`
+	PublicIP      string `json:"public_ip"`
+	TokenRequired bool   `json:"token_required"`
 }
 
 // adminProfilePath is admin.json in the same directory as the password file.
@@ -100,23 +104,56 @@ func setupEmailOK(email string) bool {
 // handleSetupGet tells the panel whether the first-run form is still open.
 // The body is setupView. It is public and does not create a session.
 func (s *Server) handleSetupGet(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, setupView{Needed: s.setup.Load(), PublicIP: s.cfg.PublicIP})
+	open := s.setup.Load()
+	writeJSON(w, http.StatusOK, setupView{Needed: open, PublicIP: s.cfg.PublicIP,
+		TokenRequired: open && s.cfg.SetupToken != ""})
 }
 
 // setupBody is the JSON of POST /api/setup. The password is never stored in admin.json.
+// Token is the first-run token; it is read only when Config.SetupToken is set.
 type setupBody struct {
 	Login    string `json:"login"`
 	Password string `json:"password"`
 	Email    string `json:"email"`
+	Token    string `json:"token"`
+}
+
+// setupTokenError is the 403 text for the first-run token: "setup token is required" for an
+// empty value and "setup token is wrong" for any other mismatch. The panel tells them apart by
+// the substring "setup token".
+func setupTokenError(given string) string {
+	if given == "" {
+		return "setup token is required"
+	}
+	return "setup token is wrong"
+}
+
+// setupTokenOK reports whether given may open the first-run form.
+// It is true when Config.SetupToken is empty, and otherwise only for an equal value. The
+// SHA-256 digests are compared in constant time, so the length of the token does not leak.
+// Neither value is logged.
+func (s *Server) setupTokenOK(given string) bool {
+	want := s.cfg.SetupToken
+	if want == "" {
+		return true
+	}
+	givenSum := sha256.Sum256([]byte(given))
+	wantSum := sha256.Sum256([]byte(want))
+	return subtle.ConstantTimeCompare(givenSum[:], wantSum[:]) == 1
 }
 
 // readSetupBody reads and checks the first-run form.
-// w receives 400 when the body or a field is rejected. It returns false after writing that status.
-// A taken login is also 400. The password is not logged.
+// w receives 403 when the first-run token is missing or wrong, checked before any other field,
+// and 400 when the body or a field is rejected. It returns false after writing that status.
+// A taken login is also 400. The password and the token are not logged.
 func (s *Server) readSetupBody(w http.ResponseWriter, r *http.Request) (setupBody, bool) {
 	var body setupBody
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
+		return setupBody{}, false
+	}
+	if !s.setupTokenOK(body.Token) {
+		writeErr(w, http.StatusForbidden, setupTokenError(body.Token))
 		return setupBody{}, false
 	}
 	if !setupLoginOK(body.Login) {
@@ -167,9 +204,12 @@ func (s *Server) writeSetupFiles(login, email, hash string) error {
 }
 
 // handleSetupPost stores the first administrator and opens a session.
-// The body is login, password and email. A short password, the password "admin",
-// a bad login or a bad email is 400. A second call after success is 409.
-// The limiter is the same one as sign-in. The password is not written to the log.
+// The body is login, password, email and, when Config.SetupToken is set, token.
+// A short password, the password "admin", a bad login or a bad email is 400.
+// A finished setup is 409 whatever the token is, so that answer reveals nothing about it.
+// While the form is open, a missing or wrong token is 403 ("setup token is required" or
+// "setup token is wrong"), checked after the limiter and before the password is hashed.
+// The limiter is the same one as sign-in. Neither the password nor the token is written to the log.
 // Success is 200 with the CSRF token and the session cookie.
 func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 	if s.loginClosed(r) {
@@ -188,15 +228,15 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	body, ok := s.readSetupBody(w, r)
-	if !ok {
-		return
-	}
 	s.pwWrite.Lock()
 	open := s.setup.Load()
 	s.pwWrite.Unlock()
 	if !open {
 		writeErr(w, http.StatusConflict, "setup already finished")
+		return
+	}
+	body, ok := s.readSetupBody(w, r)
+	if !ok {
 		return
 	}
 	if !s.hashes.enter() {

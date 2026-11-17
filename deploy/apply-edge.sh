@@ -8,25 +8,15 @@ EDGE_TDS_DIR=
 if [[ -n "$EDGE_SELF" ]]; then
 	EDGE_TDS_DIR=$(dirname "$(dirname "$EDGE_SELF")")
 fi
-# State directory: explicit EMTDS_/KUZTDS_INSTALL_STATE_DIR, then /etc/emtds,
-# then the pre-rename /etc/kuztds when only that one exists.
-EDGE_STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-${KUZTDS_INSTALL_STATE_DIR:-}}"
-if [[ -z "$EDGE_STATE_DIR" ]]; then
-	EDGE_STATE_DIR=/etc/emtds
-	if [[ ! -e /etc/emtds && -d /etc/kuztds ]]; then
-		EDGE_STATE_DIR=/etc/kuztds
-	fi
-fi
-EDGE_SERVER_ENV="${EMTDS_SERVER_ENV:-${KUZTDS_SERVER_ENV:-${EDGE_STATE_DIR}/server.env}}"
+# State directory: EMTDS_INSTALL_STATE_DIR or /etc/emtds.
+EDGE_STATE_DIR="${EMTDS_INSTALL_STATE_DIR:-/etc/emtds}"
+EDGE_SERVER_ENV="${EMTDS_SERVER_ENV:-${EDGE_STATE_DIR}/server.env}"
 EDGE_NGINX_SRC="${EDGE_TDS_DIR}/deploy/nginx"
 EDGE_CF_IPS="${EDGE_NGINX_SRC}/cloudflare-ips.txt"
 EDGE_TEMPLATE_ADMIN="${EDGE_NGINX_SRC}/emtds.conf"
 EDGE_TEMPLATE_ADMIN_HOST="${EDGE_NGINX_SRC}/emtds-admin-host.conf"
 EDGE_TEMPLATE_ENGINE="${EDGE_NGINX_SRC}/emtds-engine.conf"
 EDGE_NGINX_EMTDS_DIR=/etc/nginx/emtds
-# Snippet directory and conf.d prefix written before the rename; apply removes them with a backup.
-EDGE_NGINX_LEGACY_DIR=/etc/nginx/kuztds
-EDGE_LEGACY_PREFIX=kuztds
 EDGE_CONF_D=/etc/nginx/conf.d
 EDGE_BACKUP_ROOT="${EDGE_STATE_DIR}/nginx-backup"
 EDGE_CHECK_MODE=0
@@ -67,16 +57,6 @@ env_value() {
 	printf '%s' "$val"
 }
 
-# Read EMTDS_<name> from env file; an empty value falls back to the pre-rename KUZTDS_<name>.
-env_value_compat() {
-	local file=$1 name=$2 val
-	val=$(env_value "$file" "EMTDS_${name}")
-	if [[ -z "$val" ]]; then
-		val=$(env_value "$file" "KUZTDS_${name}")
-	fi
-	printf '%s' "$val"
-}
-
 # Return 0 if argument is a dotted IPv4 address.
 valid_ipv4() {
 	local ip=$1
@@ -89,15 +69,15 @@ valid_ipv4() {
 	return 0
 }
 
-# Gateway of docker network deploy_default (compose infra project).
-deploy_default_gateway() {
-	docker network inspect deploy_default --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true
+# Gateway of docker network emtds-infra_default (compose infra project emtds-infra).
+infra_network_gateway() {
+	docker network inspect emtds-infra_default --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}' 2>/dev/null || true
 }
 
 # Trusted proxy CIDR: docker bridge gateway /32 only.
 trusted_proxies_from_docker() {
 	local gw
-	gw=$(deploy_default_gateway)
+	gw=$(infra_network_gateway)
 	if [[ -z "$gw" ]]; then
 		return 1
 	fi
@@ -107,12 +87,12 @@ trusted_proxies_from_docker() {
 # CIDR for EMTDS_*_TRUSTED_PROXIES: file values, then docker gateway /32.
 resolve_trusted_proxies_cidr() {
 	local file=$1 tp admin_tp
-	tp=$(env_value_compat "$file" TRUSTED_PROXIES)
+	tp=$(env_value "$file" EMTDS_TRUSTED_PROXIES)
 	if [[ -n "$tp" ]]; then
 		printf '%s' "$tp"
 		return 0
 	fi
-	admin_tp=$(env_value_compat "$file" ADMIN_TRUSTED_PROXIES)
+	admin_tp=$(env_value "$file" EMTDS_ADMIN_TRUSTED_PROXIES)
 	if [[ -n "$admin_tp" ]]; then
 		printf '%s' "$admin_tp"
 		return 0
@@ -144,9 +124,6 @@ ensure_env_key_nonempty() {
 		return 1
 	fi
 	current=$(env_value "$file" "$key")
-	if [[ -z "$current" && "$key" == EMTDS_* ]]; then
-		current=$(env_value "$file" "KUZTDS_${key#EMTDS_}")
-	fi
 	if [[ -n "$current" ]]; then
 		return 0
 	fi
@@ -164,8 +141,8 @@ ensure_env_key_nonempty() {
 # curl's failure is not printed. A non-address from curl does not count as success.
 edge_public_ipv4() {
 	local ip=
-	if [[ -n "${EMTDS_PUBLIC_IP:-${KUZTDS_PUBLIC_IP:-}}" ]]; then
-		ip=${EMTDS_PUBLIC_IP:-${KUZTDS_PUBLIC_IP:-}}
+	if [[ -n "${EMTDS_PUBLIC_IP:-}" ]]; then
+		ip=${EMTDS_PUBLIC_IP}
 	elif command -v curl >/dev/null 2>&1; then
 		ip=$(curl -fsS --max-time 15 -4 https://ifconfig.me/ip 2>/dev/null || true)
 	fi
@@ -184,10 +161,10 @@ ensure_server_env_keys() {
 		edge_msg "не найден ${EDGE_SERVER_ENV}" >&2
 		return 1
 	fi
-	ip=$(env_value_compat "$EDGE_SERVER_ENV" PUBLIC_IP)
+	ip=$(env_value "$EDGE_SERVER_ENV" EMTDS_PUBLIC_IP)
 	if [[ -z "$ip" ]]; then
-		if [[ -n "${EMTDS_PUBLIC_IP:-${KUZTDS_PUBLIC_IP:-}}" ]]; then
-			ip=${EMTDS_PUBLIC_IP:-${KUZTDS_PUBLIC_IP:-}}
+		if [[ -n "${EMTDS_PUBLIC_IP:-}" ]]; then
+			ip=${EMTDS_PUBLIC_IP}
 		elif [[ -n "$public_arg" ]]; then
 			ip=$public_arg
 		elif ! ip=$(edge_public_ipv4); then
@@ -206,12 +183,58 @@ ensure_server_env_keys() {
 	fi
 
 	tp=$(resolve_trusted_proxies_cidr "$EDGE_SERVER_ENV") || {
-		edge_msg "не удалось получить gateway deploy_default для EMTDS_TRUSTED_PROXIES" >&2
+		edge_msg "не удалось получить gateway emtds-infra_default для EMTDS_TRUSTED_PROXIES" >&2
 		return 1
 	}
 	ensure_env_key_nonempty "$EDGE_SERVER_ENV" EMTDS_TRUSTED_PROXIES "$tp"
-	tp=$(env_value_compat "$EDGE_SERVER_ENV" TRUSTED_PROXIES)
+	tp=$(env_value "$EDGE_SERVER_ENV" EMTDS_TRUSTED_PROXIES)
 	ensure_env_key_nonempty "$EDGE_SERVER_ENV" EMTDS_ADMIN_TRUSTED_PROXIES "$tp"
+}
+
+# Check that a certificate and a private key form a usable pair.
+# Args: certificate path, key path.
+# Returns 0 when both files are non-empty, the certificate parses as x509, the key parses, and the
+# public key of the certificate equals the public key of the private key; 1 otherwise (no output).
+ip_cert_pair_valid() {
+	local crt=$1 key=$2 cert_pub key_pub
+	[[ -s "$crt" && -s "$key" ]] || return 1
+	cert_pub=$(openssl x509 -in "$crt" -noout -pubkey 2>/dev/null) || return 1
+	key_pub=$(openssl pkey -in "$key" -pubout 2>/dev/null) || return 1
+	[[ -n "$cert_pub" && "$cert_pub" == "$key_pub" ]]
+}
+
+# Create the self-signed certificate nginx serves on the server address when there is no usable pair.
+# It is not an issued certificate: Cloudflare in Full mode accepts a self-signed one.
+# Args: public IPv4 (goes to CN and subjectAltName IP). A valid ip.crt and ip.key pair is left
+# untouched (only the key mode is set to 0600). A missing, empty, unreadable or mismatched pair is
+# created again: both files are generated into temporary files in the same directory, checked with
+# ip_cert_pair_valid, and only then moved into place (key first, certificate second), so nginx never
+# reads a half-written file. Key: 0600, certificate: 0644, valid for 10 years.
+# Returns 1 with a message on stderr when openssl fails or produces an unusable pair; the temporary
+# files are removed and the previous files stay as they were.
+ensure_ip_cert() {
+	local ip=$1 dir="${EDGE_STATE_DIR}/tls" crt key tmp_crt tmp_key
+	crt="${dir}/ip.crt"
+	key="${dir}/ip.key"
+	install -d -m 0755 "$dir"
+	if ip_cert_pair_valid "$crt" "$key"; then
+		chmod 0600 "$key"
+		return 0
+	fi
+	tmp_key=$(mktemp "${dir}/.ip.key.XXXXXX")
+	tmp_crt=$(mktemp "${dir}/.ip.crt.XXXXXX")
+	if ! (umask 077 && openssl req -x509 -newkey rsa:2048 -nodes -sha256 -days 3650 \
+		-subj "/CN=${ip}" -addext "subjectAltName=IP:${ip}" \
+		-keyout "$tmp_key" -out "$tmp_crt" >/dev/null 2>&1) || ! ip_cert_pair_valid "$tmp_crt" "$tmp_key"; then
+		rm -f "$tmp_crt" "$tmp_key"
+		edge_msg "не удалось создать самоподписанный сертификат для ${ip}" >&2
+		return 1
+	fi
+	chmod 0600 "$tmp_key"
+	chmod 0644 "$tmp_crt"
+	mv -f "$tmp_key" "$key"
+	mv -f "$tmp_crt" "$crt"
+	edge_msg "создан самоподписанный сертификат ${crt} для ${ip}"
 }
 
 # Parse host:port from EMTDS_ENGINE_PUBLISH (e.g. 127.0.0.1:18080:8080).
@@ -258,8 +281,8 @@ render_nginx_configs() {
 # Render all edge artifacts into DEST_DIR; print paths on success.
 render_all() {
 	local dest=$1 public_ip upstream publish
-	public_ip=$(env_value_compat "$EDGE_SERVER_ENV" PUBLIC_IP)
-	publish=$(env_value_compat "$EDGE_SERVER_ENV" ENGINE_PUBLISH)
+	public_ip=$(env_value "$EDGE_SERVER_ENV" EMTDS_PUBLIC_IP)
+	publish=$(env_value "$EDGE_SERVER_ENV" EMTDS_ENGINE_PUBLISH)
 	if [[ -z "$publish" ]]; then
 		publish=127.0.0.1:18080:8080
 	fi
@@ -516,8 +539,6 @@ report_nginx_events() {
 }
 
 # Copy rendered tree into live nginx paths; sets EDGE_BACKUP_DIR after backup, before writes.
-# Pre-rename kuztds*.conf and /etc/nginx/kuztds/ go into the same backup and are removed,
-# otherwise nginx would see two default 443 servers.
 install_rendered() {
 	local src=$1 ts backup_dir f
 	EDGE_NGINX_DIR_EXISTED=0
@@ -530,16 +551,12 @@ install_rendered() {
 	install -d -m 0755 "${backup_dir}/conf.d"
 	install -d -m 0755 "${backup_dir}/emtds"
 
-	for f in "${EDGE_CONF_D}"/emtds*.conf "${EDGE_CONF_D}/${EDGE_LEGACY_PREFIX}"*.conf; do
+	for f in "${EDGE_CONF_D}"/emtds*.conf; do
 		[[ -e "$f" ]] || continue
 		cp -a "$f" "${backup_dir}/conf.d/"
 	done
 	if [[ "$EDGE_NGINX_DIR_EXISTED" -eq 1 ]]; then
 		cp -a "${EDGE_NGINX_EMTDS_DIR}/." "${backup_dir}/emtds/" 2>/dev/null || true
-	fi
-	if [[ -d "$EDGE_NGINX_LEGACY_DIR" ]]; then
-		install -d -m 0755 "${backup_dir}/legacy"
-		cp -a "${EDGE_NGINX_LEGACY_DIR}/." "${backup_dir}/legacy/" 2>/dev/null || true
 	fi
 	if [[ "$EDGE_TUNE_EVENTS" -eq 1 && -f "$EDGE_NGINX_CONF" ]]; then
 		cp -aL "$EDGE_NGINX_CONF" "${backup_dir}/nginx.conf"
@@ -553,17 +570,15 @@ install_rendered() {
 	install -m 0644 "${src}/emtds.conf" "${EDGE_CONF_D}/emtds.conf"
 	install -m 0644 "${src}/emtds-admin-host.conf" "${EDGE_CONF_D}/emtds-admin-host.conf"
 	install -m 0644 "${src}/emtds-engine.conf" "${EDGE_CONF_D}/emtds-engine.conf"
-	rm -f "${EDGE_CONF_D}/${EDGE_LEGACY_PREFIX}"*.conf
-	rm -rf "$EDGE_NGINX_LEGACY_DIR"
 }
 
-# Restore nginx files from backup; only touches emtds*/kuztds* conf.d, /etc/nginx/{emtds,kuztds}/
+# Restore nginx files from backup; only touches emtds* conf.d, /etc/nginx/emtds/
 # and nginx.conf when the backup holds a copy of it (made only with --tune-events).
 restore_from_backup() {
 	local backup_dir=$1 nginx_dir_existed=${2:-$EDGE_NGINX_DIR_EXISTED} f base
 	[[ -n "$backup_dir" && -d "$backup_dir" ]] || return 0
 
-	for f in "${EDGE_CONF_D}"/emtds*.conf "${EDGE_CONF_D}/${EDGE_LEGACY_PREFIX}"*.conf; do
+	for f in "${EDGE_CONF_D}"/emtds*.conf; do
 		[[ -e "$f" ]] || continue
 		base=$(basename "$f")
 		if [[ ! -f "${backup_dir}/conf.d/${base}" ]]; then
@@ -586,10 +601,6 @@ restore_from_backup() {
 	else
 		rm -rf "$EDGE_NGINX_EMTDS_DIR"
 	fi
-	if [[ -d "${backup_dir}/legacy" ]]; then
-		install -d -m 0755 "$EDGE_NGINX_LEGACY_DIR"
-		cp -a "${backup_dir}/legacy/." "$EDGE_NGINX_LEGACY_DIR/" 2>/dev/null || true
-	fi
 	if [[ -f "${backup_dir}/nginx.conf" ]]; then
 		cp -a "${backup_dir}/nginx.conf" "$(readlink -f "$EDGE_NGINX_CONF")"
 	fi
@@ -604,9 +615,9 @@ run_check() {
 		return 1
 	fi
 	render_all "$tmp"
-	public_ip=$(env_value_compat "$EDGE_SERVER_ENV" PUBLIC_IP)
-	tp=$(env_value_compat "$EDGE_SERVER_ENV" TRUSTED_PROXIES)
-	admin_tp=$(env_value_compat "$EDGE_SERVER_ENV" ADMIN_TRUSTED_PROXIES)
+	public_ip=$(env_value "$EDGE_SERVER_ENV" EMTDS_PUBLIC_IP)
+	tp=$(env_value "$EDGE_SERVER_ENV" EMTDS_TRUSTED_PROXIES)
+	admin_tp=$(env_value "$EDGE_SERVER_ENV" EMTDS_ADMIN_TRUSTED_PROXIES)
 	edge_msg "check mode: public_ip=${public_ip} trusted_proxies=${tp} admin_trusted_proxies=${admin_tp}"
 	for f in cloudflare-realip.conf cloudflare-geo.conf emtds.conf emtds-admin-host.conf emtds-engine.conf; do
 		printf '===== %s =====\n' "$f"
@@ -630,6 +641,7 @@ run_apply() {
 		fi
 	done
 	ensure_server_env_keys "${1:-}" || return 1
+	ensure_ip_cert "$(env_value "$EDGE_SERVER_ENV" EMTDS_PUBLIC_IP)" || return 1
 	if [[ "$EDGE_TUNE_EVENTS" -eq 1 ]]; then
 		plan_nginx_events /dev/null || return 1
 	fi
@@ -653,9 +665,9 @@ run_apply() {
 	systemctl reload nginx
 	trap - ERR
 	rm -rf "$tmp"
-	public_ip=$(env_value_compat "$EDGE_SERVER_ENV" PUBLIC_IP)
-	tp=$(env_value_compat "$EDGE_SERVER_ENV" TRUSTED_PROXIES)
-	admin_tp=$(env_value_compat "$EDGE_SERVER_ENV" ADMIN_TRUSTED_PROXIES)
+	public_ip=$(env_value "$EDGE_SERVER_ENV" EMTDS_PUBLIC_IP)
+	tp=$(env_value "$EDGE_SERVER_ENV" EMTDS_TRUSTED_PROXIES)
+	admin_tp=$(env_value "$EDGE_SERVER_ENV" EMTDS_ADMIN_TRUSTED_PROXIES)
 	edge_msg "ok: public_ip=${public_ip} trusted_proxies=${tp} admin_trusted_proxies=${admin_tp} backup=${backup_dir}"
 }
 

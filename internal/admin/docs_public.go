@@ -43,17 +43,17 @@ var docsLangs = []string{"en", "ru", "uk"}
 // docsIntro is the head of the Markdown reference per language.
 var docsIntro = map[string]string{
 	"en": "# emtds admin API\n\nThe base address is the address this text was served from. Every call sends the key in the " +
-		"`Api-Key: em_...` header (keys issued before the em_ prefix start with `kz_` and keep working). A key reads " +
+		"`Api-Key: em_...` header. A key reads " +
 		"the sections the administrator opened for it and writes only where write access is ticked; dangerous " +
 		"actions need their own tick. Answers are JSON; errors are `{\"error\", \"code\"}`. The machine-readable " +
 		"document is `/api/docs/openapi.json`. The Postman collection of the same routes is `/api/docs/postman.json`.\n",
 	"ru": "# API админки emtds\n\nБазовый адрес — адрес, с которого отдан этот текст. Каждый вызов передаёт ключ в заголовке " +
-		"`Api-Key: em_...` (ключи, выданные до появления префикса em_, начинаются с `kz_` и продолжают работать). Ключ " +
+		"`Api-Key: em_...`. Ключ " +
 		"читает разделы, которые ему открыл администратор, и пишет только там, где отмечена запись; опасные действия " +
 		"требуют своей галочки. Ответы в JSON, ошибки — `{\"error\", \"code\"}`. Машиночитаемый документ — " +
 		"`/api/docs/openapi.json`. Коллекция Postman тех же маршрутов — `/api/docs/postman.json`.\n",
 	"uk": "# API адмінки emtds\n\nБазова адреса — адреса, з якої віддано цей текст. Кожен виклик передає ключ у заголовку " +
-		"`Api-Key: em_...` (ключі, видані до появи префікса em_, починаються з `kz_` і продовжують працювати). Ключ " +
+		"`Api-Key: em_...`. Ключ " +
 		"читає розділи, які йому відкрив адміністратор, і пише лише там, де позначено запис; небезпечні дії " +
 		"потребують своєї галочки. Відповіді в JSON, помилки — `{\"error\", \"code\"}`. Машинночитаний документ — " +
 		"`/api/docs/openapi.json`. Колекція Postman тих самих маршрутів — `/api/docs/postman.json`.\n",

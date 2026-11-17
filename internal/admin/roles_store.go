@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // modeNone is a grant mode that denies every record of a resource.

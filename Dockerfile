@@ -26,7 +26,7 @@ ARG EMTDS_GOFLAGS=
 
 RUN --mount=type=cache,target=/root/.cache/go-build \
     set -e; \
-    LDFLAGS="-s -w -X github.com/egerkuzma/emtds/internal/config.version=${EMTDS_VERSION} -X github.com/egerkuzma/emtds/internal/config.commit=${EMTDS_COMMIT} -X github.com/egerkuzma/emtds/internal/config.commitDate=${EMTDS_COMMIT_DATE} -X github.com/egerkuzma/emtds/internal/config.channel=${EMTDS_CHANNEL}"; \
+    LDFLAGS="-s -w -X github.com/hasayone/empataso-tds/internal/config.version=${EMTDS_VERSION} -X github.com/hasayone/empataso-tds/internal/config.commit=${EMTDS_COMMIT} -X github.com/hasayone/empataso-tds/internal/config.commitDate=${EMTDS_COMMIT_DATE} -X github.com/hasayone/empataso-tds/internal/config.channel=${EMTDS_CHANNEL}"; \
     CGO_ENABLED=0 GOOS=linux GOFLAGS="${EMTDS_GOFLAGS}" go build -trimpath -ldflags="${LDFLAGS}" -o /out/emtds-engine ./cmd/engine; \
     CGO_ENABLED=0 GOOS=linux GOFLAGS="${EMTDS_GOFLAGS}" go build -trimpath -ldflags="${LDFLAGS}" -o /out/emtds-admin ./cmd/admin; \
     CGO_ENABLED=0 GOOS=linux GOFLAGS="${EMTDS_GOFLAGS}" go build -trimpath -ldflags="${LDFLAGS}" -o /out/emtds-cron ./cmd/cron
@@ -51,8 +51,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10001 --home-dir /var/lib/emtds --shell /usr/sbin/nologin emtds \
-    && mkdir -p /var/lib/emtds/data /var/lib/emtds/keys \
-    && ln -s /var/lib/emtds /var/lib/kuztds
+    && mkdir -p /var/lib/emtds/data /var/lib/emtds/keys
 
 COPY --from=build /out/emtds-engine /out/emtds-admin /out/emtds-cron /usr/local/bin/
 COPY deploy/docker-entrypoint.sh /usr/local/bin/emtds-entrypoint

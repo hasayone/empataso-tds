@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 func accessTestServer(t *testing.T) *Server {
@@ -99,11 +99,11 @@ var cookieOnlyRoutes = map[string]bool{
 	"PUT /api/keitaro/settings":      true,
 	"POST /api/keitaro/check":        true,
 
-	"GET /api/registrars/namecheap":               true,
-	"PUT /api/registrars/namecheap":               true,
-	"POST /api/registrars/namecheap/test":         true,
-	"POST /api/registrars/namecheap/check":        true,
-	"POST /api/registrars/namecheap/register":     true,
+	"GET /api/registrars/namecheap":           true,
+	"PUT /api/registrars/namecheap":           true,
+	"POST /api/registrars/namecheap/test":     true,
+	"POST /api/registrars/namecheap/check":    true,
+	"POST /api/registrars/namecheap/register": true,
 	"POST /api/domains/{id}/ns":               true,
 	"GET /api/cloudflare":                     true,
 	"PUT /api/cloudflare":                     true,
@@ -144,6 +144,8 @@ var cookieOnlyRoutes = map[string]bool{
 	"POST /api/update/apply":                    true,
 	"POST /api/update/rollback":                 true,
 	"POST /api/update/check":                    true,
+	"GET /api/system":                           true,
+	"GET /api/system/signals":                   true,
 }
 
 var expect401Routes = map[string]bool{

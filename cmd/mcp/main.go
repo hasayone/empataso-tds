@@ -3,13 +3,11 @@
 //
 // Environment:
 //
-//	EMTDS_URL        admin base URL, for example https://212.2.33.246
+//	EMTDS_URL        admin base URL, for example https://203.0.113.10
 //	EMTDS_API_KEY    API key sent in the Api-Key header (never logged)
 //	EMTDS_CA_FILE    optional PEM file with the CA of a self-signed admin certificate
 //	EMTDS_MCP_WRITE  set to 1 to enable the write tools
 //	EMTDS_MCP_FORMAT json (default) or toon: the format of the tool results
-//
-// Each EMTDS_ variable falls back to the same KUZTDS_ name when it is empty.
 package main
 
 import (
@@ -19,7 +17,7 @@ import (
 	"os"
 	"strings"
 
-	envconfig "github.com/egerkuzma/emtds/internal/config"
+	envconfig "github.com/hasayone/empataso-tds/internal/config"
 )
 
 // config is the server configuration read from the environment.

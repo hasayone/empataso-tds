@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // TestTakeLimitUnderConcurrency pins the race the LimitAllowed/RecordServe pair

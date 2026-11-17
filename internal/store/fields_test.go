@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 func TestFieldsContract(t *testing.T) {
@@ -137,7 +137,7 @@ func TestDimColumnNonString(t *testing.T) {
 }
 
 func normSQL(s string) string {
-	s = strings.ReplaceAll(s, "kuztds.", "")
+	s = strings.ReplaceAll(s, "emtds.", "")
 	s = strings.ReplaceAll(s, ";", "")
 	return strings.Join(strings.Fields(s), " ")
 }

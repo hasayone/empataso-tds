@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 const (
@@ -141,6 +141,17 @@ func aiBodyCode(t *testing.T, body string) string {
 
 // aiTestPtr returns a pointer to v.
 func aiTestPtr[T any](v T) *T { return &v }
+
+// aiTestVal returns *p, or -1 for nil, so a missing limit fails a comparison with a real value.
+func aiTestVal[T int64 | float64](p *T) T {
+	if p == nil {
+		return -1
+	}
+	return *p
+}
+
+// aiTestOff returns the stored value of a switched-off daily limit.
+func aiTestOff[T int64 | float64]() *T { return aiTestPtr(T(aiNoLimit)) }
 
 // seedCatalog stores a fresh catalog of provider that lists ids, as a fetch would, so a PUT can name them.
 func (e *aiTestEnv) seedCatalog(provider string, ids ...string) {
@@ -304,31 +315,35 @@ func TestAISettingsModelMustBeAllowed(t *testing.T) {
 func TestAISettingsLimits(t *testing.T) {
 	e := newAITestEnv(t, nil)
 	v := e.view(t)
-	if v.MaxOutputTokens != 2048 || v.MaxSteps != 6 || v.TurnInputTokens != 60000 || v.DailyTokens != 2_000_000 ||
-		v.UserDailyTokens != 300_000 || v.DailyUSD != 5 || v.UserDailyUSD != 2 {
-		t.Fatalf("defaults: %+v", v)
+	if v.MaxOutputTokens != 2048 || v.MaxSteps != 6 || v.TurnInputTokens != 60000 || v.DailyTokens != nil ||
+		v.UserDailyTokens != nil || aiTestVal(v.DailyUSD) != 5 || aiTestVal(v.UserDailyUSD) != 2 {
+		t.Fatalf("defaults: tokens have no limit, USD keeps its default: %+v", v)
 	}
 	if !v.Beta || v.Enabled || v.Provider != aiProviderAnthropic {
 		t.Fatalf("defaults: %+v", v)
 	}
-	v = e.mustPut(t, `{"daily_tokens":0,"user_daily_usd":0,"max_steps":3}`)
-	if v.DailyTokens != 0 || v.UserDailyUSD != 0 || v.MaxSteps != 3 || v.UserDailyTokens != 300_000 || v.DailyUSD != 5 {
-		t.Fatalf("explicit zero: %+v", v)
+	v = e.mustPut(t, `{"daily_usd":null,"user_daily_usd":0,"max_steps":3}`)
+	if v.DailyUSD != nil || aiTestVal(v.UserDailyUSD) != 0 || v.UserDailyUSD == nil || v.MaxSteps != 3 || v.UserDailyTokens != nil {
+		t.Fatalf("null switches off, zero is a limit: %+v", v)
 	}
 	raw, _ := os.ReadFile(filepath.Join(e.dir, "ai.json"))
-	if !strings.Contains(string(raw), `"daily_tokens":0`) || !strings.Contains(string(raw), `"user_daily_usd":0`) {
-		t.Fatalf("zero must be stored: %s", raw)
+	if !strings.Contains(string(raw), `"daily_usd":-1`) || !strings.Contains(string(raw), `"user_daily_usd":0`) {
+		t.Fatalf("no limit and zero must be stored: %s", raw)
 	}
-	if strings.Contains(string(raw), "user_daily_tokens") || strings.Contains(string(raw), `"daily_usd"`) {
+	if strings.Contains(string(raw), "user_daily_tokens") || strings.Contains(string(raw), `"daily_tokens"`) {
 		t.Fatalf("an unset limit must stay unset: %s", raw)
 	}
 	v = e.mustPut(t, `{"enabled":false}`)
-	if v.DailyTokens != 0 || v.UserDailyUSD != 0 {
-		t.Fatalf("another PUT lost the zero: %+v", v)
+	if v.DailyUSD != nil || v.UserDailyUSD == nil || *v.UserDailyUSD != 0 {
+		t.Fatalf("another PUT lost the stored limits: %+v", v)
 	}
 	v = e.mustPut(t, `{"daily_tokens":5000,"daily_usd":1.5}`)
-	if v.DailyTokens != 5000 || v.DailyUSD != 1.5 || v.MaxSteps != 3 {
+	if aiTestVal(v.DailyTokens) != 5000 || aiTestVal(v.DailyUSD) != 1.5 || v.MaxSteps != 3 {
 		t.Fatalf("new values: %+v", v)
+	}
+	v = e.mustPut(t, `{"daily_tokens":null}`)
+	if v.DailyTokens != nil {
+		t.Fatalf("null takes a set token limit off: %+v", v)
 	}
 	for _, body := range []string{
 		`{"daily_tokens":-1}`, `{"user_daily_tokens":-5}`, `{"daily_usd":-0.1}`, `{"user_daily_usd":-1}`,
@@ -577,12 +592,12 @@ func TestAISettingsStatus(t *testing.T) {
 		Usage                  *struct {
 			Tokens          int64
 			USD             float64
-			LimitTokens     int64   `json:"limit_tokens"`
-			LimitUSD        float64 `json:"limit_usd"`
-			TeamTokens      int64   `json:"team_tokens"`
-			TeamLimitTokens int64   `json:"team_limit_tokens"`
-			TeamUSD         float64 `json:"team_usd"`
-			TeamLimitUSD    float64 `json:"team_limit_usd"`
+			LimitTokens     *int64   `json:"limit_tokens"`
+			LimitUSD        *float64 `json:"limit_usd"`
+			TeamTokens      int64    `json:"team_tokens"`
+			TeamLimitTokens *int64   `json:"team_limit_tokens"`
+			TeamUSD         float64  `json:"team_usd"`
+			TeamLimitUSD    *float64 `json:"team_limit_usd"`
 		}
 	}
 	get := func(sess security.Session) (statusBody, string) {
@@ -600,7 +615,7 @@ func TestAISettingsStatus(t *testing.T) {
 	if !b.Enabled || !b.Allowed || !b.Beta || b.Provider != "openai" || b.Model != "mystery" || len(b.Models) != 2 || !b.PriceUnknown {
 		t.Fatalf("admin status %+v", b)
 	}
-	if b.Usage == nil || b.Usage.LimitTokens != 1000 || b.Usage.TeamLimitTokens != 2_000_000 || b.Usage.TeamLimitUSD != 0 || b.Usage.LimitUSD != 2 {
+	if b.Usage == nil || aiTestVal(b.Usage.LimitTokens) != 1000 || b.Usage.TeamLimitTokens != nil || aiTestVal(b.Usage.TeamLimitUSD) != 0 || aiTestVal(b.Usage.LimitUSD) != 2 {
 		t.Fatalf("limits %+v", b.Usage)
 	}
 	r, err := e.s.aiReserve("env-admin", "gpt-4o", aiNormalize(aiSettings{TurnInputTokens: 100, MaxOutputTokens: 100}))
@@ -764,7 +779,7 @@ func aiWantQuota(t *testing.T, err error) {
 
 func TestAIUsageReserveCommit(t *testing.T) {
 	e := newAITestEnv(t, nil)
-	st := aiUsageSettings(aiTestPtr(int64(0)), aiTestPtr(int64(100000)), aiTestPtr(0.0), aiTestPtr(0.0))
+	st := aiUsageSettings(aiTestOff[int64](), aiTestPtr(int64(100000)), aiTestOff[float64](), aiTestOff[float64]())
 	r1, err := e.s.aiReserve("u1", "mystery", st)
 	if err != nil {
 		t.Fatal(err)
@@ -796,7 +811,7 @@ func TestAIUsageReserveCommit(t *testing.T) {
 
 func TestAIUsageTeamTokenLimit(t *testing.T) {
 	e := newAITestEnv(t, nil)
-	st := aiUsageSettings(aiTestPtr(int64(100000)), aiTestPtr(int64(0)), aiTestPtr(0.0), aiTestPtr(0.0))
+	st := aiUsageSettings(aiTestPtr(int64(100000)), aiTestOff[int64](), aiTestOff[float64](), aiTestOff[float64]())
 	if _, err := e.s.aiReserve("a", "mystery", st); err != nil {
 		t.Fatal(err)
 	}
@@ -808,10 +823,10 @@ func TestAIUsageTeamTokenLimit(t *testing.T) {
 }
 
 func TestAIUsageUSDLimits(t *testing.T) {
-	zero := func() *int64 { return aiTestPtr(int64(0)) }
+	off := aiTestOff[int64]
 	t.Run("team", func(t *testing.T) {
 		e := newAITestEnv(t, nil)
-		st := aiUsageSettings(zero(), zero(), aiTestPtr(0.3), aiTestPtr(0.0))
+		st := aiUsageSettings(off(), off(), aiTestPtr(0.3), aiTestOff[float64]())
 		r, err := e.s.aiReserve("a", "claude-sonnet-4", st)
 		if err != nil {
 			t.Fatal(err)
@@ -832,7 +847,7 @@ func TestAIUsageUSDLimits(t *testing.T) {
 	})
 	t.Run("user", func(t *testing.T) {
 		e := newAITestEnv(t, nil)
-		st := aiUsageSettings(zero(), zero(), aiTestPtr(0.0), aiTestPtr(0.3))
+		st := aiUsageSettings(off(), off(), aiTestOff[float64](), aiTestPtr(0.3))
 		if _, err := e.s.aiReserve("a", "claude-sonnet-4", st); err != nil {
 			t.Fatal(err)
 		}
@@ -844,7 +859,7 @@ func TestAIUsageUSDLimits(t *testing.T) {
 	})
 	t.Run("administrator price", func(t *testing.T) {
 		e := newAITestEnv(t, nil)
-		st := aiUsageSettings(zero(), zero(), aiTestPtr(0.0), aiTestPtr(0.1))
+		st := aiUsageSettings(off(), off(), aiTestOff[float64](), aiTestPtr(0.1))
 		st.Prices = map[string]aiPrice{"claude-sonnet-4": {InputPerM: 1, OutputPerM: 1}}
 		if _, err := e.s.aiReserve("a", "claude-sonnet-4", st); err != nil {
 			t.Fatalf("cheaper price fits: %v", err)
@@ -852,31 +867,63 @@ func TestAIUsageUSDLimits(t *testing.T) {
 	})
 }
 
-func TestAIUsageZeroMeansNoLimit(t *testing.T) {
+func TestAIUsageNoLimitNeverRefuses(t *testing.T) {
 	e := newAITestEnv(t, nil)
-	st := aiUsageSettings(aiTestPtr(int64(0)), aiTestPtr(int64(0)), aiTestPtr(0.0), aiTestPtr(0.0))
+	st := aiUsageSettings(aiTestOff[int64](), aiTestOff[int64](), aiTestOff[float64](), aiTestOff[float64]())
 	for i := 0; i < 200; i++ {
-		if _, err := e.s.aiReserve("u", "claude-opus-4", st); err != nil {
+		r, err := e.s.aiReserve("u", "claude-opus-4", st)
+		if err != nil {
 			t.Fatalf("reserve %d: %v", i, err)
 		}
+		e.s.aiCommit(r, 100_000, 10_000)
 	}
 	def := aiNormalize(aiSettings{})
-	if lim := def.limits(); lim.DailyTokens != 2_000_000 || lim.UserDailyTokens != 300_000 || lim.DailyUSD != 5 || lim.UserDailyUSD != 2 {
-		t.Fatalf("a nil pointer is the default: %+v", lim)
+	if lim := def.limits(); lim.DailyTokens != nil || lim.UserDailyTokens != nil || aiTestVal(lim.DailyUSD) != 5 || aiTestVal(lim.UserDailyUSD) != 2 {
+		t.Fatalf("by default tokens have no limit and USD keeps its default: %+v", lim)
 	}
 	e2 := newAITestEnv(t, nil)
-	for i := 0; i < 4; i++ {
-		if _, err := e2.s.aiReserve("u", "mystery", def); err != nil {
-			t.Fatalf("reserve %d within the defaults: %v", i, err)
+	for i := 0; i < 50; i++ {
+		r, err := e2.s.aiReserve("u", "mystery", def)
+		if err != nil {
+			t.Fatalf("reserve %d: tokens must not refuse by default: %v", i, err)
 		}
+		e2.s.aiCommit(r, 100_000, 10_000)
 	}
-	_, err := e2.s.aiReserve("u", "mystery", def)
-	aiWantQuota(t, err)
+}
+
+func TestAIUsageMoneyLimitRefuses(t *testing.T) {
+	off := aiTestOff[int64]
+	t.Run("zero dollars", func(t *testing.T) {
+		e := newAITestEnv(t, nil)
+		st := aiUsageSettings(off(), off(), aiTestOff[float64](), aiTestPtr(0.0))
+		_, err := e.s.aiReserve("u", "claude-sonnet-4", st)
+		aiWantQuota(t, err)
+		if ae := aiErrOf(t, err); !strings.Contains(ae.msg, "USD") {
+			t.Fatalf("the refusal must name the money limit: %s", ae.msg)
+		}
+	})
+	t.Run("spent above the limit", func(t *testing.T) {
+		e := newAITestEnv(t, nil)
+		st := aiUsageSettings(off(), off(), aiTestPtr(0.5), aiTestOff[float64]())
+		r, err := e.s.aiReserve("u", "claude-sonnet-4", st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		e.s.aiCommit(r, 200_000, 32_000)
+		if _, total, _ := e.s.aiUsageSnapshot(); total.USD <= 0.5 {
+			t.Fatalf("the fact must pass the limit: %+v", total)
+		}
+		_, err = e.s.aiReserve("u", "claude-sonnet-4", st)
+		aiWantQuota(t, err)
+		if ae := aiErrOf(t, err); !strings.Contains(ae.msg, "team USD") {
+			t.Fatalf("the refusal must name the team money limit: %s", ae.msg)
+		}
+	})
 }
 
 func TestAIUsageUnknownPriceDoesNotBlockUSD(t *testing.T) {
 	e := newAITestEnv(t, nil)
-	st := aiUsageSettings(aiTestPtr(int64(0)), aiTestPtr(int64(0)), aiTestPtr(0.000001), aiTestPtr(0.000001))
+	st := aiUsageSettings(aiTestOff[int64](), aiTestOff[int64](), aiTestPtr(0.000001), aiTestPtr(0.000001))
 	r, err := e.s.aiReserve("u", "mystery-model", st)
 	if err != nil {
 		t.Fatalf("an unpriced model must not hit the USD limit: %v", err)
@@ -895,7 +942,7 @@ func TestAIUsageDayRollover(t *testing.T) {
 	e := newAITestEnv(t, nil)
 	clock := time.Date(2026, 11, 15, 23, 59, 0, 0, time.UTC)
 	e.s.ai.usage.now = func() time.Time { return clock }
-	st := aiUsageSettings(aiTestPtr(int64(100000)), aiTestPtr(int64(100000)), aiTestPtr(0.0), aiTestPtr(0.0))
+	st := aiUsageSettings(aiTestPtr(int64(100000)), aiTestPtr(int64(100000)), aiTestOff[float64](), aiTestOff[float64]())
 	r, err := e.s.aiReserve("u", "mystery", st)
 	if err != nil {
 		t.Fatal(err)
@@ -1000,7 +1047,7 @@ func TestAIUsageOldDayDropped(t *testing.T) {
 
 func TestAIUsageConcurrent(t *testing.T) {
 	e := newAITestEnv(t, nil)
-	st := aiUsageSettings(aiTestPtr(int64(0)), aiTestPtr(int64(0)), aiTestPtr(0.0), aiTestPtr(0.0))
+	st := aiUsageSettings(aiTestOff[int64](), aiTestOff[int64](), aiTestOff[float64](), aiTestOff[float64]())
 	var wg sync.WaitGroup
 	for i := 0; i < 20; i++ {
 		wg.Add(1)
@@ -1083,7 +1130,7 @@ func TestAISettingsGuard(t *testing.T) {
 
 func TestAIUsageCountsOnlyReportedTokens(t *testing.T) {
 	e := newAITestEnv(t, nil)
-	st := aiUsageSettings(aiTestPtr(int64(0)), aiTestPtr(int64(0)), aiTestPtr(0.0), aiTestPtr(0.0))
+	st := aiUsageSettings(aiTestOff[int64](), aiTestOff[int64](), aiTestOff[float64](), aiTestOff[float64]())
 	r, err := e.s.aiReserve("u", "claude-sonnet-4", st)
 	if err != nil {
 		t.Fatal(err)
@@ -1208,19 +1255,19 @@ func TestAISettingsDailyLimitBounds(t *testing.T) {
 	}
 	cur, _ := e.s.aiLoad()
 	for _, bad := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
-		_, err := aiMergeSettings(cur, aiSettingsPut{DailyUSD: &bad})
+		_, err := aiMergeSettings(cur, aiSettingsPut{DailyUSD: aiDailyOf(bad)})
 		if ae := aiErrOf(t, err); ae.code != aiErrBadLimit || ae.status != http.StatusBadRequest {
 			t.Errorf("%v: %+v", bad, ae)
 		}
 	}
 	v := e.mustPut(t, `{"daily_tokens":1000000000000,"user_daily_tokens":1000000000000,"daily_usd":1000000,"user_daily_usd":1000000}`)
-	if v.DailyTokens != aiTokensCap || v.UserDailyUSD != aiUSDCap {
+	if aiTestVal(v.DailyTokens) != aiTokensCap || aiTestVal(v.UserDailyUSD) != aiUSDCap {
 		t.Fatalf("the largest values must be accepted: %+v", v)
 	}
 
-	v = e.mustPut(t, `{"daily_tokens":0,"user_daily_tokens":0,"daily_usd":0,"user_daily_usd":0}`)
-	if v.DailyTokens != 0 || v.UserDailyTokens != 0 || v.DailyUSD != 0 || v.UserDailyUSD != 0 {
-		t.Fatalf("zero means no limit and is kept: %+v", v)
+	v = e.mustPut(t, `{"daily_tokens":null,"user_daily_tokens":null,"daily_usd":null,"user_daily_usd":null}`)
+	if v.DailyTokens != nil || v.UserDailyTokens != nil || v.DailyUSD != nil || v.UserDailyUSD != nil {
+		t.Fatalf("null switches every daily limit off: %+v", v)
 	}
 	st, err := e.s.aiLoad()
 	if err != nil {
@@ -1253,13 +1300,17 @@ func TestAISettingsFileCannotPassCeilings(t *testing.T) {
 		}
 	}
 	l := lim(st)
-	if l.DailyTokens != 2_000_000 || l.UserDailyTokens != 0 || l.DailyUSD != aiUSDCap || l.UserDailyUSD != 2 {
-		t.Fatalf("daily limits: negative falls back to the default, zero stays, huge is cut: %+v", l)
+	if l.DailyTokens != nil || aiTestVal(l.UserDailyTokens) != 0 || aiTestVal(l.DailyUSD) != aiUSDCap || l.UserDailyUSD != nil {
+		t.Fatalf("daily limits: negative is no limit, zero stays, huge is cut: %+v", l)
 	}
 	v := e.view(t)
 	if v.MaxSteps != 20 || v.MaxOutputTokens != 32000 || v.TurnInputTokens != 200000 {
 		t.Fatalf("the view shows the effective values: %+v", v)
 	}
+	if _, err = e.s.aiReserve("u", "mystery", st); err == nil {
+		t.Fatal("a stored zero token limit must refuse the turn")
+	}
+	st.UserDailyTokens = nil
 	r, err := e.s.aiReserve("u", "mystery", st)
 	if err != nil || r.In != 200000 || r.Out != 32000 {
 		t.Fatalf("a turn uses the clamped values: %+v %v", r, err)

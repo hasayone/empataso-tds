@@ -1,7 +1,7 @@
 //go:build integration
 
 // Integration tests for the ClickHouse store. Each test creates its own
-// kuztds_it_* database, applies migrations/clickhouse/*.sql and drops it on
+// emtds_it_* database, applies migrations/clickhouse/*.sql and drops it on
 // cleanup. Set EMTDS_CLICKHOUSE_ADDR, EMTDS_CLICKHOUSE_USER and
 // EMTDS_CLICKHOUSE_PASSWORD; without them tests are skipped.
 package store
@@ -19,11 +19,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
 )
 
-const itDatabasePrefix = "kuztds_it_"
+const itDatabasePrefix = "emtds_it_"
 
 var (
 	chMigrationAll      []string
@@ -56,8 +56,8 @@ func migrationDir() string {
 
 func assertITDatabaseName(t *testing.T, db string) {
 	t.Helper()
-	if db == "kuztds" || !strings.HasPrefix(db, itDatabasePrefix) {
-		t.Fatalf("integration tests refuse database %q (want prefix %q, not production kuztds)", db, itDatabasePrefix)
+	if db == "emtds" || !strings.HasPrefix(db, itDatabasePrefix) {
+		t.Fatalf("integration tests refuse database %q (want prefix %q, not production emtds)", db, itDatabasePrefix)
 	}
 }
 

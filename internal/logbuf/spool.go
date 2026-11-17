@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/atomicfile"
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // The spool is a directory of segments on disk where a process parks batches
@@ -34,7 +34,6 @@ import (
 // the same library). <instance> is EMTDS_INSTANCE: stable across restarts, so a
 // restarted process finds its own segments. Directories are 0700, segments 0600.
 
-
 const (
 	// DefaultSpoolDir is the spool root when EMTDS_SPOOL_DIR is empty.
 	DefaultSpoolDir = "/var/lib/emtds-spool"
@@ -47,7 +46,6 @@ const (
 	spoolFileMode = 0o600
 	// segmentExt is the suffix of one spool segment file.
 	segmentExt = ".seg"
-
 
 	// rejectedDir is the subdirectory that keeps what could not be read.
 	rejectedDir = "rejected"
@@ -66,7 +64,6 @@ var (
 	// ErrSegmentRejected is returned by Load when the segment was unreadable
 	// and has been moved to the rejected directory.
 	ErrSegmentRejected = errors.New("logbuf: spool segment rejected")
-
 )
 
 // Spool is the directory of one engine instance under the spool root. It holds

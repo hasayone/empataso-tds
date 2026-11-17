@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
 	"github.com/emtds/bridge/ktimport"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // cfStoredRow is a domain whose server-owned Cloudflare, check and watch fields are all set.

@@ -15,7 +15,6 @@ import (
 func TestEngineRedisTimeoutsDefaults(t *testing.T) {
 	for _, k := range []string{"DIAL", "READ", "WRITE", "POOL"} {
 		t.Setenv("EMTDS_ENGINE_REDIS_"+k+"_TIMEOUT", "")
-		t.Setenv("KUZTDS_ENGINE_REDIS_"+k+"_TIMEOUT", "")
 	}
 	got := EngineRedisTimeouts()
 	want := RedisTimeouts{Dial: time.Second, Read: 200 * time.Millisecond, Write: 200 * time.Millisecond, Pool: 300 * time.Millisecond, DialRetries: 1}
@@ -24,15 +23,16 @@ func TestEngineRedisTimeoutsDefaults(t *testing.T) {
 	}
 }
 
-// TestEngineRedisTimeoutsEnv checks overrides, the legacy prefix and rejected values.
+// TestEngineRedisTimeoutsEnv checks overrides, that the retired prefix is not read
+// (it is assembled from parts) and rejected values.
 func TestEngineRedisTimeoutsEnv(t *testing.T) {
 	t.Setenv("EMTDS_ENGINE_REDIS_DIAL_TIMEOUT", "2s")
 	t.Setenv("EMTDS_ENGINE_REDIS_READ_TIMEOUT", "")
-	t.Setenv("KUZTDS_ENGINE_REDIS_READ_TIMEOUT", "500ms")
+	t.Setenv("KU"+"ZTDS_ENGINE_REDIS_READ_TIMEOUT", "500ms")
 	t.Setenv("EMTDS_ENGINE_REDIS_WRITE_TIMEOUT", "fast")
 	t.Setenv("EMTDS_ENGINE_REDIS_POOL_TIMEOUT", "-1s")
 	got := EngineRedisTimeouts()
-	want := RedisTimeouts{Dial: 2 * time.Second, Read: 500 * time.Millisecond, Write: EngineRedisWriteTimeout, Pool: EngineRedisPoolTimeout, DialRetries: EngineRedisDialRetries}
+	want := RedisTimeouts{Dial: 2 * time.Second, Read: EngineRedisReadTimeout, Write: EngineRedisWriteTimeout, Pool: EngineRedisPoolTimeout, DialRetries: EngineRedisDialRetries}
 	if got != want {
 		t.Fatalf("env %+v, want %+v", got, want)
 	}

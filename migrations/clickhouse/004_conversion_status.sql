@@ -1,6 +1,6 @@
 -- One conversion per click and status. The older postbacks table is ordered by
 -- cid alone, so a later status replaced the earlier one.
-CREATE TABLE IF NOT EXISTS kuztds.conversions
+CREATE TABLE IF NOT EXISTS emtds.conversions
 (
     ts          DateTime DEFAULT now(),
     domain      String,

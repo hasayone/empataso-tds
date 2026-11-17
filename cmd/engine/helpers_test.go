@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/detect"
-	"github.com/egerkuzma/emtds/internal/fetch"
-	"github.com/egerkuzma/emtds/internal/ipindex"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/detect"
+	"github.com/hasayone/empataso-tds/internal/fetch"
+	"github.com/hasayone/empataso-tds/internal/ipindex"
 )
 
 func TestParseSEKeyword(t *testing.T) {

@@ -8,7 +8,7 @@ import "net/http"
 func adminRouteDocs() map[string]routeDoc {
 	docs := map[string]routeDoc{}
 	for _, part := range []map[string]routeDoc{
-		keitaroRouteDocs(), publicRouteDocs(), sessionRouteDocs(), settingsRouteDocs(),
+		keitaroRouteDocs(), publicRouteDocs(), setupRouteDocs(), sessionRouteDocs(), settingsRouteDocs(),
 		cronRouteDocs(), updateRouteDocs(), accountRouteDocs(), integrationRouteDocs(), checkerRouteDocs(),
 	} {
 		for pattern, d := range part {
@@ -31,6 +31,19 @@ func docOf(summary, description string) docText {
 // of the three languages; the route needs only the summaries, the descriptions are optional.
 func cookieDoc(id string, en, ru, uk docText) routeDoc {
 	return routeDoc{ID: id, Summary: en.Summary, Description: en.Description, RU: ru, UK: uk}
+}
+
+// withResponse returns d with sample as the success answer.
+func (d routeDoc) withResponse(sample any) routeDoc {
+	d.Response = sample
+	return d
+}
+
+// withBody returns d with a JSON request body schema, a sample body and the statuses the route
+// answers on its own besides the 401, 403 and 429 every route shares.
+func (d routeDoc) withBody(schema map[string]any, example any, errs ...int) routeDoc {
+	d.Body, d.Example, d.Errors = schema, example, errs
+	return d
 }
 
 // buildInfoSample returns a sample build record: version, commit, commit_date and channel.
@@ -152,16 +165,29 @@ func keitaroRouteDocs() map[string]routeDoc {
 			ID: "check_keitaro", Summary: "Check the saved Keitaro key and count its campaigns.",
 			Description: "Calls Keitaro with the saved address and key and counts the campaigns; the count is remembered " +
 				"for the next check. Browser session of an administrator only: an API key gets 403 \"cookie session required\". " +
-				"Nothing is saved. 503 when the address or the key is not set, 502 when Keitaro refuses the key or does not answer.",
+				"Nothing is saved. 503 when the address or the key is not set, 502 when Keitaro refuses the key or does not answer. " +
+				"The Keitaro version is not reported by the API; product_version is \"10\" or \"11\" when read-only samples of the " +
+				"click and conversion logs point to one version (version_signals lists the votes), and empty when there are no " +
+				"signals or they disagree (version_conflict true).",
 			RU: docOf("Проверка сохранённого ключа Keitaro и подсчёт кампаний.",
 				"Обращается к Keitaro с сохранённым адресом и ключом и считает кампании; число запоминается для следующей "+
 					"проверки. Только сессия браузера администратора: ключ получает 403 «cookie session required». "+
-					"Ничего не сохраняется. 503, если адрес или ключ не заданы, 502, если Keitaro отклонил ключ или не ответил."),
+					"Ничего не сохраняется. 503, если адрес или ключ не заданы, 502, если Keitaro отклонил ключ или не ответил. "+
+					"API версию Keitaro не сообщает: product_version равен «10» или «11», когда чтение свежих записей журналов "+
+					"кликов и конверсий без записи указывает на одну версию (version_signals — голоса), и пуст, если признаков "+
+					"нет или они противоречат (version_conflict true)."),
 			UK: docOf("Перевірка збереженого ключа Keitaro й підрахунок кампаній.",
 				"Звертається до Keitaro зі збереженою адресою та ключем і рахує кампанії; число запам'ятовується для наступної "+
 					"перевірки. Лише сесія браузера адміністратора: ключ отримує 403 «cookie session required». "+
-					"Нічого не зберігається. 503, якщо адреса або ключ не задані, 502, якщо Keitaro відхилив ключ або не відповів."),
-			Response: map[string]any{"ok": true, "campaigns": 42, "api": "v1", "product_version": ""},
+					"Нічого не зберігається. 503, якщо адреса або ключ не задані, 502, якщо Keitaro відхилив ключ або не відповів. "+
+					"API версію Keitaro не повертає: product_version дорівнює «10» або «11», коли читання свіжих записів журналів "+
+					"кліків і конверсій без запису вказує на одну версію (version_signals — голоси), і порожній, якщо ознак "+
+					"немає або вони суперечать (version_conflict true)."),
+			Response: map[string]any{
+				"ok": true, "campaigns": 42, "api": "v1", "product_version": "11",
+				"version_signals":  []map[string]string{{"signal": "subid", "version": "11"}},
+				"version_conflict": false,
+			},
 			Errors:   []int{http.StatusForbidden, http.StatusBadGateway, http.StatusServiceUnavailable},
 		},
 		"POST /api/keitaro/purge": {
@@ -193,7 +219,7 @@ func keitaroRouteDocs() map[string]routeDoc {
 }
 
 // publicRouteDocs documents the routes mounted without the session check: the probes and
-// the brand an API key may call, and the sign-in routes of the browser.
+// the brand an API key may call, and the sign-in and recovery routes of the browser.
 func publicRouteDocs() map[string]routeDoc {
 	return map[string]routeDoc{
 		"GET /api/health": {
@@ -230,23 +256,6 @@ func publicRouteDocs() map[string]routeDoc {
 				"Ключ не потрібен. Логотип — посилання data:image або порожній рядок. Відповідь ніколи не кешується."),
 			Response: map[string]string{"name": "Example Ltd", "logo": ""},
 		},
-		"GET /api/setup": cookieDoc("get_setup",
-			docOf("Tell whether the first-run form is still open.",
-				"Needs no session. needed is true until the first administrator is created; public_ip is the server address or empty."),
-			docOf("Открыта ли форма первого запуска.",
-				"Сессия не нужна. needed равен true, пока не создан первый администратор; public_ip — адрес сервера или пустая строка."),
-			docOf("Чи відкрита форма першого запуску.",
-				"Сесія не потрібна. needed дорівнює true, поки не створений перший адміністратор; public_ip — адреса сервера або порожній рядок.")),
-		"POST /api/setup": cookieDoc("post_setup",
-			docOf("Create the first administrator and sign in.",
-				"Body login (2 to 64 characters, no spaces), password (6 or more, not admin) and email. 200 with the CSRF "+
-					"token and the session cookie. 400 for a bad field, 409 when the setup is already finished, 429 for too many attempts."),
-			docOf("Создание первого администратора и вход.",
-				"Тело: login (2–64 символа без пробелов), password (от 6 символов, не admin) и email. 200 с CSRF-токеном "+
-					"и cookie сессии. 400 при неверном поле, 409 если настройка уже завершена, 429 при слишком частых попытках."),
-			docOf("Створення першого адміністратора та вхід.",
-				"Тіло: login (2–64 символи без пробілів), password (від 6 символів, не admin) і email. 200 із CSRF-токеном "+
-					"і cookie сесії. 400 при хибному полі, 409 якщо налаштування вже завершене, 429 при надто частих спробах.")),
 		"POST /api/login": cookieDoc("login",
 			docOf("Sign in with a login and a password.",
 				"Body login and password. 200 with the CSRF token and the session cookie; 401 for wrong credentials; "+
@@ -270,6 +279,44 @@ func publicRouteDocs() map[string]routeDoc {
 			docOf("Новий пароль за одноразовим кодом відновлення.",
 				"Тіло: login, code і password (від 6 символів). Хибний логін, хибний і прострочений код дають той самий 401; "+
 					"429 при надто частих спробах.")),
+	}
+}
+
+// setupRouteDocs documents the first-run form: whether it is still open and the creation of the
+// first administrator. Both routes are mounted without the session check.
+func setupRouteDocs() map[string]routeDoc {
+	return map[string]routeDoc{
+		"GET /api/setup": cookieDoc("get_setup",
+			docOf("Tell whether the first-run form is still open.",
+				"Needs no session. needed is true until the first administrator is created; public_ip is the server address or empty; "+
+					"token_required is true while the form is open and the server was started with a first-run token."),
+			docOf("Открыта ли форма первого запуска.",
+				"Сессия не нужна. needed равен true, пока не создан первый администратор; public_ip — адрес сервера или пустая строка; "+
+					"token_required равен true, пока форма открыта и сервер запущен с токеном первого входа."),
+			docOf("Чи відкрита форма першого запуску.",
+				"Сесія не потрібна. needed дорівнює true, поки не створений перший адміністратор; public_ip — адреса сервера або порожній рядок; "+
+					"token_required дорівнює true, поки форма відкрита і сервер запущений із токеном першого входу.")).
+			withResponse(map[string]any{"needed": true, "public_ip": "203.0.113.10", "token_required": true}),
+		"POST /api/setup": cookieDoc("post_setup",
+			docOf("Create the first administrator and sign in.",
+				"Body login (2 to 64 characters, no spaces), password (6 or more, not admin), email and, when GET /api/setup "+
+					"says token_required, token. 200 with the CSRF token and the session cookie. 400 for a bad field, "+
+					"403 with \"setup token is required\" or \"setup token is wrong\" when the token is missing or does not match, "+
+					"409 when the setup is already finished (whatever the token is), 429 for too many attempts."),
+			docOf("Создание первого администратора и вход.",
+				"Тело: login (2–64 символа без пробелов), password (от 6 символов, не admin), email и, если GET /api/setup "+
+					"возвращает token_required, token. 200 с CSRF-токеном и cookie сессии. 400 при неверном поле, "+
+					"403 с текстом \"setup token is required\" или \"setup token is wrong\", если токен не передан или не совпал, "+
+					"409 если настройка уже завершена (при любом токене), 429 при слишком частых попытках."),
+			docOf("Створення першого адміністратора та вхід.",
+				"Тіло: login (2–64 символи без пробілів), password (від 6 символів, не admin), email і, якщо GET /api/setup "+
+					"повертає token_required, token. 200 із CSRF-токеном і cookie сесії. 400 при хибному полі, "+
+					"403 з текстом \"setup token is required\" або \"setup token is wrong\", якщо токен не передано або він не збігся, "+
+					"409 якщо налаштування вже завершене (за будь-якого токена), 429 при надто частих спробах.")).
+			withBody(objectBody("login, password, email and token (needed only when token_required is true)."),
+				map[string]string{"login": "owner", "password": "example-password", "email": "owner@example.com", "token": "example-setup-token"},
+				http.StatusBadRequest, http.StatusForbidden, http.StatusConflict).
+			withResponse(map[string]string{"csrf": "example-csrf-token"}),
 	}
 }
 
@@ -771,6 +818,53 @@ func updateRouteDocs() map[string]routeDoc {
 				"images": images, "mismatch": false,
 			},
 		},
+		"GET /api/system": cookieDoc("get_system",
+			docOf("Get the state of the host and of the services around the admin.",
+				"Administrator browser session only; an API key gets 403. host holds cpus, load (1, 5 and 15 minutes), mem_total and "+
+					"mem_available and disk_total and disk_free of the state volume in bytes, and uptime_s in seconds. services holds "+
+					"clickhouse and redis as {state, ms}: state is ok, down or not_configured, and ms is the answer time in milliseconds, "+
+					"present only for ok and down; each is checked with a 2 second limit. cron holds heartbeat_age_s and busy, "+
+					"and is absent without a status file. A field with no data is left out."),
+			docOf("Состояние хоста и сервисов рядом с админкой.",
+				"Только для сессии администратора в браузере; ключ API получает 403. host содержит cpus, load (1, 5 и 15 минут), "+
+					"mem_total и mem_available, disk_total и disk_free тома состояния в байтах и uptime_s в секундах. services содержит "+
+					"clickhouse и redis как {state, ms}: state — ok, down или not_configured, ms — время ответа в миллисекундах, "+
+					"только для ok и down; каждый сервис проверяется с лимитом 2 секунды. cron содержит heartbeat_age_s и busy "+
+					"и отсутствует без файла состояния. Поле без данных не отдаётся."),
+			docOf("Стан хоста та сервісів поруч з адмінкою.",
+				"Лише для сесії адміністратора в браузері; ключ API отримує 403. host містить cpus, load (1, 5 і 15 хвилин), "+
+					"mem_total і mem_available, disk_total і disk_free тому стану в байтах та uptime_s в секундах. services містить "+
+					"clickhouse і redis як {state, ms}: state — ok, down або not_configured, ms — час відповіді в мілісекундах, "+
+					"лише для ok і down; кожен сервіс перевіряється з лімітом 2 секунди. cron містить heartbeat_age_s і busy "+
+					"та відсутній без файлу стану. Поле без даних не віддається.")).
+			withResponse(map[string]any{
+				"host": map[string]any{
+					"cpus": 4, "load": []float64{0.12, 0.3, 0.25}, "mem_total": 8589934592, "mem_available": 4294967296,
+					"uptime_s": 86400, "disk_total": 107374182400, "disk_free": 53687091200,
+				},
+				"services": map[string]any{
+					"clickhouse": map[string]any{"state": "ok", "ms": 3},
+					"redis":      map[string]any{"state": "ok", "ms": 1},
+					"cron":       map[string]any{"heartbeat_age_s": 12, "busy": false},
+				},
+			}),
+		"GET /api/system/signals": cookieDoc("get_system_signals",
+			docOf("Get the marks of the header: a newer commit and the services that do not answer.",
+				"Administrator browser session only; an API key gets 403. update is true when a fresh check of the update agent "+
+					"found a newer commit for the running build; it turns false as soon as the new build runs. down lists the "+
+					"services that do not answer, in the order engine, clickhouse, redis, and is an empty list when all answer; "+
+					"a service that is not configured is not listed. Each service is checked with a 2 second limit."),
+			docOf("Метки шапки: есть ли коммит новее и какие службы не отвечают.",
+				"Только для сессии администратора в браузере; ключ API получает 403. update равен true, когда свежая проверка "+
+					"агента обновлений нашла коммит новее работающей сборки, и становится false, как только запущена новая сборка. "+
+					"down перечисляет службы, которые не отвечают, в порядке engine, clickhouse, redis, и пуст, когда отвечают все; "+
+					"ненастроенная служба не попадает в список. Каждая служба проверяется с лимитом 2 секунды."),
+			docOf("Мітки шапки: чи є новіший коміт і які служби не відповідають.",
+				"Лише для сесії адміністратора в браузері; ключ API отримує 403. update дорівнює true, коли свіжа перевірка "+
+					"агента оновлень знайшла коміт, новіший за робочу збірку, і стає false, щойно запущено нову збірку. "+
+					"down перелічує служби, які не відповідають, у порядку engine, clickhouse, redis, і порожній, коли відповідають усі; "+
+					"неналаштована служба не потрапляє до списку. Кожна служба перевіряється з лімітом 2 секунди.")).
+			withResponse(map[string]any{"update": true, "down": []string{"redis"}}),
 		"GET /api/update": {
 			ID: "get_update", Summary: "Get the update state and whether an update or a rollback may start.",
 			Description: "Administrator key only. build is the running build; agent, check and state are the files of the " +
@@ -951,13 +1045,13 @@ func accountRouteDocs() map[string]routeDoc {
 			docOf("Удаление роли.", "204 при успехе; 409, пока роль используется аккаунтом."),
 			docOf("Видалення ролі.", "204 у разі успіху; 409, поки роль використовується акаунтом.")),
 		"GET /api/api-keys": cookieDoc("list_api_keys",
-			docOf("List the API keys.", "Returns the id, name, lead (em_; absent on a key issued before it, which starts with kz_), prefix, scopes, type, role, access and actions of each key, "+
+			docOf("List the API keys.", "Returns the id, name, prefix, scopes, type, role, access and actions of each key, "+
 				"created_at, expires_at (absent: never expires) and last_used_at with last_used_ip masked to a.b.c.x (absent: not used yet). "+
 				"The last use is recorded at most once a minute and may lag by that much. The secret is stored as a hash and is never returned."),
-			docOf("Список API-ключей.", "Возвращает id, имя, lead (em_; нет у ключа, выданного раньше, — он начинается с kz_), префикс, области, тип, роль, доступ и галочки каждого ключа, "+
+			docOf("Список API-ключей.", "Возвращает id, имя, префикс, области, тип, роль, доступ и галочки каждого ключа, "+
 				"created_at, expires_at (нет — бессрочный) и last_used_at с last_used_ip, замаскированным до a.b.c.x (нет — ещё не использовался). "+
 				"Использование записывается не чаще раза в минуту и может отставать на столько же. Секрет хранится хэшем и не возвращается."),
-			docOf("Список API-ключів.", "Повертає id, ім'я, lead (em_; немає в ключа, виданого раніше, — він починається з kz_), префікс, області, тип, роль, доступ і галочки кожного ключа, "+
+			docOf("Список API-ключів.", "Повертає id, ім'я, префікс, області, тип, роль, доступ і галочки кожного ключа, "+
 				"created_at, expires_at (немає — безстроковий) і last_used_at з last_used_ip, замаскованим до a.b.c.x (немає — ще не використовувався). "+
 				"Використання записується не частіше разу на хвилину й може відставати на стільки ж. Секрет зберігається хешем і не повертається.")),
 		"POST /api/api-keys": cookieDoc("create_api_key",

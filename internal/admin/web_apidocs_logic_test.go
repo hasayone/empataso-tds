@@ -114,5 +114,16 @@ const sh = apiDocsHighlight('curl -H "Api-Key: em_..." "https://a.example/?a=1&b
 eq([sh.startsWith('<span class="hl-cmd">curl</span>'), sh.includes('<span class="hl-flag">-H</span>'), sh.includes('&amp;b=&lt;x&gt;'), sh.includes('<x>')],
   [true, true, true, false], 'curl command, flags and escaped strings');
 eq(apiDocsHighlight('a<b', ''), 'a&lt;b', 'plain text is only escaped');
+
+const md = apiDocsMarkdown('# API <x>\n\nBase **bold** and ` + "`" + `Api-Key: em_` + "`" + ` here.\nSecond line.\n\n## General\n\n### ` + "`" + `GET /api/me` + "`" + `\n\nSummary [docs](/docs) [bad](javascript:alert(1)).\n\n- ` + "`" + `id` + "`" + ` (string) — the id\n- other\n\nResponse 200:\n\n` + "```" + `json\n{"a": 1}\n` + "```" + `\n\n## Next\n');
+eq(md.toc, [{id:'md-1', text:'General'}, {id:'md-3', text:'Next'}], 'the contents lists the level-2 headings with their element ids');
+eq([md.html.startsWith('<h1 id="md-0">API &lt;x&gt;</h1>'), md.html.includes('<p>Base <b>bold</b> and <code>Api-Key: em_</code> here.\nSecond line.</p>'),
+   md.html.includes('<h3 id="md-2"><code>GET /api/me</code></h3>')], [true, true, true], 'headings, bold, inline code, soft line breaks, escaping');
+eq([md.html.includes('<a href="/docs" target="_blank" rel="noopener">docs</a>'), md.html.includes('<a href="javascript'), md.html.includes('[bad](javascript:alert(1))')],
+  [true, false, true], 'only http and root-relative links become anchors');
+eq(md.html.includes('<ul><li><code>id</code> (string) — the id</li><li>other</li></ul>'), true, 'a dash list is one ul');
+eq(md.html.includes('<code class="hl">{<span class="hl-key">&quot;a&quot;</span>: <span class="hl-num">1</span>}</code>'), true, 'a fenced json sample is highlighted');
+eq(apiDocsMarkdown(null), {html:'', toc:[]}, 'no text, no page');
+eq(apiDocsMarkdown('<script>alert(1)</script>').html, '<p>&lt;script&gt;alert(1)&lt;/script&gt;</p>', 'raw HTML is escaped');
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/security"
+	"github.com/hasayone/empataso-tds/internal/security"
 )
 
 // registerRoles mounts CRUD routes for roles.json behind cookie sessions.

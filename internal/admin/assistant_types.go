@@ -71,9 +71,11 @@ type aiPrice struct {
 // aiSettings is the content of ai.json.
 //
 // Keys holds the provider keys by provider id and never leaves the server.
-// The four limit fields are pointers: nil means the built-in default and an
-// explicit zero means no limit. Prices overrides the built-in price table by
-// model id.
+// The four daily limit fields are pointers: nil means the built-in default, aiNoLimit means
+// no limit and zero refuses every call the limit counts. Prices overrides the built-in price table by
+// model id. UserBudgetUSD and GroupBudgetUSD are the USD budgets of the current day by usage id of
+// an account and by role id (the group of users); a missing id means no budget, and they do not
+// replace the four limits above: the stricter one refuses the call.
 type aiSettings struct {
 	Enabled         bool               `json:"enabled"`
 	Provider        string             `json:"provider"`
@@ -87,6 +89,8 @@ type aiSettings struct {
 	UserDailyTokens *int64             `json:"user_daily_tokens,omitempty"`
 	DailyUSD        *float64           `json:"daily_usd,omitempty"`
 	UserDailyUSD    *float64           `json:"user_daily_usd,omitempty"`
+	UserBudgetUSD   map[string]float64 `json:"user_budget_usd,omitempty"`
+	GroupBudgetUSD  map[string]float64 `json:"group_budget_usd,omitempty"`
 	Prices          map[string]aiPrice `json:"prices,omitempty"`
 	Perms           aiPerms            `json:"perms"`
 }

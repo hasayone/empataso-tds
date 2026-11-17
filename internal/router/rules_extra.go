@@ -3,7 +3,7 @@ package router
 import (
 	"strings"
 
-	"github.com/egerkuzma/emtds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/config"
 )
 
 // ruleCheck is one condition of a stream for the "any condition" mode: its name,

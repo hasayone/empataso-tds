@@ -13,17 +13,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/egerkuzma/emtds/internal/config"
-	"github.com/egerkuzma/emtds/internal/detect"
-	"github.com/egerkuzma/emtds/internal/fetch"
-	"github.com/egerkuzma/emtds/internal/geo"
-	"github.com/egerkuzma/emtds/internal/ipindex"
-	"github.com/egerkuzma/emtds/internal/logbuf"
-	"github.com/egerkuzma/emtds/internal/render"
-	"github.com/egerkuzma/emtds/internal/router"
-	"github.com/egerkuzma/emtds/internal/seplist"
-	"github.com/egerkuzma/emtds/internal/server"
-	"github.com/egerkuzma/emtds/internal/store"
+	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/detect"
+	"github.com/hasayone/empataso-tds/internal/fetch"
+	"github.com/hasayone/empataso-tds/internal/geo"
+	"github.com/hasayone/empataso-tds/internal/ipindex"
+	"github.com/hasayone/empataso-tds/internal/logbuf"
+	"github.com/hasayone/empataso-tds/internal/render"
+	"github.com/hasayone/empataso-tds/internal/router"
+	"github.com/hasayone/empataso-tds/internal/seplist"
+	"github.com/hasayone/empataso-tds/internal/server"
+	"github.com/hasayone/empataso-tds/internal/store"
 )
 
 // engineDeps — hot-path dependencies assembled in main() and passed to the

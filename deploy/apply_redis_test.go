@@ -231,7 +231,7 @@ func runApplyRedis(t *testing.T, state, bin string, args ...string) (string, int
 		"STUB_DIR="+state,
 		"EMTDS_HOST_MEM_MIB=32000",
 		"EMTDS_REDIS_PASSWORD=",
-		"KUZTDS_REDIS_PASSWORD=",
+		"KU"+"ZTDS_REDIS_PASSWORD=ignored",
 		"EMTDS_SERVER_ENV="+envFile,
 	)
 	out, err := cmd.CombinedOutput()

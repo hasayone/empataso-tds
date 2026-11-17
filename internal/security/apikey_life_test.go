@@ -98,13 +98,13 @@ func TestKeyTouchIsThrottled(t *testing.T) {
 }
 
 func TestOldKeyFileHasNoLifetime(t *testing.T) {
-	path := writeKeyFile(t, "kz_old", "")
+	path := writeKeyFile(t, "em_old", "")
 	s, err := LoadKeySet(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	k, err := s.Check("kz_old", ScopeAdmin, time.Now().AddDate(50, 0, 0))
-	if err != nil || k.ExpiresAt != nil || k.LastUsedAt != nil || k.LastUsedIP != "" || k.Lead != "" {
+	k, err := s.Check("em_old", ScopeAdmin, time.Now().AddDate(50, 0, 0))
+	if err != nil || k.ExpiresAt != nil || k.LastUsedAt != nil || k.LastUsedIP != "" {
 		t.Fatalf("old key must never expire and have no use: %+v %v", k, err)
 	}
 	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
