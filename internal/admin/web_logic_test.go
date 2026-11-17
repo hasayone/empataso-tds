@@ -2149,6 +2149,7 @@ aboutPage = async () => { opened.push('about'); };
   await aboutPage();
   yes(BODY.innerHTML.includes('stale ' + cur.slice(0, 12)), 'a check made for another build is flagged');
   yes(BODY.innerHTML.includes('id="upd-stale-check"') && !BODY.innerHTML.includes('upd.commits') && !BODY.innerHTML.includes('subject'), 'a stale check offers a check and hides its commits');
+  yes(SYSBOX.innerHTML.includes('about.server.err'), 'an unreadable server block says so');
   const flagged = base(); flagged.check_stale = true;
   answers = {'/api/update': flagged, '/api/version': verOK, '/api/system': sysOK};
   await aboutPage();
@@ -2176,7 +2177,6 @@ aboutPage = async () => { opened.push('about'); };
   await aboutPage();
   yes(BODY.innerHTML.includes('data-step="queued"'), 'a followed request waits in the inbox');
   delete SESS['emtds-upd-track'];
-  yes(SYSBOX.innerHTML.includes('about.server.err'), 'an unreadable server block says so');
 
   const signing = base(); signing.agent.signing = true;
   answers = {'/api/update': signing, '/api/version': verOK, '/api/system': sysOK};
