@@ -2136,11 +2136,46 @@ aboutPage = async () => { opened.push('about'); };
   yes(SYSBOX.innerHTML.includes('<span class="pill bad">Down</span>'), 'a service that is down is flagged');
   await REFBTN.onclick();
   eq(sysCalls, 2, 'the server block reads again on its button');
+  eq([...html.matchAll(/<section class="card pad upd-card" id="([a-z-]+)">/g)].map(m => m[1]), ['about-ver', 'about-upd', 'about-cli', 'about-sys'], 'four blocks in order');
+  yes(html.includes('<div class="bt">about.update</div><div class="upd-tools"><button type="button" class="btn primary" id="upd-apply-btn"'), 'the update button stands at the right of its block title');
+  yes(html.includes('<div class="bt">about.server</div><div class="upd-tools"><button type="button" class="btn secondary" id="about-sys-refresh"'), 'the server refresh stands at the right of its block title too');
+  eq((html.match(/class="upd-tools"/g) || []).length, 2, 'only the update and server blocks carry buttons in the title');
+  yes(html.includes('<div class="cli-row"><code>' + U + ' --check</code><button type="button" class="copy-ic icon sm ghost"'), 'the copy button sits in the command row');
+  yes(html.includes('class="copy-ic icon sm ghost"') && html.includes('viewBox="0 0 24 24"'), 'the copy button is an icon, not a clipped glyph');
+  yes(!html.includes('id="upd-prog"'), 'no progress block without a request');
 
   const stale = base(); stale.check.current = {commit: cur};
   answers = {'/api/update': stale, '/api/version': verOK, '/api/system': null};
   await aboutPage();
   yes(BODY.innerHTML.includes('stale ' + cur.slice(0, 12)), 'a check made for another build is flagged');
+  yes(BODY.innerHTML.includes('id="upd-stale-check"') && !BODY.innerHTML.includes('upd.commits') && !BODY.innerHTML.includes('subject'), 'a stale check offers a check and hides its commits');
+  const flagged = base(); flagged.check_stale = true;
+  answers = {'/api/update': flagged, '/api/version': verOK, '/api/system': sysOK};
+  await aboutPage();
+  yes(BODY.innerHTML.includes('id="upd-stale-check"'), 'the server flag of a stale check is honoured');
+
+  delete SESS['emtds-upd-track'];
+  const pending = base(); pending.request_pending = true; pending.can_apply = false; pending.apply_block = 'request_pending';
+  answers = {'/api/update': pending, '/api/version': verOK, '/api/system': sysOK};
+  await aboutPage();
+  yes(BODY.innerHTML.includes('data-step="queued"') && BODY.innerHTML.includes('upd.prog.accepted'), 'a request already in the inbox shows its progress');
+
+  const onTip = base(); onTip.check.ahead = 3; onTip.check.target = {commit: sha, version: 'v0.1.0'};
+  onTip.check.commits = [{sha: sha, subject: 'this build', author: 'a'}]; onTip.check.notes = 'note'; onTip.check.manual_steps = [];
+  answers = {'/api/update': onTip, '/api/version': verOK, '/api/system': sysOK};
+  await aboutPage();
+  yes(BODY.innerHTML.includes('upd.target.none') && !BODY.innerHTML.includes('upd.commits') && !BODY.innerHTML.includes('this build'), 'the running commit is not listed as commits ahead');
+
+  const running = base(); running.can_apply = false; running.apply_block = 'running';
+  running.state = {id: 'run0run0run0run0', action: 'apply', result: 'running', phase: 'build', phases: [{name: 'env', ok: true}], from: sha, to: cur};
+  answers = {'/api/update': running, '/api/version': verOK, '/api/system': sysOK};
+  await aboutPage();
+  yes(BODY.innerHTML.includes('<div class="upd-prog" id="upd-prog" data-step="running">'), 'a run started elsewhere shows its progress');
+  SESS['emtds-upd-track'] = JSON.stringify({id: 'req0req0req0req0', prev: 'run0run0run0run0'});
+  running.request_pending = true; running.state = {id: 'run0run0run0run0', result: 'ok', finished_at: 'x', phases: []};
+  await aboutPage();
+  yes(BODY.innerHTML.includes('data-step="queued"'), 'a followed request waits in the inbox');
+  delete SESS['emtds-upd-track'];
   yes(SYSBOX.innerHTML.includes('about.server.err'), 'an unreadable server block says so');
 
   const signing = base(); signing.agent.signing = true;
@@ -2182,13 +2217,16 @@ func TestSettingsTabsAndAbout(t *testing.T) {
 	}
 	html := spaSource()
 	var b strings.Builder
-	b.WriteString("let ME=null, UPD_GEN=0, UPD_VER=null, BOARDS={loaded:false};\n")
+	b.WriteString("let ME=null, UPD_GEN=0, UPD_VER=null, BOARDS={loaded:false}, SYSNOTE_AT=0;\n")
+	b.WriteString("const sysNotice=()=>{}, SESS={};\n")
+	b.WriteString("var sessionStorage={getItem:k=>k in SESS?SESS[k]:null, setItem:(k,v)=>{SESS[k]=String(v)}, removeItem:k=>{delete SESS[k]}};\n")
 	b.WriteString("const PAGE_SECTION={};\n")
 	b.WriteString("const SIG={data:{update:false, down:[]}};\n")
 	b.WriteString("const dict={'about.free':'{free} free of {total}','about.ms':'{n} ms','about.hb':'hb {age}','about.state.ok':'OK','about.state.down':'Down','about.state.not_configured':'Not configured','about.stale':'stale {commit}','upd.target.checked':'checked {at}','land.unit.b':'B','land.unit.kb':'KB','land.unit.mb':'MB','land.unit.gb':'GB'};\n")
 	b.WriteString("const tr=k=>(k in dict)?dict[k]:k;\n")
 	b.WriteString("var uiLocale=()=>'en', when=s=>'W('+s+')', ago=s=>'A('+s+')', view, history, go, settings, boardsPage, usersPage, apiKeys, q, qa, get;\n")
 	b.WriteString("const userTypeLabel=()=>'Admin', openPostbacks=()=>{}, logout=()=>{}, boardSwitchRows=()=>[], postbackDocs=()=>{}, apiDocs=async()=>{};\n")
+	b.WriteString("const icon=()=>'<svg class=\"ic\" viewBox=\"0 0 24 24\"></svg>';\n")
 	b.WriteString("var location={hash:''};\n")
 	b.WriteString("q=()=>null; qa=()=>[]; get=async()=>null;\n")
 	if line := spaConstLine(html, "const esc="); line != "" {
@@ -2201,7 +2239,7 @@ func TestSettingsTabsAndAbout(t *testing.T) {
 	} else {
 		t.Fatal("SETTINGS_TABS not found in SPA")
 	}
-	for _, prefix := range []string{"const UPD_REPO_RE=", "const UPD_CLI_RE="} {
+	for _, prefix := range []string{"const UPD_REPO_RE=", "const UPD_CLI_RE=", "const UPD_TRACK_KEY="} {
 		line := spaConstLine(html, prefix)
 		if line == "" {
 			t.Fatalf("%s not found in SPA", prefix)
@@ -2210,7 +2248,8 @@ func TestSettingsTabsAndAbout(t *testing.T) {
 	}
 	for _, name := range []string{"trFill", "byteSize", "accessPages", "sectionAllowed", "pageAllowed", "meIsAdmin", "settingsTabs", "settingsTabsAllowed", "adminMenuEntries", "userMenuItems",
 		"appendBoardUserMenuItems", "boardChromeVisible", "changelogURL", "updSignBadge", "safeCLI", "schemaOkCommand", "durationText", "systemRowsHTML",
-		"buildLabelHTML", "setupTokenFieldHTML", "setupMessage", "sigMark", "sigNames", "sigMenuMark"} {
+		"buildLabelHTML", "setupTokenFieldHTML", "setupMessage", "sigMark", "sigNames", "sigMenuMark",
+		"updTrackGet", "updTrackSet", "updProgress", "updProgressHTML", "updCardHTML"} {
 		fn := spaTopFunction(html, name, false)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)

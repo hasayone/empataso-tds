@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"reflect"
 	"sync"
 	"time"
 
@@ -14,25 +15,26 @@ import (
 const keitaroJobTimeout = 2 * time.Hour
 
 // keitaroJob is one background import and the lock that keeps a purge from
-// overlapping it. The mutex guards every field below it.
+// overlapping it. The mutex guards every field below it except saveMu, file and warn.
 type keitaroJob struct {
-	mu         sync.Mutex
-	running    bool
-	syncing    bool
-	stage      string
-	done       int
-	total      int
-	counts     map[string]int
-	losses     []ktimport.Loss
-	errText    string
-	startedAt  string
-	finishedAt string
-	purging    bool
-	campaign   int
+	mu      sync.Mutex
+	running bool
+	syncing bool
+	// rec is the state of the running or the last import; save writes it to file.
+	rec     keitaroJournal
+	purging bool
 	// writers counts holders of holdWrite: catalog or campaign writes in progress.
 	writers int
 	// updating is true while an update/pending file is active; begin* and holdWrite refuse when set.
 	updating bool
+	// savedAt is the time of the last journal write.
+	savedAt time.Time
+	// saveMu orders journal writes, so a later state is never overwritten by an earlier one.
+	saveMu sync.Mutex
+	// file is keitaro-job.json on the state volume; empty keeps the journal in memory only.
+	file string
+	// warn receives journal read and write failures; nil drops them.
+	warn func(string, ...any)
 }
 
 // keitaroUpdatePendingMsg is the refusal of begin* and holdWrite while an update is pending.
@@ -53,17 +55,25 @@ type keitaroJobView struct {
 	FinishedAt  string          `json:"finished_at"`
 	// CampaignID is the Keitaro campaign of the last dosync of one campaign; omitted for a full import.
 	CampaignID int `json:"campaign_id,omitempty"`
+	// LastStage is the stage a failed run stopped in; empty otherwise.
+	LastStage string `json:"last_stage,omitempty"`
+	// UpdatedAt is the time of the last change of the state, RFC3339, or empty before the first run.
+	UpdatedAt string `json:"updated_at"`
+	// Interrupted is true when the admin process stopped while the run was going.
+	Interrupted bool `json:"interrupted"`
+	// Resumable is true when POST /api/keitaro/import with resume true can continue the last run.
+	Resumable bool `json:"resumable"`
+	// Resumes counts how many times the run was continued.
+	Resumes int `json:"resumes"`
+	// Logs holds per log (clicks, conversions) the rows written so far and whether the log is done.
+	Logs map[string]keitaroLogMark `json:"logs"`
 }
 
-// newKeitaroJob returns an idle job.
+// newKeitaroJob returns an idle job that keeps its journal in memory only.
 // The stage is idle. Counts is an empty map and losses is an empty slice.
 // It does not return an error.
 func newKeitaroJob() *keitaroJob {
-	return &keitaroJob{
-		stage:  "idle",
-		counts: map[string]int{},
-		losses: []ktimport.Loss{},
-	}
+	return &keitaroJob{rec: idleJournal()}
 }
 
 const keitaroSyncBusyMsg = "идёт актуализация"
@@ -160,6 +170,18 @@ func (j *keitaroJob) busy() bool {
 func (j *keitaroJob) beginImport() string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if msg := j.refuseLocked(); msg != "" {
+		return msg
+	}
+	j.running = true
+	j.rec = idleJournal()
+	j.rec.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	return ""
+}
+
+// refuseLocked returns why an import cannot start now, or an empty string. j.mu is held.
+// The order of the checks is update, catch-up, import, purge, then a write hold.
+func (j *keitaroJob) refuseLocked() string {
 	if j.updating {
 		return keitaroUpdatePendingMsg
 	}
@@ -175,26 +197,7 @@ func (j *keitaroJob) beginImport() string {
 	if j.writers > 0 {
 		return keitaroWriteBusyMsg
 	}
-	j.running = true
-	j.stage = "idle"
-	j.done = 0
-	j.total = 0
-	j.counts = map[string]int{}
-	j.losses = []ktimport.Loss{}
-	j.errText = ""
-	j.startedAt = time.Now().UTC().Format(time.RFC3339)
-	j.finishedAt = ""
-	j.campaign = 0
 	return ""
-}
-
-// setCampaign records the Keitaro campaign of the running import for GET /api/keitaro/job.
-// id is the campaign of a dosync of one campaign, or 0 for a full import.
-// It does not return an error.
-func (j *keitaroJob) setCampaign(id int) {
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	j.campaign = id
 }
 
 // beginPurge holds the lock for one synchronous purge.
@@ -279,22 +282,26 @@ func (j *keitaroJob) endPurge() {
 // finished are ignored. It does not return an error.
 func (j *keitaroJob) progress(stage string, done, total int) {
 	j.mu.Lock()
-	defer j.mu.Unlock()
 	if !j.running {
+		j.mu.Unlock()
 		return
 	}
-	j.stage = stage
-	j.done = done
-	j.total = total
+	moved := j.rec.Stage != stage
+	j.rec.Stage = stage
+	j.rec.Done = done
+	j.rec.Total = total
+	j.mu.Unlock()
+	j.save(moved)
 }
 
 // setStage sets the stage name without touching the counters.
 // stage is catalogs, landing_files, lists, pages or groups, which the tracker client does not report.
-// It does not return an error.
+// The journal is written at once. It does not return an error.
 func (j *keitaroJob) setStage(stage string) {
 	j.mu.Lock()
-	j.stage = stage
+	j.rec.Stage = stage
 	j.mu.Unlock()
+	j.save(true)
 }
 
 // publish copies counts and losses into the state while the import is running.
@@ -304,34 +311,41 @@ func (j *keitaroJob) publish(counts map[string]int, losses []ktimport.Loss, key 
 	masked := maskLosses(losses, key)
 	copied := copyCounts(counts)
 	j.mu.Lock()
-	defer j.mu.Unlock()
 	if !j.running {
+		j.mu.Unlock()
 		return
 	}
-	j.counts = copied
-	j.losses = masked
+	j.rec.Counts = copied
+	j.rec.Losses = masked
+	j.mu.Unlock()
+	j.save(true)
 }
 
 // finish marks the import stopped and stores the outcome.
 // errMsg is empty on success and is already safe to show. counts and losses
 // are everything collected, including a partial run. key is removed from loss text.
-// The stage becomes done or failed. running becomes false and finished_at is set.
-// It does not return an error.
+// The stage becomes done or failed; a failed run keeps the stage it stopped in as last_stage
+// and is resumable when canResume allows it. running becomes false, finished_at is set and
+// the journal is written at once. It does not return an error.
 func (j *keitaroJob) finish(errMsg string, counts map[string]int, losses []ktimport.Loss, key string) {
 	masked := maskLosses(losses, key)
 	copied := copyCounts(counts)
 	j.mu.Lock()
-	defer j.mu.Unlock()
 	j.running = false
-	j.finishedAt = time.Now().UTC().Format(time.RFC3339)
-	j.counts = copied
-	j.losses = masked
-	j.errText = errMsg
+	j.rec.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+	j.rec.Counts = copied
+	j.rec.Losses = masked
+	j.rec.Error = errMsg
+	j.rec.LastStage = ""
 	if errMsg != "" {
-		j.stage = "failed"
-		return
+		j.rec.LastStage = j.rec.Stage
+		j.rec.Stage = "failed"
+	} else {
+		j.rec.Stage = "done"
 	}
-	j.stage = "done"
+	j.rec.Resumable = j.rec.canResume()
+	j.mu.Unlock()
+	j.save(true)
 }
 
 // snapshot returns a copy of the job state.
@@ -340,22 +354,29 @@ func (j *keitaroJob) finish(errMsg string, counts map[string]int, losses []ktimp
 func (j *keitaroJob) snapshot() keitaroJobView {
 	j.mu.Lock()
 	defer j.mu.Unlock()
-	losses := append([]ktimport.Loss{}, j.losses...)
-	if losses == nil {
-		losses = []ktimport.Loss{}
+	losses := append([]ktimport.Loss{}, j.rec.Losses...)
+	logs := make(map[string]keitaroLogMark, len(j.rec.Logs))
+	for k, v := range j.rec.Logs {
+		logs[k] = v
 	}
 	return keitaroJobView{
 		Running:     j.running,
 		SyncRunning: j.syncing,
-		Stage:       j.stage,
-		Done:        j.done,
-		Total:       j.total,
-		Counts:      copyCounts(j.counts),
+		Stage:       j.rec.Stage,
+		Done:        j.rec.Done,
+		Total:       j.rec.Total,
+		Counts:      copyCounts(j.rec.Counts),
 		Losses:      losses,
-		Error:       j.errText,
-		StartedAt:   j.startedAt,
-		FinishedAt:  j.finishedAt,
-		CampaignID:  j.campaign,
+		Error:       j.rec.Error,
+		StartedAt:   j.rec.StartedAt,
+		FinishedAt:  j.rec.FinishedAt,
+		CampaignID:  j.rec.CampaignID,
+		LastStage:   j.rec.LastStage,
+		UpdatedAt:   j.rec.UpdatedAt,
+		Interrupted: j.rec.Interrupted,
+		Resumable:   j.rec.Resumable && !j.running,
+		Resumes:     j.rec.Resumes,
+		Logs:        logs,
 	}
 }
 
@@ -376,6 +397,7 @@ func copyCounts(in map[string]int) map[string]int {
 // a negative id or campaign_id with users, clicks or conversions is 400.
 // filters_only with campaign_ids or all_imported rewrites only imported stream filters, and with
 // dry_run only reports them; a malformed filters_only body is 400.
+// resume true continues the last failed full import (see handleKeitaroResume).
 // A running import or a purge in progress is 409. Success is 202 with started true.
 // The work uses a two-hour background context, not the request context.
 // The key is removed from the job error later. This handler does not return an error value.
@@ -383,6 +405,10 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 	var req keitaroImportReq
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad json")
+		return
+	}
+	if req.Resume {
+		s.handleKeitaroResume(w, r, req)
 		return
 	}
 	if msg := req.forFilters(); msg != "" {
@@ -413,16 +439,69 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, msg)
 		return
 	}
-	s.ktJob.setCampaign(req.CampaignID)
-	// Settings cannot change while the job holds the lock, so this copy is the
-	// one for the whole run. Settings can only be replaced, never cleared.
+	req.Board = board
+	s.ktJob.setRequest(req)
+	s.startKeitaroRun(r, keitaroResumeRun{req: req}, creds, board, manifestStore)
+	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
+}
+
+// handleKeitaroResume continues the last failed full import from the journal.
+// body is the decoded request; any field besides resume is 400. Catalogs that already passed are
+// not imported again, the click log continues from its last written batch and conversions are
+// read again; nothing imported before is removed. A run that cannot be resumed is 409 with
+// "nothing to resume"; a running import, purge, catch-up or update is 409 as for a new import;
+// a missing origin, key or store is 503. Success is 202 with started true.
+func (s *Server) handleKeitaroResume(w http.ResponseWriter, r *http.Request, body keitaroImportReq) {
+	if !reflect.DeepEqual(body, keitaroImportReq{Resume: true}) {
+		writeErr(w, http.StatusBadRequest, "resume does not combine with other fields")
+		return
+	}
+	next, ok := s.ktJob.resumeRequest()
+	if !ok {
+		if msg := s.ktJob.beginImportRefusal(); msg != "" {
+			writeErr(w, http.StatusConflict, msg)
+			return
+		}
+		writeErr(w, http.StatusConflict, keitaroNothingToResumeMsg)
+		return
+	}
+	board := next.Board
+	creds, manifestStore := s.keitaroImportBundle(board)
+	if next.needsTracker() && !creds.configured() {
+		writeErr(w, http.StatusServiceUnavailable, "keitaro not configured")
+		return
+	}
+	if msg := s.keitaroStoreMissing(next); msg != "" {
+		writeErr(w, http.StatusServiceUnavailable, msg)
+		return
+	}
+	run, msg := s.ktJob.beginResume()
+	if msg != "" {
+		writeErr(w, http.StatusConflict, msg)
+		return
+	}
+	s.startKeitaroRun(r, run, creds, board, manifestStore)
+	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
+}
+
+// beginImportRefusal returns why an import cannot start now, or an empty string. It takes nothing.
+func (j *keitaroJob) beginImportRefusal() string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.refuseLocked()
+}
+
+// startKeitaroRun runs one import or resumed import in the background.
+// r supplies the session that owns new catalog rows. run is the work and the earlier totals.
+// Settings cannot change while the job holds the lock, so creds is the copy for the whole run.
+// The work uses a keitaroJobTimeout background context, not the request context.
+func (s *Server) startKeitaroRun(r *http.Request, run keitaroResumeRun, creds ktCreds, board string, manifestStore ManifestStore) {
 	ctx, cancel := context.WithTimeout(context.Background(), keitaroJobTimeout)
 	owner := sessionFrom(r.Context()).UID
 	go func() {
 		defer cancel()
-		s.runKeitaroImport(ctx, req, owner, creds, board, manifestStore)
+		s.runKeitaroImportFrom(ctx, run, owner, creds, board, manifestStore)
 	}()
-	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
 }
 
 // handleKeitaroJob returns a copy of the import state.
@@ -484,9 +563,20 @@ func (s *Server) runStage(st *importState, name, key string, step func() (int, [
 // collected before the failure stay in the state. It does not return an error.
 // It logs one line with the counts and the duration. The key and URLs are not logged.
 func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, owner string, creds ktCreds, board string, manifestStore ManifestStore) {
+	s.runKeitaroImportFrom(ctx, keitaroResumeRun{req: req}, owner, creds, board, manifestStore)
+}
+
+// runKeitaroImportFrom performs one import, or the rest of a resumed one, as runKeitaroImport.
+// run.req is the work left; run.counts and run.losses are the totals of the earlier attempts and
+// start the totals of this one. The catalog pass and the log marks go to the job journal as they
+// happen; the click log starts at run.clicksFrom when set and counts on from run.clicksRows.
+func (s *Server) runKeitaroImportFrom(ctx context.Context, run keitaroResumeRun, owner string, creds ktCreds, board string, manifestStore ManifestStore) {
+	req := run.req
 	started := time.Now()
+	counts := copyCounts(run.counts)
+	losses := append([]ktimport.Loss{}, run.losses...)
 	st := &importState{
-		counts: map[string]int{}, losses: []ktimport.Loss{}, owner: owner, creds: creds,
+		counts: counts, losses: losses, owner: owner, creds: creds,
 		board: board, manifestStore: manifestStore,
 	}
 	defer func() {
@@ -557,14 +647,23 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 			}
 		}
 	}
+	s.ktJob.catalogsPassed()
 	if req.Conversions || req.Clicks {
+		base := map[string]int{"clicks": run.clicksRows}
 		counts, extra, _, err := s.importLogWindow(ctx, creds, from, to, logImportOpts{
 			clicks: req.Clicks, conversions: req.Conversions,
 			manifest: st.prev, res: st.res.Manifest, snapCampaigns: st.snapCampaigns,
 			mapScope: campaignMapScope{board: st.board}, manifestStore: st.manifestStore,
+			clicksFrom: run.clicksFrom,
+			mark: func(stream string, rows int, through time.Time, done bool) {
+				s.ktJob.markLog(stream, base[stream]+rows, through, done)
+			},
 		})
 		for k, v := range counts {
 			st.counts[k] = v
+		}
+		if n, ok := counts["clicks"]; ok {
+			st.counts["clicks"] = base["clicks"] + n
 		}
 		st.losses = append(st.losses, extra...)
 		if err != nil {
@@ -596,6 +695,12 @@ type logImportOpts struct {
 	skip          *logSkipTally
 	mapScope      campaignMapScope
 	manifestStore ManifestStore
+	// clicksFrom is the tracker time a resumed click log starts at; empty starts at the window.
+	clicksFrom string
+	// mark receives the progress of each log of a manual import: stream is clicks or conversions,
+	// rows the rows read through the last written batch, through the sort time of that row, and
+	// done true once the log is written. nil reports nothing.
+	mark func(stream string, rows int, through time.Time, done bool)
 }
 
 // logFetchStats holds the latest row timestamps seen in one log fetch.

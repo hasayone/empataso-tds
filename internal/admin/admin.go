@@ -173,6 +173,8 @@ type Config struct {
 	CronFile    string // cron service config
 	// KeitaroSyncFile is keitaro-sync.json, the log catch-up cursor; empty disables the watcher.
 	KeitaroSyncFile string
+	// KeitaroJobFile is keitaro-job.json, the journal of the last manual import; empty keeps it in memory.
+	KeitaroJobFile string
 
 	// KeitaroBase is the tracker origin. KeitaroKey is the Admin API key.
 	// Both are start values used when KeitaroFile does not exist.
@@ -480,6 +482,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	s := &Server{cfg: cfg, hashes: newHashGate(0), loginFPKey: key, ktJob: newKeitaroJob(), trustedProxies: prefixes,
 		audit: newAuditLog(cfg.DataDir), keyLim: newKeyLimiter(nil), kwSlots: make(chan struct{}, keywordSlots)}
+	s.ktJob = loadKeitaroJob(cfg.KeitaroJobFile, s.logWarn)
 	hash, err := initialHash(cfg)
 	if err != nil {
 		return nil, err

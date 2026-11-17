@@ -64,28 +64,41 @@ func keitaroRouteDocs() map[string]routeDoc {
 				"while the log catch-up runs; a purge is not shown. The stage is idle, snapshot, streams, catalogs, " +
 				"landing_files, lists, pages, groups, users, conversions, clicks, done or failed; done and total count " +
 				"the pages or campaigns of the current stage. campaign_id is set only for a transfer of one campaign. " +
-				"A failure of the last run is in error, not in the HTTP status.",
+				"A failure of the last run is in error, not in the HTTP status. The state survives an admin restart: " +
+				"a run cut by the restart is failed with interrupted true. last_stage is the stage a failed run stopped in, " +
+				"updated_at the last change, logs the rows written so far per log (clicks, conversions) and whether the log is done. " +
+				"resumable true means POST /api/keitaro/import with resume true can continue the run; resumes counts the continuations.",
 			RU: docOf("Состояние задачи переноса из Keitaro.",
 				"Показывает идущий или последний перенос: этап, прогресс, число сохранённых записей по видам, потери и ошибку. "+
 					"Только для ключа администратора. running равен true, пока идёт перенос, sync_running — пока идёт "+
 					"догрузка логов; чистка здесь не видна. Этап: idle, snapshot, streams, catalogs, landing_files, lists, "+
 					"pages, groups, users, conversions, clicks, done или failed; done и total считают страницы или "+
 					"кампании текущего этапа. campaign_id задан только при переносе одной кампании. "+
-					"Сбой последнего запуска лежит в поле error, а не в статусе HTTP."),
+					"Сбой последнего запуска лежит в поле error, а не в статусе HTTP. Состояние переживает перезапуск admin: "+
+					"перенос, оборванный перезапуском, становится failed с interrupted равным true. last_stage — этап, на котором "+
+					"остановился сбойный запуск, updated_at — время последнего изменения, logs — сколько строк записано по каждому "+
+					"журналу (clicks, conversions) и дочитан ли он. resumable равен true, если POST /api/keitaro/import с resume "+
+					"равным true может продолжить перенос; resumes считает продолжения."),
 			UK: docOf("Стан завдання перенесення з Keitaro.",
 				"Показує перенесення, що триває, або останнє: етап, прогрес, кількість збережених записів за видами, втрати й помилку. "+
 					"Лише для ключа адміністратора. running дорівнює true, поки триває перенесення, sync_running — поки триває "+
 					"догрузка логів; чистка тут не видна. Етап: idle, snapshot, streams, catalogs, landing_files, lists, "+
 					"pages, groups, users, conversions, clicks, done або failed; done і total рахують сторінки або "+
 					"кампанії поточного етапу. campaign_id заданий лише при перенесенні однієї кампанії. "+
-					"Збій останнього запуску лежить у полі error, а не в статусі HTTP."),
+					"Збій останнього запуску лежить у полі error, а не в статусі HTTP. Стан переживає перезапуск admin: "+
+					"перенесення, обірване перезапуском, стає failed з interrupted, рівним true. last_stage — етап, на якому "+
+					"зупинився збійний запуск, updated_at — час останньої зміни, logs — скільки рядків записано за кожним "+
+					"журналом (clicks, conversions) і чи дочитаний він. resumable дорівнює true, якщо POST /api/keitaro/import з resume, "+
+					"рівним true, може продовжити перенесення; resumes рахує продовження."),
 			Response: map[string]any{
-				"running": false, "sync_running": false, "stage": "done", "done": 12, "total": 12,
+				"running": false, "sync_running": false, "stage": "failed", "last_stage": "clicks", "done": 40, "total": 120,
 				"counts": map[string]int{"networks": 3, "sources": 2, "domains": 4, "landings": 6, "offers": 14, "groups": 12},
 				"losses": []map[string]string{
 					{"kind": "skipped", "ref": "offer 15", "detail": "unsupported offer type"},
 				},
-				"error": "", "started_at": "2026-11-16T10:00:00Z", "finished_at": "2026-11-16T10:02:31Z",
+				"error": "context deadline exceeded", "started_at": "2026-11-16T10:00:00Z", "finished_at": "2026-11-16T12:00:00Z",
+				"updated_at": "2026-11-16T12:00:00Z", "interrupted": false, "resumable": true, "resumes": 0,
+				"logs": map[string]any{"clicks": map[string]any{"rows": 40000, "through": "2026-11-10 08:15:00", "done": false}},
 			},
 		},
 		"POST /api/keitaro/import": {
@@ -98,6 +111,9 @@ func keitaroRouteDocs() map[string]routeDoc {
 				"of imported campaigns are rewritten: send campaign_ids or all_imported true, one of the two; dry_run true " +
 				"then only reports what would change. filters_only does not combine with the other flags or campaign_id, " +
 				"and campaign_ids, all_imported and dry_run are refused without it. " +
+				"resume true alone continues the last failed transfer (resumable in GET /api/keitaro/job): nothing imported is removed, " +
+				"catalogs that already passed are skipped, clicks continue from the last written batch without doubling a cid, " +
+				"conversions are read again; 409 nothing to resume when there is no such run, 400 with any other field. " +
 				"409 while a transfer, a purge, a catch-up or an update is running; 503 when Keitaro or a store is not set up.",
 			RU: docOf("Запуск задачи переноса из Keitaro.",
 				"Работает в фоне; ход виден в GET /api/keitaro/job. Одновременно идёт одна задача, второй запуск вернёт 409. "+
@@ -108,6 +124,9 @@ func keitaroRouteDocs() map[string]routeDoc {
 					"фильтры потоков импортированных кампаний: передайте campaign_ids или all_imported равным true, одно из двух; "+
 					"dry_run равным true только покажет, что изменилось бы. filters_only не сочетается с другими флагами и "+
 					"campaign_id, а campaign_ids, all_imported и dry_run без него отклоняются. "+
+					"Одно поле resume равным true продолжает последний оборванный перенос (resumable в GET /api/keitaro/job): "+
+					"импортированное не удаляется, пройденные каталоги пропускаются, клики дочитываются с последней записанной пачки "+
+					"без повторов cid, конверсии читаются заново; 409 nothing to resume, если продолжать нечего, 400 с другими полями. "+
 					"409, пока идут перенос, чистка, догрузка или обновление; 503, если Keitaro или хранилище не настроены."),
 			UK: docOf("Запуск завдання перенесення з Keitaro.",
 				"Працює у фоні; перебіг видно в GET /api/keitaro/job. Одночасно йде одне завдання, другий запуск поверне 409. "+
@@ -118,10 +137,13 @@ func keitaroRouteDocs() map[string]routeDoc {
 					"фільтри потоків імпортованих кампаній: передайте campaign_ids або all_imported, рівний true, одне з двох; "+
 					"dry_run, рівний true, лише покаже, що змінилося б. filters_only не поєднується з іншими прапорцями та "+
 					"campaign_id, а campaign_ids, all_imported і dry_run без нього відхиляються. "+
+					"Одне поле resume, рівне true, продовжує останнє обірване перенесення (resumable у GET /api/keitaro/job): "+
+					"імпортоване не видаляється, пройдені каталоги пропускаються, кліки дочитуються з останньої записаної пачки "+
+					"без повторів cid, конверсії читаються заново; 409 nothing to resume, якщо продовжувати нічого, 400 з іншими полями. "+
 					"409, поки йдуть перенесення, чистка, догрузка або оновлення; 503, якщо Keitaro чи сховище не налаштовані."),
 			Body: objectBody("Flags domains, networks, offers, landings, sources, campaigns, users, clicks, conversions (booleans); " +
 				"from and to (YYYY-MM-DD) for clicks and conversions; board_id; campaign_id (Keitaro campaign id, " +
-				"not combined with users, clicks or conversions)."),
+				"not combined with users, clicks or conversions); resume (boolean, alone: continue the last failed transfer)."),
 			Example: map[string]any{
 				"domains": true, "networks": true, "offers": true, "landings": true, "sources": true, "campaigns": true,
 			},
@@ -888,17 +910,23 @@ func updateRouteDocs() map[string]routeDoc {
 			ID: "get_update", Summary: "Get the update state and whether an update or a rollback may start.",
 			Description: "Administrator key only. build is the running build; agent, check and state are the files of the " +
 				"updater and are null when missing or damaged. can_apply and can_rollback tell whether a button may be " +
-				"used, with the reason in apply_block and rollback_block. keitaro_busy is true while a Keitaro job runs. " +
+				"used, with the reason in apply_block and rollback_block. check_stale is true when check was made for another " +
+				"build than the running one; such a check offers no update (apply_block check_stale) until a new check. " +
+				"keitaro_busy is true while a Keitaro job runs. " +
 				"cli lists the matching commands for the server shell. The update itself is started only from a browser session.",
 			RU: docOf("Состояние обновления и можно ли начать обновление или откат.",
 				"Только для ключа администратора. build — запущенная сборка; agent, check и state — файлы обновлятора, "+
 					"равны null, если файла нет или он повреждён. can_apply и can_rollback говорят, можно ли нажать кнопку, "+
-					"причина — в apply_block и rollback_block. keitaro_busy равен true, пока идёт задача Keitaro. "+
+					"причина — в apply_block и rollback_block. check_stale равен true, если check сделан для другой сборки, "+
+					"чем запущенная; такая проверка не предлагает обновление (apply_block check_stale) до новой проверки. "+
+					"keitaro_busy равен true, пока идёт задача Keitaro. "+
 					"cli — подходящие команды для консоли сервера. Само обновление запускается только из сессии браузера."),
 			UK: docOf("Стан оновлення та чи можна почати оновлення або відкіт.",
 				"Лише для ключа адміністратора. build — запущена збірка; agent, check і state — файли оновлювача, "+
 					"дорівнюють null, якщо файлу немає або він пошкоджений. can_apply і can_rollback кажуть, чи можна натиснути кнопку, "+
-					"причина — в apply_block і rollback_block. keitaro_busy дорівнює true, поки йде завдання Keitaro. "+
+					"причина — в apply_block і rollback_block. check_stale дорівнює true, якщо check зроблено для іншої збірки, "+
+					"ніж запущена; така перевірка не пропонує оновлення (apply_block check_stale) до нової перевірки. "+
+					"keitaro_busy дорівнює true, поки йде завдання Keitaro. "+
 					"cli — відповідні команди для консолі сервера. Саме оновлення запускається лише із сесії браузера."),
 			Response: map[string]any{
 				"build": buildInfoSample(),
@@ -919,6 +947,7 @@ func updateRouteDocs() map[string]routeDoc {
 				"state":           nil,
 				"inbox":           true,
 				"request_pending": false,
+				"check_stale":     false,
 				"keitaro_busy":    false,
 				"can_apply":       true,
 				"can_rollback":    true,
@@ -945,13 +974,13 @@ func updateRouteDocs() map[string]routeDoc {
 		"POST /api/update/apply": cookieDoc("apply_update",
 			docOf("Ask the updater to install the checked update.",
 				"Body target (the commit of the check) and confirm (its first 7 characters). 202 with the request id. "+
-					"409 with the reason code when an update cannot start now, for example no_update, keitaro_running or request_pending."),
+					"409 with the reason code when an update cannot start now, for example no_update, check_stale, keitaro_running or request_pending."),
 			docOf("Запрос установки проверенного обновления.",
 				"Тело: target (коммит проверки) и confirm (его первые 7 символов). 202 с id запроса. "+
-					"409 с кодом причины, если обновление сейчас начать нельзя, например no_update, keitaro_running или request_pending."),
+					"409 с кодом причины, если обновление сейчас начать нельзя, например no_update, check_stale, keitaro_running или request_pending."),
 			docOf("Запит установлення перевіреного оновлення.",
 				"Тіло: target (коміт перевірки) і confirm (його перші 7 символів). 202 з id запиту. "+
-					"409 з кодом причини, якщо оновлення зараз почати не можна, наприклад no_update, keitaro_running або request_pending.")),
+					"409 з кодом причини, якщо оновлення зараз почати не можна, наприклад no_update, check_stale, keitaro_running або request_pending.")),
 		"POST /api/update/rollback": cookieDoc("rollback_update",
 			docOf("Ask the updater to return to the previous version.",
 				"Body confirm equal to rollback. 202 with the request id; 409 with the reason code when a rollback cannot start now."),

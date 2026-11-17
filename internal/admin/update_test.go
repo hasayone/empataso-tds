@@ -335,6 +335,39 @@ func TestUpdateNoticeForAdmin(t *testing.T) {
 	}
 }
 
+// TestUpdateNoticeSkipsRunningCommit verifies that a check whose target is the running build
+// does not raise "update available", even when ahead is still positive.
+func TestUpdateNoticeSkipsRunningCommit(t *testing.T) {
+	dir := t.TempDir()
+	_, srv := newUpdateServer(t, dir, "")
+	restore := config.SetBuildForTest(config.BuildInfo{
+		Version: "v1.1.0", Commit: anotherCommit, CommitDate: "2026-01-01T00:00:00Z", Channel: "main",
+	})
+	defer restore()
+	check := freshCheck()
+	check.Current = cron.CheckRef{Commit: anotherCommit}
+	check.Target = cron.CheckRef{Commit: anotherCommit, Version: "v1.1.0"}
+	check.Ahead = 1
+	check.Commits = []cron.CheckCommit{{SHA: anotherCommit, Subject: "same"}}
+	writeCheckFile(t, dir, check)
+
+	c, _ := loginAdmin(t, srv.URL)
+	resp, err := c.Get(srv.URL + "/api/notices")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var lines []string
+	if err := json.NewDecoder(resp.Body).Decode(&lines); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		if strings.Contains(l, "update available") {
+			t.Fatalf("running commit offered as an update: %v", lines)
+		}
+	}
+}
+
 // --- keitaro gate tests ---
 
 // TestUpdatePendingGateBlocksBeginImport verifies that begin* returns update_pending
@@ -802,6 +835,43 @@ func TestUpdateApplySecondRequestPending(t *testing.T) {
 		`{"target":"`+anotherCommit+`","confirm":"`+anotherCommit[:7]+`"}`)
 	if code != http.StatusConflict || !strings.Contains(string(body), "request_pending") {
 		t.Errorf("second apply: %d %s", code, body)
+	}
+}
+
+// TestUpdateStaleCheckOffersNoUpdate verifies a check.json made for the build before the running one, as left by an apply:
+// GET /api/update flags it and blocks the button with check_stale, POST /api/update/apply refuses it, /api/notices has no
+// "update available" line, and POST /api/update/check is accepted at once despite the age of that check.
+func TestUpdateStaleCheckOffersNoUpdate(t *testing.T) {
+	dir := t.TempDir()
+	inboxDir := t.TempDir()
+	_, srv := newUpdateServer(t, dir, inboxDir)
+	c, csrf := loginAdmin(t, srv.URL)
+	restore := config.SetBuildForTest(config.BuildInfo{
+		Version: "v1.1.0", Commit: anotherCommit, CommitDate: "2026-01-01T00:00:00Z", Channel: "main",
+	})
+	defer restore()
+
+	writeAgentFile(t, dir, freshAgent())
+	check := freshCheck()
+	check.Target = cron.CheckRef{Commit: anotherCommit, Version: "v1.1.0"}
+	writeCheckFile(t, dir, check)
+
+	v := getUpdate(t, c, srv.URL)
+	if !v.CheckStale || v.CanApply || v.ApplyBlock != "check_stale" {
+		t.Fatalf("stale check: check_stale %v, apply %v %q", v.CheckStale, v.CanApply, v.ApplyBlock)
+	}
+	code, body := callJSON(t, c, http.MethodPost, srv.URL+"/api/update/apply", csrf,
+		`{"target":"`+anotherCommit+`","confirm":"`+anotherCommit[:7]+`"}`)
+	if code != http.StatusConflict || !strings.Contains(string(body), "check_stale") {
+		t.Fatalf("apply of the running commit: %d %s", code, body)
+	}
+	code, body = callJSON(t, c, http.MethodGet, srv.URL+"/api/notices", "", "")
+	if code != http.StatusOK || strings.Contains(string(body), "update available") {
+		t.Fatalf("notices for a stale check: %d %s", code, body)
+	}
+	code, body = callJSON(t, c, http.MethodPost, srv.URL+"/api/update/check", csrf, "{}")
+	if code != http.StatusAccepted {
+		t.Fatalf("check after a stale check: %d %s", code, body)
 	}
 }
 

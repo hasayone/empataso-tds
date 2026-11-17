@@ -86,9 +86,10 @@ func (f *fakeSink) ExistingCIDs(_ context.Context, domain string, from, to time.
 }
 
 type keitaroFiles struct {
-	dir    string
-	offers *JSONStore[config.Offer]
-	log    *captureLog
+	dir     string
+	offers  *JSONStore[config.Offer]
+	log     *captureLog
+	jobFile string
 }
 
 type keitaroJobBody struct {
@@ -126,7 +127,9 @@ func newKeitaroServers(t *testing.T, base, key string, groups *memGroups, wh Imp
 	dir := t.TempDir()
 	var offers *JSONStore[config.Offer]
 	var log slogLogger = noopLog{}
+	jobFile := ""
 	if files != nil {
+		jobFile = files.jobFile
 		if files.dir != "" {
 			dir = files.dir
 		}
@@ -153,6 +156,8 @@ func newKeitaroServers(t *testing.T, base, key string, groups *memGroups, wh Imp
 		UsersFile:   filepath.Join(dir, "users.json"),
 		Warehouse:   wh,
 		Log:         log,
+
+		KeitaroJobFile: jobFile,
 	})
 	if err != nil {
 		t.Fatal(err)

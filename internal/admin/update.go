@@ -164,8 +164,10 @@ type updateView struct {
 	Inbox          bool             `json:"inbox"`
 	RequestPending bool             `json:"request_pending"`
 	KeitaroBusy    bool             `json:"keitaro_busy"`
-	CanApply       bool             `json:"can_apply"`
-	ApplyBlock     string           `json:"apply_block,omitempty"`
+	// CheckStale is true when check.json was made for another build than the running one.
+	CheckStale bool   `json:"check_stale"`
+	CanApply   bool   `json:"can_apply"`
+	ApplyBlock string `json:"apply_block,omitempty"`
 	CanRollback    bool             `json:"can_rollback"`
 	RollbackBlock  string           `json:"rollback_block,omitempty"`
 	CLI            []string         `json:"cli"`
@@ -228,6 +230,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 
 	out.KeitaroBusy = s.ktJob.busyOrWriting()
+	out.CheckStale = checkForOtherBuild(out.Check)
 
 	snap := updateSnapshot{
 		Now:            now,
@@ -272,6 +275,12 @@ func (s *Server) computeApplyBlock(snap updateSnapshot) string {
 	if snap.Agent == nil || !snap.Agent.Fresh(snap.Now, updateAgentMaxAge) || !snap.Agent.Inbox {
 		return "updater_absent"
 	}
+	if checkForOtherBuild(snap.Check) {
+		return "check_stale"
+	}
+	if runningCommitIsTarget(snap.Check) {
+		return "no_update"
+	}
 	if snap.Check == nil || !snap.Check.Fresh(snap.Now, updateCheckFreshAge) || snap.Check.Error != "" || snap.Check.Ahead == 0 {
 		return "no_update"
 	}
@@ -291,6 +300,31 @@ func (s *Server) computeApplyBlock(snap updateSnapshot) string {
 		return "running"
 	}
 	return ""
+}
+
+// checkForOtherBuild reports whether check.json was made for another commit than the running build.
+// Such a check lists the running commit as an update, so it must not offer an apply.
+//
+// Parameters: check is the parsed check.json, nil when absent.
+// Returns true for a non-development build whose commit differs from check.current.commit.
+// It does not return an error.
+func checkForOtherBuild(check *cron.CheckFile) bool {
+	b := config.Build()
+	return check != nil && !b.IsDev() && check.Current.Commit != b.Commit
+}
+
+// runningCommitIsTarget reports whether the check names the running build as the commit to install.
+// A check written before the new build came up can still list that commit with commits ahead.
+//
+// Parameters: check is the parsed check.json, nil when absent.
+// Returns true when the running build is not a development build and its commit is check.target.commit.
+// It does not return an error.
+func runningCommitIsTarget(check *cron.CheckFile) bool {
+	if check == nil {
+		return false
+	}
+	b := config.Build()
+	return !b.IsDev() && check.Target.Commit == b.Commit
 }
 
 // computeRollbackBlock returns the code of the first condition that blocks a rollback, or "".
@@ -393,7 +427,8 @@ func (s *Server) handleUpdateLog(w http.ResponseWriter, r *http.Request) {
 }
 
 // updateNotice returns the update available notice line for the admin panel.
-// Returns ("", false) when no update is available, the check is stale, or data is invalid.
+// Returns ("", false) when no update is available, the check is old or made for another
+// build than the running one, or data is invalid.
 // The line is built only from validated values.
 func (s *Server) updateNotice(now time.Time) (string, bool) {
 	if s.cfg.UpdateDir == "" {
@@ -403,7 +438,7 @@ func (s *Server) updateNotice(now time.Time) (string, bool) {
 	if err := cron.ReadUpdateJSON(filepath.Join(s.cfg.UpdateDir, cron.UpdateCheckFile), cron.UpdateMaxJSON, &check); err != nil {
 		return "", false
 	}
-	if !check.Fresh(now, updateCheckFreshAge) || check.Error != "" || check.Ahead <= 0 {
+	if !check.Fresh(now, updateCheckFreshAge) || check.Error != "" || check.Ahead <= 0 || checkForOtherBuild(&check) || runningCommitIsTarget(&check) {
 		return "", false
 	}
 	if check.Validate() != nil {

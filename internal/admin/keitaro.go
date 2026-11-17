@@ -47,6 +47,8 @@ type keitaroImportReq struct {
 	AllImported bool `json:"all_imported"`
 	// DryRun reports filters_only changes without saving them.
 	DryRun bool `json:"dry_run"`
+	// Resume continues the last failed full import from its journal; it takes no other field.
+	Resume bool `json:"resume,omitempty"`
 }
 
 // forCampaign turns a request with campaign_id into the dosync of that one campaign.

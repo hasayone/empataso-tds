@@ -133,6 +133,9 @@ func (s *Server) applyPreconditions(snap updateSnapshot, target, confirm string)
 	if snap.Agent == nil || !snap.Agent.Fresh(snap.Now, updateAgentMaxAge) || !snap.Agent.Inbox {
 		return "updater_absent"
 	}
+	if checkForOtherBuild(snap.Check) {
+		return "check_stale"
+	}
 	if snap.Check == nil || !snap.Check.Fresh(snap.Now, updateCheckFreshAge) || snap.Check.Error != "" || snap.Check.Ahead == 0 {
 		return "no_update"
 	}
@@ -360,8 +363,8 @@ func (s *Server) checkPreconditions(snap updateSnapshot) string {
 	if !lastCheck.IsZero() && snap.Now.Sub(lastCheck) < updateCheckWindow {
 		return "rate_limited"
 	}
-	// Rate limit: check.At from the last run.
-	if snap.Check != nil && !snap.Check.At.IsZero() && snap.Now.Sub(snap.Check.At) < updateCheckWindow {
+	// Rate limit: check.At from the last run, unless that run described another build.
+	if snap.Check != nil && !checkForOtherBuild(snap.Check) && !snap.Check.At.IsZero() && snap.Now.Sub(snap.Check.At) < updateCheckWindow {
 		return "rate_limited"
 	}
 	return ""

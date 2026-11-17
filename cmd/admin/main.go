@@ -222,6 +222,7 @@ func applyDataFiles(cfg *admin.Config, groupsFile string, log *slog.Logger) {
 	log.Info("pages dir", "path", pagesDir)
 	cfg.Manifest = admin.NewFileManifest(filepath.Join(dir, "keitaro-import.json"))
 	cfg.KeitaroSyncFile = keitaroSyncFileForGroups(f)
+	cfg.KeitaroJobFile = getenv("EMTDS_KEITARO_JOB_FILE", filepath.Join(dir, "keitaro-job.json"))
 	cfg.KeitaroFile = getenv("EMTDS_KEITARO_FILE", filepath.Join(dir, "keitaro.json"))
 	cfg.NamecheapFile = getenv("EMTDS_NAMECHEAP_FILE", filepath.Join(dir, "namecheap.json"))
 	cfg.NamecheapURL = config.Env("EMTDS_NAMECHEAP_URL")

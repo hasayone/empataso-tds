@@ -847,24 +847,25 @@ func TestUpdateBannerAndButton(t *testing.T) {
 	html := spaSource()
 	must(t, spaFunctionLine(html, "sysNotice"), "updApplyStart(updOpenAbout)", "the banner starts the update")
 	must(t, spaFunctionLine(html, "aboutPage"), "applyBtn.onclick=()=>updApplyStart(updOpenAbout)", "About starts the same update")
-	must(t, spaFunctionLine(html, "aboutPage"), "${agentHtml}${checkHtml}${btnsHtml}${stateHtml}", "the buttons stand above the last run")
-	consts := regexp.MustCompile(`(?m)^const UPD_HIDE_KEY=.*$`).FindAllString(html, -1)
-	if len(consts) != 1 {
-		t.Fatalf("found %d banner constants, want 1", len(consts))
+	must(t, spaFunctionLine(html, "aboutPage"), "updCardHTML('about-upd',tr('about.update'),btnsHtml,`${whyHtml}${progHtml}${agentHtml}${checkHtml}${stateHtml}`)", "the buttons stand in the title of the update block")
+	consts := regexp.MustCompile(`(?m)^const UPD_(?:HIDE|TRACK)_KEY=.*$`).FindAllString(html, -1)
+	if len(consts) != 2 {
+		t.Fatalf("found %d banner and progress constants, want 2", len(consts))
 	}
-	prelude := consts[0] + `
+	prelude := strings.Join(consts, "\n") + `
 const tr = k => k;
 const esc = s => String(s);
-const store = {};
+const store = {}, sess = {};
 var localStorage = {getItem: k => k in store ? store[k] : null, setItem: (k, v) => { store[k] = String(v); }};
-let upd = null, toasts = [], modals = [], posts = [];
+var sessionStorage = {getItem: k => k in sess ? sess[k] : null, setItem: (k, v) => { sess[k] = String(v); }, removeItem: k => { delete sess[k]; }};
+let upd = null, toasts = [], modals = [], posts = [], reply = {id: 'aaaa0000bbbb1111'};
 const get = async () => upd;
 const toast = (m, bad) => { toasts.push(m); };
 const q = () => ({value: 'abcdef1'});
-const call = async (m, p, b) => { posts.push([m, p, b]); };
+const call = async (m, p, b) => { posts.push([m, p, b]); if (reply instanceof Error) throw reply; return reply; };
 const formModal = (title, html, ok) => { modals.push(ok); };
 `
-	assistantNode(t, []string{"updBannerHidden", "updBannerHide", "updErrText", "updApplyStart"}, prelude, `
+	assistantNode(t, []string{"updBannerHidden", "updBannerHide", "updErrText", "updTrackGet", "updTrackSet", "updApplyStart"}, prelude, `
 const now = 1000;
 eq(updBannerHidden('abc123def456', now), false, 'nothing hidden at first');
 updBannerHide('abc123def456', 0);
@@ -876,12 +877,55 @@ eq(updBannerHidden('abc123def456', now), false, 'a broken record shows the banne
 upd = {can_apply: false, apply_block: 'keitaro_running'};
 await updApplyStart(() => {});
 eq([toasts, modals.length], [['upd.block.keitaro_running'], 0], 'a running import blocks with its reason and no dialog');
-upd = {can_apply: true, check: {target: {commit: 'abcdef1234567890abcdef1234567890abcdef12'}}};
+upd = {can_apply: true, state: {id: 'old0old0old0old0', result: 'ok'}, check: {target: {commit: 'abcdef1234567890abcdef1234567890abcdef12'}}};
 let after = 0;
 await updApplyStart(() => { after++; });
 eq(modals.length, 1, 'an allowed update asks to confirm');
 eq(await modals[0](), 'stay', 'the dialog stays on the page');
 eq([posts, after], [[['POST', '/api/update/apply', {target: 'abcdef1234567890abcdef1234567890abcdef12', confirm: 'abcdef1'}]], 1], 'one request into the inbox, then the page refresh');
+eq(updTrackGet(), {id: 'aaaa0000bbbb1111', prev: 'old0old0old0old0'}, 'the accepted request is followed by its id');
+updTrackSet(null);
+const busy = new Error('409'); busy.body = {error: 'request_pending'}; reply = busy;
+await modals[0]();
+eq([updTrackGet(), after], [{id: '', prev: 'old0old0old0old0'}, 2], 'a request that raced in is followed instead of an error');
+updTrackSet(null); toasts = []; posts = [];
+upd = {can_apply: false, apply_block: 'request_pending', request_pending: true, state: {id: 'old0old0old0old0', result: 'ok'}};
+await updApplyStart(() => { after++; });
+eq([toasts, posts.length, modals.length, after, updTrackGet()], [[], 0, 1, 3, {id: '', prev: 'old0old0old0old0'}], 'an open request shows its progress, not a toast');
+upd = {can_apply: false, apply_block: 'running', state: {id: 'run0run0run0run0', result: 'running'}};
+await updApplyStart(() => { after++; });
+eq([toasts, after, updTrackGet()], [[], 4, {id: '', prev: ''}], 'a running update shows its progress');
+`)
+}
+
+// TestUpdateProgressSteps runs the progress of an update request under node: waiting in the inbox, picked by the agent,
+// running with the phases of state.json, done or failed with its reason, a refusal tied by the request id, and the
+// restart notice while the admin panel does not answer.
+func TestUpdateProgressSteps(t *testing.T) {
+	prelude := `
+const tr = k => k;
+const trFill = (k, v) => k + JSON.stringify(v);
+const esc = s => String(s).replace(/</g, '&lt;');
+const yes = (ok, what) => { if (!ok) fail(what); };
+`
+	assistantNode(t, []string{"updProgress", "updProgressHTML"}, prelude, `
+const track = {id: 'req0req0req0req0', prev: 'old0old0old0old0'};
+const old = {id: 'old0old0old0old0', result: 'ok', finished_at: 'x'};
+eq(updProgress({request_pending: true, state: old}, track).step, 'queued', 'a request in the inbox waits for the agent');
+eq(updProgress({request_pending: false, state: old}, track).step, 'picked', 'the old report means the agent is still checking the channel');
+const run = {id: 'run0run0run0run0', result: 'running', phase: 'build', phases: [{name: 'env', ok: true}, {name: 'backup', ok: true}]};
+const p = updProgress({state: run}, track);
+eq(p.step, 'running', 'a new report is the run of the request');
+const h = updProgressHTML(p, false);
+yes(h.includes('upd.prog.accepted') && h.includes('upd.prog.agent') && h.includes('upd.prog.apply'), 'the three steps are drawn');
+yes(h.includes('<li class="upd-step active"><span class="dot warn"></span><span>build</span>') && h.includes('<span>backup</span>'), 'the phases with the current one');
+yes(!h.includes('upd-prog-close'), 'nothing to close while the run goes');
+const ok = updProgressHTML(updProgress({state: {id: 'run0run0run0run0', result: 'ok', finished_at: 'x', from: 'aaaaaaa111', to: 'bbbbbbb222', phases: []}}, track), false);
+yes(ok.includes('upd.prog.done{"from":"aaaaaaa","to":"bbbbbbb"}') && ok.includes('upd-prog-close'), 'done with from and to');
+const bad = updProgressHTML(updProgress({state: {id: 'run0run0run0run0', result: 'failed', reason: 'keitaro <x>', finished_at: 'x', phases: [{name: 'keitaro_gate', ok: false}]}}, track), false);
+yes(bad.includes('upd.prog.fail{"result":"upd.result.failed"}: keitaro &lt;x>') && bad.includes('upd-step fail'), 'a failure with its reason');
+eq(updProgress({state: {id: 'req0req0req0req0', result: 'refused', finished_at: 'x'}}, {id: 'req0req0req0req0', prev: 'req0req0req0req0'}).step, 'failed', 'a refusal carries the request id');
+yes(updProgressHTML(p, true).includes('upd.prog.offline'), 'the restart is told while the panel does not answer');
 `)
 }
 

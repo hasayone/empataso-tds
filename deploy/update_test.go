@@ -633,7 +633,8 @@ func TestUpdateScenarioA(t *testing.T) {
 		}
 	}
 	cf := te.check(t)
-	if cf.Schema != 1 || cf.Target.Commit != target || cf.Current.Commit != prev || cf.Ahead != 1 || len(cf.Commits) != 1 || cf.Signed {
+	// После применения агент перепроверяет канал: check.json описывает новую сборку, а не прежнюю.
+	if cf.Schema != 1 || cf.Target.Commit != target || cf.Current.Commit != target || cf.Ahead != 0 || len(cf.Commits) != 0 || cf.Error != "" {
 		t.Fatalf("check.json: %+v", cf)
 	}
 

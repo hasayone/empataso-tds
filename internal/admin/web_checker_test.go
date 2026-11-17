@@ -528,3 +528,53 @@ paintS2SChecker();
 eq(HOST.innerHTML, '', 'the row goes away when the postback is not available');
 `)
 }
+
+// TestSPACheckerSettingsGroups checks the layout of the settings card: the header and the side list carry the product name
+// CheckMy.Store in every language, the other integrations keep their names, and the fields sit in four groups in the order
+// connection, apps, postback, counters with buttons, followed by the campaign keys.
+// t is the test handle. It returns nothing and fails when a name is translated or a field leaves its group.
+func TestSPACheckerSettingsGroups(t *testing.T) {
+	html := spaSource()
+	for _, lang := range []string{"en", "ru", "uk"} {
+		for _, key := range []string{"chk.grp.link", "chk.grp.apps"} {
+			if !trKeyDefined(html, lang, key) {
+				t.Errorf("%q missing for lang %q", key, lang)
+			}
+		}
+	}
+	if n := strings.Count(html, "'int.name.checker':'CheckMy.Store',"); n != 3 {
+		t.Errorf("the product name CheckMy.Store appears %d times in the dictionaries, want 3", n)
+	}
+	mustNot(t, html, "'int.name.checker':'Чекер'", "the header is the product name, not the word Checker")
+	mustNot(t, html, "'int.name.checker':'Checker'", "the header is the product name, not the word Checker")
+	for _, keep := range []string{"{id:'keitaro', title:'Keitaro'", "{id:'namecheap', title:'Namecheap'", "{id:'cloudflare', title:'Cloudflare'", "{id:'ai', title:'AI'"} {
+		must(t, html, keep, "other integrations keep their names")
+	}
+
+	panel := dictBetween(t, html, "async function checkerPanel(", "/** AI_PROVIDERS lists")
+	marks := []string{
+		`data-grp="link"`, `sw('ck-enabled'`, `field('ck-url'`, `field('ck-tenant'`, `id="ck-token"`,
+		`data-grp="apps"`, `sw('ck-create'`, `field('ck-admin'`, `field('ck-appurl'`, `id="ck-locales"`,
+		`data-grp="pb"`, `id="ck-pburl"`, `id="ck-pbmethod"`, `id="ck-pbtoken"`,
+		`data-grp="foot"`, `id="ck-queue"`, `id="ck-save"`, `id="ck-test"`,
+		`data-grp="keys"`, `id="ck-prev"`,
+	}
+	last := -1
+	for _, m := range marks {
+		at := strings.Index(panel, m)
+		if at < 0 {
+			t.Fatalf("the settings card lacks %s", m)
+		}
+		if at < last {
+			t.Errorf("%s stands before the previous item: the group order is broken", m)
+		}
+		last = at
+	}
+	for _, grp := range []string{"link", "apps", "pb", "keys"} {
+		must(t, panel, `data-grp="`+grp+`" role="group" aria-labelledby="ck-gt-`+grp+`"`, "the group "+grp+" is named for screen readers")
+	}
+	must(t, panel, `<label for="ck-pburl">${esc(tr('chk.pb.url'))}</label>`, "the hint of the address is outside its label")
+	mustNot(t, panel, `<b>${esc(tr('chk.pb.section'))}</b>`, "the postback title is a group title")
+	must(t, html, ".intsec .igrp{", "groups have their own spacing")
+	must(t, html, ".intsec .igrp textarea{overflow-wrap:anywhere}", "a long postback address wraps inside its field")
+}

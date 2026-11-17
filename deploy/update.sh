@@ -357,6 +357,8 @@ git_ssh_cmd() {
 # Результат: код возврата git.
 # Ошибки: код git.
 git_cmd() {
+	# Чужой GIT_DIR (окружение тестов, агента) не должен подменять дерево TDS_DIR.
+	env -u GIT_DIR -u GIT_WORK_TREE -u GIT_INDEX_FILE -u GIT_OBJECT_DIRECTORY -u GIT_COMMON_DIR -u GIT_NAMESPACE \
 	GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 \
 	GIT_SSH_COMMAND="$(git_ssh_cmd)" \
 		git -C "$TDS_DIR" \
@@ -1468,14 +1470,20 @@ prepare_stack() {
 }
 
 # Назначение: режим --check (шаги 1–3 плана, запись check.json).
-# Параметры: нет.
+# Параметры: $1 — sha только что выкатанной сборки или пусто для обычной проверки.
 # Результат: check.json в томе; ошибки выбора цели — в поле error.
+#   Если $1 задан и чтение git ещё видит прежний коммит или канал позади выкатанного, текущая и цель — $1.
 # Ошибки: код 1.
 do_check() {
+	local pinned=${1:-}
 	log "режим: --check"
 	prepare_stack
 	local cur_sha
 	cur_sha=$(git_cmd rev-parse HEAD)
+	if [[ -n "$pinned" && "$cur_sha" != "$pinned" && "$pinned" =~ ^[0-9a-f]{40}$ ]]; then
+		log "проверка: HEAD ${cur_sha:0:12} не совпал с выкатанным ${pinned:0:12}"
+		cur_sha=$pinned
+	fi
 	_CHECK_COMMITS_JSON="[]"
 	if ! git_fetch; then
 		write_check_json "$cur_sha" "" "" "" 0 false "" "[]" "" "git fetch не удался"
@@ -1485,6 +1493,13 @@ do_check() {
 		write_check_json "$cur_sha" "" "" "" 0 false "" "[]" "" "$TARGET_ERROR"
 		log "check: ${TARGET_ERROR}" >&2
 		return 1
+	fi
+	if [[ -n "$pinned" && "$TARGET_SHA" != "$pinned" && "$pinned" =~ ^[0-9a-f]{40}$ ]] && \
+		git_cmd merge-base --is-ancestor "$TARGET_SHA" "$pinned" 2>/dev/null; then
+		log "проверка: канал ${TARGET_SHA:0:12} отстаёт от выкатанного ${pinned:0:12}"
+		TARGET_SHA=$pinned
+		TARGET_TAG=""
+		TARGET_VER=""
 	fi
 	write_check_for_target "$cur_sha"
 	log "check: target=${TARGET_SHA:0:12} signed=${SIGNED} manual_steps=${#MANUAL_STEPS[@]}"
@@ -1606,6 +1621,9 @@ do_apply() {
 		phase_done
 		finish_run ok ""
 		prune_old_images "$target_sha" "$RUN_FROM"
+		# check.json описывает сборку до прогона: без новой проверки админка покажет текущий коммит как обновление.
+		# $1 — выкатанный sha: если rev-parse ещё видит прежнее дерево, проверка не публикует его как цель.
+		( do_check "$target_sha" ) || log "предупреждение: проверка после применения не удалась" >&2
 		return 0
 	fi
 	phase_done false

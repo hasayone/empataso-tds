@@ -150,12 +150,24 @@ func (u *unknownCampaignTally) note(campaignID int) {
 // logSpan is the tracker window and mapping context for one log fetch.
 // from and to are the inclusive tracker range strings passed to FetchClicks
 // or FetchConversions. host is stored as the row domain. place supplies the
-// group id and name for every mapped row.
+// group id and name for every mapped row. mark, when set, receives the rows read
+// through each written batch and the sort time of the last of them.
 type logSpan struct {
 	from  string
 	to    string
 	host  string
 	place logPlace
+	mark  func(rows int, through time.Time)
+}
+
+// spanMark returns the batch hook of one log for logSpan.mark.
+// mark is logImportOpts.mark and may be nil; stream is clicks or conversions.
+// It returns nil when mark is nil.
+func spanMark(mark func(string, int, time.Time, bool), stream string) func(int, time.Time) {
+	if mark == nil {
+		return nil
+	}
+	return func(rows int, through time.Time) { mark(stream, rows, through, false) }
 }
 
 // importLogs writes conversions and clicks, or records that the warehouse is absent.
@@ -198,10 +210,16 @@ func (s *Server) importLogRows(ctx context.Context, req keitaroImportReq, li log
 			counts["clicks"] = 0
 			*losses = append(*losses, ktimport.Loss{Kind: "skipped", Ref: "clicks", Detail: "clickhouse unavailable"})
 		} else {
-			span := logSpan{from: li.from, to: li.to, host: li.host, place: place}
+			span := logSpan{from: li.from, to: li.to, host: li.host, place: place, mark: spanMark(opts.mark, "clicks")}
+			if opts.clicksFrom != "" {
+				span.from = opts.clicksFrom
+			}
 			read, inserted, dups, maxTS, idx, err := s.importClicks(ctx, client, span, opts.syncMode, skip)
 			if err != nil {
 				return stats, refs, err
+			}
+			if opts.mark != nil {
+				opts.mark("clicks", read, time.Time{}, true)
 			}
 			if opts.syncMode {
 				counts["clicks"] = inserted
@@ -223,10 +241,13 @@ func (s *Server) importLogRows(ctx context.Context, req keitaroImportReq, li log
 			counts["conversions"] = 0
 			*losses = append(*losses, ktimport.Loss{Kind: "skipped", Ref: "conversions", Detail: "clickhouse unavailable"})
 		} else {
-			span := logSpan{from: li.from, to: li.to, host: li.host, place: place}
+			span := logSpan{from: li.from, to: li.to, host: li.host, place: place, mark: spanMark(opts.mark, "conversions")}
 			n, maxTS, odd, err := s.importConversions(ctx, client, span, clickIdx, opts.syncMode, skip)
 			if err != nil {
 				return stats, refs, err
+			}
+			if opts.mark != nil {
+				opts.mark("conversions", n, time.Time{}, true)
 			}
 			counts["conversions"] = n
 			stats.maxConv = maxTS
@@ -337,15 +358,17 @@ func (s *Server) listKeitaroGroups(ctx context.Context) ([]config.Group, error) 
 // client is the tracker reader, so a column fallback stays visible to the caller.
 // span carries the tracker range, domain host and group mapping for each row.
 // clickIdx maps sub_id to click metadata from an earlier importClicks in the same run;
-// it may be nil when conversions import alone.
+// it may be nil when conversions import alone. After each written batch span.mark, when set,
+// gets the rows read so far and a zero time.
 // It returns how many rows were read, the latest timestamp, and how many rows had a
 // non-empty status outside lead, sale, rejected, registration, deposit and rebill.
 // An error comes from the tracker or the warehouse. The row status is not rewritten.
 func (s *Server) importConversions(ctx context.Context, client *ktimport.Client, span logSpan, clickIdx keitaroClickFillIndex, syncMode bool, skip *logSkipTally) (int, time.Time, int, error) {
 	var batch []store.ConversionInsert
 	var maxTS time.Time
-	var odd int
+	var odd, seen int
 	n, err := client.FetchConversions(ctx, span.from, span.to, func(row ktimport.ConversionRow) error {
+		seen++
 		if oddConversionStatus(row.EffectiveStatus()) {
 			odd++
 		}
@@ -373,7 +396,13 @@ func (s *Server) importConversions(ctx context.Context, client *ktimport.Client,
 		}
 		cp := append([]store.ConversionInsert(nil), batch...)
 		batch = batch[:0]
-		return s.cfg.Warehouse.InsertConversions(ctx, cp)
+		if err := s.cfg.Warehouse.InsertConversions(ctx, cp); err != nil {
+			return err
+		}
+		if span.mark != nil {
+			span.mark(seen, time.Time{})
+		}
+		return nil
 	})
 	if err != nil {
 		return n, maxTS, odd, err
@@ -389,6 +418,9 @@ func (s *Server) importConversions(ctx context.Context, client *ktimport.Client,
 }
 
 // importClicks reads the click log and writes batches of 1000.
+// The log comes sorted by click time, so after each written batch span.mark, when set, gets the
+// rows read so far and the latest click time: every click before that time is in the warehouse.
+// A click already stored under the same cid is skipped, so a log read again from that time does not double.
 // It returns rows read, rows inserted, duplicate skips, the latest timestamp,
 // the sub_id index for conversion backfill, and an error from the tracker or warehouse.
 func (s *Server) importClicks(ctx context.Context, client *ktimport.Client, span logSpan, syncMode bool, skip *logSkipTally) (read, inserted, duplicates int, maxTS time.Time, idx keitaroClickFillIndex, err error) {
@@ -423,7 +455,9 @@ func (s *Server) importClicks(ctx context.Context, client *ktimport.Client, span
 		inserted += len(out)
 		return s.cfg.Warehouse.InsertEvents(ctx, out)
 	}
+	seen := 0
 	n, err := client.FetchClicks(ctx, span.from, span.to, func(row ktimport.ClickRow) error {
+		seen++
 		if strings.TrimSpace(row.SubID) == "" {
 			if skip != nil {
 				skip.clicksEmpty++
@@ -465,7 +499,13 @@ func (s *Server) importClicks(ctx context.Context, client *ktimport.Client, span
 		if len(batch) < keitaroBatch {
 			return nil
 		}
-		return flush()
+		if err := flush(); err != nil {
+			return err
+		}
+		if span.mark != nil {
+			span.mark(seen, maxTS)
+		}
+		return nil
 	})
 	if err != nil {
 		return n, inserted, duplicates, maxTS, idx, err

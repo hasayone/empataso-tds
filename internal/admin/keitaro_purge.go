@@ -96,6 +96,7 @@ func (s *Server) handleKeitaroPurge(w http.ResponseWriter, r *http.Request) {
 		removeKeitaroSyncFile(s.cfg.KeitaroSyncFile)
 	}
 	s.logPurge(removed)
+	s.ktJob.dropResume()
 	writeJSON(w, http.StatusOK, map[string]any{"removed": removed})
 }
 
