@@ -1,0 +1,140 @@
+# Built-in User-Agent signatures. One lowercase substring per line, matched
+# case-insensitively anywhere in the User-Agent. The section header sets the label:
+#   [headless]         automated browsers
+#   [http_client]      libraries and command-line clients, counted always
+#   [http_client_bare] libraries counted only when the UA has no "mozilla/"
+#   [crawler]          crawlers, SEO tools, AI agents and link-preview fetchers
+#   [scanner]          vulnerability and network scanners
+# Generic words (bot, spider, crawler, safari, wv, instagram, fban, telegram, sogou)
+# are deliberately absent: they appear in real visitor UAs.
+# signature_ua.dat in the data directory extends this set; a line "-pattern" there
+# disables the built-in pattern with the same text.
+
+[headless]
+headlesschrome
+phantomjs
+puppeteer
+playwright
+selenium
+webdriver
+chrome-lighthouse
+slimerjs
+htmlunit
+zombie.js
+
+[http_client]
+curl/
+libcurl
+wget/
+python-requests
+python-urllib
+python-httpx
+aiohttp
+httpx/
+go-http-client
+libwww-perl
+lwp::simple
+scrapy
+node-fetch
+axios/
+undici
+guzzlehttp
+apache-httpclient
+restsharp
+postmanruntime
+insomnia/
+httpie
+powershell/
+winhttp
+faraday v
+
+[http_client_bare]
+okhttp/
+java/
+
+[crawler]
+ahrefsbot
+ahrefssiteaudit
+semrushbot
+siteauditbot
+mj12bot
+dotbot
+petalbot
+bytespider
+gptbot
+chatgpt-user
+oai-searchbot
+claudebot
+claude-web
+anthropic-ai
+ccbot
+amazonbot
+facebookexternalhit
+facebookcatalog
+meta-externalagent
+meta-externalfetcher
+duckduckbot
+duckassistbot
+perplexitybot
+perplexity-user
+yandexbot
+yandexmobilebot
+blexbot
+dataforseobot
+seznambot
+sogou web spider
+sogou inst spider
+sogou news spider
+exabot
+megaindex
+serpstatbot
+barkrowler
+ia_archiver
+archive.org_bot
+twitterbot
+linkedinbot
+pinterestbot
+slackbot
+discordbot
+telegrambot
+bitlybot
+redditbot
+embedly
+quora link preview
+skypeuripreview
+imagesiftbot
+cotoyogi
+diffbot
+omgili
+timpibot
+youbot
+ai2bot
+
+[scanner]
+sqlmap
+nikto
+nmap
+masscan
+zgrab
+nuclei
+wpscan
+acunetix
+netsparker
+dirbuster
+gobuster
+ffuf
+wfuzz
+openvas
+nessus
+qualys
+burpsuite
+censysinspect
+expanse, a palo alto
+paloaltonetworks
+internet-measurement
+l9explore
+leakix
+httpx - open-source
+projectdiscovery
+jorgee
+zmeu

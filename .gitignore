@@ -44,3 +44,4 @@ coverage.*
 !internal/geo/testdata/*.mmdb
 # built-in proxy org list compiled into the engine (data/proxy_org.dat stays ignored)
 !internal/detect/proxy_org.dat
+!internal/detect/signature_ua_default.dat
