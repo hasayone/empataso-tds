@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -230,6 +231,74 @@ func TestFetchRowsStuckPage(t *testing.T) {
 	})
 	if err == nil || err.Error() != "журнал не двигается" || n != 2 || calls != 2 {
 		t.Fatalf("n=%d calls=%d err=%v", n, calls, err)
+	}
+}
+
+// noLogRetryPause убирает паузы между повторами страницы журнала на время теста.
+func noLogRetryPause(t *testing.T) {
+	prev := logRetryDelays
+	logRetryDelays = []time.Duration{0, 0, 0}
+	t.Cleanup(func() { logRetryDelays = prev })
+}
+
+func TestFetchRowsRetriesBrokenBodyAnd502(t *testing.T) {
+	noLogRetryPause(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		switch calls {
+		case 1:
+			w.Header().Set("Content-Length", "1000")
+			_, _ = io.WriteString(w, `{"rows":[`)
+		case 2:
+			http.Error(w, "bad gateway", http.StatusBadGateway)
+		default:
+			_, _ = io.WriteString(w, `{"rows":[{"sub_id":"a"},{"sub_id":"b"}],"total":2}`)
+		}
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL, Key: "k-test", HTTP: srv.Client()}
+	n, err := fetchRows(c, context.Background(), "/admin_api/v1/clicks/log", "2026-01-01 00:00:00", "2026-01-02 00:00:00", []string{"sub_id"}, "clicks", 10, "datetime", func(ClickRow) error {
+		return nil
+	})
+	if err != nil || n != 2 || calls != 3 {
+		t.Fatalf("n=%d calls=%d err=%v", n, calls, err)
+	}
+}
+
+func TestFetchRowsBrokenBodyGivesUpWithCause(t *testing.T) {
+	noLogRetryPause(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.Header().Set("Content-Length", "1000")
+		_, _ = io.WriteString(w, `{"rows":[`)
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL, Key: "k-test", HTTP: srv.Client()}
+	_, err := fetchRows(c, context.Background(), "/admin_api/v1/clicks/log", "2026-01-01 00:00:00", "2026-01-02 00:00:00", []string{"sub_id"}, "clicks", 10, "datetime", func(ClickRow) error {
+		return nil
+	})
+	if calls != len(logRetryDelays)+1 || err == nil || !errors.Is(err, io.ErrUnexpectedEOF) ||
+		!strings.HasPrefix(err.Error(), "keitaro: чтение /admin_api/v1/clicks/log: ") || strings.Contains(err.Error(), "k-test") {
+		t.Fatalf("calls=%d err=%v", calls, err)
+	}
+}
+
+func TestFetchRowsNoRetryOnRejectedColumns(t *testing.T) {
+	noLogRetryPause(t)
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		http.Error(w, "unknown column", http.StatusBadRequest)
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL, Key: "k-test", HTTP: srv.Client()}
+	_, err := fetchRows(c, context.Background(), "/admin_api/v1/clicks/log", "2026-01-01 00:00:00", "2026-01-02 00:00:00", []string{"sub_id"}, "clicks", 10, "datetime", func(ClickRow) error {
+		return nil
+	})
+	if calls != 1 || !statusRejected(err) {
+		t.Fatalf("calls=%d err=%v", calls, err)
 	}
 }
 

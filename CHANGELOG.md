@@ -31,6 +31,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Fixed
 
+- A long Keitaro click or conversion log import no longer fails on one broken page. A page whose answer breaks off mid-body, does not connect, or comes back 429, 502, 503, 504 or Cloudflare 520–524 is asked again after 2, 10 and 30 seconds; only then does the import stop. A refused column list (400) still falls back at once. The error now names the cause, for example `keitaro: чтение /admin_api/v1/clicks/log: unexpected EOF`.
 - AI settings, "Connection": the note about the key storage spans the full width of the field grid under the fields instead of half of it.
 - Keitaro transfer result: the "finished" note no longer touches the counters above it, the warning table wraps its columns inside the panel at about 580 px without side scroll, and the counters wrap too. An offer country `Unknown` (or an empty code) is kept as the country "Unknown" and is no longer reported as an approximation; real garbage still is.
 - The campaign filter bar: the group filter has the same width as the state filter, the search field takes the rest of the row, and the bar stays in one row at about 740 px.

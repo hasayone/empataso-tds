@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Client ходит в Keitaro только по allowlist: GET конфигурации и два POST журнала.
@@ -34,6 +36,29 @@ const (
 	getBodyLimit        = 64 << 20
 	streamFetchParallel = 8
 )
+
+// logRetryDelays — паузы перед повторами страницы журнала после временного сбоя; длина задаёт число повторов.
+var logRetryDelays = []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second}
+
+// transportError — запрос не дошёл до ответа или тело ответа оборвалось.
+type transportError struct {
+	msg   string
+	cause error
+}
+
+// Error возвращает текст сбоя с причиной транспорта. Ключ API в заголовке и в текст не входит.
+//
+// Параметры: нет.
+// Результат: текст и причина.
+// Ошибки: нет.
+func (e *transportError) Error() string {
+	return e.msg + ": " + e.cause.Error()
+}
+
+// Unwrap отдаёт причину сбоя для errors.Is и errors.As.
+func (e *transportError) Unwrap() error {
+	return e.cause
+}
 
 // Get выполняет GET и возвращает тело.
 //
@@ -309,6 +334,50 @@ func (c *Client) postLog(ctx context.Context, path string, body any) ([]byte, er
 	return buf, nil
 }
 
+// postLogPage читает одну страницу журнала и повторяет её после временного сбоя.
+// Повтор безопасен: строки страницы отдаются обработчику только после полного разбора ответа.
+//
+// Параметры: ctx — отмена, прерывает и паузу между повторами; path — путь журнала; body — JSON-тело.
+// Результат: тело ответа при статусе 200.
+// Ошибки: как у postLog. Временный сбой — после последнего повтора из logRetryDelays, остальные сразу.
+func (c *Client) postLogPage(ctx context.Context, path string, body any) ([]byte, error) {
+	for attempt := 0; ; attempt++ {
+		raw, err := c.postLog(ctx, path, body)
+		if err == nil || attempt >= len(logRetryDelays) || ctx.Err() != nil || !logRetryable(err) {
+			return raw, err
+		}
+		pause := time.NewTimer(logRetryDelays[attempt])
+		select {
+		case <-ctx.Done():
+			pause.Stop()
+			return nil, err
+		case <-pause.C:
+		}
+	}
+}
+
+// logRetryable сообщает, что сбой страницы журнала временный и страницу стоит запросить снова.
+//
+// Параметры: err — ошибка postLog, не nil.
+// Результат: true для сети и оборванного тела, 429, 502, 503, 504 и 520–524 Cloudflare.
+// Остальные статусы, в том числе отказ в колонках, повтора не получают.
+// Ошибки: нет.
+func logRetryable(err error) bool {
+	var te *transportError
+	if errors.As(err, &te) {
+		return true
+	}
+	var se *httpStatusError
+	if !errors.As(err, &se) {
+		return false
+	}
+	switch se.code {
+	case http.StatusTooManyRequests, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	}
+	return se.code >= 520 && se.code <= 524
+}
+
 // request выполняет один запрос после проверки allow.
 //
 // Параметры: ctx — отмена; method и path — запрос; body — JSON или nil; allow — проверка пути.
@@ -340,7 +409,10 @@ func (c *Client) request(ctx context.Context, method, path string, body any, all
 	}
 	res, err := c.HTTP.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("keitaro: %s %s не выполнен", method, path)
+		if inner := errors.Unwrap(err); inner != nil {
+			err = inner
+		}
+		return 0, nil, &transportError{msg: fmt.Sprintf("keitaro: %s %s не выполнен", method, path), cause: err}
 	}
 	defer res.Body.Close()
 	limit := int64(getBodyLimit) + 1
@@ -349,7 +421,7 @@ func (c *Client) request(ctx context.Context, method, path string, body any, all
 	}
 	buf, err := io.ReadAll(io.LimitReader(res.Body, limit))
 	if err != nil {
-		return res.StatusCode, nil, fmt.Errorf("keitaro: чтение %s", path)
+		return res.StatusCode, nil, &transportError{msg: fmt.Sprintf("keitaro: чтение %s", path), cause: err}
 	}
 	if int64(len(buf)) >= limit {
 		return res.StatusCode, nil, fmt.Errorf("keitaro: ответ %s больше предела", path)
@@ -440,7 +512,7 @@ func fetchRows[T any](c *Client, ctx context.Context, path, from, to string, col
 			"columns": columns,
 			"sort":    []map[string]string{{"name": sortBy, "order": "asc"}},
 		}
-		raw, err := c.postLog(ctx, path, payload)
+		raw, err := c.postLogPage(ctx, path, payload)
 		if err != nil {
 			return seen, err
 		}
