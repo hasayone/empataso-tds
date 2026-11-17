@@ -798,6 +798,8 @@ write_agent_json() {
 		local iown
 		iown=$(stat -c '%u' "$inbox_dir" 2>/dev/null || echo 0)
 		[[ "$iown" == "10001" ]] && inbox=true
+		# В песочнице ensure_inbox_dir допускает отказ chown без root: владелец — текущий пользователь.
+		[[ -n "$SBX" && "$iown" == "$(id -u)" ]] && inbox=true
 	fi
 	img_local=$(docker inspect --format '{{.Id}}' emtds:local 2>/dev/null | head -c 32 || true)
 	img_engine=$(docker inspect --format '{{.Image}}' emtds-engine 2>/dev/null | head -c 32 || true)
