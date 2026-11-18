@@ -16,6 +16,9 @@ EDGE_CF_IPS="${EDGE_NGINX_SRC}/cloudflare-ips.txt"
 EDGE_TEMPLATE_ADMIN="${EDGE_NGINX_SRC}/emtds.conf"
 EDGE_TEMPLATE_ADMIN_HOST="${EDGE_NGINX_SRC}/emtds-admin-host.conf"
 EDGE_TEMPLATE_ENGINE="${EDGE_NGINX_SRC}/emtds-engine.conf"
+EDGE_TEMPLATE_HTTP="${EDGE_NGINX_SRC}/emtds-http.conf"
+# Package welcome-page configs on port 80; disabled only while unmodified and only when EmTDS takes port 80.
+EDGE_STOCK_DEFAULTS="${EMTDS_NGINX_STOCK_DEFAULTS:-/etc/nginx/conf.d/default.conf /etc/nginx/sites-enabled/default}"
 EDGE_NGINX_EMTDS_DIR=/etc/nginx/emtds
 EDGE_CONF_D=/etc/nginx/conf.d
 EDGE_BACKUP_ROOT="${EDGE_STATE_DIR}/nginx-backup"
@@ -289,6 +292,78 @@ render_all() {
 	upstream=$(engine_upstream_from_publish "$publish")
 	render_cloudflare_snippets "$dest"
 	render_nginx_configs "$dest" "$public_ip" "$upstream"
+	render_http_redirect "$dest"
+}
+
+# Check that a config is an unmodified package file.
+# Args: path (a symlink is followed). Returns 0 when the resolved file is a dpkg conffile and its md5
+# equals the recorded one; 1 otherwise (missing file, no dpkg, foreign or edited file). No output.
+edge_stock_default() {
+	local path=$1 real pkg want got
+	[[ -e "$path" ]] || return 1
+	command -v dpkg-query >/dev/null 2>&1 || return 1
+	real=$(readlink -f "$path") || return 1
+	pkg=$(dpkg-query -S "$real" 2>/dev/null | head -n 1 | cut -d: -f1 | cut -d, -f1) || return 1
+	[[ -n "$pkg" ]] || return 1
+	want=$(dpkg-query -W -f='${Conffiles}\n' "$pkg" 2>/dev/null | awk -v p="$real" '$1 == p { print $2; exit }') || return 1
+	got=$(md5sum <"$real" | cut -d' ' -f1)
+	[[ -n "$want" && "$want" == "$got" ]]
+}
+
+# Print the configs from EDGE_STOCK_DEFAULTS that are present and unmodified, one per line.
+edge_stock_defaults_present() {
+	local f
+	for f in $EDGE_STOCK_DEFAULTS; do
+		if edge_stock_default "$f"; then
+			printf '%s\n' "$f"
+		fi
+	done
+}
+
+# Print config files that listen on port 80, except conf.d/emtds*.conf and the files given as args.
+# Source: the nginx -T dump; "listen" without a port means port 80, unix sockets do not count.
+# Prints "nginx -T" when the dump is unavailable, so the caller treats port 80 as taken.
+edge_http_listener_files() {
+	local dump
+	if ! command -v nginx >/dev/null 2>&1 || ! dump=$(nginx -T 2>/dev/null); then
+		printf 'nginx -T\n'
+		return 0
+	fi
+	printf '%s\n' "$dump" | awk -v own="${EDGE_CONF_D}/emtds" -v skip="$*" '
+		BEGIN { n = split(skip, s, " "); for (i = 1; i <= n; i++) ign[s[i]] = 1 }
+		/^# configuration file .*:$/ { f = $0; sub(/^# configuration file /, "", f); sub(/:$/, "", f); next }
+		{
+			if (f == "" || index(f, own) == 1 || (f in ign)) next
+			c = $0; sub(/#.*/, "", c)
+			if (!match(c, /(^|[ \t;{])listen[ \t]+[^ \t;]+/)) next
+			a = substr(c, RSTART, RLENGTH); sub(/.*listen[ \t]+/, "", a)
+			if (a ~ /^unix:/) next
+			if (a ~ /^[0-9]+$/) p = a
+			else if (a ~ /:[0-9]+$/) { p = a; sub(/.*:/, "", p) }
+			else if (a ~ /^\[.*\]$/ || a !~ /:/) p = 80
+			else p = ""
+			if (p == 80) hits[f] = 1
+		}
+		END { for (k in hits) print k }'
+}
+
+# Decide whether EmTDS serves port 80 and render that decision into DEST.
+# When nothing but unmodified package welcome pages listens on port 80: emtds-http.conf (redirect to
+# https) and stock-defaults (the welcome pages to disable). Otherwise http-busy with the listeners;
+# nothing for port 80 is rendered and foreign servers stay as they are.
+render_http_redirect() {
+	local dest=$1 stock busy
+	stock=$(edge_stock_defaults_present)
+	# shellcheck disable=SC2086 # package config paths have no spaces
+	busy=$(edge_http_listener_files $stock)
+	if [[ -n "$busy" ]]; then
+		printf '%s\n' "$busy" >"${dest}/http-busy"
+		return 0
+	fi
+	cp "$EDGE_TEMPLATE_HTTP" "${dest}/emtds-http.conf"
+	if [[ -n "$stock" ]]; then
+		printf '%s\n' "$stock" >"${dest}/stock-defaults"
+	fi
 }
 
 # Run MODE over nginx.conf SRC with a tokenizer that skips comments and quoted strings
@@ -570,9 +645,37 @@ install_rendered() {
 	install -m 0644 "${src}/emtds.conf" "${EDGE_CONF_D}/emtds.conf"
 	install -m 0644 "${src}/emtds-admin-host.conf" "${EDGE_CONF_D}/emtds-admin-host.conf"
 	install -m 0644 "${src}/emtds-engine.conf" "${EDGE_CONF_D}/emtds-engine.conf"
+	install_http_redirect "$src" "$backup_dir"
 }
 
-# Restore nginx files from backup; only touches emtds* conf.d, /etc/nginx/emtds/
+# Apply the port 80 decision rendered by render_http_redirect.
+# Args: rendered dir, backup dir. With emtds-http.conf: install it and move every file listed in
+# stock-defaults into <backup>/stock (the file name is the full path with "/" written as "%", a symlink
+# stays a symlink). Without it: remove a previous conf.d/emtds-http.conf (its copy is already in the
+# backup) and report the listeners.
+install_http_redirect() {
+	local src=$1 backup_dir=$2 f
+	if [[ ! -f "${src}/emtds-http.conf" ]]; then
+		rm -f "${EDGE_CONF_D}/emtds-http.conf"
+		if [[ -f "${src}/http-busy" ]]; then
+			edge_msg "порт 80 занят ($(paste -sd' ' "${src}/http-busy")): редирект на https не ставится"
+		fi
+		return 0
+	fi
+	if [[ -f "${src}/stock-defaults" ]]; then
+		install -d -m 0755 "${backup_dir}/stock"
+		while IFS= read -r f; do
+			[[ -n "$f" ]] || continue
+			cp -aP "$f" "${backup_dir}/stock/${f//\//"%"}"
+			rm -f "$f"
+			edge_msg "отключён стандартный ${f}, копия в ${backup_dir}/stock"
+		done <"${src}/stock-defaults"
+	fi
+	install -m 0644 "${src}/emtds-http.conf" "${EDGE_CONF_D}/emtds-http.conf"
+}
+
+# Restore nginx files from backup; only touches emtds* conf.d, /etc/nginx/emtds/,
+# package welcome pages disabled by install_http_redirect (<backup>/stock)
 # and nginx.conf when the backup holds a copy of it (made only with --tune-events).
 restore_from_backup() {
 	local backup_dir=$1 nginx_dir_existed=${2:-$EDGE_NGINX_DIR_EXISTED} f base
@@ -604,6 +707,13 @@ restore_from_backup() {
 	if [[ -f "${backup_dir}/nginx.conf" ]]; then
 		cp -a "${backup_dir}/nginx.conf" "$(readlink -f "$EDGE_NGINX_CONF")"
 	fi
+	if [[ -d "${backup_dir}/stock" ]]; then
+		for f in "${backup_dir}/stock/"*; do
+			[[ -e "$f" || -L "$f" ]] || continue
+			base=$(basename "$f")
+			cp -aP "$f" "${base//"%"//}"
+		done
+	fi
 }
 
 # --check: render to temp and dump to stdout.
@@ -623,6 +733,15 @@ run_check() {
 		printf '===== %s =====\n' "$f"
 		cat "${tmp}/${f}"
 	done
+	if [[ -f "${tmp}/emtds-http.conf" ]]; then
+		printf '===== %s =====\n' emtds-http.conf
+		cat "${tmp}/emtds-http.conf"
+		if [[ -f "${tmp}/stock-defaults" ]]; then
+			edge_msg "check mode: будут отключены стандартные $(paste -sd' ' "${tmp}/stock-defaults")"
+		fi
+	else
+		edge_msg "check mode: порт 80 занят ($(paste -sd' ' "${tmp}/http-busy")): редирект на https не ставится"
+	fi
 	report_nginx_events "$tmp"
 	rm -rf "$tmp"
 }
@@ -634,7 +753,7 @@ run_apply() {
 		edge_msg "нужны права root" >&2
 		return 1
 	fi
-	for f in "$EDGE_CF_IPS" "$EDGE_TEMPLATE_ADMIN" "$EDGE_TEMPLATE_ADMIN_HOST" "$EDGE_TEMPLATE_ENGINE"; do
+	for f in "$EDGE_CF_IPS" "$EDGE_TEMPLATE_ADMIN" "$EDGE_TEMPLATE_ADMIN_HOST" "$EDGE_TEMPLATE_ENGINE" "$EDGE_TEMPLATE_HTTP"; do
 		if [[ ! -f "$f" ]]; then
 			edge_msg "не найден шаблон: ${f}" >&2
 			return 1

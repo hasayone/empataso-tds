@@ -3,6 +3,8 @@ package deploy
 import (
 	"bufio"
 	"bytes"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"net"
 	"os"
@@ -233,6 +235,7 @@ func TestApplyEdgeScriptGuards(t *testing.T) {
 		"emtds-admin-host.conf",
 		"ensure_env_key_nonempty",
 		"admin_trusted_proxies=",
+		"emtds-http.conf",
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("apply-edge.sh: нет %q", want)
@@ -242,7 +245,176 @@ func TestApplyEdgeScriptGuards(t *testing.T) {
 		t.Fatal("apply-edge.sh: не должен массово трогать conf.d")
 	}
 	if matched, _ := regexp.MatchString(`listen\s+80\b`, s); matched {
-		t.Fatal("apply-edge.sh: не должен трогать порт 80")
+		t.Fatal("apply-edge.sh: порт 80 описывается только шаблоном nginx/emtds-http.conf")
+	}
+}
+
+// TestNginxHTTPTemplate проверяет шаблон порта 80: только редирект на https того же хоста, без
+// default_server (чужой сервер с ним не конфликтует) и без проксирования.
+func TestNginxHTTPTemplate(t *testing.T) {
+	s := readEdgeFile(t, filepath.Join("nginx", "emtds-http.conf"))
+	for _, frag := range []string{"listen 80;", "listen [::]:80;", "server_name _;", "return 301 https://$host$request_uri;"} {
+		if !strings.Contains(s, frag) {
+			t.Fatalf("emtds-http.conf: нет %q", frag)
+		}
+	}
+	for _, bad := range []string{"default_server", "proxy_pass", "__", "listen 443"} {
+		if strings.Contains(s, bad) {
+			t.Fatalf("emtds-http.conf: не ждали %q", bad)
+		}
+	}
+}
+
+// TestEdgeHTTPListenerFiles: порт 80 занимают listen 80, адрес без порта, [::]:80 с параметрами;
+// не занимают 443, 8080, unix-сокет, закомментированный listen, свои conf.d/emtds*.conf и файлы из
+// аргументов. Без дампа nginx -T порт считается занятым.
+func TestEdgeHTTPListenerFiles(t *testing.T) {
+	root := t.TempDir()
+	dump := filepath.Join(root, "dump.txt")
+	files := []struct{ name, body string }{
+		{"/etc/nginx/nginx.conf", "http {\n    include /etc/nginx/conf.d/*.conf;\n}\n"},
+		{"/x/a.conf", "server { listen 443 ssl; }\n"},
+		{"/x/b.conf", "server {\n    listen 8080;\n}\n"},
+		{"/x/c.conf", "server {\n    listen 127.0.0.1;\n}\n"},
+		{"/x/d.conf", "server {\n\tlisten [::]:80 ipv6only=on;\n}\n"},
+		{"/x/e.conf", "server {\n    # listen 80;\n    listen 443;\n}\n"},
+		{"/x/f.conf", "server {\n    listen unix:/run/x.sock;\n}\n"},
+		{"/x/stock.conf", "server {\n    listen       80;\n}\n"},
+		{root + "/conf.d/emtds-http.conf", "server {\n    listen 80;\n}\n"},
+	}
+	var b strings.Builder
+	for _, f := range files {
+		b.WriteString("# configuration file " + f.name + ":\n" + f.body + "\n")
+	}
+	mustWrite(t, dump, b.String(), 0o644)
+	env := append(edgeStubEnv(t), "STUB_NGINX_DUMP="+dump)
+	out := edgeSourced(t, "EDGE_CONF_D=$2/conf.d\nedge_http_listener_files /x/stock.conf | LC_ALL=C sort", env, root)
+	if got := strings.Fields(out); strings.Join(got, " ") != "/x/c.conf /x/d.conf" {
+		t.Fatalf("слушают порт 80: %v, ждали /x/c.conf /x/d.conf", got)
+	}
+	if got := strings.TrimSpace(edgeSourced(t, "edge_http_listener_files", edgeStubEnv(t))); got != "nginx -T" {
+		t.Fatalf("без дампа: %q, ждали nginx -T", got)
+	}
+}
+
+// stubDpkgQueryScript имитирует dpkg-query для одного файла пакета STUB_STOCK с md5 STUB_STOCK_MD5.
+const stubDpkgQueryScript = `case "$1" in
+-S) if [ "$2" = "$STUB_STOCK" ]; then echo "nginx: $2"; exit 0; fi; exit 1;;
+-W) printf ' %s %s\n' "$STUB_STOCK" "$STUB_STOCK_MD5";;
+*) exit 1;;
+esac
+`
+
+// stockWelcome — стандартный conf.d/default.conf пакета nginx.org в сокращении.
+const stockWelcome = "server {\n    listen       80;\n    server_name  localhost;\n}\n"
+
+// md5Hex возвращает md5 строки s в шестнадцатеричном виде, как его пишет dpkg.
+func md5Hex(s string) string {
+	sum := md5.Sum([]byte(s))
+	return hex.EncodeToString(sum[:])
+}
+
+// TestEdgeStockDefault: неизменённый файл пакета узнаётся по md5 из dpkg, изменённый и чужой — нет,
+// символьная ссылка на файл пакета разыменовывается.
+func TestEdgeStockDefault(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	stock := filepath.Join(root, "default.conf")
+	mustWrite(t, stock, stockWelcome, 0o644)
+	link := filepath.Join(root, "enabled")
+	if err := os.Symlink(stock, link); err != nil {
+		t.Skipf("символьные ссылки недоступны: %v", err)
+	}
+	other := filepath.Join(root, "other.conf")
+	mustWrite(t, other, stockWelcome, 0o644)
+	bin := filepath.Join(t.TempDir(), "bin")
+	writeStub(t, bin, "dpkg-query", stubDpkgQueryScript)
+	env := []string{"PATH=" + bin + string(os.PathListSeparator) + os.Getenv("PATH"), "STUB_STOCK=" + stock, "STUB_STOCK_MD5=" + md5Hex(stockWelcome)}
+	body := `for f in "$2" "$3" "$4" "$5"; do if edge_stock_default "$f"; then echo yes; else echo no; fi; done`
+	if got := strings.Fields(edgeSourced(t, body, env, stock, link, other, filepath.Join(root, "missing"))); strings.Join(got, " ") != "yes yes no no" {
+		t.Fatalf("неизменённый, ссылка, чужой, нет файла: %v", got)
+	}
+	mustWrite(t, stock, stockWelcome+"# edited\n", 0o644)
+	if got := strings.TrimSpace(edgeSourced(t, body, env, stock, link, other, other)); !strings.HasPrefix(got, "no\nno") {
+		t.Fatalf("изменённый файл пакета считается стандартным: %q", got)
+	}
+}
+
+// TestApplyEdgeHTTPRedirect: если порт 80 держит только неизменённая страница пакета, apply ставит
+// conf.d/emtds-http.conf и убирает страницу в бэкап; повторный запуск ничего не ломает; при сбое nginx -t
+// страница возвращается, а emtds-http.conf удаляется. Чужой сервер на порту 80 оставляет всё как есть.
+func TestApplyEdgeHTTPRedirect(t *testing.T) {
+	f := newEdgeApplyFixture(t, ubuntuNginxConf)
+	root, err := filepath.EvalSymlinks(f.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.root = root
+	stock := filepath.Join(root, "conf.d", "default.conf")
+	f.stub(t, "dpkg-query", stubDpkgQueryScript)
+	dump := filepath.Join(root, "dump.txt")
+	withStock := "# configuration file " + filepath.Join(root, "nginx.conf") + ":\nhttp {\n}\n# configuration file " + stock + ":\n" + stockWelcome +
+		"# configuration file " + filepath.Join(root, "conf.d", "emtds.conf") + ":\nserver {\n    listen 443 ssl;\n}\n"
+	env := []string{
+		"STUB_NGINX_DUMP=" + dump,
+		"STUB_STOCK=" + stock,
+		"STUB_STOCK_MD5=" + md5Hex(stockWelcome),
+		"EMTDS_NGINX_STOCK_DEFAULTS=" + stock + " " + filepath.Join(root, "sites-enabled", "default"),
+	}
+	httpConf := filepath.Join(root, "conf.d", "emtds-http.conf")
+	exists := func(path string) bool {
+		_, err := os.Lstat(path)
+		return err == nil
+	}
+
+	mustWrite(t, stock, stockWelcome, 0o644)
+	mustWrite(t, dump, withStock, 0o644)
+	_, errOut, code := f.run(t, append([]string{"STUB_NGINX_T_RC=1"}, env...))
+	if code == 0 {
+		t.Fatalf("ждали ошибку nginx -t, stderr:\n%s", errOut)
+	}
+	if readEdgeFile(t, stock) != stockWelcome || exists(httpConf) {
+		t.Fatalf("после отката страница пакета не вернулась или emtds-http.conf остался:\n%s", errOut)
+	}
+
+	out, errOut, code := f.run(t, env)
+	if code != 0 {
+		t.Fatalf("apply: код %d\n%s", code, errOut)
+	}
+	if exists(stock) || readEdgeFile(t, httpConf) != readEdgeFile(t, filepath.Join("nginx", "emtds-http.conf")) {
+		t.Fatalf("страница пакета не отключена или emtds-http.conf не поставлен:\n%s\n%s", out, errOut)
+	}
+	saved, _ := filepath.Glob(filepath.Join(root, "backup", "*", "stock", "*default.conf"))
+	if len(saved) != 1 || readEdgeFile(t, saved[0]) != stockWelcome || !strings.Contains(out, "отключён стандартный") {
+		t.Fatalf("копия страницы пакета в бэкапе: %v\n%s", saved, out)
+	}
+
+	mustWrite(t, dump, "# configuration file "+filepath.Join(root, "nginx.conf")+":\nhttp {\n}\n# configuration file "+httpConf+":\nserver {\n    listen 80;\n}\n", 0o644)
+	if _, errOut, code := f.run(t, env); code != 0 || !exists(httpConf) {
+		t.Fatalf("повторный apply: код %d, emtds-http.conf есть: %v\n%s", code, exists(httpConf), errOut)
+	}
+
+	busy := newEdgeApplyFixture(t, ubuntuNginxConf)
+	broot, err := filepath.EvalSymlinks(busy.root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	busy.root = broot
+	busy.stub(t, "dpkg-query", stubDpkgQueryScript)
+	bstock := filepath.Join(broot, "conf.d", "default.conf")
+	mustWrite(t, bstock, stockWelcome, 0o644)
+	mustWrite(t, filepath.Join(broot, "conf.d", "emtds-http.conf"), "old redirect\n", 0o644)
+	bdump := filepath.Join(broot, "dump.txt")
+	mustWrite(t, bdump, "# configuration file /etc/nginx/nginx.conf:\nserver {\n\tserver_name localhost;\n\tlisten 80;\n}\n# configuration file "+bstock+":\n"+stockWelcome, 0o644)
+	benv := []string{"STUB_NGINX_DUMP=" + bdump, "STUB_STOCK=" + bstock, "STUB_STOCK_MD5=" + md5Hex(stockWelcome), "EMTDS_NGINX_STOCK_DEFAULTS=" + bstock}
+	out, errOut, code = busy.run(t, benv)
+	if code != 0 {
+		t.Fatalf("apply при занятом порту 80: код %d\n%s", code, errOut)
+	}
+	if readEdgeFile(t, bstock) != stockWelcome || exists(filepath.Join(broot, "conf.d", "emtds-http.conf")) || !strings.Contains(out, "порт 80 занят (/etc/nginx/nginx.conf)") {
+		t.Fatalf("при чужом сервере на порту 80 страница пакета должна остаться, а emtds-http.conf уйти:\n%s\n%s", out, errOut)
 	}
 }
 

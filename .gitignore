@@ -15,6 +15,7 @@ emtds-admin
 *.env
 .env
 secrets/
+access.txt
 # cron service config (holds the bot token and API keys) and its state
 cron.json
 cron.json.*

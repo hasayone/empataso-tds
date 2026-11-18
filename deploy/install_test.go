@@ -461,8 +461,46 @@ func TestInstallRunOrder(t *testing.T) {
 	if strings.Contains(body, "BASH_SOURCE") || strings.Contains(body, `-f "$MARKER"`) {
 		t.Fatal("run_install: проверки запуска и маркера принадлежат main")
 	}
-	if !strings.Contains(shellFunc(t, s, "ensure_nginx"), "command -v nginx") || !strings.Contains(shellFunc(t, s, "ensure_nginx"), "apt_install nginx") {
-		t.Fatal("ensure_nginx: ожидали проверку command -v nginx и apt_install nginx")
+	ensure := shellFunc(t, s, "ensure_nginx")
+	for _, want := range []string{"command -v nginx", `nginx_version_ok "$have"`, "nginx_foreign_sites", "remove_distro_nginx", `install_nginx_org "$distro" "$codename"`} {
+		if !strings.Contains(ensure, want) {
+			t.Fatalf("ensure_nginx: нет %q", want)
+		}
+	}
+	if !strings.Contains(shellFunc(t, s, "install_nginx_org"), "apt_install nginx") {
+		t.Fatal("install_nginx_org: ожидали apt_install nginx")
+	}
+	if !strings.Contains(s, "NGINX_MIN_VERSION=1.25.1") {
+		t.Fatal("install.sh: минимальная версия nginx должна быть 1.25.1 (http2 on)")
+	}
+}
+
+// TestInstallNginxOrgFingerprints: в install.sh зашиты ровно три отпечатка ключей nginx.org (40 hex-знаков),
+// ключ проверяется до записи в keyring, источник apt — https://nginx.org/packages с signed-by, приоритет 900.
+func TestInstallNginxOrgFingerprints(t *testing.T) {
+	data, err := os.ReadFile("install.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(data)
+	m := regexp.MustCompile(`(?m)^NGINX_ORG_FINGERPRINTS="([^"]*)"$`).FindStringSubmatch(s)
+	if m == nil {
+		t.Fatal("install.sh: нет NGINX_ORG_FINGERPRINTS")
+	}
+	want := []string{"573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62", "8540A6F18833A80E9C1653A42FD21310B49F6B46", "9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3"}
+	if got := strings.Fields(m[1]); strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Fatalf("отпечатки nginx.org %v, ждали %v", got, want)
+	}
+	body := shellFunc(t, s, "install_nginx_org")
+	verify := strings.Index(body, "nginx_key_trusted")
+	dearmor := strings.Index(body, "--dearmor")
+	if verify < 0 || dearmor < verify {
+		t.Fatal("install_nginx_org: ключ должен проверяться до записи в keyring")
+	}
+	for _, frag := range []string{"https://nginx.org/keys/nginx_signing.key", "https://nginx.org/packages/%s %s nginx", "Pin: origin nginx.org", "Pin-Priority: 900", "systemctl enable --now nginx"} {
+		if !strings.Contains(body, frag) {
+			t.Fatalf("install_nginx_org: нет %q", frag)
+		}
 	}
 }
 
@@ -478,7 +516,17 @@ type installSandbox struct {
 
 // installStubs — заглушки команд, которые install.sh вызывает до и после клона.
 var installStubs = map[string]string{
-	"apt-get":   "echo \"apt-get $*\" >>\"$STUB_LOG\"\ncase \"$*\" in\n*\"install -y nginx\"*) printf '#!/bin/sh\\nexit 0\\n' >\"$STUB_BIN/nginx\"; chmod 0755 \"$STUB_BIN/nginx\";;\nesac\nexit \"${STUB_APT_RC:-0}\"\n",
+	"apt-get":   "echo \"apt-get $*\" >>\"$STUB_LOG\"\ncase \"$*\" in\n*\"install -y nginx\"*) printf '#!/bin/sh\\necho \"nginx version: nginx/%s\" >&2\\n' \"${STUB_NGINX_NEW:-1.30.6}\" >\"$STUB_BIN/nginx\"; chmod 0755 \"$STUB_BIN/nginx\";;\nesac\nexit \"${STUB_APT_RC:-0}\"\n",
+	"gpg": `echo "gpg $*" >>"$STUB_LOG"
+case "$*" in
+*--show-keys*) printf 'pub:-:4096:1:ABABF5BD827BD9BF62:1:::-:::scSC::::::23::0:\nfpr:::::::::%s:\n' "${STUB_GPG_FPR:-573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62}";;
+*--dearmor*)
+	while [ $# -gt 0 ]; do [ "$1" = -o ] && out=$2; shift; done
+	echo keyring >"$out";;
+esac
+exit 0
+`,
+	"dpkg-query": "case \"$1\" in\n-W) printf '%b' \"${STUB_DPKG_PKGS:-}\";;\n*) exit 1;;\nesac\n",
 	"nproc":     "echo 4\n",
 	"df":        "printf 'Avail\\n 100G\\n'\n",
 	"ss":        "exit 0\n",
@@ -548,6 +596,7 @@ func newInstallSandbox(t *testing.T) *installSandbox {
 		"EMTDS_INSTALL_MEMINFO="+sb.path("meminfo"),
 		"EMTDS_INSTALL_OS_RELEASE="+sb.path("os-release"),
 		"EMTDS_INSTALL_OLD_ETC_ROOT="+sb.path("etc"),
+		"EMTDS_INSTALL_APT_ROOT="+sb.path("aptroot"),
 		"EMTDS_PUBLIC_IP=203.0.113.9",
 	)
 	return sb
@@ -915,10 +964,16 @@ func (sb *installSandbox) cloneSandbox(t *testing.T, commit bool) (tds, script s
 	return tds, filepath.Join(tds, "deploy", "install.sh")
 }
 
-// stubNginx кладёт в PATH песочницы заглушку nginx: установщик считает, что nginx уже есть.
+// stubNginx кладёт в PATH песочницы заглушку nginx подходящей версии: установщик её не трогает.
 func (sb *installSandbox) stubNginx(t *testing.T) {
 	t.Helper()
-	writeStub(t, sb.bin, "nginx", "exit 0\n")
+	sb.stubNginxVersion(t, "1.30.6")
+}
+
+// stubNginxVersion кладёт в PATH песочницы заглушку nginx, которая на -v сообщает версию version.
+func (sb *installSandbox) stubNginxVersion(t *testing.T, version string) {
+	t.Helper()
+	writeStub(t, sb.bin, "nginx", "echo 'nginx version: nginx/"+version+"' >&2\n")
 }
 
 // fixtureToken — токен первого входа для фикстур: 32 строчных hex-знака, собранных при выполнении,
@@ -1064,8 +1119,10 @@ func TestInstallRunNoEdge(t *testing.T) {
 	}
 }
 
-// TestInstallRunInstallsNginx: без nginx на Debian 12 ставится пакет nginx, на неподдерживаемой системе
-// — отказ с подсказкой --no-edge. Тест пропускается, если nginx есть на хосте.
+// TestInstallRunInstallsNginx: без nginx на Debian 12 ставится пакет nginx из nginx.org: ключ с
+// проверенным отпечатком в keyring, источник https://nginx.org/packages/debian bookworm, приоритет 900,
+// служба включена. На неподдерживаемой системе — отказ с подсказкой --no-edge. Тест пропускается,
+// если nginx есть на хосте.
 func TestInstallRunInstallsNginx(t *testing.T) {
 	requireOpenSSLAndFlock(t)
 	if _, err := exec.LookPath("nginx"); err == nil {
@@ -1077,6 +1134,23 @@ func TestInstallRunInstallsNginx(t *testing.T) {
 	if out, errOut, code := sb.run(t, script, nil, args...); code != 0 || !strings.Contains(sb.logOf(), "install -y nginx") {
 		t.Fatalf("nginx не установлен: код %d\n%s\n%s\n%s", code, out, errOut, sb.logOf())
 	}
+	apt := sb.path("aptroot")
+	if got := readFile(filepath.Join(apt, "etc", "apt", "sources.list.d", "nginx.list")); got != "deb [signed-by=/usr/share/keyrings/nginx-archive-keyring.gpg] https://nginx.org/packages/debian bookworm nginx\n" {
+		t.Fatalf("nginx.list: %q", got)
+	}
+	if got := readFile(filepath.Join(apt, "etc", "apt", "preferences.d", "99nginx")); !strings.Contains(got, "Pin: origin nginx.org\n") || !strings.Contains(got, "Pin-Priority: 900\n") {
+		t.Fatalf("99nginx: %q", got)
+	}
+	if readFile(filepath.Join(apt, "usr", "share", "keyrings", "nginx-archive-keyring.gpg")) == "" {
+		t.Fatal("keyring nginx.org не записан")
+	}
+	log := sb.logOf()
+	if strings.Index(log, "--show-keys") > strings.Index(log, "--dearmor") || !strings.Contains(log, "systemctl enable --now nginx") {
+		t.Fatalf("ключ должен проверяться до записи, служба — включаться:\n%s", log)
+	}
+	if strings.Index(log, "install -y nginx") > strings.Index(log, "apply-edge 203.0.113.9") {
+		t.Fatalf("nginx должен ставиться до apply-edge:\n%s", log)
+	}
 
 	other := newInstallSandbox(t)
 	mustWrite(t, other.path("os-release"), "ID=alpine\nVERSION_CODENAME=\n", 0o644)
@@ -1084,6 +1158,90 @@ func TestInstallRunInstallsNginx(t *testing.T) {
 	_, errOut, code := other.run(t, script, nil, args...)
 	if code != 1 || !strings.Contains(errOut, "--no-edge") {
 		t.Fatalf("неподдерживаемая система: код %d\n%s", code, errOut)
+	}
+}
+
+// TestInstallRunRejectsForeignNginxKey: ключ nginx.org с чужим отпечатком останавливает установку до
+// записи keyring и apt; маркера нет. Тест пропускается, если nginx есть на хосте.
+func TestInstallRunRejectsForeignNginxKey(t *testing.T) {
+	requireOpenSSLAndFlock(t)
+	if _, err := exec.LookPath("nginx"); err == nil {
+		t.Skip("на хосте установлен nginx")
+	}
+	sb := newInstallSandbox(t)
+	_, script := sb.cloneSandbox(t, true)
+	_, errOut, code := sb.run(t, script, []string{"STUB_GPG_FPR=0000000000000000000000000000000000000000"}, "--repo", "https://example.com/emtds.git")
+	if code != 1 || !strings.Contains(errOut, "отпечатка") {
+		t.Fatalf("чужой ключ: код %d\n%s", code, errOut)
+	}
+	log := sb.logOf()
+	if strings.Contains(log, "--dearmor") || strings.Contains(log, "install -y nginx") || strings.Contains(log, "apply-edge") {
+		t.Fatalf("после отказа ключ записан или nginx поставлен:\n%s", log)
+	}
+	if _, err := os.Stat(sb.path("aptroot", "etc", "apt", "sources.list.d", "nginx.list")); err == nil {
+		t.Fatal("источник nginx.org записан после отказа")
+	}
+	if _, err := os.Stat(sb.path("etc", "installed")); err == nil {
+		t.Fatal("маркер создан после отказа")
+	}
+}
+
+// TestInstallRunKeepsModernNginx: nginx 1.25.1 и новее не переустанавливается: ни apt, ни gpg.
+func TestInstallRunKeepsModernNginx(t *testing.T) {
+	requireOpenSSLAndFlock(t)
+	sb := newInstallSandbox(t)
+	sb.stubNginxVersion(t, "1.25.1")
+	_, script := sb.cloneSandbox(t, true)
+	if out, errOut, code := sb.run(t, script, nil, "--repo", "https://example.com/emtds.git"); code != 0 {
+		t.Fatalf("прогон: код %d\n%s\n%s", code, out, errOut)
+	}
+	log := sb.logOf()
+	if strings.Contains(log, "install -y nginx") || strings.Contains(log, "purge") || strings.Contains(log, "gpg ") {
+		t.Fatalf("подходящий nginx переустанавливался:\n%s", log)
+	}
+	if !strings.Contains(log, "apply-edge 203.0.113.9") {
+		t.Fatalf("apply-edge не вызван:\n%s", log)
+	}
+}
+
+// TestInstallRunUpgradesOldNginx: nginx старее 1.25.1 без чужих сайтов заменяется пакетом nginx.org:
+// копия /etc/nginx в архиве, удаляются только установленные пакеты nginx*, затем ставится nginx.org.
+// С чужим сайтом в sites-enabled — отказ с подсказкой --no-edge до удаления пакетов.
+func TestInstallRunUpgradesOldNginx(t *testing.T) {
+	requireOpenSSLAndFlock(t)
+	sb := newInstallSandbox(t)
+	sb.stubNginxVersion(t, "1.24.0")
+	mustWrite(t, sb.path("aptroot", "etc", "nginx", "nginx.conf"), "events {}\n", 0o644)
+	_, script := sb.cloneSandbox(t, true)
+	env := []string{`STUB_DPKG_PKGS=nginx installed\nnginx-common installed\nnginx-core installed\nlibnginx-mod-stream config-files\n`}
+	out, errOut, code := sb.run(t, script, env, "--repo", "https://example.com/emtds.git")
+	if code != 0 {
+		t.Fatalf("прогон: код %d\n%s\n%s", code, out, errOut)
+	}
+	log := sb.logOf()
+	purge := strings.Index(log, "purge -y nginx nginx-common nginx-core\n")
+	install := strings.Index(log, "install -y nginx\n")
+	edge := strings.Index(log, "apply-edge 203.0.113.9")
+	if purge < 0 || install < purge || edge < install {
+		t.Fatalf("ждали purge старых пакетов, затем установку nginx.org и apply-edge:\n%s", log)
+	}
+	if strings.Contains(log, "libnginx-mod-stream") {
+		t.Fatalf("неустановленный пакет попал в purge:\n%s", log)
+	}
+	if backups, _ := filepath.Glob(sb.path("etc", "nginx-backup", "etc-nginx-*.tar.gz")); len(backups) != 1 {
+		t.Fatalf("нет архива /etc/nginx: %v", backups)
+	}
+
+	foreign := newInstallSandbox(t)
+	foreign.stubNginxVersion(t, "1.24.0")
+	mustWrite(t, foreign.path("aptroot", "etc", "nginx", "sites-enabled", "shop"), "server {}\n", 0o644)
+	_, script = foreign.cloneSandbox(t, true)
+	_, errOut, code = foreign.run(t, script, env, "--repo", "https://example.com/emtds.git")
+	if code != 1 || !strings.Contains(errOut, "чужие сайты") || !strings.Contains(errOut, "shop") || !strings.Contains(errOut, "--no-edge") {
+		t.Fatalf("старый nginx с чужим сайтом: код %d\n%s", code, errOut)
+	}
+	if log := foreign.logOf(); strings.Contains(log, "purge") || strings.Contains(log, "install -y nginx") {
+		t.Fatalf("при чужих сайтах nginx не должен меняться:\n%s", log)
 	}
 }
 

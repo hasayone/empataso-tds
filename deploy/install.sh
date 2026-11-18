@@ -33,6 +33,15 @@ INSTALL_SIGNERS=
 NO_EDGE=0
 # 1 — apply-edge.sh отработал: админка открыта на https://<публичный IP>/.
 INSTALL_EDGE_APPLIED=0
+# Минимальная версия nginx: шаблоны deploy/nginx используют директиву «http2 on» (nginx 1.25.1+).
+NGINX_MIN_VERSION=1.25.1
+# Отпечатки ключей подписи пакетов nginx.org (https://nginx.org/en/linux_packages.html).
+NGINX_ORG_FINGERPRINTS="573BFD6B3D8FBC641079A6ABABF5BD827BD9BF62 8540A6F18833A80E9C1653A42FD21310B49F6B46 9E9BE90EACBCDE69FE9B204CBCDCD8A38D88A2B3"
+# Корень для файлов apt и /etc/nginx при установке nginx (подменяется в тестах); на сервере пустой.
+NGINX_APT_ROOT="${EMTDS_INSTALL_APT_ROOT:-}"
+NGINX_KEYRING=/usr/share/keyrings/nginx-archive-keyring.gpg
+NGINX_APT_LIST=/etc/apt/sources.list.d/nginx.list
+NGINX_APT_PIN=/etc/apt/preferences.d/99nginx
 # Исходные аргументы командной строки: загрузчик передаёт их клону через exec.
 ORIG_ARGS=()
 # Временный клон загрузчика; удаляется при любом выходе, пока не переименован в INSTALL_DIR.
@@ -1036,21 +1045,140 @@ install_allowed_signers() {
 	write_atomic "$ALLOWED_SIGNERS" 0644 <"$INSTALL_SIGNERS"
 }
 
-# Назначение: поставить nginx пакетом, если его нет.
-# Параметры: $1 — ubuntu или debian на поддерживаемой версии, иначе пусто.
-# Результат: nginx доступен в PATH.
-# Ошибки: неподдерживаемая система или сбой apt — сообщение, код 1.
-ensure_nginx() {
-	local distro=$1
-	if command -v nginx >/dev/null 2>&1; then
+# Назначение: версия установленного nginx.
+# Параметры: нет.
+# Результат: версия вида 1.24.0 на stdout; пусто, если nginx нет или вывод nginx -v не разобран.
+# Ошибки: нет.
+nginx_installed_version() {
+	{ nginx -v 2>&1 || true; } | sed -n 's|^nginx version: [^/]*/\([0-9][0-9.]*\).*|\1|p' | head -n 1
+}
+
+# Назначение: сравнить версию nginx с NGINX_MIN_VERSION.
+# Параметры: $1 — версия X.Y.Z.
+# Результат: код 0, если версия не ниже минимальной.
+# Ошибки: код 1 — версия старее или не разобрана.
+nginx_version_ok() {
+	local have=$1 i
+	local -a a b
+	[[ "$have" =~ ^[0-9]+(\.[0-9]+)*$ ]] || return 1
+	IFS=. read -r -a a <<<"$have"
+	IFS=. read -r -a b <<<"$NGINX_MIN_VERSION"
+	for i in 0 1 2; do
+		if (( 10#${a[i]:-0} > 10#${b[i]:-0} )); then
+			return 0
+		fi
+		if (( 10#${a[i]:-0} < 10#${b[i]:-0} )); then
+			return 1
+		fi
+	done
+	return 0
+}
+
+# Назначение: проверить ключ подписи nginx.org по отпечаткам основных ключей.
+# Параметры: $1 — файл ключа (ASCII armor); GNUPGHOME — временный каталог gpg.
+# Результат: код 0, если в файле есть основные ключи и каждый из них есть в NGINX_ORG_FINGERPRINTS.
+# Ошибки: gpg не разобрал файл, ключей нет или есть чужой — код 1.
+nginx_key_trusted() {
+	local key=$1 fprs fpr
+	fprs=$(gpg --batch --show-keys --with-colons "$key" 2>/dev/null | awk -F: '$1 == "pub" { want = 1; next } $1 == "fpr" && want { print $10; want = 0 } $1 == "sub" { want = 0 }') || return 1
+	[[ -n "$fprs" ]] || return 1
+	for fpr in $fprs; do
+		[[ " ${NGINX_ORG_FINGERPRINTS} " == *" ${fpr} "* ]] || return 1
+	done
+}
+
+# Назначение: найти в /etc/nginx конфиги сайтов, кроме файлов EmTDS и неизменённых файлов пакета.
+# Параметры: нет (NGINX_APT_ROOT).
+# Результат: пути на stdout по одному в строке; пусто — в nginx нет чужих сайтов.
+# Ошибки: нет.
+nginx_foreign_sites() {
+	local f
+	for f in "${NGINX_APT_ROOT}"/etc/nginx/conf.d/* "${NGINX_APT_ROOT}"/etc/nginx/sites-enabled/*; do
+		[[ -e "$f" || -L "$f" ]] || continue
+		[[ "$(basename "$f")" != emtds*.conf ]] || continue
+		if ! edge_stock_default "$f"; then
+			printf '%s\n' "$f"
+		fi
+	done
+}
+
+# Назначение: удалить пакеты nginx дистрибутива перед установкой nginx.org, сохранив копию /etc/nginx.
+# Параметры: нет (STATE_DIR, NGINX_APT_ROOT).
+# Результат: архив STATE_DIR/nginx-backup/etc-nginx-<время>.tar.gz; установленные пакеты nginx* и
+# libnginx-mod-* удалены вместе с их конфигами.
+# Ошибки: архив или apt не удались — код 1.
+remove_distro_nginx() {
+	local pkgs backup
+	backup="${STATE_DIR}/nginx-backup/etc-nginx-$(date -u +%Y%m%dT%H%M%SZ).tar.gz"
+	install -d -m 0755 "$(dirname "$backup")"
+	if [[ -d "${NGINX_APT_ROOT}/etc/nginx" ]]; then
+		tar -czf "$backup" -C "${NGINX_APT_ROOT}/etc" nginx || return 1
+		msg "копия /etc/nginx: ${backup}"
+	fi
+	pkgs=$(dpkg-query -W -f='${Package} ${db:Status-Status}\n' 'nginx*' 'libnginx-mod-*' 2>/dev/null | awk '$2 == "installed" { print $1 }' || true)
+	if [[ -z "$pkgs" ]]; then
 		return 0
 	fi
-	if [[ -z "$distro" ]]; then
-		die "nginx не найден, а пакеты ставятся только на Ubuntu 22.04, 24.04 и Debian 12: установите nginx вручную или запустите с --no-edge"
+	systemctl stop nginx 9>&- || true
+	# shellcheck disable=SC2086 # имена пакетов без пробелов
+	apt-get -o DPkg::Lock::Timeout=300 purge -y $pkgs 9>&-
+}
+
+# Назначение: поставить nginx из официального репозитория nginx.org (ветка stable) с закреплением.
+# Параметры: $1 — ubuntu или debian; $2 — codename (jammy, noble, bookworm).
+# Результат: ключ проверен по отпечаткам и записан в NGINX_KEYRING, источник NGINX_APT_LIST, приоритет
+# nginx.org в NGINX_APT_PIN, пакет nginx установлен, служба включена и запущена.
+# Ошибки: загрузка или проверка ключа, apt, systemctl — сообщение, код 1.
+install_nginx_org() {
+	local distro=$1 codename=$2 tmp
+	apt_install ca-certificates curl gnupg || return 1
+	tmp=$(mktemp -d)
+	if ! curl -fsSL https://nginx.org/keys/nginx_signing.key -o "${tmp}/nginx_signing.key" \
+		|| ! GNUPGHOME=$tmp nginx_key_trusted "${tmp}/nginx_signing.key"; then
+		rm -rf "$tmp"
+		msg "ключ nginx.org не скачан или не прошёл проверку отпечатка" >&2
+		return 1
 	fi
-	msg "nginx не найден, ставлю пакет"
-	apt_install nginx || die "не удалось установить nginx"
-	command -v nginx >/dev/null 2>&1 || die "после установки nginx недоступен"
+	if ! install -d -m 0755 "${NGINX_APT_ROOT}$(dirname "$NGINX_KEYRING")" "${NGINX_APT_ROOT}$(dirname "$NGINX_APT_LIST")" "${NGINX_APT_ROOT}$(dirname "$NGINX_APT_PIN")" \
+		|| ! GNUPGHOME=$tmp gpg --batch --yes --dearmor -o "${NGINX_APT_ROOT}${NGINX_KEYRING}" "${tmp}/nginx_signing.key"; then
+		rm -rf "$tmp"
+		msg "не удалось записать ключ nginx.org" >&2
+		return 1
+	fi
+	rm -rf "$tmp"
+	chmod 0644 "${NGINX_APT_ROOT}${NGINX_KEYRING}" || return 1
+	printf 'deb [signed-by=%s] https://nginx.org/packages/%s %s nginx\n' "$NGINX_KEYRING" "$distro" "$codename" \
+		| write_atomic "${NGINX_APT_ROOT}${NGINX_APT_LIST}" 0644 || return 1
+	printf 'Package: *\nPin: origin nginx.org\nPin: release o=nginx\nPin-Priority: 900\n' \
+		| write_atomic "${NGINX_APT_ROOT}${NGINX_APT_PIN}" 0644 || return 1
+	apt_install nginx || return 1
+	systemctl enable --now nginx 9>&-
+}
+
+# Назначение: обеспечить nginx не ниже NGINX_MIN_VERSION. Подходящий nginx не трогается; если его нет,
+# ставится пакет nginx.org; старый nginx без чужих сайтов заменяется пакетом nginx.org.
+# Параметры: $1 — ubuntu или debian на поддерживаемой версии, иначе пусто; $2 — codename.
+# Результат: nginx нужной версии доступен в PATH.
+# Ошибки: неподдерживаемая система, старый nginx с чужими сайтами, сбой установки — сообщение, код 1.
+ensure_nginx() {
+	local distro=$1 codename=$2 have foreign
+	if command -v nginx >/dev/null 2>&1; then
+		have=$(nginx_installed_version)
+		if nginx_version_ok "$have"; then
+			return 0
+		fi
+		[[ -n "$distro" ]] || die "nginx ${have:-неизвестной версии} старее ${NGINX_MIN_VERSION}, а пакеты nginx.org ставятся только на Ubuntu 22.04, 24.04 и Debian 12: обновите nginx вручную или запустите с --no-edge"
+		foreign=$(nginx_foreign_sites)
+		[[ -z "$foreign" ]] || die "nginx ${have:-неизвестной версии} старее ${NGINX_MIN_VERSION}, а в нём есть чужие сайты (${foreign//$'\n'/, }): обновите nginx до ${NGINX_MIN_VERSION}+ вручную или запустите с --no-edge"
+		msg "nginx ${have:-неизвестной версии} старее ${NGINX_MIN_VERSION}: заменяю пакет дистрибутива на nginx.org"
+		remove_distro_nginx || die "не удалось удалить старый nginx"
+	else
+		[[ -n "$distro" ]] || die "nginx не найден, а пакеты ставятся только на Ubuntu 22.04, 24.04 и Debian 12: установите nginx ${NGINX_MIN_VERSION}+ вручную или запустите с --no-edge"
+		msg "nginx не найден, ставлю пакет nginx.org"
+	fi
+	install_nginx_org "$distro" "$codename" || die "не удалось установить nginx из nginx.org"
+	have=$(nginx_installed_version)
+	nginx_version_ok "$have" || die "после установки nginx ${have:-недоступен}, нужен ${NGINX_MIN_VERSION}+"
 }
 
 # Назначение: напечатать в консоль адрес первого входа и токен (только stdout, в файлы не пишется).
@@ -1242,6 +1370,13 @@ run_self_test() {
 		printf 'self-test FAIL: ubuntu focal must be refused\n'
 		exit 1
 	fi
+	local ver
+	for ver in 1.25.1 1.25.2 1.26.0 1.30.6 2.0 1.100.0; do
+		nginx_version_ok "$ver" || { printf 'self-test FAIL: nginx %s должен подходить\n' "$ver"; exit 1; }
+	done
+	for ver in 1.24.0 1.25.0 1.18 0.9.9 '' 1.25.x; do
+		nginx_version_ok "$ver" && { printf 'self-test FAIL: nginx %q не должен подходить\n' "$ver"; exit 1; }
+	done
 	printf 'CLICKHOUSE_PASSWORD=ch\nEMTDS_ADMIN_PASSWORD="secret"\n' >"$f"
 	check_env "$f" 2>/dev/null || { printf 'self-test FAIL: quoted admin\n'; exit 1; }
 	printf 'CLICKHOUSE_PASSWORD=chpass\nEMTDS_ADMIN_PASSWORD=goodpass\n' >"$f"
@@ -1378,7 +1513,7 @@ run_install() {
 	if (( NO_EDGE )); then
 		msg "--no-edge: nginx и apply-edge.sh пропущены, стек установлен без edge"
 	else
-		ensure_nginx "$docker_distro"
+		ensure_nginx "$docker_distro" "$docker_codename"
 		if [[ -f "${OUR_DEPLOY_DIR}/apply-edge.sh" ]]; then
 			if ! bash "${OUR_DEPLOY_DIR}/apply-edge.sh" "$public_ip"; then
 				msg "не удалось применить конфигурацию nginx (apply-edge.sh)" >&2
