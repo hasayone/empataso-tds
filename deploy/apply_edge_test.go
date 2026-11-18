@@ -386,7 +386,11 @@ func TestApplyEdgeHTTPRedirect(t *testing.T) {
 	if exists(stock) || readEdgeFile(t, httpConf) != readEdgeFile(t, filepath.Join("nginx", "emtds-http.conf")) {
 		t.Fatalf("страница пакета не отключена или emtds-http.conf не поставлен:\n%s\n%s", out, errOut)
 	}
-	saved, _ := filepath.Glob(filepath.Join(root, "backup", "*", "stock", "*default.conf"))
+	m := regexp.MustCompile(`backup=(\S+)`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("apply не сообщил каталог бэкапа:\n%s", out)
+	}
+	saved, _ := filepath.Glob(filepath.Join(m[1], "stock", "*default.conf"))
 	if len(saved) != 1 || readEdgeFile(t, saved[0]) != stockWelcome || !strings.Contains(out, "отключён стандартный") {
 		t.Fatalf("копия страницы пакета в бэкапе: %v\n%s", saved, out)
 	}
@@ -1286,6 +1290,7 @@ func newEdgeApplyFixture(t *testing.T, nginxConf string) *edgeApplyFixture {
 			"TMPDIR=" + filepath.Join(root, "tmpdir"),
 			"EMTDS_SERVER_ENV=" + filepath.Join(root, "server.env"),
 			"EMTDS_INSTALL_STATE_DIR=" + filepath.Join(root, "state"),
+			"EMTDS_NGINX_STOCK_DEFAULTS=" + filepath.Join(root, "conf.d", "default.conf") + " " + filepath.Join(root, "sites-enabled", "default"),
 			"STUB_LOG=" + filepath.Join(root, "stub.log"),
 			"STUB_NGINX_T_RC=0",
 			"STUB_REAL_INSTALL=" + realInstall,
