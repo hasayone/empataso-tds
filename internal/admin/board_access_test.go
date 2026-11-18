@@ -245,7 +245,7 @@ func TestBoardSingleSectionNotSwitchable(t *testing.T) {
 	hs, _ := boardTestServer(t, groups, "", func(s *Server) {
 		_ = s.users.Add(security.User{
 			ID: "u1", Login: "u1", Hash: mustHash(t, "p@ss"), Enabled: true,
-			Type: security.UserRegular, BoardIDs: []string{"seo"},
+			Type: security.UserRegular, BoardIDs: []string{"seo"}, NoMainBoard: true,
 			Access: security.Access{Sections: sectionStrings(userSections)},
 		})
 	})

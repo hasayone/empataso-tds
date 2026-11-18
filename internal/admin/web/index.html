@@ -1898,6 +1898,7 @@ function boardApplyHeaders(headers, path, override){
   headers['X-Emtds-Board']=id;
 }
 /** applyBoardsPayload copies a boards payload into BOARDS.
+ * A tab section the loaded list no longer has is replaced by the server current section.
  * @param {object} data GET /api/boards or partial /api/me fields
  * @returns {void}
  */
@@ -1914,6 +1915,13 @@ function applyBoardsPayload(data){
   };
   if(items.length<=1) BOARDS.switchable=false;
   if(!boardHasStored()&&BOARDS.current) boardSaveId(BOARDS.current);
+  else if(BOARDS.current&&items.length&&!items.some(b=>boardNormId(b.id)===boardEffectiveId())) boardSaveId(BOARDS.current);
+}
+/** boardsNone reports whether a limited user may open no section: the list loaded empty and the panel shows only a notice.
+ * @returns {boolean} false for an administrator and when the list could not be read
+ */
+function boardsNone(){
+  return !!(BOARDS.loaded&&!BOARDS.failed&&ME&&ME.uid&&ME.type!=='ADMIN'&&!(BOARDS.items||[]).length);
 }
 /** applyBoardsFromMe merges optional board fields from GET /api/me.
  * @param {object|null} me session payload
@@ -1937,7 +1945,7 @@ async function loadBoards(){
   try{
     applyBoardsPayload(await call('GET','/api/boards'));
   }catch(e){
-    BOARDS={items:[],current:'',default_id:'',switchable:false,loaded:true};
+    BOARDS={items:[],current:'',default_id:'',switchable:false,loaded:true,failed:true};
   }
 }
 /** resetBoardCaches clears money and catalog caches after a section change.
@@ -2057,7 +2065,7 @@ async function openBoardImport(){
   try{
     const main={board:''};
     const [campaigns, offers, landings, networks, sources, s2s]=await Promise.all([
-      call('GET','/api/groups', undefined, main).catch(()=>[]),
+      fetchGroupRows(main).catch(()=>[]),
       call('GET','/api/offers', undefined, main).catch(()=>[]),
       call('GET','/api/landings', undefined, main).catch(()=>[]),
       call('GET','/api/affiliate-networks', undefined, main).catch(()=>[]),
@@ -2449,7 +2457,7 @@ async function boardPanelFetchCatalog(boardId){
   const sec={board:boardNormId(boardId)};
   const main={board:''};
   const spec=[
-    ['campaigns','/api/groups'],
+    ['campaigns','/api/groups?shared=1'],
     ['offers','/api/offers'],
     ['landings','/api/landings'],
     ['networks','/api/affiliate-networks'],
@@ -2458,8 +2466,8 @@ async function boardPanelFetchCatalog(boardId){
   ];
   const out={sec:{}, main:{}};
   await Promise.all(spec.flatMap(([k,path])=>[
-    call('GET',path,undefined,sec).then(r=>{out.sec[k]=Array.isArray(r)?r:[]}).catch(()=>{out.sec[k]=[]}),
-    call('GET',path,undefined,main).then(r=>{out.main[k]=boardRowsMain(r)}).catch(()=>{out.main[k]=[]}),
+    call('GET',path,undefined,sec).then(r=>{out.sec[k]=groupRows(r)}).catch(()=>{out.sec[k]=[]}),
+    call('GET',path,undefined,main).then(r=>{out.main[k]=boardRowsMain(groupRows(r))}).catch(()=>{out.main[k]=[]}),
   ]));
   return out;
 }
@@ -2561,6 +2569,7 @@ function boardPanelMembersHTML(users, members){
   }).join('');
   const addOpts=ulist.filter(u=>u&&u.id&&!used.has(String(u.id))).map(u=>`<option value="${esc(String(u.id))}">${esc(u.login||u.id)}</option>`).join('');
   return `<h3 style="margin:0 0 10px">${esc(tr('board.people.title'))}</h3>
+    <p class="hint" style="margin:0 0 10px">${esc(tr('board.people.main'))}</p>
     <div class="tw"><table><thead><tr><th>${esc(tr('users.login'))}</th><th>${esc(tr('board.people.role'))}</th><th class="acts"></th></tr></thead><tbody data-bmem-body>${rows||`<tr><td colspan="3">${stateHTML(tr('acc.none'))}</td></tr>`}</tbody></table></div>
     <div class="row wrap" style="gap:8px;margin-top:10px;align-items:flex-end">
       <div class="fld" style="margin:0;flex:1;min-width:160px"><label>${esc(tr('board.people.add'))}</label><select id="bmem-add-sel" data-pick${addOpts?'':' disabled'}>${addOpts||`<option value="">${esc(tr('acc.none'))}</option>`}</select></div>
@@ -4360,7 +4369,7 @@ function dropFlowDrafts(){
  * @return {void} */
 function snapshotGroups(){
   SNAP.clear(); DIRTY.clear(); DELETED.clear(); ORDER_DIRTY=false;
-  (GROUPS||[]).forEach(g=>SNAP.set(g,{id:g.id,json:JSON.stringify(g)}));
+  (GROUPS||[]).forEach(g=>SNAP.set(g,{id:g.id,json:groupJSON(g)}));
 }
 /** markDirty records campaigns whose JSON differs from the snapshot.
  * g is one campaign, or an array of them. No argument only refreshes the save bar (automation).
@@ -4373,7 +4382,7 @@ function markDirty(g){
     for(const x of list){
       if(!x||typeof x!=='object') continue;
       const prev=SNAP.get(x);
-      const json=JSON.stringify(x);
+      const json=groupJSON(x);
       if(prev&&prev.json===json) DIRTY.delete(x);
       else DIRTY.add(x);
     }
@@ -4392,7 +4401,7 @@ function settleGroups(g){
   for(const x of (Array.isArray(g)?g:[g])){
     if(!x||typeof x!=='object') continue;
     const prev=SNAP.get(x);
-    if(prev&&!DIRTY.has(x)) SNAP.set(x,{id:prev.id,json:JSON.stringify(x)});
+    if(prev&&!DIRTY.has(x)) SNAP.set(x,{id:prev.id,json:groupJSON(x)});
     else rest.push(x);
   }
   markDirty(rest);
@@ -4439,7 +4448,7 @@ function restoreGroup(g){
     if(GROUPS){const i=GROUPS.indexOf(g); if(i>=0) GROUPS.splice(i,1)}
     return;
   }
-  const fresh=JSON.parse(prev.json);
+  const fresh=groupParse(prev.json);
   Object.keys(g).forEach(k=>{if(!Object.prototype.hasOwnProperty.call(fresh,k)) delete g[k]});
   Object.assign(g, fresh);
 }
@@ -5720,6 +5729,7 @@ async function render(){
   qa('#nav a').forEach(a=>a.classList.toggle('active',a.dataset.t===page));
   qa('#nav .navdrop').forEach(d=>d.classList.toggle('active',REPORT_IDS.includes(page)));
   syncSaveBar();
+  if(boardsNone()){ view().innerHTML=stateHTML(tr('board.none')); return; }
   try{await PAGES[page](arg,()=>my===RENDER)}
   catch(e){if(my===RENDER)view().innerHTML=stateHTML(e&&e.message?errText(e):tr('ui.fail'),'err')}
   if(my===RENDER) paintFlags(view());
@@ -8240,6 +8250,7 @@ const ERR_KEYS={
   'access list too long':'err.access.long',
   'offer_query must be a query string':'err.net.querybad',
   'forbidden':'err.forbidden',
+  'no boards':'board.none',
   'network offer_query holds a macro of a hidden field':'err.net.querymacro',
   'groups error':'err.groups',
   'stats error':'err.stats',
@@ -11253,7 +11264,7 @@ en:{
 'kws.by.last':'Last click','kws.by.origin':'Origin','kws.hint.origin':'Origin mode counts only the first click. A conversion uses the keyword and stream of the first click; only campaign, keyword, stream, country, device, OS and browser filters are available.',
 'nav.dashboard':'Dashboard','nav.flows':'Campaigns','nav.offers':'Offers','nav.landings':'Landings','nav.logs':'Click log','nav.conversions':'Conversion log','nav.keywords':'Keywords','nav.lists':'Lists','nav.tools':'Tools','nav.networks':'Affiliate networks','nav.sources':'Sources','nav.domains':'Domains','nav.report':'Report','nav.reports':'Reports','nav.menu':'Menu','nav.more':'More','nav.automation':'Automation','Flow':'Campaign','Flow / stream':'Campaign / stream','open flow':'open campaign','no such flow':'no such campaign','All flows':'All campaigns','Choose a flow…':'Choose a campaign…','Delete flow':'Delete campaign','Delete flows?':'Delete campaigns?','Duplicate flow':'Duplicate campaign','Flow on / off':'Campaign on / off','Move to flow':'Move to campaign','No flows yet':'No campaigns yet','Performance by flow and stream':'Performance by campaign and stream','Send the visitor to flow':'Send the visitor to campaign','There is no flow':'There is no campaign','There is no other flow yet. Create one first.':'There is no other campaign yet. Create one first.','the flow’s':'the campaign’s','Aliases — other IDs that open this flow':'Aliases — other IDs that open this campaign','— choose a flow —':'— choose a campaign —','click a column to sort, a row to open the flow':'click a column to sort, a row to open the campaign','collected per flow and day':'collected per campaign and day','Its streams are tried with the same visitor; the log shows the flow that finally served them.':'Its streams are tried with the same visitor; the log shows the campaign that finally served them.','Statistics of this flow will be deleted from the log. This cannot be undone.':'Statistics of this campaign will be deleted from the log. This cannot be undone.','flows':'campaigns','Another flow':'Another campaign','New flow':'New campaign','Switch flow':'Switch campaign','Flows':'Campaigns','kt.stream.note':'Keitaro: stream #{n}','out.empty':'empty','conv.rejected':'Rejected','land.files.hint':'How many files are uploaded','land.kind.hint':'PHP, HTML or an address','dom.role.hint':'Admin, campaign links, or both','dom.campaigns.hint':'How many campaigns use this domain',
 'menu.settings':'Settings','menu.integrations':'Integrations','int.st.on':'Connected','int.st.off':'Not set up','int.st.err':'Error','int.st.run':'Import running','int.add':'Connect','int.add.title':'Connect an integration','int.added':'Added','int.empty':'Connect your first integration','int.drop':'Remove from list','int.desc.keitaro':'Move campaigns, offers and stats from Keitaro','int.desc.namecheap':'Buy domains and point their DNS','int.desc.cloudflare':'Park domains: zones, DNS and SSL','prof.users':'Users','users.title':'Users','users.new':'Create user','users.login':'Login','users.type':'Type','users.state':'State','users.enabled':'Enabled','users.disabled':'Disabled','users.lang':'Language','users.tz':'Timezone','users.source':'Source','users.created':'Created','users.edit':'Edit','users.access':'Access','users.password':'Password','users.enable':'Enable','users.disable':'Disable','users.delete':'Delete','users.delete.confirm':'Delete user','users.pw.hint':'At least 6 characters','users.saved':'Saved','users.src.env':'Environment','users.src.owner':'Environment owner, full access','users.type.admin':'Administrator','users.type.user':'User','users.src.rights':'Full access','users.src.custom':'Assigned access','users.src.imported':'Imported from Keitaro','users.created.env':'Set at install','users.src.file':'Users file','prof.account':'Account','dash.recent':'Recent clicks','dash.recent.all':'All clicks','dash.recent.out':'Destination','prof.account.login':'Login','prof.account.type':'Type','prof.account.source':'Source','acc.title':'Access','acc.mode':'Access mode','acc.sections':'Sections','acc.sec.groups':'Groups','acc.res.campaigns':'Campaigns','acc.res.offers':'Offers','acc.res.landings':'Landings','acc.res.sources':'Sources','acc.res.networks':'Networks','acc.res.domains':'Domains','acc.mode.full':'Full access','acc.mode.read':'Read only','acc.mode.selected':'Selected only','acc.mode.created':'Created and selected','acc.entities':'Entities','acc.labels':'Labels','acc.hidden':'Hidden metrics','acc.hidden.profit':'Profit and revenue','acc.hidden.cost':'Cost and spend','acc.none':'None','kt.users':'Users','kt.users.hint':'Imported users are disabled and have no password','kt.c.users':'Users','int.title':'Integrations','dash.panels':'Panels','company.title':'Company','company.name':'Name','company.logo':'Logo','company.clear':'Remove logo','company.logo.big':'Image only, up to 200 KB','company.hint':'Shown in the header and on the sign-in screen for everyone.','set.sec.access':'Company and access','set.sec.ui':'Interface','set.sec.stats':'Statistics','set.sec.bots':'Bot protection','menu.keitaro':'Keitaro import','kt.title':'Keitaro import','kt.need':'Enter the Keitaro address and the API key below, then press Save.','kt.conn':'Connection','kt.check':'Check connection','kt.ok':'Connected, campaigns:','kt.api':'Admin API v1. Keitaro version is not determined: the tracker gives no signs.','kt.api.ver':'Admin API v1. Keitaro {v}. Signs: {signs}.','kt.api.conflict':'Admin API v1. Keitaro version is not determined: the signs disagree ({signs}).','kt.sig.subid':'SubID format','kt.sig.click_id':'click_id','kt.sig.event_id':'event_id','kt.sig.conversion_id':'conversion_id','kt.sig.event_type':'event_type','kt.sig.rebill':'Rebill type','kt.sig.custom_type':'custom conversion type','kt.what':'What to transfer','kt.domains':'Domains','kt.networks':'Affiliate networks','kt.offers':'Offers','kt.landings':'Landings','kt.sources':'Traffic sources','kt.campaigns':'Campaigns with settings','kt.conversions':'Conversions','kt.clicks':'Clicks','kt.period':'Period','kt.period.global':'Current period','kt.period.custom':'Dates','kt.run':'Transfer','kt.one.id':'Keitaro campaign ID','kt.one.run':'Dosync one campaign','kt.one.bad':'Enter a positive Keitaro campaign ID','kt.purge':'Remove imported','kt.purge.confirm':'Remove everything this import created? Your own campaigns and catalogs stay.','kt.result':'Result','kt.removed':'Removed','kt.nolosses':'Everything transferred without losses','kt.c.groups':'Campaigns','kt.c.offers':'Offers','kt.c.landings':'Landings','kt.c.networks':'Affiliate networks','kt.c.sources':'Traffic sources','kt.c.domains':'Domains','kt.c.conversions':'Conversions','kt.c.clicks':'Clicks','kt.kind.disabled':'Disabled','kt.kind.skipped':'Skipped','kt.kind.approximated':'Approximated','kt.kind.changed':'Changed','kt.col.ref':'Object','kt.col.detail':'Detail','kt.busy':'Import is already running','kt.progress':'Progress','kt.stage.idle':'Idle','kt.stage.snapshot':'Reading catalogs','kt.stage.streams':'Reading campaign streams','kt.stage.catalogs':'Saving catalogs','kt.stage.groups':'Saving campaigns','kt.stage.conversions':'Conversions','kt.stage.clicks':'Clicks','kt.stage.done':'Finished','cron.ktsync.title':'Data refresh','cron.ktsync.hint':'Loads clicks, conversions and new campaigns with their settings from the last checkpoint with overlap; campaigns already imported are untouched.','cron.ktsync.newcamps':'new campaigns {n}','cron.ktsync.camps.pending':'New campaigns queued','cron.ktsync.camps.deleted':'Skipped, deleted here','cron.ktsync.camps.failed':'Not imported','cron.ktsync.camps.paused':'New campaigns paused until {time}: {reason}','cron.ktsync.off':'Keitaro is not configured','cron.ktsync.needkt':'Configure Keitaro in {link}.','cron.ktsync.needimport':'Run a full Keitaro import first — {link}.','cron.ktsync.cursor.clicks':'Clicks cursor','cron.ktsync.cursor.convs':'Conversions cursor','cron.ktsync.lag':'Lag','cron.ktsync.last':'Last run','cron.ktsync.timezone':'Tracker time is ahead of the server','cron.ktsync.noconv':'Configure Telegram above to enable conversion alerts.','kt.sync.busy':'Catch-up is already running','kt.sync.requested':'Catch-up requested','kt.stage.failed':'Failed','kt.stage.landing_files':'Saving landing files','kt.stage.lists':'Saving lists','kt.stage.pages':'Saving pages','kt.stage.users':'Saving users','err.network':'No connection to the server. Check your connection and try again.','cf.intro':'Cloudflare account. The token lets the admin read zones and manage DNS records and settings of the domains you connect.','cf.token':'API token','cf.account':'Account ID','cf.ip':'Server public IP','cf.ip.empty':'EMTDS_PUBLIC_IP is not set on the server','cf.ip.local':'Cloudflare integration does not run on a local machine: it needs a server with a public IP','nc.local':'The admin runs on a local machine, so the outgoing IP found here is your own connection, not a server. A server with a public IP is needed for real use.','cf.test':'Check','cf.test.ok':'ok, zones: {n}','cf.test.fail':'Check failed','cf.file.err':'Settings file error','cf.err.load':'Cloudflare settings are unavailable','cf.reg.use':'Connect through Cloudflare — name servers change to Cloudflare, the A record points to {ip}','cf.reg.err':'Cloudflare setup failed','cf.reg.hosterr':'DNS records failed','cf.reg.manual':'Set these name servers at the registrar: {ns}','cf.buy.title':'Buy {domain}?','cf.buy.sum':'Domain: {domain}\nTerm: {years} yr\nPrice: {price}\nDNS: {dns}','cf.dns.cf':'Cloudflare (name servers to Cloudflare, A record to {ip})','cf.dns.ns':'own name servers: {ns}','cf.dns.a':'A record to {ip}','cf.dns.none':'no DNS changes','dom.state.on':'Enabled','dom.state.off':'Disabled','dom.state.pending':'Awaiting payment','dom.elsewhere':'Not pointed: A points to {ips}, needed {ip}','dom.elsewhere.short':'Not pointed: A points to {ips}','dom.cfpending':'Waiting for Cloudflare: NS {ns}','dom.cfpending.short':'Waiting for Cloudflare','dom.tls':'Server certificate rejected','cf.connecting':'Connecting to Cloudflare…','cf.connect':'Connect through Cloudflare','cf.connect.title':'Connect {host} through Cloudflare?','cf.connect.ask':'A zone is created in Cloudflare and the A record points to the server. Set the Cloudflare name servers at your registrar.','cf.connect.ask.nc':'The name servers of the domain at Namecheap change to Cloudflare and the A record points to the server. Until the zone is active the domain may be unreachable.','cf.connect.done':'Connected to Cloudflare, waiting for the zone to activate','cf.connect.set':'Name servers changed, waiting for Cloudflare to activate the zone','cf.ns.title':'Name servers','cf.ns.hint':'Set these name servers at the registrar of the domain.','cf.ns.copy':'Copy','cf.ns.copied':'Copied','cf.ns.select':'Copy the selected text by hand','dom.conn.title':'Domain connected','dom.conn.title.many':'Domains connected','dom.conn.text':'These domains now reach the server:','dom.conn.ok':'Got it','dom.conn.go':'Go to domains','kt.col.count':'Count','kt.col.refs':'Where','kt.groups.more':'more groups not shown:','page.open':'Open page','page.hint':'Output is stored as a file; edit it via “Open page”.','page.missing':'The file does not exist yet; saving creates it.','kt.c.lists':'IP lists','kt.c.pages':'Pages','menu.logout':'Log out','sig.update':'A newer commit is ready to install','sig.down.title':'A service does not answer','sig.down.text':'Not answering: {list}. Restart the server or this service. The state and the commands are in Settings → {about}.','sig.down.ok':'Close','sig.down.go':'Open {about}','sig.svc.engine':'engine','sig.svc.clickhouse':'ClickHouse','sig.svc.redis':'Redis',
-'board.main':'Default','board.switch':'Section','board.sections':'Sections','board.settings':'Section settings','board.create':'New section name','board.import':'Import from Default','board.empty':'Nothing to copy from the default view yet.','board.page.title':'Sections','board.add':'Create section','board.icon':'Icon','board.recent':'Recent','board.all':'All icons','board.colors':'Color','board.name':'Name','board.id':'ID','board.delete':'Delete','board.move':'Move','board.delete.confirm':'Delete this section?','board.inuse':'This section still has records','board.saved':'Saved','board.expand':'Composition and members','board.include':'Section view','board.include_all':'Show contents of all sections','board.collapse':'Hide details','board.compose.title':'Composition','board.compose.folders':'folders','board.compose.save':'Save composition','board.compose.saved':'Composition saved','board.compose.addid':'Add ID','board.compose.add':'Add','board.compose.search':'Search by ID or name','err.csrf':'The session is out of date. Refresh the page.','board.people.title':'Members','board.people.role':'Role','board.people.add':'Add member','board.people.remove':'Remove','board.people.save':'Save members','board.people.saved':'Members saved','board.role.read':'Read','board.role.edit':'Edit','board.role.created':'Created only',
+'users.board.main':'Main section «{name}»','users.board.main.hint':'Membership in other sections does not clear this mark.','users.board.all':'All sections: this account sees every section.','users.board.member':'Also by membership: {list}.','users.board.member.none':'No membership in other sections; members are set in Section settings.','users.board.empty':'Without the main section and without membership the user sees no section.','board.none':'You have no access to any section. Ask an administrator to add you to one.','board.people.main':'Membership adds this section to the user. The main section is set in the user card and does not change here.','board.main':'Default','board.switch':'Section','board.sections':'Sections','board.settings':'Section settings','board.create':'New section name','board.import':'Import from Default','board.empty':'Nothing to copy from the default view yet.','board.page.title':'Sections','board.add':'Create section','board.icon':'Icon','board.recent':'Recent','board.all':'All icons','board.colors':'Color','board.name':'Name','board.id':'ID','board.delete':'Delete','board.move':'Move','board.delete.confirm':'Delete this section?','board.inuse':'This section still has records','board.saved':'Saved','board.expand':'Composition and members','board.include':'Section view','board.include_all':'Show contents of all sections','board.collapse':'Hide details','board.compose.title':'Composition','board.compose.folders':'folders','board.compose.save':'Save composition','board.compose.saved':'Composition saved','board.compose.addid':'Add ID','board.compose.add':'Add','board.compose.search':'Search by ID or name','err.csrf':'The session is out of date. Refresh the page.','board.people.title':'Members','board.people.role':'Role','board.people.add':'Add member','board.people.remove':'Remove','board.people.save':'Save members','board.people.saved':'Members saved','board.role.read':'Read','board.role.edit':'Edit','board.role.created':'Created only',
 'period.today':'Today','period.yesterday':'Yesterday','period.week':'This week','period.7d':'Last 7 days','period.month':'This month','period.prevmonth':'Previous month','period.30d':'Last 30 days','period.year':'This year','period.all':'All time','period.dates':'Date range','period.times':'Time range','period.need':'Pick both ends of the range',
 'settings.country':'Country','settings.lang':'Interface language','settings.search':'Find a country','settings.geo':'Default source for a new campaign','settings.geo.cf':'CDN header','settings.geo.db':'Geo database','settings.hint':'Search matches the code and the English, Russian and Ukrainian names at once.','settings.tz':'Statistics timezone','settings.tz.find':'Find a timezone','settings.tz.hint':'Periods and times in reports use this zone. The visitor’s own zone is unchanged.',
 'flows.title':'Campaigns','dirty.title':'Unsaved changes:','dirty.flow':'Campaign','dirty.removed':'Removed: {n}','dirty.all':'Show all','dirty.less':'Fold','flow.compact':'Compact view','flow.expanded':'Detailed view','flow.traffic.off':'Order by traffic: off','flow.traffic.desc':'Order by traffic: most first','flow.traffic.asc':'Order by traffic: fewest first','flow.traffic.lock':'Turn off the order by traffic to change the order','flows.table':'Table','flows.cards':'Cards','flows.search':'Search campaigns and streams…','flows.new':'New campaign','flows.bulk.on':'Enable','flows.bulk.off':'Disable','flows.bulk.dup':'Duplicate','flows.bulk.del':'Delete','flows.bulk.n':'selected','flows.col.id':'Campaign','flows.col.num':'ID','flows.col.name':'Campaign name','flows.col.url':'URL','flows.col.streams':'Streams','flows.page':'Per page','flows.page.custom':'Custom','flows.state':'State','flows.state.all':'All','flows.state.on':'On','flows.state.off':'Off','flows.state.hits':'With visits','flows.state.any':'All states','flows.source.all':'All sources','flows.nosource':'No source','flows.nofolder':'No group','flows.sum':'Total','flows.sum.sel':'Selected','flows.visits':'visits','flows.bots':'bots','flows.conv':'conv','flows.profit':'profit','flows.nostreams':'No streams — every visitor gets the default','flows.more':'more','flows.streams':'streams','flows.log.clicks':'Click log','flows.log.conv':'Conversion log','tester.ip':'IP address','tester.country':'Country','tester.lang':'Language','tester.referer':'Referer','tester.key':'Keyword','tester.query':'URL parameters','tester.hint':'Uses the campaigns on screen, saved or not. Impression limits, bot checks and the antiflood depend on live traffic and are not simulated.','src.title':'Traffic sources','src.new':'New source','src.our':'Our name','src.theirs':'Name in the link','src.empty':'No sources yet','src.link':'Campaign link','log.traffic':'Traffic','log.postbacks':'Postbacks and S2S','log.system':'System','log.outcome':'Outcome','log.direction':'Direction','rep.title':'Report','rep.csv':'Download CSV','rep.empty':'Nothing in this period',
@@ -11351,7 +11362,7 @@ ru:{
 'kws.by.last':'Последний клик','kws.by.origin':'Первоисточник','kws.hint.origin':'Режим первоисточника считает только первый клик. Конверсия получает ключевое слово и поток первого клика; доступны только фильтры кампании, ключевого слова, потока, страны, устройства, ОС и браузера.',
 'nav.dashboard':'Сводка','nav.flows':'Кампании','nav.offers':'Офферы','nav.landings':'Лендинги','nav.logs':'Лог кликов','nav.conversions':'Лог конверсий','nav.keywords':'Ключевые слова','nav.lists':'Списки','nav.tools':'Инструменты','nav.networks':'Партнёрские сети','nav.sources':'Источники','nav.domains':'Домены','nav.report':'Отчёт','nav.reports':'Отчёты','nav.menu':'Меню','nav.more':'Прочее','nav.automation':'Автоматизация','kt.stream.note':'Keitaro: поток #{n}','out.empty':'пусто','conv.rejected':'Отклонён','land.files.hint':'Сколько файлов загружено','land.kind.hint':'PHP, HTML или адрес','dom.role.hint':'Админка, ссылки кампаний или оба','dom.campaigns.hint':'Сколько кампаний используют домен',
 'menu.settings':'Настройки','menu.integrations':'Интеграции','int.st.on':'Подключено','int.st.off':'Не настроено','int.st.err':'Ошибка','int.st.run':'Идёт перенос','int.add':'Подключить','int.add.title':'Подключить интеграцию','int.added':'Добавлено','int.empty':'Подключите первую интеграцию','int.drop':'Убрать из списка','int.desc.keitaro':'Перенос кампаний, офферов и статистики из Keitaro','int.desc.namecheap':'Покупка доменов и их DNS','int.desc.cloudflare':'Парковка доменов: зоны, DNS и SSL','prof.users':'Пользователи','users.title':'Пользователи','users.new':'Создать пользователя','users.login':'Логин','users.type':'Тип','users.state':'Состояние','users.enabled':'Включён','users.disabled':'Выключен','users.lang':'Язык','users.tz':'Пояс','users.source':'Источник','users.created':'Создан','users.edit':'Править','users.access':'Доступ','users.password':'Пароль','users.enable':'Включить','users.disable':'Выключить','users.delete':'Удалить','users.delete.confirm':'Удалить пользователя','users.pw.hint':'Не меньше 6 символов','users.saved':'Сохранено','users.src.env':'Окружение','users.src.owner':'Владелец окружения, полные права','users.type.admin':'Администратор','users.type.user':'Пользователь','users.src.rights':'Полные права','users.src.custom':'Свои права','users.src.imported':'Перенесён из Keitaro','users.created.env':'Задан при установке','users.src.file':'Файл пользователей','prof.account':'Аккаунт','dash.recent':'Последние клики','dash.recent.all':'Все клики','dash.recent.out':'Направление','prof.account.login':'Логин','prof.account.type':'Тип','prof.account.source':'Источник','acc.title':'Доступ','acc.mode':'Режим доступа','acc.sections':'Разделы','acc.sec.groups':'Группы','acc.res.campaigns':'Кампании','acc.res.offers':'Офферы','acc.res.landings':'Лендинги','acc.res.sources':'Источники','acc.res.networks':'Сети','acc.res.domains':'Домены','acc.mode.full':'Полный','acc.mode.read':'Только чтение','acc.mode.selected':'Только выбранные','acc.mode.created':'Созданные и выбранные','acc.entities':'Сущности','acc.labels':'Метки','acc.hidden':'Скрытые метрики','acc.hidden.profit':'Прибыль и доход','acc.hidden.cost':'Расход и cost','acc.none':'Нет','kt.users':'Пользователи','kt.users.hint':'Перенесённые пользователи выключены и без пароля','kt.c.users':'Пользователи','int.title':'Интеграции','dash.panels':'Панели','company.title':'Компания','company.name':'Название','company.logo':'Логотип','company.clear':'Убрать логотип','company.logo.big':'Только картинка до 200 КБ','company.hint':'Видно в шапке и на экране входа у всех.','set.sec.access':'Компания и доступ','set.sec.ui':'Интерфейс','set.sec.stats':'Статистика','set.sec.bots':'Защита от ботов','menu.keitaro':'Перенос из Keitaro','kt.title':'Перенос из Keitaro','kt.need':'Укажите адрес Keitaro и API-токен ниже и нажмите «Сохранить».','kt.conn':'Соединение','kt.check':'Проверить соединение','kt.ok':'Соединение есть, кампаний:','kt.api':'Admin API v1. Версия Keitaro не определена: признаков нет.','kt.api.ver':'Admin API v1. Keitaro {v}. Признаки: {signs}.','kt.api.conflict':'Admin API v1. Версия Keitaro не определена: признаки противоречат ({signs}).','kt.sig.subid':'формат SubID','kt.sig.click_id':'click_id','kt.sig.event_id':'event_id','kt.sig.conversion_id':'conversion_id','kt.sig.event_type':'event_type','kt.sig.rebill':'тип Rebill','kt.sig.custom_type':'свой тип конверсии','kt.what':'Что переносим','kt.domains':'Домены','kt.networks':'Партнёрские сети','kt.offers':'Офферы','kt.landings':'Лендинги','kt.sources':'Источники','kt.campaigns':'Кампании с настройками','kt.conversions':'Конверсии','kt.clicks':'Клики','kt.period':'Период','kt.period.global':'Текущий период','kt.period.custom':'Даты','kt.run':'Перенести','kt.one.id':'Keitaro ID кампании','kt.one.run':'Досинк одной кампании','kt.one.bad':'Укажите положительный Keitaro ID кампании','kt.purge':'Удалить импортированное','kt.purge.confirm':'Удалить всё, что создал перенос? Свои кампании и каталоги останутся.','kt.result':'Результат','kt.removed':'Удалено','kt.nolosses':'Всё перенесено без потерь','kt.c.groups':'Кампании','kt.c.offers':'Офферы','kt.c.landings':'Лендинги','kt.c.networks':'Партнёрские сети','kt.c.sources':'Источники','kt.c.domains':'Домены','kt.c.conversions':'Конверсии','kt.c.clicks':'Клики','kt.kind.disabled':'Выключено','kt.kind.skipped':'Пропущено','kt.kind.approximated':'Приближено','kt.kind.changed':'Изменено','kt.col.ref':'Объект','kt.col.detail':'Подробность','kt.busy':'Перенос уже идёт','kt.progress':'Ход переноса','kt.stage.idle':'Ожидание','kt.stage.snapshot':'Чтение каталогов','kt.stage.streams':'Чтение потоков кампаний','kt.stage.catalogs':'Запись каталогов','kt.stage.groups':'Запись кампаний','kt.stage.conversions':'Конверсии','kt.stage.clicks':'Клики','kt.stage.done':'Готово','kt.stage.failed':'Ошибка','cron.ktsync.title':'Актуализация данных','cron.ktsync.hint':'Догружает клики, конверсии и новые кампании с их настройками с последнего курсора с запасом назад; уже перенесённые кампании не трогает.','cron.ktsync.newcamps':'новых кампаний {n}','cron.ktsync.camps.pending':'Новых кампаний в очереди','cron.ktsync.camps.deleted':'Пропущено, удалены у нас','cron.ktsync.camps.failed':'Не перенесены','cron.ktsync.camps.paused':'Новые кампании на паузе до {time}: {reason}','cron.ktsync.off':'Keitaro не настроен','cron.ktsync.needkt':'Настройте Keitaro в {link}.','cron.ktsync.needimport':'Сначала нужен полный импорт Keitaro — {link}.','cron.ktsync.cursor.clicks':'Курсор кликов','cron.ktsync.cursor.convs':'Курсор конверсий','cron.ktsync.lag':'Отставание','cron.ktsync.last':'Последний прогон','cron.ktsync.timezone':'Время трекера опережает сервер','cron.ktsync.noconv':'Настройте Telegram выше, чтобы включить оповещения о конверсиях.','kt.sync.busy':'Уже идёт актуализация','kt.sync.requested':'Актуализация запрошена','kt.stage.landing_files':'Запись файлов лендингов','kt.stage.lists':'Запись списков','kt.stage.pages':'Запись страниц','kt.stage.users':'Запись пользователей','err.network':'Нет связи с сервером. Проверьте соединение и повторите.','cf.intro':'Аккаунт Cloudflare. Токен позволяет админке читать зоны и управлять DNS-записями и настройками подключаемых доменов.','cf.token':'API-токен','cf.account':'Account ID','cf.ip':'Публичный IP сервера','cf.ip.empty':'EMTDS_PUBLIC_IP не задан на сервере','cf.ip.local':'Интеграция с Cloudflare не запускается на локальной машине: нужен сервер с публичным IP','nc.local':'Админка запущена на локальной машине: найденный исходящий IP — это ваше подключение, а не сервер. Для работы нужен сервер с публичным IP.','cf.test':'Проверить','cf.test.ok':'ок, зон: {n}','cf.test.fail':'Проверка не прошла','cf.file.err':'Ошибка файла настроек','cf.err.load':'Настройки Cloudflare недоступны','cf.reg.use':'Подключить через Cloudflare — NS сменятся на Cloudflare, A-запись на {ip}','cf.reg.err':'Не удалось настроить Cloudflare','cf.reg.hosterr':'Не удалось записать DNS-записи','cf.reg.manual':'Укажите эти NS у регистратора: {ns}','cf.buy.title':'Купить {domain}?','cf.buy.sum':'Домен: {domain}\nСрок: {years} г.\nЦена: {price}\nDNS: {dns}','cf.dns.cf':'Cloudflare (NS на Cloudflare, A-запись на {ip})','cf.dns.ns':'свои NS: {ns}','cf.dns.a':'A-запись на {ip}','cf.dns.none':'DNS не меняется','dom.state.on':'Включён','dom.state.off':'Выключен','dom.state.pending':'Ожидает оплаты','dom.elsewhere':'Не направлен: A указывает на {ips}, нужен {ip}','dom.elsewhere.short':'Не направлен: A указывает на {ips}','dom.cfpending':'Ждём Cloudflare: NS {ns}','dom.cfpending.short':'Ждём Cloudflare','dom.tls':'Сертификат сервера отклонён','cf.connecting':'Подключение к Cloudflare…','cf.connect':'Подключить через Cloudflare','cf.connect.title':'Подключить {host} через Cloudflare?','cf.connect.ask':'В Cloudflare создаётся зона, A-запись указывает на сервер. NS Cloudflare нужно будет указать у регистратора.','cf.connect.ask.nc':'NS домена в Namecheap сменятся на Cloudflare, A-запись будет указывать на сервер. Пока зона не активна, домен может быть недоступен.','cf.connect.done':'Подключено к Cloudflare, ждём активации зоны','cf.connect.set':'NS сменены, ждём активации зоны в Cloudflare','cf.ns.title':'Серверы имён','cf.ns.hint':'Укажите эти NS у регистратора домена.','cf.ns.copy':'Копировать','cf.ns.copied':'Скопировано','cf.ns.select':'Скопируйте выделенный текст вручную','dom.conn.title':'Домен подключён','dom.conn.title.many':'Домены подключены','dom.conn.text':'Эти домены теперь доходят до сервера:','dom.conn.ok':'Понятно','dom.conn.go':'Перейти к доменам','kt.col.count':'Сколько','kt.col.refs':'Где','kt.groups.more':'ещё групп не показано:','page.open':'Открыть страницу','page.hint':'Вывод хранится файлом; правите его через «Открыть страницу».','page.missing':'Файла ещё нет; сохранение создаст его.','kt.c.lists':'IP-списки','kt.c.pages':'Страницы','menu.logout':'Выйти','sig.update':'Готов более новый коммит для установки','sig.down.title':'Служба не отвечает','sig.down.text':'Не отвечает: {list}. Перезапустите сервер или эту службу. Состояние и команды — в «Настройки → {about}».','sig.down.ok':'Закрыть','sig.down.go':'Открыть «{about}»','sig.svc.engine':'движок','sig.svc.clickhouse':'ClickHouse','sig.svc.redis':'Redis',
-'board.main':'По умолчанию','board.switch':'Раздел','board.sections':'Разделы','board.settings':'Настройки разделов','board.create':'Имя нового раздела','board.import':'Импорт из вида по умолчанию','board.empty':'В виде по умолчанию пока нечего копировать.','board.page.title':'Разделы','board.add':'Создать раздел','board.icon':'Иконка','board.recent':'Недавние','board.all':'Все иконки','board.colors':'Цвет','board.name':'Имя','board.id':'ID','board.delete':'Удалить','board.move':'Переместить','board.delete.confirm':'Удалить этот раздел?','board.inuse':'В разделе есть записи','board.saved':'Сохранено','board.expand':'Состав и участники','board.include':'Вид раздела','board.include_all':'Отображать содержимое всех разделов','board.collapse':'Свернуть','board.compose.title':'Состав','board.compose.folders':'папки','board.compose.save':'Сохранить состав','board.compose.saved':'Состав сохранён','board.compose.addid':'Добавить id','board.compose.add':'Добавить','board.compose.search':'Поиск по id или имени','err.csrf':'Сессия устарела. Обновите страницу.','board.people.title':'Участники','board.people.role':'Роль','board.people.add':'Добавить участника','board.people.remove':'Убрать','board.people.save':'Сохранить участников','board.people.saved':'Участники сохранены','board.role.read':'Чтение','board.role.edit':'Редактирование','board.role.created':'Только свои',
+'users.board.main':'Основной раздел «{name}»','users.board.main.hint':'Участие в других разделах эту отметку не снимает.','users.board.all':'Все разделы: аккаунт видит каждый раздел.','users.board.member':'Также по участию: {list}.','users.board.member.none':'Нет участия в других разделах; участников задают в настройках разделов.','users.board.empty':'Без основного раздела и без участия пользователь не увидит ни одного раздела.','board.none':'У вас нет доступа ни к одному разделу. Попросите администратора добавить вас в раздел.','board.people.main':'Участие добавляет пользователю этот раздел. Основной раздел задаётся в карточке пользователя и здесь не меняется.','board.main':'По умолчанию','board.switch':'Раздел','board.sections':'Разделы','board.settings':'Настройки разделов','board.create':'Имя нового раздела','board.import':'Импорт из вида по умолчанию','board.empty':'В виде по умолчанию пока нечего копировать.','board.page.title':'Разделы','board.add':'Создать раздел','board.icon':'Иконка','board.recent':'Недавние','board.all':'Все иконки','board.colors':'Цвет','board.name':'Имя','board.id':'ID','board.delete':'Удалить','board.move':'Переместить','board.delete.confirm':'Удалить этот раздел?','board.inuse':'В разделе есть записи','board.saved':'Сохранено','board.expand':'Состав и участники','board.include':'Вид раздела','board.include_all':'Отображать содержимое всех разделов','board.collapse':'Свернуть','board.compose.title':'Состав','board.compose.folders':'папки','board.compose.save':'Сохранить состав','board.compose.saved':'Состав сохранён','board.compose.addid':'Добавить id','board.compose.add':'Добавить','board.compose.search':'Поиск по id или имени','err.csrf':'Сессия устарела. Обновите страницу.','board.people.title':'Участники','board.people.role':'Роль','board.people.add':'Добавить участника','board.people.remove':'Убрать','board.people.save':'Сохранить участников','board.people.saved':'Участники сохранены','board.role.read':'Чтение','board.role.edit':'Редактирование','board.role.created':'Только свои',
 'period.today':'Сегодня','period.yesterday':'Вчера','period.week':'Текущая неделя','period.7d':'Последние 7 дней','period.month':'Текущий месяц','period.prevmonth':'Предыдущий месяц','period.30d':'Последние 30 дней','period.year':'Текущий год','period.all':'За всё время','period.dates':'Интервал дат','period.times':'Интервал времени','period.need':'Укажите оба края интервала',
 'settings.country':'Страна','settings.lang':'Язык интерфейса','settings.search':'Найти страну','settings.geo':'Источник страны для новой кампании','settings.geo.cf':'Заголовок CDN','settings.geo.db':'Гео-база','settings.hint':'Поиск сразу по коду и по английскому, русскому и украинскому имени.','settings.tz':'Часовой пояс статистики','settings.tz.find':'Найти часовой пояс','settings.tz.hint':'Периоды и время в отчётах считаются в этом поясе. Пояс самого посетителя не меняется.',
 'flows.title':'Кампании','dirty.title':'Несохранённые изменения:','dirty.flow':'Кампания','dirty.removed':'Удалено: {n}','dirty.all':'Показать все','dirty.less':'Свернуть','flow.compact':'Компактный вид','flow.expanded':'Подробный вид','flow.traffic.off':'Сортировка по трафику: выкл','flow.traffic.desc':'Сортировка по трафику: больше сверху','flow.traffic.asc':'Сортировка по трафику: меньше сверху','flow.traffic.lock':'Выключите сортировку по трафику, чтобы менять порядок','flows.table':'Таблица','flows.cards':'Карточки','flows.search':'Поиск кампаний и потоков…','flows.new':'Новая кампания','flows.bulk.on':'Включить','flows.bulk.off':'Выключить','flows.bulk.dup':'Дублировать','flows.bulk.del':'Удалить','flows.bulk.n':'выбрано','flows.col.id':'Кампания','flows.col.num':'ID','flows.col.name':'Имя кампании','flows.col.url':'URL','flows.col.streams':'Потоки','flows.page':'На странице','flows.page.custom':'Своё','flows.state':'Состояние','flows.state.all':'Все','flows.state.on':'Включённые','flows.state.off':'Выключенные','flows.state.hits':'С визитами','flows.state.any':'Все состояния','flows.source.all':'Все источники','flows.nosource':'Без источника','flows.nofolder':'Без группы','flows.sum':'Всего','flows.sum.sel':'Выбранные','flows.visits':'визиты','flows.bots':'боты','flows.conv':'конверсии','flows.profit':'прибыль','flows.nostreams':'Нет потоков — каждый посетитель получает ответ по умолчанию','flows.more':'ещё','flows.streams':'потоков','flows.log.clicks':'Лог кликов','flows.log.conv':'Лог конверсий','tester.ip':'IP-адрес','tester.country':'Страна','tester.lang':'Язык','tester.referer':'Реферер','tester.key':'Ключевое слово','tester.query':'Параметры URL','tester.hint':'Берёт кампании с экрана, сохранённые или нет. Лимиты показов, проверка ботов и антифлуд зависят от живого трафика и здесь не считаются.','src.title':'Источники трафика','src.new':'Новый источник','src.our':'Имя у нас','src.theirs':'Имя в ссылке','src.empty':'Источников пока нет','src.link':'Ссылка кампании','log.traffic':'Трафик','log.postbacks':'Postbacks и S2S','log.system':'Системный','log.outcome':'Исход','log.direction':'Направление','rep.title':'Отчёт','rep.csv':'Скачать CSV','rep.empty':'За этот период пусто',
@@ -11449,7 +11460,7 @@ uk:{
 'kws.by.last':'Останній клік','kws.by.origin':'Першоджерело','kws.hint.origin':'Режим першоджерела враховує лише перший клік. Конверсія отримує ключове слово й потік першого кліку; доступні лише фільтри кампанії, ключового слова, потоку, країни, пристрою, ОС і браузера.',
 'nav.dashboard':'Зведення','nav.flows':'Кампанії','nav.offers':'Офери','nav.landings':'Лендінги','nav.logs':'Лог кліків','nav.conversions':'Лог конверсій','nav.keywords':'Ключові слова','nav.lists':'Списки','nav.tools':'Інструменти','nav.networks':'Партнерські мережі','nav.sources':'Джерела','nav.domains':'Домени','nav.report':'Звіт','nav.reports':'Звіти','nav.menu':'Меню','nav.more':'Інше','nav.automation':'Автоматизація','kt.stream.note':'Keitaro: потік #{n}','out.empty':'порожньо','conv.rejected':'Відхилено','land.files.hint':'Скільки файлів завантажено','land.kind.hint':'PHP, HTML або адреса','dom.role.hint':'Адмінка, посилання кампаній або обидва','dom.campaigns.hint':'Скільки кампаній використовують домен',
 'menu.settings':'Налаштування','menu.integrations':'Інтеграції','int.st.on':'Підключено','int.st.off':'Не налаштовано','int.st.err':'Помилка','int.st.run':'Іде перенесення','int.add':'Підключити','int.add.title':'Підключити інтеграцію','int.added':'Додано','int.empty':'Підключіть першу інтеграцію','int.drop':'Прибрати зі списку','int.desc.keitaro':'Перенесення кампаній, офферів і статистики з Keitaro','int.desc.namecheap':'Купівля доменів та їхній DNS','int.desc.cloudflare':'Паркування доменів: зони, DNS і SSL','prof.users':'Користувачі','users.title':'Користувачі','users.new':'Створити користувача','users.login':'Логін','users.type':'Тип','users.state':'Стан','users.enabled':'Увімкнено','users.disabled':'Вимкнено','users.lang':'Мова','users.tz':'Пояс','users.source':'Джерело','users.created':'Створено','users.edit':'Правити','users.access':'Доступ','users.password':'Пароль','users.enable':'Увімкнути','users.disable':'Вимкнути','users.delete':'Видалити','users.delete.confirm':'Видалити користувача','users.pw.hint':'Не менше 6 символів','users.saved':'Збережено','users.src.env':'Оточення','users.src.owner':'Власник оточення, повні права','users.type.admin':'Адміністратор','users.type.user':'Користувач','users.src.rights':'Повні права','users.src.custom':'Свої права','users.src.imported':'Перенесено з Keitaro','users.created.env':'Задано під час встановлення','users.src.file':'Файл користувачів','prof.account':'Обліковий запис','dash.recent':'Останні кліки','dash.recent.all':'Усі кліки','dash.recent.out':'Напрямок','prof.account.login':'Логін','prof.account.type':'Тип','prof.account.source':'Джерело','acc.title':'Доступ','acc.mode':'Режим доступу','acc.sections':'Розділи','acc.sec.groups':'Групи','acc.res.campaigns':'Кампанії','acc.res.offers':'Офери','acc.res.landings':'Лендінги','acc.res.sources':'Джерела','acc.res.networks':'Мережі','acc.res.domains':'Домени','acc.mode.full':'Повний','acc.mode.read':'Лише читання','acc.mode.selected':'Лише обрані','acc.mode.created':'Створені й обрані','acc.entities':'Сутності','acc.labels':'Мітки','acc.hidden':'Приховані метрики','acc.hidden.profit':'Прибуток і дохід','acc.hidden.cost':'Витрата і cost','acc.none':'Немає','kt.users':'Користувачі','kt.users.hint':'Перенесені користувачі вимкнені і без пароля','kt.c.users':'Користувачі','int.title':'Інтеграції','dash.panels':'Панелі','company.title':'Компанія','company.name':'Назва','company.logo':'Логотип','company.clear':'Прибрати логотип','company.logo.big':'Лише зображення до 200 КБ','company.hint':'Видно в шапці та на екрані входу в усіх.','set.sec.access':'Компанія і доступ','set.sec.ui':'Інтерфейс','set.sec.stats':'Статистика','set.sec.bots':'Захист від ботів','menu.keitaro':'Перенесення з Keitaro','kt.title':'Перенесення з Keitaro','kt.need':'Вкажіть адресу Keitaro й API-токен нижче та натисніть «Зберегти».','kt.conn':'З’єднання','kt.check':'Перевірити з’єднання','kt.ok':'З’єднання є, кампаній:','kt.api':'Admin API v1. Версію Keitaro не визначено: ознак немає.','kt.api.ver':'Admin API v1. Keitaro {v}. Ознаки: {signs}.','kt.api.conflict':'Admin API v1. Версію Keitaro не визначено: ознаки суперечать ({signs}).','kt.sig.subid':'формат SubID','kt.sig.click_id':'click_id','kt.sig.event_id':'event_id','kt.sig.conversion_id':'conversion_id','kt.sig.event_type':'event_type','kt.sig.rebill':'тип Rebill','kt.sig.custom_type':'власний тип конверсії','kt.what':'Що переносимо','kt.domains':'Домени','kt.networks':'Партнерські мережі','kt.offers':'Офери','kt.landings':'Лендінги','kt.sources':'Джерела','kt.campaigns':'Кампанії з налаштуваннями','kt.conversions':'Конверсії','kt.clicks':'Кліки','kt.period':'Період','kt.period.global':'Поточний період','kt.period.custom':'Дати','kt.run':'Перенести','kt.one.id':'Keitaro ID кампанії','kt.one.run':'Досинк однієї кампанії','kt.one.bad':'Вкажіть додатний Keitaro ID кампанії','kt.purge':'Видалити імпортоване','kt.purge.confirm':'Видалити все, що створив перенос? Свої кампанії і каталоги залишаться.','kt.result':'Результат','kt.removed':'Видалено','kt.nolosses':'Усе перенесено без втрат','kt.c.groups':'Кампанії','kt.c.offers':'Офери','kt.c.landings':'Лендінги','kt.c.networks':'Партнерські мережі','kt.c.sources':'Джерела','kt.c.domains':'Домени','kt.c.conversions':'Конверсії','kt.c.clicks':'Кліки','kt.kind.disabled':'Вимкнено','kt.kind.skipped':'Пропущено','kt.kind.approximated':'Наближено','kt.kind.changed':'Змінено','kt.col.ref':'Об’єкт','kt.col.detail':'Подробиця','kt.busy':'Перенесення вже триває','kt.progress':'Перебіг','kt.stage.idle':'Очікування','kt.stage.snapshot':'Читання каталогів','kt.stage.streams':'Читання потоків кампаній','kt.stage.catalogs':'Запис каталогів','kt.stage.groups':'Запис кампаній','kt.stage.conversions':'Конверсії','kt.stage.clicks':'Кліки','kt.stage.done':'Готово','cron.ktsync.title':'Актуалізація даних','cron.ktsync.hint':'Довантажує кліки, конверсії та нові кампанії з їхніми налаштуваннями з останнього курсора з запасом назад; уже перенесені кампанії не чіпає.','cron.ktsync.newcamps':'нових кампаній {n}','cron.ktsync.camps.pending':'Нових кампаній у черзі','cron.ktsync.camps.deleted':'Пропущено, видалені у нас','cron.ktsync.camps.failed':'Не перенесені','cron.ktsync.camps.paused':'Нові кампанії на паузі до {time}: {reason}','cron.ktsync.off':'Keitaro не налаштовано','cron.ktsync.needkt':'Налаштуйте Keitaro в {link}.','cron.ktsync.needimport':'Спочатку потрібен повний імпорт Keitaro — {link}.','cron.ktsync.cursor.clicks':'Курсор кліків','cron.ktsync.cursor.convs':'Курсор конверсій','cron.ktsync.lag':'Відставання','cron.ktsync.last':'Останній прогін','cron.ktsync.timezone':'Час трекера випереджає сервер','cron.ktsync.noconv':'Налаштуйте Telegram вище, щоб увімкнути сповіщення про конверсії.','kt.sync.busy':'Вже йде актуалізація','kt.sync.requested':'Актуалізацію запрошено','kt.stage.failed':'Помилка','kt.stage.landing_files':'Запис файлів лендінгів','kt.stage.lists':'Запис списків','kt.stage.pages':'Запис сторінок','kt.stage.users':'Запис користувачів','err.network':'Немає зв’язку із сервером. Перевірте з’єднання і повторіть.','cf.intro':'Акаунт Cloudflare. Токен дозволяє адмінці читати зони та керувати DNS-записами і налаштуваннями доменів, що підключаються.','cf.token':'API-токен','cf.account':'Account ID','cf.ip':'Публічна IP-адреса сервера','cf.ip.empty':'EMTDS_PUBLIC_IP не задано на сервері','cf.ip.local':'Інтеграція з Cloudflare не запускається на локальній машині: потрібен сервер із публічною IP-адресою','nc.local':'Адмінка запущена на локальній машині: знайдена вихідна IP — це ваше підключення, а не сервер. Для роботи потрібен сервер із публічною IP-адресою.','cf.test':'Перевірити','cf.test.ok':'ок, зон: {n}','cf.test.fail':'Перевірка не пройшла','cf.file.err':'Помилка файлу налаштувань','cf.err.load':'Налаштування Cloudflare недоступні','cf.reg.use':'Підключити через Cloudflare — NS зміняться на Cloudflare, A-запис на {ip}','cf.reg.err':'Не вдалося налаштувати Cloudflare','cf.reg.hosterr':'Не вдалося записати DNS-записи','cf.reg.manual':'Вкажіть ці NS у реєстратора: {ns}','cf.buy.title':'Купити {domain}?','cf.buy.sum':'Домен: {domain}\nТермін: {years} р.\nЦіна: {price}\nDNS: {dns}','cf.dns.cf':'Cloudflare (NS на Cloudflare, A-запис на {ip})','cf.dns.ns':'власні NS: {ns}','cf.dns.a':'A-запис на {ip}','cf.dns.none':'DNS не змінюється','dom.state.on':'Увімкнено','dom.state.off':'Вимкнено','dom.state.pending':'Очікує оплати','dom.elsewhere':'Не спрямовано: A вказує на {ips}, потрібен {ip}','dom.elsewhere.short':'Не спрямовано: A вказує на {ips}','dom.cfpending':'Чекаємо Cloudflare: NS {ns}','dom.cfpending.short':'Чекаємо Cloudflare','dom.tls':'Сертифікат сервера відхилено','cf.connecting':'Підключення до Cloudflare…','cf.connect':'Підключити через Cloudflare','cf.connect.title':'Підключити {host} через Cloudflare?','cf.connect.ask':'У Cloudflare створюється зона, A-запис вказує на сервер. NS Cloudflare потрібно буде вказати у реєстратора.','cf.connect.ask.nc':'NS домену в Namecheap зміняться на Cloudflare, A-запис вказуватиме на сервер. Поки зона не активна, домен може бути недоступним.','cf.connect.done':'Підключено до Cloudflare, чекаємо активації зони','cf.connect.set':'NS змінено, чекаємо активації зони в Cloudflare','cf.ns.title':'Сервери імен','cf.ns.hint':'Вкажіть ці NS у реєстратора домену.','cf.ns.copy':'Копіювати','cf.ns.copied':'Скопійовано','cf.ns.select':'Скопіюйте виділений текст вручну','dom.conn.title':'Домен підключено','dom.conn.title.many':'Домени підключено','dom.conn.text':'Ці домени тепер доходять до сервера:','dom.conn.ok':'Зрозуміло','dom.conn.go':'Перейти до доменів','kt.col.count':'Скільки','kt.col.refs':'Де','kt.groups.more':'ще груп не показано:','page.open':'Відкрити сторінку','page.hint':'Вивід зберігається файлом; редагуйте його через «Відкрити сторінку».','page.missing':'Файлу ще немає; збереження створить його.','kt.c.lists':'IP-списки','kt.c.pages':'Сторінки','menu.logout':'Вийти','sig.update':'Готовий новіший коміт для встановлення','sig.down.title':'Служба не відповідає','sig.down.text':'Не відповідає: {list}. Перезапустіть сервер або цю службу. Стан і команди — у «Налаштування → {about}».','sig.down.ok':'Закрити','sig.down.go':'Відкрити «{about}»','sig.svc.engine':'рушій','sig.svc.clickhouse':'ClickHouse','sig.svc.redis':'Redis',
-'board.main':'За замовчуванням','board.switch':'Розділ','board.sections':'Розділи','board.settings':'Налаштування розділів','board.create':'Назва нового розділу','board.import':'Імпорт із виду за замовчуванням','board.empty':'У виді за замовчуванням поки нічого копіювати.','board.page.title':'Розділи','board.add':'Створити розділ','board.icon':'Іконка','board.recent':'Нещодавні','board.all':'Усі іконки','board.colors':'Колір','board.name':'Назва','board.id':'ID','board.delete':'Видалити','board.move':'Перемістити','board.delete.confirm':'Видалити цей розділ?','board.inuse':'У розділі є записи','board.saved':'Збережено','board.expand':'Склад і учасники','board.include':'Вид розділу','board.include_all':'Показувати вміст усіх розділів','board.collapse':'Згорнути','board.compose.title':'Склад','board.compose.folders':'папки','board.compose.save':'Зберегти склад','board.compose.saved':'Склад збережено','board.compose.addid':'Додати id','board.compose.add':'Додати','board.compose.search':'Пошук за id або імʼям','err.csrf':'Сесія застаріла. Оновіть сторінку.','board.people.title':'Учасники','board.people.role':'Роль','board.people.add':'Додати учасника','board.people.remove':'Прибрати','board.people.save':'Зберегти учасників','board.people.saved':'Учасників збережено','board.role.read':'Читання','board.role.edit':'Редагування','board.role.created':'Лише свої',
+'users.board.main':'Основний розділ «{name}»','users.board.main.hint':'Участь в інших розділах цю позначку не знімає.','users.board.all':'Усі розділи: акаунт бачить кожен розділ.','users.board.member':'Також за участю: {list}.','users.board.member.none':'Немає участі в інших розділах; учасників задають у налаштуваннях розділів.','users.board.empty':'Без основного розділу і без участі користувач не побачить жодного розділу.','board.none':'У вас немає доступу до жодного розділу. Попросіть адміністратора додати вас до розділу.','board.people.main':'Участь додає користувачу цей розділ. Основний розділ задається в картці користувача і тут не змінюється.','board.main':'За замовчуванням','board.switch':'Розділ','board.sections':'Розділи','board.settings':'Налаштування розділів','board.create':'Назва нового розділу','board.import':'Імпорт із виду за замовчуванням','board.empty':'У виді за замовчуванням поки нічого копіювати.','board.page.title':'Розділи','board.add':'Створити розділ','board.icon':'Іконка','board.recent':'Нещодавні','board.all':'Усі іконки','board.colors':'Колір','board.name':'Назва','board.id':'ID','board.delete':'Видалити','board.move':'Перемістити','board.delete.confirm':'Видалити цей розділ?','board.inuse':'У розділі є записи','board.saved':'Збережено','board.expand':'Склад і учасники','board.include':'Вид розділу','board.include_all':'Показувати вміст усіх розділів','board.collapse':'Згорнути','board.compose.title':'Склад','board.compose.folders':'папки','board.compose.save':'Зберегти склад','board.compose.saved':'Склад збережено','board.compose.addid':'Додати id','board.compose.add':'Додати','board.compose.search':'Пошук за id або імʼям','err.csrf':'Сесія застаріла. Оновіть сторінку.','board.people.title':'Учасники','board.people.role':'Роль','board.people.add':'Додати учасника','board.people.remove':'Прибрати','board.people.save':'Зберегти учасників','board.people.saved':'Учасників збережено','board.role.read':'Читання','board.role.edit':'Редагування','board.role.created':'Лише свої',
 'period.today':'Сьогодні','period.yesterday':'Вчора','period.week':'Поточний тиждень','period.7d':'Останні 7 днів','period.month':'Поточний місяць','period.prevmonth':'Попередній місяць','period.30d':'Останні 30 днів','period.year':'Поточний рік','period.all':'За весь час','period.dates':'Інтервал дат','period.times':'Інтервал часу','period.need':'Вкажіть обидва краї інтервалу',
 'settings.country':'Країна','settings.lang':'Мова інтерфейсу','settings.search':'Знайти країну','settings.geo':'Джерело країни для нової кампанії','settings.geo.cf':'Заголовок CDN','settings.geo.db':'Гео-база','settings.hint':'Пошук одразу за кодом і за англійською, російською та українською назвою.','settings.tz':'Часовий пояс статистики','settings.tz.find':'Знайти часовий пояс','settings.tz.hint':'Періоди й час у звітах рахуються в цьому поясі. Пояс самого відвідувача не змінюється.',
 'flows.title':'Кампанії','dirty.title':'Незбережені зміни:','dirty.flow':'Кампанія','dirty.removed':'Видалено: {n}','dirty.all':'Показати всі','dirty.less':'Згорнути','flow.compact':'Компактний вигляд','flow.expanded':'Докладний вигляд','flow.traffic.off':'Сортування за трафіком: вимк','flow.traffic.desc':'Сортування за трафіком: більше зверху','flow.traffic.asc':'Сортування за трафіком: менше зверху','flow.traffic.lock':'Вимкніть сортування за трафіком, щоб змінювати порядок','flows.table':'Таблиця','flows.cards':'Картки','flows.search':'Пошук кампаній і потоків…','flows.new':'Нова кампанія','flows.bulk.on':'Увімкнути','flows.bulk.off':'Вимкнути','flows.bulk.dup':'Дублювати','flows.bulk.del':'Видалити','flows.bulk.n':'обрано','flows.col.id':'Кампанія','flows.col.num':'ID','flows.col.name':'Назва кампанії','flows.col.url':'URL','flows.col.streams':'Потоки','flows.page':'На сторінці','flows.page.custom':'Своє','flows.state':'Стан','flows.state.all':'Усі','flows.state.on':'Увімкнені','flows.state.off':'Вимкнені','flows.state.hits':'З візитами','flows.state.any':'Усі стани','flows.source.all':'Усі джерела','flows.nosource':'Без джерела','flows.nofolder':'Без групи','flows.sum':'Разом','flows.sum.sel':'Обрані','flows.visits':'візити','flows.bots':'боти','flows.conv':'конверсії','flows.profit':'прибуток','flows.nostreams':'Немає потоків — кожен відвідувач отримує відповідь за замовчуванням','flows.more':'ще','flows.streams':'потоків','flows.log.clicks':'Лог кліків','flows.log.conv':'Лог конверсій','tester.ip':'IP-адреса','tester.country':'Країна','tester.lang':'Мова','tester.referer':'Реферер','tester.key':'Ключове слово','tester.query':'Параметри URL','tester.hint':'Бере кампанії з екрана, збережені чи ні. Ліміти показів, перевірка ботів і антифлуд залежать від живого трафіку і тут не рахуються.','src.title':'Джерела трафіку','src.new':'Нове джерело','src.our':'Ім’я у нас','src.theirs':'Ім’я в посиланні','src.empty':'Джерел ще немає','src.link':'Посилання кампанії','log.traffic':'Трафік','log.postbacks':'Postbacks і S2S','log.system':'Системний','log.outcome':'Результат','log.direction':'Напрям','rep.title':'Звіт','rep.csv':'Завантажити CSV','rep.empty':'За цей період порожньо',
@@ -11906,14 +11917,103 @@ function outHTML(red,out,rows){
 const linkTargets=(g)=>{const t=new Set();if(g.redirect==='group'&&g.out)t.add(g.out.trim());(g.streams||[]).forEach(s=>{if((s.out||{}).redirect==='group'&&s.out.out)t.add(s.out.out.trim())});return [...t]};
 const groupById=(id)=>(GROUPS||[]).find(g=>g.id===id||(g.aliases||[]).includes(id))||null;
 
+/** GROUPS_LOAD is the GET /api/groups request in flight with its section: {board, rows}, so pages of one
+ * section that ask at once share one download. */
+let GROUPS_LOAD=null;
+/** ensureGroups loads the campaigns into GROUPS once, or again on refresh while nothing is unsaved.
+ * An answer for a section the tab has left is dropped and the list is read for the current section.
+ * @param {boolean} [refresh] read the list again when there is no unsaved campaign edit
+ * @returns {Promise<object[]>} GROUPS
+ * @throws {Error} the request error
+ */
 async function ensureGroups(refresh){
   if(GROUPS===null||(refresh&&!flowsDirty())){
-    const gs=await call('GET','/api/groups');
+    const board=boardEffectiveId();
+    if(!GROUPS_LOAD||GROUPS_LOAD.board!==board){
+      const load={board, rows:fetchGroupRows({board}).finally(()=>{if(GROUPS_LOAD===load) GROUPS_LOAD=null})};
+      GROUPS_LOAD=load;
+    }
+    const gs=await GROUPS_LOAD.rows;
+    if(board!==boardEffectiveId()) return ensureGroups(refresh);
     if(refresh&&flowsDirty()) return GROUPS;
-    GROUPS=Array.isArray(gs)?gs:[];
+    GROUPS=gs;
     snapshotGroups();
   }
   return GROUPS;
+}
+/** fetchGroupRows reads the campaigns in the shared form and puts the long list filters back.
+ * @param {object} [opts] call options, for example the board override
+ * @returns {Promise<object[]>} campaigns
+ * @throws {Error} the request error
+ */
+async function fetchGroupRows(opts){
+  return groupRows(await call('GET','/api/groups?shared=1',undefined,opts));
+}
+/** SHARED_LISTS keeps each long list filter read from GET /api/groups?shared=1 by token: {raw, values}.
+ * SHARED_RAW maps a raw text and SHARED_VALUES a values array to its token. A campaign snapshot names
+ * a kept list by token instead of copying it, so thousands of streams with one list hold one copy. */
+const SHARED_LISTS=new Map(), SHARED_RAW=new Map(), SHARED_VALUES=new Map();
+/** sharedListEntry keeps one list of the shared answer; a list with the same raw and values read before is reused.
+ * @param {{raw?:string,values?:string[]}} l list from the answer
+ * @returns {{raw:string,values:string[]}} the kept list
+ */
+function sharedListEntry(l){
+  const raw=String(l&&l.raw||''), values=Array.isArray(l&&l.values)?l.values.map(String):[];
+  const known=SHARED_RAW.has(raw)?SHARED_LISTS.get(SHARED_RAW.get(raw)):null;
+  if(known&&known.values.length===values.length&&known.values.every((v,i)=>v===values[i])) return known;
+  const token='\u0000list'+SHARED_LISTS.size, entry={raw,values};
+  SHARED_LISTS.set(token, entry);
+  if(raw&&!SHARED_RAW.has(raw)) SHARED_RAW.set(raw, token);
+  if(values.length) SHARED_VALUES.set(values, token);
+  return entry;
+}
+/** groupRows turns a GET /api/groups answer into the campaign array. In the shared form every ref gives its
+ * stream a filter object of its own flag over the kept raw and values; a plain array is returned as is.
+ * The kept values arrays are shared between streams and must not be changed in place.
+ * @param {*} r answer of GET /api/groups or GET /api/groups?shared=1
+ * @returns {object[]} campaigns; [] for any other value
+ */
+function groupRows(r){
+  if(Array.isArray(r)) return r;
+  if(!r||!Array.isArray(r.groups)) return [];
+  const lists=(Array.isArray(r.lists)?r.lists:[]).map(sharedListEntry);
+  for(const ref of Array.isArray(r.refs)?r.refs:[]){
+    const [gi,si,key,li]=Array.isArray(ref)?ref:[];
+    const s=r.groups[gi]&&(r.groups[gi].streams||[])[si], l=lists[li];
+    if(!s||!l||typeof key!=='string') continue;
+    s.rules=s.rules||{};
+    const f={flag:+(s.rules[key]&&s.rules[key].flag)||0};
+    if(l.raw) f.raw=l.raw;
+    if(l.values.length) f.values=l.values;
+    s.rules[key]=f;
+  }
+  return r.groups;
+}
+/** groupJSON is the snapshot text of a campaign: its JSON with each kept long list written as its token.
+ * @param {object} g campaign
+ * @returns {string} JSON text that groupParse reads back
+ */
+function groupJSON(g){
+  if(!SHARED_LISTS.size) return JSON.stringify(g);
+  return JSON.stringify(g,(k,v)=>{
+    if(typeof v==='string') return v&&SHARED_RAW.has(v)?SHARED_RAW.get(v)+'r':v;
+    if(Array.isArray(v)&&SHARED_VALUES.has(v)) return SHARED_VALUES.get(v)+'v';
+    return v;
+  });
+}
+/** groupParse reads a groupJSON text back, putting the kept lists in place of their tokens.
+ * @param {string} json text from groupJSON
+ * @returns {object} campaign
+ * @throws {SyntaxError} broken JSON
+ */
+function groupParse(json){
+  if(!SHARED_LISTS.size) return JSON.parse(json);
+  return JSON.parse(json,(k,v)=>{
+    if(typeof v!=='string'||v.charCodeAt(0)!==0) return v;
+    const e=SHARED_LISTS.get(v.slice(0,-1)), kind=v.slice(-1);
+    if(!e) return v;
+    return kind==='r'?e.raw:kind==='v'?e.values:v;
+  });
 }
 /** saveFlows writes campaigns. Ids and aliases are checked first; a bad one throws before any request.
  * Few unchanged-id edits go one by one: DELETE, then PUT in list order. A 404 on DELETE counts as done.
@@ -11965,7 +12065,7 @@ async function saveFlows(){
     if(!DIRTY.has(g)) continue;
     await call('PUT','/api/groups/'+encodeURIComponent(g.id),g);
     DIRTY.delete(g);
-    SNAP.set(g,{id:g.id,json:JSON.stringify(g)});
+    SNAP.set(g,{id:g.id,json:groupJSON(g)});
   }
   snapshotGroups();
 }
@@ -12200,16 +12300,16 @@ async function clearCampaignFolder(name){
       markDirty(g);
       continue;
     }
-    const saved=JSON.parse(prev.json);
+    const saved=groupParse(prev.json);
     delete saved.folder;
     await call('PUT','/api/groups/'+encodeURIComponent(prev.id), saved);
     const dirty=DIRTY.has(g);
     delete g.folder;
-    if(!dirty) SNAP.set(g,{id:g.id,json:JSON.stringify(g)});
+    if(!dirty) SNAP.set(g,{id:g.id,json:groupJSON(g)});
     else{
-      const snap=JSON.parse(prev.json);
+      const snap=groupParse(prev.json);
       delete snap.folder;
-      SNAP.set(g,{id:prev.id,json:JSON.stringify(snap)});
+      SNAP.set(g,{id:prev.id,json:groupJSON(snap)});
     }
     markDirty(g);
   }
@@ -19366,9 +19466,50 @@ function userFormHTML(u, withPassword){
     ${pw}
     <div class="fld"><label>${esc(tr('users.type'))}</label><select id="u-type"><option value="USER"${typ==='USER'?' selected':''}>${esc(tr('users.role.user'))}</option><option value="ADMIN"${typ==='ADMIN'?' selected':''}>${esc(tr('users.role.admin'))}</option></select></div>
     <div class="fld" id="u-role-box"${typ==='ADMIN'?' hidden':''}><label>${esc(tr('users.rolename'))}</label><select id="u-role" data-pick${choices.length?'':' disabled'}>${opt('',tr('users.role.own'),u.role_id||'')}${choices.map(r=>opt(r.id,r.name||tr('users.role.lost'),u.role_id||'')).join('')}</select><p class="hint">${esc(tr('users.role.hint'))}</p></div>
+    ${userBoardsHTML(u)}
     <label class="tog"><input type="checkbox" id="u-on"${enabled?' checked':''}> ${esc(tr('users.enabled'))}</label>
     <div class="fld"><label>${esc(tr('users.lang'))}</label><select id="u-lang"><option value="">${esc(tr('acc.none'))}</option><option value="ru"${lang==='ru'?' selected':''}>ru</option><option value="en"${lang==='en'?' selected':''}>en</option><option value="uk"${lang==='uk'?' selected':''}>uk</option></select></div>
     <div class="fld"><label>${esc(tr('users.tz'))}</label><div class="tags flt-val"><input id="u-tz" class="tin" value="" data-tz-init="${esc((u.prefs&&u.prefs.tz)||'')}" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="u-tz-list" aria-autocomplete="list"><span class="flt-chev" aria-hidden="true">${icon('down')}</span></div></div>`;
+}
+/** userBoardAccess describes the sections a users.json row may open, for the user dialog.
+ * @param {object|null} u user row with type, all_boards, no_main_board and board_ids
+ * @param {Array} boards section rows from GET /api/boards
+ * @returns {{all:boolean, main:boolean, member:string[]}} all is true for an administrator or an all-sections account;
+ *   main is the main-section mark; member names the other sections the user joined, in section order
+ */
+function userBoardAccess(u, boards){
+  u=u||{};
+  const ids=new Set((Array.isArray(u.board_ids)?u.board_ids:[]).map(boardNormId).filter(Boolean));
+  const member=(Array.isArray(boards)?boards:[]).filter(b=>b&&ids.has(boardNormId(b.id))).map(b=>b.name?String(b.name):String(b.id));
+  return {all:u.type==='ADMIN'||!!u.all_boards, main:!u.no_main_board, member};
+}
+/** userBoardsHTML builds the sections block of the user dialog: the main-section mark and the sections by membership.
+ * @param {object} u user row; an empty object when creating
+ * @returns {string} HTML; an administrator gets a ticked, locked mark and the all-sections note
+ */
+function userBoardsHTML(u){
+  const acc=userBoardAccess(u, BOARDS.items);
+  const member=acc.member.length?trFill('users.board.member',{list:acc.member.join(', ')}):tr('users.board.member.none');
+  return `<div class="fld" id="u-boards"><label>${esc(tr('board.sections'))}</label>
+    <div><label class="tog"><input type="checkbox" id="u-main" data-main="${acc.main?1:0}" data-member="${acc.member.length}"${acc.main||acc.all?' checked':''}${acc.all?' disabled':''}> ${esc(trFill('users.board.main',{name:tr('board.main')}))}</label></div>
+    <p class="hint" id="u-boards-all"${acc.all?'':' hidden'}>${esc(tr('users.board.all'))}</p>
+    <p class="hint" id="u-boards-member"${acc.all?' hidden':''}>${esc(member)} ${esc(tr('users.board.main.hint'))}</p>
+    <p class="hint bad" id="u-boards-empty"${acc.all||acc.main||acc.member.length?' hidden':''}>${esc(tr('users.board.empty'))}</p></div>`;
+}
+/** syncUserBoards updates the sections block after the type or the main-section mark changes.
+ * @param {Element} el the user dialog
+ * @param {boolean} [allBoards] true for an all-sections account, which sees every section whatever the type
+ * @returns {void}
+ */
+function syncUserBoards(el, allBoards){
+  const main=q('#u-main',el), type=q('#u-type',el);
+  if(!main||!type) return;
+  const all=type.value==='ADMIN'||!!allBoards;
+  if(all!==main.disabled) main.checked=all||main.dataset.main==='1';
+  main.disabled=all;
+  q('#u-boards-all',el).hidden=!all;
+  q('#u-boards-member',el).hidden=all;
+  q('#u-boards-empty',el).hidden=all||main.checked||Number(main.dataset.member)>0;
 }
 /** wireUserFormCombos binds timezone combobox on a user create/edit dialog. */
 function wireUserFormCombos(box){
@@ -19382,13 +19523,15 @@ function wireUserFormCombos(box){
  * @param {Element} box dialog root
  * @param {boolean} withPassword true when creating: require the password and include it in the body
  * @param {string} [roleBefore] role id stored for the user; role_id is sent only when the choice differs
- * @returns {{login:string,type:string,enabled:boolean,prefs:{lang:string,tz:string},password?:string,role_id?:string}} no access is ever part of it
+ * @returns {{login:string,type:string,enabled:boolean,prefs:{lang:string,tz:string},no_main_board:boolean,password?:string,role_id?:string}} no access is ever part of it; no_main_board is true only for a USER with the main-section mark cleared
  */
 function readUserForm(box, withPassword, roleBefore){
   const login=(q('#u-login',box).value||'').trim();
   const tzInp=q('#u-tz',box);
   const tz=tzInp?tzInputValidate(tzInp):'';
+  const main=q('#u-main',box);
   const body={login, type:q('#u-type',box).value||'USER', enabled:!!(q('#u-on',box)&&q('#u-on',box).checked), prefs:{lang:(q('#u-lang',box).value||'').trim(), tz}};
+  body.no_main_board=body.type!=='ADMIN'&&!!main&&!main.disabled&&!main.checked;
   const sel=q('#u-role',box);
   Object.assign(body, userRoleField(body.type, sel&&!sel.disabled?sel.value:(roleBefore||''), roleBefore||'', !!withPassword));
   if(withPassword){
@@ -19409,15 +19552,20 @@ function openUserCreate(){
   }, tr('Create'));
   bindUserForm(FORM&&FORM.el);
 }
-/** bindUserForm hides the role choice while the type is administrator, who has full access and no role.
+/** bindUserForm hides the role choice while the type is administrator, who has full access and no role,
+ * and keeps the sections block in step with the type and the main-section mark.
  * @param {Element|null} el the formModal element
+ * @param {object} [u] the edited user row; omitted when creating
  * @returns {void}
  */
-function bindUserForm(el){
+function bindUserForm(el, u){
   const type=el&&q('#u-type',el), box=el&&q('#u-role-box',el);
   if(el) wireUserFormCombos(el);
   if(!type||!box) return;
-  type.onchange=()=>{box.hidden=type.value==='ADMIN'};
+  const allBoards=!!(u&&u.all_boards);
+  type.onchange=()=>{box.hidden=type.value==='ADMIN'; syncUserBoards(el, allBoards)};
+  const main=q('#u-main',el);
+  if(main) main.onchange=()=>syncUserBoards(el, allBoards);
 }
 /** openUserEdit opens a dialog and PUT /api/users/{id}.
  * @param {object} u user row
@@ -19429,7 +19577,7 @@ function openUserEdit(u){
     toast(tr('users.saved'));
     await usersPage();
   });
-  bindUserForm(FORM&&FORM.el);
+  bindUserForm(FORM&&FORM.el, u);
 }
 /** openUserPassword sets a new password via PUT /api/users/{id}/password.
  * @param {object} u user row
@@ -19566,11 +19714,12 @@ function bindAccessEditor(el){
   });
 }
 /** loadAccessCatalog reads the records an access editor lets the admin pick for the selected and created modes.
+ * The campaigns come from ensureGroups, so the editor shares the loaded list and its request in flight.
  * @returns {Promise<{campaigns:object[],offers:object[],landings:object[],sources:object[],networks:object[],domains:object[]}>} one list per grant resource; a request error is thrown
  */
 async function loadAccessCatalog(){
   const lists=await Promise.all([
-    call('GET','/api/groups'),
+    ensureGroups(),
     call('GET','/api/offers'),
     call('GET','/api/landings'),
     call('GET','/api/traffic-sources'),

@@ -42,7 +42,8 @@ func NewFileGroups(path string) *FileGroups { return &FileGroups{path: path} }
 // The context is accepted for the GroupsStore signature and is not used.
 // The result is a copy of the top-level slice. Nested slices such as Streams
 // are shared with the cache: handlers do not mutate them in place; they
-// replace the group as a whole.
+// replace the group as a whole. Equal long list filters of the streams share
+// one Raw string and one Values slice (config.ShareListFilters).
 // A missing file returns an empty slice and a nil error.
 // It returns an error when the file cannot be read or the JSON is invalid.
 func (f *FileGroups) List(context.Context) ([]config.Group, error) {
@@ -72,6 +73,7 @@ func (f *FileGroups) List(context.Context) ([]config.Group, error) {
 	if err := json.Unmarshal(b, &groups); err != nil {
 		return nil, err
 	}
+	config.ShareListFilters(groups)
 	f.cache = groups
 	f.stamp.mod = info.ModTime()
 	f.stamp.size = info.Size()

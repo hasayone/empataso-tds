@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,8 +201,8 @@ func TestBoardMembershipNeverNarrowsFullAccess(t *testing.T) {
 		{UserID: "lim", Role: config.BoardRoleEdit},
 	})
 	everyAll("added")
-	if got := boardIDsSeen(t, lim, hs.URL); len(got) != 1 || got[0] != "seo" {
-		t.Fatalf("limited user sees %v, want only seo", got)
+	if got := boardIDsSeen(t, lim, hs.URL); !slices.Equal(got, []string{config.MainBoardID, "seo"}) {
+		t.Fatalf("limited user sees %v, want main and seo", got)
 	}
 	if resp, _ := boardGet(t, lim, hs.URL+"/api/groups", "aso"); resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("limited user opens aso: %d", resp.StatusCode)
@@ -212,8 +214,141 @@ func TestBoardMembershipNeverNarrowsFullAccess(t *testing.T) {
 
 	putBoardMembers(t, owner, hs.URL, csrf, "seo", []config.BoardMember{{UserID: "lim", Role: config.BoardRoleEdit}})
 	everyAll("removed")
-	if got := boardIDsSeen(t, lim, hs.URL); len(got) != 1 || got[0] != "seo" {
+	if got := boardIDsSeen(t, lim, hs.URL); !slices.Equal(got, []string{config.MainBoardID, "seo"}) {
 		t.Fatalf("limited user after removal of others sees %v", got)
+	}
+}
+
+// putUser patches user id through PUT /api/users/{id} as the signed-in owner and returns the stored record.
+func putUser(t *testing.T, c *http.Client, base, csrf, id string, body map[string]any) security.User {
+	t.Helper()
+	resp, raw := boardJSON(t, c, http.MethodPut, base+"/api/users/"+id, "", csrf, body)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("put user %s: %d %s", id, resp.StatusCode, raw)
+	}
+	var u security.User
+	if err := json.Unmarshal(raw, &u); err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
+func TestBoardMembershipKeepsMainSection(t *testing.T) {
+	full := security.Access{Sections: sectionStrings(userSections)}
+	usersPath := filepath.Join(t.TempDir(), "users.json")
+	hs, srv := boardTestServer(t, &boardMemGroups{}, usersPath, func(s *Server) {
+		_ = s.users.Add(security.User{ID: "old", Login: "old", Hash: mustHash(t, "p@ss"), Enabled: true, Type: security.UserRegular, Access: full})
+	})
+	owner, csrf := boardLogin(t, hs.URL, "admin", "p@ss")
+	old, _ := boardLogin(t, hs.URL, "old", "p@ss")
+	sees := func(step string, want ...string) {
+		t.Helper()
+		if got := boardIDsSeen(t, old, hs.URL); !slices.Equal(got, want) {
+			t.Fatalf("%s: sees %v, want %v", step, got, want)
+		}
+	}
+	status := func(board string) int {
+		t.Helper()
+		resp, _ := boardGet(t, old, hs.URL+"/api/groups", board)
+		return resp.StatusCode
+	}
+
+	sees("record without the flag", config.MainBoardID)
+	putBoardMembers(t, owner, hs.URL, csrf, "seo", []config.BoardMember{{UserID: "old", Role: config.BoardRoleEdit}})
+	sees("added to seo", config.MainBoardID, "seo")
+	if u, _ := srv.userByID("old"); u.NoMainBoard || !slices.Equal(u.BoardIDs, []string{"seo"}) {
+		t.Fatalf("after add: no_main_board=%v board_ids=%v", u.NoMainBoard, u.BoardIDs)
+	}
+	if code := status("aso"); code != http.StatusForbidden {
+		t.Fatalf("foreign section aso: %d", code)
+	}
+
+	putBoardMembers(t, owner, hs.URL, csrf, "main", []config.BoardMember{{UserID: "old", Role: config.BoardRoleRead}})
+	if u, _ := srv.userByID("old"); !slices.Equal(u.BoardIDs, []string{"seo"}) {
+		t.Fatalf("main membership leaked into board_ids: %v", u.BoardIDs)
+	}
+	putBoardMembers(t, owner, hs.URL, csrf, "main", nil)
+
+	putBoardMembers(t, owner, hs.URL, csrf, "seo", nil)
+	sees("removed from seo", config.MainBoardID)
+
+	putBoardMembers(t, owner, hs.URL, csrf, "seo", []config.BoardMember{{UserID: "old", Role: config.BoardRoleEdit}})
+	if u := putUser(t, owner, hs.URL, csrf, "old", map[string]any{"no_main_board": true}); !u.NoMainBoard {
+		t.Fatal("no_main_board not stored")
+	}
+	sees("main unticked", "seo")
+	if code := status("main"); code != http.StatusForbidden {
+		t.Fatalf("main after untick: %d", code)
+	}
+	if code := status(""); code != http.StatusOK {
+		t.Fatalf("empty header falls back to seo: %d", code)
+	}
+
+	putBoardMembers(t, owner, hs.URL, csrf, "aso", []config.BoardMember{{UserID: "old", Role: config.BoardRoleRead}})
+	if u, _ := srv.userByID("old"); !u.NoMainBoard {
+		t.Fatal("membership sync cleared no_main_board")
+	}
+
+	putBoardMembers(t, owner, hs.URL, csrf, "seo", nil)
+	putBoardMembers(t, owner, hs.URL, csrf, "aso", nil)
+	sees("no section")
+	for _, board := range []string{"", "main", "seo"} {
+		resp, raw := boardGet(t, old, hs.URL+"/api/groups", board)
+		if resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("no section, groups %q: %d", board, resp.StatusCode)
+		}
+		if board == "" && !strings.Contains(string(raw), errNoBoards) {
+			t.Fatalf("no section answer: %s", raw)
+		}
+	}
+	resp, raw := boardGet(t, old, hs.URL+"/api/me", "seo")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("me without sections: %d %s", resp.StatusCode, raw)
+	}
+	var me meResponse
+	if err := json.Unmarshal(raw, &me); err != nil {
+		t.Fatal(err)
+	}
+	if len(me.Boards) != 0 || me.Current != "" {
+		t.Fatalf("me without sections: boards=%v current=%q", me.Boards, me.Current)
+	}
+
+	putUser(t, owner, hs.URL, csrf, "old", map[string]any{"no_main_board": false})
+	sees("main ticked again", config.MainBoardID)
+
+	reloaded, err := security.LoadUserSet(usersPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := reloaded.Get("old"); u.NoMainBoard || len(u.BoardIDs) != 0 {
+		t.Fatalf("stored record: %+v", u)
+	}
+}
+
+func TestUserMainBoardFlagAdminDropped(t *testing.T) {
+	hs, srv := boardTestServer(t, &boardMemGroups{}, "", func(s *Server) {
+		_ = s.users.Add(security.User{ID: "adm", Login: "tofan", Hash: mustHash(t, "p@ss"), Enabled: true, Type: security.UserAdmin})
+	})
+	owner, csrf := boardLogin(t, hs.URL, "admin", "p@ss")
+	if u := putUser(t, owner, hs.URL, csrf, "adm", map[string]any{"no_main_board": true}); u.NoMainBoard {
+		t.Fatal("administrator kept no_main_board")
+	}
+	resp, raw := boardJSON(t, owner, http.MethodPost, hs.URL+"/api/users", "", csrf, map[string]any{
+		"login": "nomain", "password": "secret1", "type": "USER", "enabled": true, "no_main_board": true,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("create: %d %s", resp.StatusCode, raw)
+	}
+	var created security.User
+	if err := json.Unmarshal(raw, &created); err != nil {
+		t.Fatal(err)
+	}
+	if u, _ := srv.userByID(created.ID); !u.NoMainBoard {
+		t.Fatal("create dropped no_main_board for a USER")
+	}
+	tofan, _ := boardLogin(t, hs.URL, "tofan", "p@ss")
+	if got := boardIDsSeen(t, tofan, hs.URL); len(got) != 3 {
+		t.Fatalf("administrator sees %v, want every section", got)
 	}
 }
 

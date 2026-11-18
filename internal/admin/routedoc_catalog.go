@@ -328,6 +328,12 @@ func campaignCoreDocs() map[string]routeDoc {
 				Summary:     "Список кампаній.",
 				Description: "Повертає всі кампанії (групи), доступні викликачу, разом із потоками.",
 			},
+			Query: []queryParam{strQ("shared", "1 returns {groups, lists, refs}: every long list filter of a stream (1 KB of text or more) is cut down to its flag, "+
+				"lists holds each distinct one once as {raw, values}, and each refs entry [group index, stream index, rules key, lists index] puts it back.").
+				loc("1 возвращает {groups, lists, refs}: каждый длинный списочный фильтр потока (от 1 КБ текста) урезан до флага, "+
+					"lists хранит каждый различный список один раз как {raw, values}, а запись refs [индекс кампании, индекс потока, ключ в rules, индекс в lists] возвращает его на место.",
+					"1 повертає {groups, lists, refs}: кожен довгий списковий фільтр потоку (від 1 КБ тексту) урізано до прапорця, "+
+						"lists зберігає кожен різний список один раз як {raw, values}, а запис refs [індекс кампанії, індекс потоку, ключ у rules, індекс у lists] повертає його на місце.")},
 			Response: []any{campaignSample},
 			Errors:   []int{500},
 		},
@@ -661,16 +667,19 @@ func boardDocs() map[string]routeDoc {
 		"GET /api/boards": {
 			ID: "list_boards", Summary: "List the panel sections (boards) the caller may see.", MCP: mcpRead,
 			Description: "Returns the sections the caller may open, the current section, the default one and whether the caller can switch between them. " +
-				"The section of a request comes from the X-Emtds-Board header.",
+				"The section of a request comes from the X-Emtds-Board header. A user who may open no section gets empty items, current and default_id; " +
+				"the section data routes then answer 403 no boards.",
 			RU: docText{
 				Summary: "Список разделов панели (boards), доступных вызывающему.",
 				Description: "Возвращает разделы, которые вызывающий может открыть, текущий и стандартный разделы и признак, можно ли между ними переключаться. " +
-					"Раздел запроса берётся из заголовка X-Emtds-Board.",
+					"Раздел запроса берётся из заголовка X-Emtds-Board. Пользователь без доступных разделов получает пустые items, current и default_id; " +
+					"маршруты с данными раздела тогда отвечают 403 no boards.",
 			},
 			UK: docText{
 				Summary: "Список розділів панелі (boards), доступних викликачу.",
 				Description: "Повертає розділи, які викликач може відкрити, поточний і типовий розділи та ознаку, чи можна між ними перемикатися. " +
-					"Розділ запиту береться із заголовка X-Emtds-Board.",
+					"Розділ запиту береться із заголовка X-Emtds-Board. Користувач без доступних розділів отримує порожні items, current і default_id; " +
+					"маршрути з даними розділу тоді відповідають 403 no boards.",
 			},
 			Response: map[string]any{
 				"items": []any{
@@ -758,16 +767,19 @@ func boardDocs() map[string]routeDoc {
 		"PUT /api/boards/{id}/members": {
 			ID: "set_board_members", Summary: "Replace the members of a panel section.",
 			Description: "Replaces the member list of the section; each member is a user id with the role read, edit or created, listed once. " +
-				"The board list of each affected user is updated. Needs the boards key action. Administrators only. The answer is the section with its members.",
+				"The board_ids of each affected user is rebuilt from the sections other than the main one where the user is a member; " +
+				"the main section of a user (no_main_board) never changes here. Needs the boards key action. Administrators only. The answer is the section with its members.",
 			RU: docText{
 				Summary: "Заменить участников раздела панели.",
 				Description: "Заменяет список участников раздела; участник — id пользователя с ролью read, edit или created, каждый один раз. " +
-					"Список разделов каждого затронутого пользователя обновляется. Нужна галочка ключа boards. Только для администраторов. Ответ — раздел с участниками.",
+					"board_ids каждого затронутого пользователя пересобирается из разделов, кроме основного, где он участник; " +
+					"основной раздел пользователя (no_main_board) здесь не меняется. Нужна галочка ключа boards. Только для администраторов. Ответ — раздел с участниками.",
 			},
 			UK: docText{
 				Summary: "Замінити учасників розділу панелі.",
 				Description: "Замінює список учасників розділу; учасник — id користувача з роллю read, edit або created, кожен один раз. " +
-					"Список розділів кожного зачепленого користувача оновлюється. Потрібна позначка ключа boards. Лише для адміністраторів. Відповідь — розділ з учасниками.",
+					"board_ids кожного зачепленого користувача перебудовується з розділів, крім основного, де він учасник; " +
+					"основний розділ користувача (no_main_board) тут не змінюється. Потрібна позначка ключа boards. Лише для адміністраторів. Відповідь — розділ з учасниками.",
 			},
 			Body:    objectBody("Members. Field: members, a list of {user_id, role}."),
 			Example: map[string]any{"members": []any{map[string]any{"user_id": "u1", "role": "edit"}}},

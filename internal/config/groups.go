@@ -31,6 +31,7 @@ func index(list []Group) (map[string]*Group, map[string]*Group) {
 }
 
 // LoadGroups reads groups from a JSON file (an array of Group).
+// Equal long list filters of the streams share one copy (ShareListFilters).
 func LoadGroups(path string) (*Groups, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -40,6 +41,7 @@ func LoadGroups(path string) (*Groups, error) {
 	if err := json.Unmarshal(b, &list); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
+	ShareListFilters(list)
 	byID, byAlias := index(list)
 	return &Groups{byID: byID, byAlias: byAlias}, nil
 }

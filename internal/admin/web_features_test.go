@@ -1207,8 +1207,8 @@ func TestSpaBoardInclude(t *testing.T) {
 		t.Errorf("board.include defined %d times, want one per language", n)
 	}
 	cat := spaFunctionLine(html, "boardPanelFetchCatalog")
-	must(t, cat, "boardRowsMain(r)", "composition keeps main rows from the wide list")
-	must(t, cat, "out.sec[k]=Array.isArray(r)?r:[]", "the section's own rows are not cut")
+	must(t, cat, "boardRowsMain(groupRows(r))", "composition keeps main rows from the wide list")
+	must(t, cat, "out.sec[k]=groupRows(r)", "the section's own rows are not cut")
 	must(t, spaFunctionLine(html, "openBoardImport"), "boardRowsMain(", "import copies only the default section")
 	must(t, spaFunctionLine(html, "boardPickRows"), "keep.has(id)", "a chosen id from another section stays")
 	must(t, spaFunctionLine(html, "offerSelect"), "boardPickRows(OFFERS, CUR, id)", "offers stay in the campaign section")

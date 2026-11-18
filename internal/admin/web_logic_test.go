@@ -1545,7 +1545,8 @@ func TestSaveBarSettleLogic(t *testing.T) {
 	html := spaSource()
 	var src strings.Builder
 	src.WriteString("const SNAP=new Map(), DIRTY=new Set(); let synced=0; function syncSaveBar(){synced++}\n")
-	for _, name := range []string{"markDirty", "settleGroups"} {
+	src.WriteString(sharedListsDecl)
+	for _, name := range []string{"groupJSON", "markDirty", "settleGroups"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -1602,7 +1603,8 @@ func TestEnsureNumsBaseline(t *testing.T) {
 	html := spaSource()
 	var src strings.Builder
 	src.WriteString("const SNAP=new Map(), DIRTY=new Set(); let GROUPS=null; let synced=0; function syncSaveBar(){synced++}\n")
-	for _, name := range []string{"markDirty", "settleGroups", "nextNum", "ensureNums"} {
+	src.WriteString(sharedListsDecl)
+	for _, name := range []string{"groupJSON", "markDirty", "settleGroups", "nextNum", "ensureNums"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)

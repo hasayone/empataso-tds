@@ -46,8 +46,23 @@ func boardsAllFrom(ctx context.Context) bool {
 	return true
 }
 
+// boardFreeRoutes lists the account routes that do not read section data. They answer
+// a session that may open no section, and a header naming a closed section falls back
+// to the user default there, so the panel can still load the account and the section list.
+var boardFreeRoutes = map[string]bool{
+	"GET /api/me": true, "POST /api/logout": true, "POST /api/password": true,
+	"GET /api/me/views": true, "PUT /api/me/views": true, "GET /api/boards": true,
+	"GET /api/ui": true, "GET /api/log-fields": true,
+}
+
+// errNoBoards is the 403 text for a session that may open no section.
+const errNoBoards = "no boards"
+
 // boardScope resolves the request section from X-Emtds-Board and stores it in ctx.
-// A header naming a section the session may not open answers 403. An empty header uses the user default.
+// A header naming a section the session may not open answers 403, except on a
+// boardFreeRoutes pattern, where the user default is used. An empty header uses the
+// user default. A session that may open no section answers 403 "no boards" on every
+// other route; on a boardFreeRoutes pattern its current section is empty.
 func (s *Server) boardScope(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		sess := sessionFrom(r.Context())
@@ -56,24 +71,31 @@ func (s *Server) boardScope(next http.Handler) http.Handler {
 			writeErr(w, http.StatusInternalServerError, "boards error")
 			return
 		}
-		raw := requestBoard(r)
+		free := boardFreeRoutes[r.Pattern]
 		current := meta.defaultID
-		if raw != "" {
+		if raw := requestBoard(r); raw != "" {
 			want := config.NormalizeBoardID(raw)
-			if !meta.canOpen(want) {
+			switch {
+			case meta.canOpen(want):
+				current = want
+			case !free:
 				writeErr(w, http.StatusForbidden, "forbidden")
 				return
 			}
-			current = want
-		} else if !meta.canOpen(current) {
-			if len(meta.visibleIDs) > 0 {
+		}
+		if !meta.canOpen(current) {
+			switch {
+			case len(meta.visibleIDs) > 0:
 				current = meta.visibleIDs[0]
-			} else {
-				current = config.MainBoardID
+			case free:
+				current = ""
+			default:
+				writeErr(w, http.StatusForbidden, errNoBoards)
+				return
 			}
 		}
 		role := ""
-		if !meta.all && sess.UID != "" {
+		if !meta.all && sess.UID != "" && current != "" {
 			role = meta.roles[config.NormalizeBoardID(current)]
 		}
 		bs := boardSession{
@@ -155,6 +177,10 @@ func containsBoardID(ids []string, id string) bool {
 }
 
 // visibleBoardItems returns board rows the session may list in GET /api/boards.
+// ctx carries the request; sess is the caller. For a limited session the rows follow
+// the stored section order, deleted sections are dropped from meta, and the default
+// moves to the first open section, or to "" when the session may open none.
+// It returns the users or boards store error.
 func (s *Server) visibleBoardItems(ctx context.Context, sess security.Session) ([]config.Board, boardMeta, error) {
 	meta, err := s.boardMeta(ctx, sess)
 	if err != nil {
@@ -173,20 +199,22 @@ func (s *Server) visibleBoardItems(ctx context.Context, sess security.Session) (
 		return boardsResponseItems(all, s.canManageBoards(sess)), meta, nil
 	}
 	out := make([]config.Board, 0, len(meta.visibleIDs))
-	byID := map[string]config.Board{}
+	ids := make([]string, 0, len(meta.visibleIDs))
+	set := make(map[string]bool, len(meta.visibleIDs))
 	for _, b := range all {
-		byID[config.NormalizeBoardID(b.ID)] = b
-	}
-	for _, id := range meta.visibleIDs {
-		n := config.NormalizeBoardID(id)
-		if b, ok := byID[n]; ok {
+		n := config.NormalizeBoardID(b.ID)
+		if meta.visibleSet[n] && !set[n] {
+			set[n] = true
+			ids = append(ids, n)
 			out = append(out, b)
-		} else if config.SameBoard(n, config.MainBoardID) {
-			out = append(out, mainBoardRecord())
 		}
 	}
-	if len(out) == 0 {
-		out = []config.Board{mainBoardRecord()}
+	meta.visibleIDs, meta.visibleSet = ids, set
+	if !set[config.NormalizeBoardID(meta.defaultID)] {
+		meta.defaultID = ""
+		if len(ids) > 0 {
+			meta.defaultID = ids[0]
+		}
 	}
 	meta.switchable = len(out) > 1
 	return boardsResponseItems(out, s.canManageBoards(sess)), meta, nil

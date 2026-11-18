@@ -22,6 +22,7 @@ type boardCreateBody struct {
 }
 
 // handleBoardsGet lists sections visible to the session and the active section metadata.
+// A session that may open no section gets empty items and empty current and default_id.
 func (s *Server) handleBoardsGet(w http.ResponseWriter, r *http.Request) {
 	sess := sessionFrom(r.Context())
 	items, meta, err := s.visibleBoardItems(r.Context(), sess)
@@ -29,9 +30,13 @@ func (s *Server) handleBoardsGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "boards error")
 		return
 	}
+	current := ""
+	if len(items) > 0 {
+		current = boardFrom(r.Context())
+	}
 	writeJSON(w, http.StatusOK, boardsResponse{
 		Items:      items,
-		Current:    boardFrom(r.Context()),
+		Current:    current,
 		DefaultID:  meta.defaultID,
 		Switchable: meta.switchable,
 	})

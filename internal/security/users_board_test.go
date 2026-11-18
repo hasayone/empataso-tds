@@ -1,6 +1,10 @@
 package security
 
 import (
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/hasayone/empataso-tds/internal/config"
@@ -37,11 +41,64 @@ func TestVisibleBoards(t *testing.T) {
 		t.Fatalf("user default: ids=%v all=%v", ids, all)
 	}
 	userList := User{ID: "u3", Type: UserRegular, BoardIDs: []string{"sales", "", "sales"}}
-	if ids, all := userList.VisibleBoards(false); all || len(ids) != 2 || ids[0] != "sales" || ids[1] != config.MainBoardID {
+	if ids, all := userList.VisibleBoards(false); all || !slices.Equal(ids, []string{config.MainBoardID, "sales"}) {
 		t.Fatalf("user list: ids=%v all=%v", ids, all)
 	}
-	allBoards := User{ID: "u2", Type: UserRegular, AllBoards: true, BoardIDs: []string{"sales"}}
+	allBoards := User{ID: "u2", Type: UserRegular, AllBoards: true, BoardIDs: []string{"sales"}, NoMainBoard: true}
 	if ids, all := allBoards.VisibleBoards(false); !all || ids != nil {
 		t.Fatalf("all_boards: ids=%v all=%v", ids, all)
+	}
+	adminNoMain := User{ID: "a3", Type: UserAdmin, NoMainBoard: true}
+	if ids, all := adminNoMain.VisibleBoards(false); !all || ids != nil {
+		t.Fatalf("admin with no_main_board must see every section: ids=%v all=%v", ids, all)
+	}
+}
+
+func TestVisibleBoardsMainFlag(t *testing.T) {
+	cases := []struct {
+		name string
+		u    User
+		want []string
+	}{
+		{"member of x keeps main", User{ID: "u", Type: UserRegular, BoardIDs: []string{"x"}}, []string{config.MainBoardID, "x"}},
+		{"removed from x keeps main", User{ID: "u", Type: UserRegular}, []string{config.MainBoardID}},
+		{"main unticked", User{ID: "u", Type: UserRegular, NoMainBoard: true, BoardIDs: []string{"x"}}, []string{"x"}},
+		{"main in board_ids is ignored", User{ID: "u", Type: UserRegular, NoMainBoard: true, BoardIDs: []string{"main", "x"}}, []string{"x"}},
+		{"no section at all", User{ID: "u", Type: UserRegular, NoMainBoard: true}, []string{}},
+	}
+	for _, c := range cases {
+		ids, all := c.u.VisibleBoards(false)
+		if all || ids == nil || !slices.Equal(ids, c.want) {
+			t.Errorf("%s: ids=%v all=%v, want %v", c.name, ids, all, c.want)
+		}
+	}
+}
+
+func TestLoadUserWithoutMainFlagKeepsMain(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "users.json")
+	raw := `[{"id":"old","login":"old","type":"USER","enabled":true,"prefs":{},"access":{"sections":[],"grants":{}},"board_ids":["seo"],"created_at":"2026-01-01T00:00:00Z"}]`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	set, err := LoadUserSet(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u, ok := set.Get("old")
+	if !ok || u.NoMainBoard {
+		t.Fatalf("old record: ok=%v no_main_board=%v", ok, u.NoMainBoard)
+	}
+	if ids, all := u.VisibleBoards(false); all || !slices.Equal(ids, []string{config.MainBoardID, "seo"}) {
+		t.Fatalf("old record sees %v all=%v, want main and seo", ids, all)
+	}
+	if err := set.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "no_main_board") {
+		t.Fatalf("a record with main writes no_main_board: %s", data)
 	}
 }

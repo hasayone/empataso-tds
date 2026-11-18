@@ -30,8 +30,11 @@ func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
 			filtered = append(filtered, g)
 		}
 	}
-	groups = filtered
-	writeJSON(w, http.StatusOK, groups)
+	if r.URL.Query().Get("shared") == "1" {
+		writeJSON(w, http.StatusOK, shareGroupLists(filtered))
+		return
+	}
+	writeJSON(w, http.StatusOK, filtered)
 }
 
 // maxFolderRunes is the longest campaign folder label the admin accepts.

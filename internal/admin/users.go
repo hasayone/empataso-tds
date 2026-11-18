@@ -59,8 +59,9 @@ func (s *Server) handleUsersList(w http.ResponseWriter, _ *http.Request) {
 
 // handleUsersCreate adds one users.json record and returns the public row.
 //
-// The body is login, password, type, enabled, prefs, access and role_id. An empty
-// type becomes USER. ErrUserLogin, ErrUserType, errPasswordShort, errAccess*,
+// The body is login, password, type, enabled, prefs, access, role_id and
+// no_main_board. An empty type becomes USER; no_main_board is dropped for an
+// administrator. ErrUserLogin, ErrUserType, errPasswordShort, errAccess*,
 // errRoleUnknown, errRoleAdmin and errRoleOwnAccess answer 400 with the error text. errUserReserved
 // and ErrUserExists answer 409. errUsersUnavailable answers 503 "users disabled".
 // Success is 201 with Hash cleared.
@@ -77,6 +78,7 @@ func (s *Server) handleUsersCreate(w http.ResponseWriter, r *http.Request) {
 		Prefs    security.Prefs    `json:"prefs"`
 		Access   security.Access   `json:"access"`
 		RoleID   string            `json:"role_id"`
+		NoMain   bool              `json:"no_main_board"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, userBodyLimit)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
@@ -90,13 +92,14 @@ func (s *Server) handleUsersCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	u, err := s.createUser(userDraft{
-		Login:    body.Login,
-		Password: body.Password,
-		Type:     body.Type,
-		Enabled:  body.Enabled,
-		Prefs:    body.Prefs,
-		Access:   body.Access,
-		RoleID:   strings.TrimSpace(body.RoleID),
+		Login:       body.Login,
+		Password:    body.Password,
+		Type:        body.Type,
+		Enabled:     body.Enabled,
+		Prefs:       body.Prefs,
+		Access:      body.Access,
+		RoleID:      strings.TrimSpace(body.RoleID),
+		NoMainBoard: body.NoMain,
 	})
 	if err != nil {
 		writeUserErr(w, err)
@@ -122,12 +125,13 @@ func (s *Server) handleUsersGet(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, u.Public())
 }
 
-// handleUsersUpdate patches login, type, enabled, prefs and role for one user.
+// handleUsersUpdate patches login, type, enabled, prefs, role and the main section for one user.
 //
-// Omitted or empty login and type leave the current values. enabled and prefs
-// are applied only when present in JSON. role_id is applied when present: an
-// empty string detaches the role, an id attaches it. A user turned into ADMIN
-// loses the role. A reserved environment login answers 409 "login reserved".
+// Omitted or empty login and type leave the current values. enabled, prefs and
+// no_main_board are applied only when present in JSON. role_id is applied when
+// present: an empty string detaches the role, an id attaches it. A user turned
+// into ADMIN loses the role and no_main_board. Section membership (board_ids) is
+// not changed here. A reserved environment login answers 409 "login reserved".
 // Disabling your own session answers 409. ErrLastAdmin and ErrUserExists answer
 // 409. Invalid prefs, an unknown role and a role on an administrator answer 400.
 // Success is 200 with the public record. Access and password are not changed here.
@@ -143,6 +147,7 @@ func (s *Server) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 		Enabled *bool             `json:"enabled"`
 		Prefs   *security.Prefs   `json:"prefs"`
 		RoleID  *string           `json:"role_id"`
+		NoMain  *bool             `json:"no_main_board"`
 	}
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, userBodyLimit)).Decode(&body); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
@@ -172,6 +177,12 @@ func (s *Server) handleUsersUpdate(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 			u.Prefs = merged
+		}
+		if body.NoMain != nil {
+			u.NoMainBoard = *body.NoMain
+		}
+		if u.Type == security.UserAdmin {
+			u.NoMainBoard = false
 		}
 		return s.applyRole(u, body.RoleID)
 	})

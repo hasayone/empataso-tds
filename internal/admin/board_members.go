@@ -353,11 +353,16 @@ func memberUserIDs(before, after []config.BoardMember) []string {
 	return out
 }
 
-// boardIDsForMember collects section ids where userID appears in Members.
+// boardIDsForMember collects the ids of sections other than main where userID appears in Members.
+// boards is the stored section list. Main is skipped: access to it is the user's NoMainBoard flag.
+// It returns nil when the user is a member of no other section.
 func boardIDsForMember(boards []config.Board, userID string) []string {
 	var out []string
 	seen := map[string]bool{}
 	for _, b := range boards {
+		if config.SameBoard(b.ID, config.MainBoardID) {
+			continue
+		}
 		for _, m := range b.Members {
 			if m.UserID != userID {
 				continue
@@ -375,10 +380,10 @@ func boardIDsForMember(boards []config.Board, userID string) []string {
 }
 
 // syncUsersBoardIDsFromMembers sets BoardIDs of each user in affected to the sections
-// of boards that list the user as a member.
+// other than main that list the user as a member.
 // boards is the stored section list after the change; affected are the user ids that
-// were or now are members. AllBoards and Type stay as they are, so membership never
-// narrows an administrator or an all-sections account.
+// were or now are members. Only BoardIDs changes: NoMainBoard, AllBoards and Type stay
+// as they are, so membership never takes main away or narrows an administrator.
 // It returns the users store or persist error; without users storage it does nothing.
 func (s *Server) syncUsersBoardIDsFromMembers(boards []config.Board, affected []string) error {
 	if !s.usersEnabled() || len(affected) == 0 {

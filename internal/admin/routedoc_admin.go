@@ -210,7 +210,7 @@ func keitaroRouteDocs() map[string]routeDoc {
 				"version_signals":  []map[string]string{{"signal": "subid", "version": "11"}},
 				"version_conflict": false,
 			},
-			Errors:   []int{http.StatusForbidden, http.StatusBadGateway, http.StatusServiceUnavailable},
+			Errors: []int{http.StatusForbidden, http.StatusBadGateway, http.StatusServiceUnavailable},
 		},
 		"POST /api/keitaro/purge": {
 			ID: "purge_keitaro", Summary: "Remove everything the Keitaro transfer imported.",
@@ -709,8 +709,8 @@ func cronConfigSample() map[string]any {
 			"enabled": false, "every_minutes": 720, "api_key": "********", "domains": []string{"example.com"},
 			"from_groups": true, "threshold": 1, "disable_streams": false,
 		},
-		"disk":         map[string]any{"enabled": true, "every_minutes": 10, "paths": []string{}, "min_free_percent": 10},
-		"cleanup":      map[string]any{"enabled": true, "every_minutes": 1440, "keys_days": 30},
+		"disk":    map[string]any{"enabled": true, "every_minutes": 10, "paths": []string{}, "min_free_percent": 10},
+		"cleanup": map[string]any{"enabled": true, "every_minutes": 1440, "keys_days": 30},
 		"conversions": map[string]any{
 			"enabled": false, "every_minutes": 1, "template": "[PROFIT] [GROUP] [COUNTRY]",
 			"period": "today", "timezone": "UTC",
@@ -1009,34 +1009,52 @@ func accountRouteDocs() map[string]routeDoc {
 	return map[string]routeDoc{
 		"GET /api/users": cookieDoc("list_users",
 			docOf("List the panel accounts.",
-				"The first row is the environment administrator; the others come from the users file. Password hashes are never returned."),
+				"The first row is the environment administrator; the others come from the users file. Password hashes are never returned. "+
+					"board_ids lists the sections other than the main one where the account is a member; no_main_board: true means "+
+					"a USER does not see the main section. A USER sees the main section unless no_main_board is set, plus board_ids; "+
+					"an administrator sees every section."),
 			docOf("Список аккаунтов панели.",
-				"Первая строка — администратор из окружения, остальные из файла пользователей. Хэши паролей не возвращаются никогда."),
+				"Первая строка — администратор из окружения, остальные из файла пользователей. Хэши паролей не возвращаются никогда. "+
+					"board_ids — разделы, кроме основного, где аккаунт участник; no_main_board: true значит, что USER не видит "+
+					"основной раздел. USER видит основной раздел, если no_main_board не задан, и разделы из board_ids; "+
+					"администратор видит все разделы."),
 			docOf("Список акаунтів панелі.",
-				"Перший рядок — адміністратор із середовища, решта з файлу користувачів. Хеші паролів не повертаються ніколи.")),
+				"Перший рядок — адміністратор із середовища, решта з файлу користувачів. Хеші паролів не повертаються ніколи. "+
+					"board_ids — розділи, крім основного, де акаунт учасник; no_main_board: true означає, що USER не бачить "+
+					"основний розділ. USER бачить основний розділ, якщо no_main_board не задано, і розділи з board_ids; "+
+					"адміністратор бачить усі розділи.")),
 		"POST /api/users": cookieDoc("create_user",
 			docOf("Create a panel account.",
-				"Body login, password, type (ADMIN or USER, USER by default), enabled, prefs, access and role_id. 201 with the "+
+				"Body login, password, type (ADMIN or USER, USER by default), enabled, prefs, access, role_id and no_main_board "+
+					"(true hides the main section from a USER; ignored for ADMIN). 201 with the "+
 					"account; 400 for a bad field, 409 when the login is taken, 503 when users are disabled."),
 			docOf("Создание аккаунта панели.",
-				"Тело: login, password, type (ADMIN или USER, по умолчанию USER), enabled, prefs, access и role_id. 201 с "+
+				"Тело: login, password, type (ADMIN или USER, по умолчанию USER), enabled, prefs, access, role_id и no_main_board "+
+					"(true скрывает основной раздел от USER; для ADMIN не учитывается). 201 с "+
 					"аккаунтом; 400 при неверном поле, 409 если логин занят, 503 если пользователи отключены."),
 			docOf("Створення акаунта панелі.",
-				"Тіло: login, password, type (ADMIN або USER, типово USER), enabled, prefs, access і role_id. 201 з "+
+				"Тіло: login, password, type (ADMIN або USER, типово USER), enabled, prefs, access, role_id і no_main_board "+
+					"(true приховує основний розділ від USER; для ADMIN не враховується). 201 з "+
 					"акаунтом; 400 при хибному полі, 409 якщо логін зайнятий, 503 якщо користувачі вимкнені.")),
 		"GET /api/users/{id}": cookieDoc("get_user",
 			docOf("Get one panel account.", "404 for an unknown id."),
 			docOf("Один аккаунт панели.", "404 для неизвестного id."),
 			docOf("Один акаунт панелі.", "404 для невідомого id.")),
 		"PUT /api/users/{id}": cookieDoc("update_user",
-			docOf("Change the login, type, state, preferences or role of an account.",
+			docOf("Change the login, type, state, preferences, role or main section of an account.",
 				"Fields you leave out keep their value; the password and the access are changed by their own routes. "+
+					"no_main_board: true hides the main section from a USER, false returns it; an ADMIN never keeps it. "+
+					"board_ids is not changed here: it follows the section members. "+
 					"409 when the change would disable yourself or remove the last administrator."),
-			docOf("Смена логина, типа, состояния, настроек или роли аккаунта.",
+			docOf("Смена логина, типа, состояния, настроек, роли или основного раздела аккаунта.",
 				"Пропущенные поля сохраняют значение; пароль и доступ меняются отдельными маршрутами. "+
+					"no_main_board: true скрывает основной раздел от USER, false возвращает его; у ADMIN поле не сохраняется. "+
+					"board_ids здесь не меняется: он следует за участниками разделов. "+
 					"409, если изменение отключило бы вас самих или убрало последнего администратора."),
-			docOf("Зміна логіна, типу, стану, налаштувань або ролі акаунта.",
+			docOf("Зміна логіна, типу, стану, налаштувань, ролі або основного розділу акаунта.",
 				"Пропущені поля зберігають значення; пароль і доступ змінюються окремими маршрутами. "+
+					"no_main_board: true приховує основний розділ від USER, false повертає його; в ADMIN поле не зберігається. "+
+					"board_ids тут не змінюється: він слідує за учасниками розділів. "+
 					"409, якщо зміна вимкнула б вас самих або прибрала останнього адміністратора.")),
 		"DELETE /api/users/{id}": cookieDoc("delete_user",
 			docOf("Delete a panel account.",

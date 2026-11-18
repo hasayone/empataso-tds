@@ -22,6 +22,8 @@ type userDraft struct {
 	Prefs    security.Prefs
 	Access   security.Access
 	RoleID   string
+	// NoMainBoard removes the main section from a regular user; an administrator never stores it.
+	NoMainBoard bool
 }
 
 // usersEnabled reports whether users.json storage is configured.
@@ -104,6 +106,7 @@ func (s *Server) createUser(d userDraft) (security.User, error) {
 		Access:       d.Access,
 		AccessSource: "manual",
 		RoleID:       d.RoleID,
+		NoMainBoard:  d.NoMainBoard && d.Type != security.UserAdmin,
 	}
 	s.userMu.Lock()
 	defer s.userMu.Unlock()
