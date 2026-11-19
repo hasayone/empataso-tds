@@ -32,7 +32,7 @@ var docTags = []docTag{
 	{"keywords", "Keywords", "Ключевые слова", "Ключові слова", []string{"/api/keys", "/api/keywords"}},
 	{"boards", "Boards", "Доски", "Дошки", []string{"/api/boards"}},
 	{"tools", "Tools and lists", "Инструменты и списки", "Інструменти та списки",
-		[]string{"/api/lookup", "/api/simulate", "/api/lists"}},
+		[]string{"/api/lookup", "/api/tools", "/api/simulate", "/api/lists"}},
 	{"site", "Pages and bot protection", "Страницы и защита от ботов", "Сторінки та захист від ботів",
 		[]string{"/api/pages", "/api/bot-protection"}},
 	{"automation", "Automation (cron)", "Автоматизация (cron)", "Автоматизація (cron)", []string{"/api/cron"}},

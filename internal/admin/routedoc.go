@@ -170,6 +170,8 @@ func buildRouteDocs() map[string]routeDoc {
 	add(journalRouteDocs())
 	add(keywordRouteDocs())
 	add(toolRouteDocs())
+	add(geoToolRouteDocs())
+	add(lookupHistoryRouteDocs())
 	add(adminRouteDocs())
 	add(aiRouteDocs())
 	markAssistantRoutes(docs)

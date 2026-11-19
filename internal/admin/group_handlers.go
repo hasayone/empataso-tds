@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"unicode/utf8"
@@ -50,8 +51,8 @@ const maxGroupsBody = 128 << 20
 const maxGroupBody = 8 << 20
 
 // handleGroupsSave replaces the campaign list with the JSON array in the body.
-// The body is the full list. A missing store is 503. A bad body is 400.
-// Validation and save errors are written by commitGroups.
+// The body is the full list. A missing store is 503. A body over maxGroupsBody is 413,
+// another bad body is 400. Validation and save errors are written by commitGroups.
 // Success writes 200 {"status":"saved"}.
 func (s *Server) handleGroupsSave(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Groups == nil {
@@ -60,7 +61,7 @@ func (s *Server) handleGroupsSave(w http.ResponseWriter, r *http.Request) {
 	}
 	var body []config.Group
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxGroupsBody)).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad json")
+		writeBodyErr(w, err)
 		return
 	}
 	v := s.viewerFrom(r.Context())
@@ -79,8 +80,10 @@ func (s *Server) handleGroupsSave(w http.ResponseWriter, r *http.Request) {
 
 // handleGroupPut replaces one campaign or appends it, then saves the full list.
 // The path id is the campaign id. An empty body id is taken from the path.
-// A body id that differs from the path is 400 "id mismatch". A missing store is 503.
-// A bad body is 400. Other errors match commitGroups. Success writes 200 {"status":"saved"}.
+// A body id that differs from the path renames the stored campaign (renameGroupPut);
+// an assistant write with a different id is 400 "id mismatch". A missing store is 503.
+// A body over maxGroupBody is 413, another bad body is 400. Other errors match commitGroups.
+// Success writes 200 {"status":"saved"}.
 func (s *Server) handleGroupPut(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Groups == nil {
 		writeErr(w, http.StatusServiceUnavailable, "groups store unavailable")
@@ -89,14 +92,18 @@ func (s *Server) handleGroupPut(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	var body config.Group
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxGroupBody)).Decode(&body); err != nil {
-		writeErr(w, http.StatusBadRequest, "bad json")
+		writeBodyErr(w, err)
 		return
 	}
 	if body.ID == "" {
 		body.ID = id
 	}
 	if body.ID != id {
-		writeErr(w, http.StatusBadRequest, "id mismatch")
+		if aiExpectFrom(r.Context()) != nil {
+			writeErr(w, http.StatusBadRequest, "id mismatch")
+			return
+		}
+		s.renameGroupPut(w, r, id, body)
 		return
 	}
 	v := s.viewerFrom(r.Context())
@@ -123,6 +130,116 @@ func (s *Server) handleGroupPut(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
+// writeBodyErr answers a request body that could not be decoded.
+// err is the decode error. A body over its http.MaxBytesReader limit is 413 "body too large",
+// any other error is 400 "bad json".
+func writeBodyErr(w http.ResponseWriter, err error) {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		writeErr(w, http.StatusRequestEntityTooLarge, "body too large")
+		return
+	}
+	writeErr(w, http.StatusBadRequest, "bad json")
+}
+
+// renameGroupPut renames the stored campaign oldID to body.ID and saves body in its place, in one write
+// under groupsMu. The row keeps its position, section and owner; Num comes from body as on every save.
+// Campaign links of other campaigns that pointed at oldID are moved to the new id in the same write.
+// The checks of saveGroups compare the row with the stored one under the new id, so only real changes are checked.
+// Errors: 400 for a new id with a space, /, ? or #; 404 for a missing or unseen oldID; 403 when the caller
+// may not write the campaign or a campaign whose link moves; 409 "campaign id is taken: <id>" when the new id
+// is an id or alias of another campaign; others match saveGroups. Success writes 200 {"status":"saved"}.
+func (s *Server) renameGroupPut(w http.ResponseWriter, r *http.Request, oldID string, body config.Group) {
+	if !validGroupID(body.ID) {
+		writeErr(w, http.StatusBadRequest, "campaign id must not contain spaces, /, ? or #")
+		return
+	}
+	v := s.viewerFrom(r.Context())
+	s.groupsMu.Lock()
+	defer s.groupsMu.Unlock()
+	stored, err := s.cfg.Groups.List(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "groups error")
+		return
+	}
+	old, ok := findGroup(stored, oldID)
+	if !ok || !v.seesBoard(old.BoardID) || (!v.admin && !v.canSee(resCampaigns, campaignRef(old))) {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if !v.admin && !v.canWrite(resCampaigns, campaignRef(old)) {
+		writeErr(w, http.StatusForbidden, "forbidden")
+		return
+	}
+	if _, taken := findGroup(stored, body.ID); taken || aliasTakenAmong(stored, oldID, body.ID) {
+		writeErr(w, http.StatusConflict, "campaign id is taken: "+body.ID)
+		return
+	}
+	body.BoardID, body.CreatedBy = old.BoardID, old.CreatedBy
+	before, groups, moved := renameGroup(stored, oldID, body)
+	for _, i := range moved {
+		if !v.admin && !v.canWrite(resCampaigns, campaignRef(stored[i])) {
+			writeErr(w, http.StatusForbidden, "read-only campaign: "+stored[i].ID)
+			return
+		}
+	}
+	if code, msg := s.saveGroups(r.Context(), v, before, groups, groupWrite{id: body.ID}); code != 0 {
+		writeErr(w, code, msg)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+}
+
+// validGroupID reports whether id can be the first path segment of a campaign link:
+// it is not empty and holds no whitespace, '/', '?' or '#'.
+func validGroupID(id string) bool {
+	return id != "" && !strings.ContainsAny(id, " \t\r\n/?#")
+}
+
+// renameGroup builds the save candidate for renaming the campaign oldID to g.ID. stored is not modified.
+// before is stored with that row under the new id, the baseline the save checks compare with.
+// groups is stored with g in that row's place and every campaign link (campaign default or stream
+// with redirect "group") that named oldID moved to g.ID. moved holds the indexes of the other
+// campaigns whose links changed. When oldID is absent, before and groups are copies of stored.
+func renameGroup(stored []config.Group, oldID string, g config.Group) (before, groups []config.Group, moved []int) {
+	before = append([]config.Group(nil), stored...)
+	groups = append([]config.Group(nil), stored...)
+	for i := range groups {
+		if groups[i].ID == oldID {
+			before[i].ID = g.ID
+			groups[i] = g
+			continue
+		}
+		if moveGroupLinks(&groups[i], oldID, g.ID) {
+			moved = append(moved, i)
+		}
+	}
+	return before, groups, moved
+}
+
+// moveGroupLinks points the campaign links of g that name from at to instead.
+// The streams slice is copied before a change, so a slice shared with the stored list stays as it was.
+// It reports whether any link changed.
+func moveGroupLinks(g *config.Group, from, to string) bool {
+	changed, copied := false, false
+	if g.Redirect == "group" && strings.TrimSpace(g.Out) == from {
+		g.Out = to
+		changed = true
+	}
+	for i := range g.Streams {
+		if g.Streams[i].Out.Redirect != "group" || strings.TrimSpace(g.Streams[i].Out.Out) != from {
+			continue
+		}
+		if !copied {
+			g.Streams = append([]config.Stream(nil), g.Streams...)
+			copied = true
+		}
+		g.Streams[i].Out.Out = to
+		changed = true
+	}
+	return changed
 }
 
 // findGroup returns the campaign with the given id and whether it exists.

@@ -31,7 +31,7 @@ func TestLogicHelpers(t *testing.T) {
 	}
 	html := spaSource()
 	var prelude strings.Builder
-	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "cpcHasSpend", "moneyCellCls", "asSortMeta", "applySort", "condsQS", "addBy", "normBy", "reportCostCur", "reportSortValue", "sortReportRows"} {
+	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "cpcHasSpend", "moneyCellCls", "asSortMeta", "applySort", "condsQS", "addBy", "normBy", "reportCostCur", "pagerPages"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -400,23 +400,34 @@ eq(reportTotals([{hits:1,unique:1,uniq_first:1}]).unique, 1, 'one row keeps its 
 // The cost column sums by currency and sorts by one currency, never by a sum of currencies.
 const costRows=[{group:'a',cost:{'':300}},{group:'b',cost:{EUR:9000}},{group:'c'},{group:'d',cost:{USD:500,EUR:10}},{group:'e',cost:{'':100}}];
 eq(reportTotals(costRows).cost, {USD:900,EUR:9010}, 'cost totals stay per currency, the empty code is USD');
-eq(reportCostCur(costRows), 'EUR', 'the sort currency is the one with the largest cost');
-eq(reportCostCur([{group:'x'}]), 'USD', 'without cost the sort currency is the tracker one');
-eq(sortReportRows(costRows, {k:'cost',dir:-1}, {}).map(r=>r.group), ['b','d','a','c','e'], 'descending by EUR, rows without EUR keep their order at the end');
-eq(sortReportRows(costRows, {k:'cost',dir:1}, {}).map(r=>r.group), ['d','b','a','c','e'], 'ascending by EUR, rows without EUR still at the end');
-const usdRows=[{group:'a',cost:{'':300}},{group:'b'},{group:'c',cost:{USD:50,EUR:20}}];
-eq(sortReportRows(usdRows, {k:'cost',dir:-1}, {}).map(r=>r.group), ['a','c','b'], 'the EUR part of a row is not added to its USD');
-eq(sortReportRows(usdRows, {k:'hits',dir:-1}, {}).length, 3, 'other columns sort as before');
+eq(reportCostCur(reportTotals(costRows)), 'EUR', 'the sort currency is the one with the largest cost of the set');
+eq(reportCostCur({hits:1,cost:{}}), 'USD', 'without cost the sort currency is the tracker one');
+eq(reportCostCur(null), 'USD', 'no totals give the tracker currency');
 eq(reportTotals([{hits:1,cost:{'':150,EUR:40}},{hits:1,cost:{USD:10}},{hits:1}]).cost, {USD:160,EUR:40}, 'the cost total adds cents per currency, an empty code is USD');
 
-// The report body is read with its truncated flag; an old bare array and junk are safe.
-eq(reportData({rows:[{hits:1}],truncated:true}), {rows:[{hits:1}],truncated:true}, 'a cut report is flagged');
-eq(reportData({rows:[],truncated:false}), {rows:[],truncated:false}, 'a whole report is not flagged');
-eq(reportData({rows:[{hits:1}]}).truncated, false, 'a missing flag is not truncated');
-eq(reportData({rows:[],truncated:'yes'}).truncated, false, 'only true means truncated');
-eq(reportData([{hits:2}]), {rows:[{hits:2}],truncated:false}, 'an older server sends a bare array');
-eq(reportData(null), {rows:[],truncated:false}, 'no body gives no rows');
-eq(reportData({rows:'x'}), {rows:[],truncated:false}, 'bad rows give no rows');
+// A paged report body carries the size and the totals of the whole set; an old answer is one page summed here.
+const paged=reportData({rows:[{hits:1}], total:2500, offset:1000, limit:1000, sort:'hits', dir:'desc', totals:{hits:9000,unique:700,bots:3,conv:12,profit:40,depsum:5,cost:{EUR:300}}, truncated:false});
+eq(paged.rows, [{hits:1}], 'the page rows are kept as sent');
+eq(paged.total, 2500, 'the size of the whole set comes from the server');
+eq(paged.totals, {hits:9000,unique:700,bots:3,conv:12,profit:40,depsum:5,cost:{EUR:300}}, 'the totals of the whole set come from the server, not from the page');
+eq(paged.truncated, false, 'a whole set is not flagged');
+eq(reportData({rows:[], total:0, totals:{hits:0,unique:0,bots:0,conv:0,profit:0,depsum:0}}).totals.cost, {}, 'totals without cost get an empty cost');
+eq(reportData({rows:[{hits:1}], total:100001, totals:{hits:5}, truncated:true}).truncated, true, 'a set stopped at the server limit is flagged');
+eq(reportData({rows:[], total:3, truncated:'yes'}).truncated, false, 'only true means truncated');
+eq(reportData({rows:[{hits:1,uniq_first:1},{hits:2,unique:4}],truncated:true}), {rows:[{hits:1,uniq_first:1},{hits:2,unique:4}],truncated:true,total:2,totals:{hits:3,unique:5,bots:0,conv:0,profit:0,depsum:0,cost:{}}}, 'an older answer without total is one page summed here');
+eq(reportData([{hits:2}]).total, 1, 'an older server sends a bare array');
+eq(reportData(null), {rows:[],truncated:false,total:0,totals:{hits:0,unique:0,bots:0,conv:0,profit:0,depsum:0,cost:{}}}, 'no body gives no rows');
+eq(reportData({rows:'x'}).rows, [], 'bad rows give no rows');
+eq(reportData({rows:[], total:-4}).total, 0, 'a negative total is zero');
+
+// The numbered pager shows the ends, two pages around the current one, and an ellipsis only for a gap of two or more pages.
+eq(pagerPages(0, 1, 2), [0], 'one page');
+eq(pagerPages(0, 5, 2), [0,1,2,3,4], 'five pages fit without a gap');
+eq(pagerPages(0, 10, 2), [0,1,2,null,9], 'the start shows its neighbours and the last page');
+eq(pagerPages(9, 10, 2), [0,null,7,8,9], 'the end shows the first page and its neighbours');
+eq(pagerPages(5, 12, 2), [0,null,3,4,5,6,7,null,11], 'the middle has a gap on both sides');
+eq(pagerPages(4, 10, 2), [0,1,2,3,4,5,6,null,9], 'a gap of one page is drawn as that page');
+eq(pagerPages(3, 7, 2), [0,1,2,3,4,5,6], 'gaps of one page on both sides are drawn as pages');
 
 // Server error texts of the access, role, spend and landing handlers have keys; a template does not swallow a fixed text.
 eq(errKey('network offer_query holds a macro of a hidden field'), 'err.net.querymacro', 'the fixed network text is not taken by the offer_query: template');
@@ -599,9 +610,14 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq([tabsPut.users.sort, tabsPut.roles.sort, tabsPut.keywords.sort], [{ k: 'login', dir: 1 }, { k: 'name', dir: -1 }, { k: 'key', dir: 1 }], 'users, roles and keywords sorts are collected');
   eq(collectPageViews(def).users, { sort: { k: '', dir: -1 } }, 'users view is in every body');
 
-  eq(collectPageViews(def).keyword_stats, { sort: { k: '', dir: -1 }, campaign: '', by: '', conds: [] }, 'keyword statistics view is in every body with its defaults');
+  eq(collectPageViews(def).keyword_stats, { sort: { k: '', dir: -1 }, campaign: '', by: '', conds: [], page: 1000 }, 'keyword statistics view is in every body with its defaults');
+  eq([collectPageViews(def).report.page, def.report.page], [1000, 1000], 'the report shows 1000 rows by default');
+  const rp = applyPageViews({ report: { page: 500 }, keyword_stats: { page: 2000 } }, def);
+  eq([rp.report.page, rp.keyword_stats.page, collectPageViews(rp).report.page, collectPageViews(rp).keyword_stats.page], [500, 2000, 500, 2000], 'report and keyword page sizes are read and collected');
+  const rpBad = applyPageViews({ report: { page: 2001 }, keyword_stats: { page: 0 } }, def);
+  eq([rpBad.report.page, rpBad.keyword_stats.page], [1000, 1000], 'a report or keyword size out of range falls back');
   const kw = applyPageViews({ keyword_stats: { sort: { k: 'hits', dir: 1 }, campaign: ' promo ', by: 'origin', conds: [{ f: 'country', op: 'eq', v: ['PL'] }, { f: '', op: 'eq', v: ['x'] }] }, keywords: { sort: { k: 'key', dir: -1 } } }, def);
-  eq(kw.keyword_stats, { sort: { k: 'hits', dir: 1 }, campaign: 'promo', by: 'origin', conds: [{ f: 'country', op: 'eq', v: ['PL'] }] }, 'keyword statistics sort, campaign, attribution and conditions are read');
+  eq(kw.keyword_stats, { sort: { k: 'hits', dir: 1 }, campaign: 'promo', by: 'origin', conds: [{ f: 'country', op: 'eq', v: ['PL'] }], page: 1000 }, 'keyword statistics sort, campaign, attribution and conditions are read');
   eq(collectPageViews(kw).keyword_stats, kw.keyword_stats, 'keyword statistics view is collected as read');
   eq(collectPageViews(kw).keywords, { sort: { k: 'key', dir: -1 } }, 'the API key sort keeps its own page key');
   eq(applyPageViews({ keyword_stats: { campaign: 7, conds: 'x', sort: 'hits' } }, def).keyword_stats, def.keyword_stats, 'bad keyword statistics values fall back');
@@ -1140,7 +1156,7 @@ func TestMoneyDisplay(t *testing.T) {
 	}
 	html := spaSource()
 	var b strings.Builder
-	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "csvMoney", "plainMoney", "cellRatio", "normBy", "moneyMap", "costCode", "costCodesList", "spendBasis", "profitList", "roiPct", "metricROI", "roiCls", "cpcCell", "cpcHasSpend", "moneyCellCls", "moneyOf", "profitOf", "clickCostBy", "addBy", "pct", "periodSpendBy", "campaignCostOnly", "spendShare", "overlapShare", "rangeBounds", "sumClicks", "foldStatus", "packMetrics", "factsIndex", "campaignMetrics", "pointSpendBy", "pointMoney", "nameSortKey", "nameCollator", "nameIconRank", "nameScript", "nameKey", "compareNameKeys", "asSortMeta", "applySort", "fltOpMulti", "fltCommit", "logSortField", "reportCellText", "reportHasCost", "reportSortValue"} {
+	for _, name := range []string{"curKey", "curSign", "moneyUnits", "moneyText", "csvMoney", "plainMoney", "cellRatio", "normBy", "moneyMap", "costCode", "costCodesList", "spendBasis", "profitList", "roiPct", "metricROI", "roiCls", "cpcCell", "cpcHasSpend", "moneyCellCls", "moneyOf", "profitOf", "clickCostBy", "addBy", "pct", "periodSpendBy", "campaignCostOnly", "spendShare", "overlapShare", "rangeBounds", "sumClicks", "foldStatus", "packMetrics", "factsIndex", "campaignMetrics", "pointSpendBy", "pointMoney", "nameSortKey", "nameCollator", "nameIconRank", "nameScript", "nameKey", "compareNameKeys", "asSortMeta", "applySort", "fltOpMulti", "fltCommit", "logSortField", "reportCellText", "reportHasCost"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -1311,9 +1327,6 @@ eq(reportCellText({cost: {'': 150}}, 'cost', false), moneyText(1.5, 'USD', 2), '
 eq(reportCellText({cost: {'': 150}}, 'cost', true), '1.50', 'a CSV cost of one currency is a plain number');
 eq(reportCellText({cost: {USD: 150, EUR: 40}}, 'cost', true), moneyMap({USD: 150, EUR: 40}), 'a CSV cost in two currencies lists them');
 eq(reportCellText({}, 'cost', false), moneyText(0, 'USD', 2), 'a row without cost shows zero');
-eq(reportSortValue({cost: {'': 150, EUR: 40}}, 'cost'), 150, 'the cost sorts by the cents of the tracker currency');
-eq(reportSortValue({cost: {'': 150, EUR: 40}}, 'cost', 'EUR'), 40, 'the cost sorts by the cents of the chosen currency only');
-
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 `
 
@@ -1593,6 +1606,94 @@ if (failed) process.exit(1);
 	}
 }
 
+// TestSaveFlowsPointLogic runs saveFlows under node with a recording call: a copy is sent alone with
+// PUT /api/groups/{id}, a changed id goes as PUT on the saved id (a rename, never a DELETE of the old row),
+// a campaign whose only change is the link the rename moved is not sent again, a failed rename keeps the draft,
+// and a list longer than FLOW_WHOLE_MAX is saved campaign by campaign even with many changes.
+func TestSaveFlowsPointLogic(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the campaign save checks")
+	}
+	html := spaSource()
+	var src strings.Builder
+	src.WriteString("const SNAP=new Map(), DIRTY=new Set(), DELETED=new Set(); let GROUPS=[], calls=[], fail=null;\n")
+	src.WriteString("function syncSaveBar(){} async function flushIPDraft(){}\n")
+	src.WriteString("async function call(m,p,b){calls.push(m+' '+p+(Array.isArray(b)?' list':'')); if(fail&&fail(m,p)){const e=new Error('campaign id is taken: x'); e.status=409; throw e} return {status:'saved'}}\n")
+	src.WriteString(sharedListsDecl)
+	for _, name := range []string{"groupJSON", "groupParse", "markDirty", "snapshotGroups", "moveFlowLinks", "settleMovedLinks", "saveFlows"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		if strings.Contains(html, "async function "+name+"(") {
+			fn = "async " + fn
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => { const g = JSON.stringify(got), w = JSON.stringify(want); if (g !== w) { failed++; console.log('FAIL ' + what + ': got ' + g + ', want ' + w); } };
+(async () => {
+  const many = Array.from({length: 30}, (_, i) => ({id: 'c' + i, name: 'C' + i}));
+  const src = {id: 'a', name: 'A'};
+  const hub = {id: 'hub', redirect: 'group', out: 'a', streams: [{name: 's', out: {redirect: 'group', out: 'a'}}]};
+  GROUPS = [src, hub, ...many];
+  snapshotGroups();
+  const copy = {id: 'a_copy', name: 'A (copy)'};
+  GROUPS.splice(1, 0, copy);
+  markDirty(copy);
+  await saveFlows();
+  eq(calls, ['PUT /api/groups/a_copy'], 'a copy is sent alone');
+  eq(DIRTY.size, 0, 'the copy is saved');
+
+  calls = [];
+  src.id = 'fresh';
+  moveFlowLinks(hub, 'a', 'fresh');
+  markDirty([src, hub]);
+  await saveFlows();
+  eq(calls, ['PUT /api/groups/a'], 'a rename is one PUT on the saved id; the moved link is not sent again');
+  eq(hub.out + '/' + hub.streams[0].out.out, 'fresh/fresh', 'links follow the new id');
+  eq(SNAP.get(src).id, 'fresh', 'the snapshot takes the new id');
+
+  calls = [];
+  src.id = 'taken';
+  markDirty(src);
+  fail = (m, p) => m === 'PUT' && p === '/api/groups/fresh';
+  let err = null;
+  try { await saveFlows(); } catch (e) { err = e; }
+  eq(err && err.status, 409, 'a refused rename throws');
+  eq(calls, ['PUT /api/groups/fresh'], 'a refused rename deletes nothing');
+  eq(DIRTY.has(src), true, 'a refused rename keeps the draft');
+  fail = null;
+  src.id = 'fresh';
+  markDirty(src);
+
+  calls = [];
+  many.forEach(g => { g.name += '!'; markDirty(g); });
+  await saveFlows();
+  eq(calls, ['PUT /api/groups list'], 'many changes send the whole list');
+
+  calls = [];
+  GROUPS = Array.from({length: FLOW_WHOLE_MAX + 1}, (_, i) => ({id: 'b' + i, name: 'B' + i}));
+  snapshotGroups();
+  GROUPS.slice(0, 25).forEach(g => { g.status = false; markDirty(g); });
+  await saveFlows();
+  eq(calls.length, 25, 'a long list is never sent whole');
+  eq(calls.every(c => /^PUT \/api\/groups\/b\d+$/.test(c)), true, 'a long list saves each changed campaign alone');
+  eq(DIRTY.size, 0, 'every changed campaign of a long list is saved');
+  if (failed) process.exit(1);
+})();
+`)
+	f := filepath.Join(t.TempDir(), "saveflows.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("campaign save checks failed:\n%s", out)
+	}
+}
+
 // TestEnsureNumsBaseline runs ensureNums under node: numbering old campaigns on the list page does
 // not mark them changed, a create or copy saves the numbers it builds on, and nothing is renumbered.
 func TestEnsureNumsBaseline(t *testing.T) {
@@ -1750,14 +1851,14 @@ func TestKeywordStatsLogic(t *testing.T) {
 	html := spaSource()
 	var src strings.Builder
 	src.WriteString(spaBetween(html, "const esc=(s)=>", "\n") + "\n")
-	src.WriteString("const tr=k=>k==='kws.tr.of'?'Trend: {key}':k; let KWS_DATA=null, KWS_TREND=new Map(), KWS_TREND_READY=true, ME=null, KWS={campaign: 'promo', conds: []}, KWS_Q='';\n")
+	src.WriteString("const tr=k=>k==='kws.tr.of'?'Trend: {key}':k; let KWS_DATA=null, KWS_TREND=new Map(), KWS_TREND_READY=true, ME=null, KWS={campaign: 'promo', conds: []}, KWS_Q='', KWS_PAGE=1000, KWS_PAGE_I=0, KWS_SORT={k:'',dir:-1};\n")
 	src.WriteString("const trFill=(k,m)=>{let s=tr(k); Object.keys(m||{}).forEach(n=>{s=s.split('{'+n+'}').join(String(m[n]))}); return s};\n")
 	src.WriteString(spaBetween(html, "const KWS_NEEDS_CONV=", "\n") + "\n")
 	src.WriteString(spaBetween(html, "const KWS_COLS=", "\n") + "\n")
 	src.WriteString("const rangeQS=()=>'from=A&to=B'; const condsQS=conds=>{const qs=new URLSearchParams(); conds.forEach(c=>(c.v||['']).forEach(v=>qs.append('f',c.f+':'+c.op+':'+v))); return qs};\n")
 	src.WriteString("const fmt=n=>String(+n||0); const csvNum=n=>String(+n||0); const csvMoney=n=>(+n||0).toFixed(2); const moneyText=(n)=>(+n||0).toFixed(2)+' $';\n")
 	src.WriteString("const cellRatio=(n,d)=>+d?((n/d)*100).toFixed(2)+'%':'0.00%';\n")
-	for _, name := range []string{"csvSafe", "csvTable", "kwsKeyCell", "kwsCellText", "kwsSpark", "kwsSum", "kwsTrendCell", "kwsTotals", "kwsTrendMap", "hiddenFields", "hiddenCols", "kwsCols", "kwsCampaign", "kwsOriginAllowed", "kwsMode", "kwsPruneConds", "kwsQS", "kwsSortValue"} {
+	for _, name := range []string{"csvSafe", "csvTable", "kwsKeyCell", "kwsCellText", "kwsSpark", "kwsSum", "kwsTrendCell", "kwsData", "kwsTrendMap", "hiddenFields", "hiddenCols", "kwsCols", "kwsCampaign", "kwsOriginAllowed", "kwsMode", "kwsPruneConds", "kwsQS", "kwsPageQS"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -1817,12 +1918,11 @@ KWS_DATA = {rows: [], truncated: false, ready: true};
 eq(kwsCellText({conv: 3, hits: 10, unique: 7, rejected: 1, profit: 12.5}, 'cr', false), '30.00%', 'CR from conversions and clicks');
 eq(kwsCellText({conv: 3, hits: 0}, 'cr', false), '—', 'CR without clicks is a dash');
 eq(kwsCellText({conv: 3, hits: 0}, 'cr', true), '', 'CR without clicks is an empty CSV cell');
-eq(kwsCellText(kwsTotals([{hits: 0, conv: 2}, {hits: 0, conv: 1}]), 'cr', false), '—', 'the total CR is a dash while the clicks add up to zero');
+eq(kwsCellText(kwsData({rows: [], total: 2, totals: {hits: 0, conv: 3}}).totals, 'cr', false), '—', 'the total CR is a dash while the clicks add up to zero');
 eq(kwsCellText({unique: 7}, 'uniq', false), '7', 'unique reads the unique field');
 eq(kwsCellText({rejected: 1}, 'rej', false), '1', 'rejected reads the rejected field');
 eq(kwsCellText({profit: -5}, 'revenue', true), '-5.00', 'a negative amount keeps its sign in the machine text');
 eq(kwsCellText({profit: 12.5}, 'revenue', false), '12.50 $', 'the revenue column reads the profit field of the row');
-eq(kwsSortValue({profit: 7}, 'revenue'), 7, 'the revenue column sorts by the profit field');
 eq(KWS_NEEDS_CONV.has('revenue') && !KWS_NEEDS_CONV.has('profit'), true, 'revenue needs the conversions, the old profit id is gone');
 
 const colIds = me => { ME = me; return kwsCols().map(c => c.id).join(','); };
@@ -1858,9 +1958,20 @@ eq(kwsMode(), '', 'a role without the origin campaign cannot select origin attri
 eq(kwsQS().includes('by=origin'), false, 'a hidden origin campaign sends no by=origin');
 ME = null; KWS.by = '';
 
-const tot = kwsTotals([{hits: 10, conv: 5, profit: 1}, {hits: 90, conv: 5, profit: 2.5}]);
-eq(JSON.stringify([tot.hits, tot.conv, tot.profit]), '[100,10,3.5]', 'totals are sums');
+const page = kwsData({rows: [{keyword: 7, hits: 10, conv: 5, profit: 1}], total: 1200, totals: {hits: 100, conv: 10, profit: 3.5}, truncated: false, conv_ready: true});
+const tot = page.totals;
+eq(JSON.stringify([tot.hits, tot.conv, tot.profit, tot.unique, tot.keyword]), '[100,10,3.5,0,""]', 'the totals of the whole set come from the server, missing sums are zero');
 eq(kwsCellText(tot, 'cr', false), '10.00%', 'the total ratio comes from the sums, not from the row ratios');
+eq(JSON.stringify([page.total, page.rows[0].keyword, page.ready]), '[1200,"7",true]', 'the size of the set is kept and keywords become text');
+eq(kwsData(null).total, 0, 'no body gives an empty set');
+KWS_PAGE = 500; KWS_PAGE_I = 2; KWS_SORT = {k: 'cr', dir: 1};
+let pq = new URLSearchParams(kwsPageQS());
+eq([pq.get('limit'), pq.get('offset'), pq.get('sort'), pq.get('dir')].join(','), '500,1000,cr,asc', 'the page query has the window and the sort');
+pq = new URLSearchParams(kwsPageQS(100000, 0));
+eq([pq.get('limit'), pq.get('offset')].join(','), '100000,0', 'the export asks for the whole set from the start');
+KWS_SORT = {k: '', dir: -1};
+eq(new URLSearchParams(kwsPageQS()).has('sort'), false, 'no chosen column keeps the server order');
+KWS_PAGE = 1000; KWS_PAGE_I = 0;
 
 const sp = kwsSpark([1, 3, 2]);
 eq(sp.startsWith('<svg class="kws-spark"') && sp.includes('<path d="M'), true, 'a series draws a line');

@@ -609,12 +609,7 @@ func (s *Server) handleCheckerAppRefresh(w http.ResponseWriter, r *http.Request)
 	}
 	if wait := s.checker.refresh[g.ID].Add(checkerRefreshGap).Sub(now); wait > 0 {
 		s.checker.mu.Unlock()
-		secs := int((wait + time.Second - 1) / time.Second)
-		w.Header().Set("Retry-After", strconv.Itoa(secs))
-		writeJSON(w, http.StatusTooManyRequests, map[string]any{
-			"error": "too many requests", "code": errCode(http.StatusTooManyRequests, "too many requests"),
-			"retry_after": secs, "params": map[string]any{"retry_after": secs},
-		})
+		writeRetryLater(w, msgTooManyRequests, wait)
 		return
 	}
 	s.checker.refresh[g.ID] = now

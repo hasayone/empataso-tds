@@ -255,24 +255,34 @@ func TestPostbackAuthKeyNotInSpool(t *testing.T) {
 	}
 }
 
-// TestPostbackAuthBadKeyNotInJournal verifies that a rejected (bad_key)
-// request does not write a line to the postback journal.
-func TestPostbackAuthBadKeyNotInJournal(t *testing.T) {
+// TestPostbackAuthBadKeyInJournal verifies that a rejected (bad_key) request is
+// journaled with its reason and the key masked, and is not stored.
+func TestPostbackAuthBadKeyInJournal(t *testing.T) {
 	auth := postbackAuth{secret: "mysecret", mode: "require"}
 	cs := &fakeConv{}
 	d := queueEnv(t, cs)
 	d.pbAuth = auth
-	l := newPostbackLog(d, d.pbq.q, discardLog())
-	t.Cleanup(func() { _ = l.Close(context.Background()) })
-	d.plog = l
+	d.plog = newPostbackLog(d, d.pbq.q, discardLog())
 
-	// Wrong key → 403, nothing should be journalled.
 	rec := sendPostback(d, "/postback?subid=abc&key=WRONG&status=lead&payout=1")
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("want 403, got %d", rec.Code)
 	}
-	if len(cs.logged) != 0 {
-		t.Errorf("bad_key request was journalled: %+v", cs.logged)
+	if err := d.plog.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(cs.logged) != 1 || len(cs.logged[0]) != 1 {
+		t.Fatalf("journal %+v, want one line", cs.logged)
+	}
+	row := cs.logged[0][0]
+	if row.Outcome != store.PostbackOutcomeBadKey || row.Subid != "abc" || row.Method != http.MethodGet {
+		t.Fatalf("line %+v", row)
+	}
+	if strings.Contains(row.Params, "WRONG") || !strings.Contains(row.Params, "key=%2A%2A%2A") {
+		t.Fatalf("the key must be masked: %q", row.Params)
+	}
+	if cs.callCount() != 0 {
+		t.Fatal("a rejected postback must not reach the store")
 	}
 }
 

@@ -121,7 +121,7 @@ var actionRoutes = map[string][]string{
 	security.ActionKeitaroPurge:  {"POST /api/keitaro/purge"},
 	security.ActionLogsDelete:    {"DELETE /api/logs"},
 	security.ActionGroupsReplace: {"PUT /api/groups"},
-	security.ActionCron:          {"PUT /api/cron", "POST /api/cron/run"},
+	security.ActionCron:          {"PUT /api/cron", "POST /api/cron/run", geoDownloadPattern},
 	security.ActionBoards: {
 		"POST /api/boards", "PUT /api/boards/order", "PATCH /api/boards/{id}",
 		"PUT /api/boards/{id}/members", "POST /api/boards/{id}/assign",
@@ -243,7 +243,7 @@ func addCoreRoutes(m map[string]routeRule, open func() routeRule, rule func(sect
 
 	m["GET /api/postbacks"] = rule(secConversions)
 	m["GET /api/postbacks/export"] = rule(secConversions)
-	m["GET /api/postback-log"] = routeRule{sec: secConversions, admin: true}
+	m["GET /api/postback-log"] = rule(secConversions)
 
 	m["GET /api/report"] = rule(secReport)
 	m["GET /api/keys"] = rule(secKeywords)
@@ -300,6 +300,10 @@ func addCatalogRoutes(m map[string]routeRule, rule func(section) routeRule, addC
 	m["PUT /api/lists/{name}"] = routeRule{sec: secLists, admin: true}
 
 	m["GET /api/lookup"] = rule(secTools)
+	m["GET /api/tools/lookups"] = rule(secTools)
+	m["DELETE /api/tools/lookups"] = routeRule{sec: secTools, admin: true, cookie: true}
+	m["GET /api/tools/geo"] = rule(secTools)
+	m[geoDownloadPattern] = routeRule{sec: secSettings, admin: true}
 	m["POST /api/simulate"] = rule(secTools)
 }
 

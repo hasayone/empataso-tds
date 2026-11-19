@@ -43,6 +43,9 @@ type ConversionResult struct {
 	// RootCID is the chain root copied from the click. Empty means the click
 	// is its own root. It is set even when the root row was not found.
 	RootCID string
+	// NetworkID is the affiliate network of the click, empty when the click has
+	// none or the click columns are not on the table yet.
+	NetworkID string
 }
 
 // RecordConversion finds the click cid and writes one conversion.
@@ -100,7 +103,7 @@ func (c *CH) RecordConversion(ctx context.Context, in PostbackIn) (ConversionRes
 	if err := c.writeConversion(ctx, snap, in, prev); err != nil {
 		return ConversionResult{}, err
 	}
-	return ConversionResult{GroupID: snap.gid, Fresh: !earlier, RootCID: snap.rootCID}, nil
+	return ConversionResult{GroupID: snap.gid, Fresh: !earlier, RootCID: snap.rootCID, NetworkID: snap.network}, nil
 }
 
 // RecordPostback finds an event by cid and writes one conversion.

@@ -133,7 +133,7 @@ func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !allowed {
-			writeErr(w, http.StatusTooManyRequests, "too many attempts")
+			writeRetryLater(w, msgTooManyAttempts, LoginLimitWindow)
 			return
 		}
 	}
@@ -154,7 +154,7 @@ func (s *Server) handleRecover(w http.ResponseWriter, r *http.Request) {
 		if n := s.hashes.report(); n > 0 {
 			s.logWarn("recovery verifications refused: hashing slots exhausted", "since_last", n)
 		}
-		writeErr(w, http.StatusTooManyRequests, "too many attempts")
+		writeRetryLater(w, msgTooManyAttempts, time.Second)
 		return
 	}
 	rec, ok := s.readRecovery()

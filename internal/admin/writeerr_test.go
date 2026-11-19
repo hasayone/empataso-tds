@@ -5,8 +5,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hasayone/empataso-tds/internal/security"
 )
@@ -35,6 +37,31 @@ func TestWriteErrCodeTable(t *testing.T) {
 		}
 		if rec.Code != status || body["code"] != want || body["error"] != "boom" {
 			t.Errorf("status %d: code %d body %v, want code %q", status, rec.Code, body, want)
+		}
+	}
+}
+
+// TestWriteRetryLater checks that a 429 answer carries the wait rounded up to whole seconds, at least one,
+// in Retry-After and in retry_after of the body and of params, with the stable code too_many_requests.
+func TestWriteRetryLater(t *testing.T) {
+	for _, c := range []struct {
+		wait time.Duration
+		want int
+	}{{0, 1}, {300 * time.Millisecond, 1}, {time.Minute, 60}, {179*time.Second + time.Millisecond, 180}} {
+		rec := httptest.NewRecorder()
+		writeRetryLater(rec, "rate_limited", c.wait)
+		var body struct {
+			Error      string         `json:"error"`
+			Code       string         `json:"code"`
+			RetryAfter int            `json:"retry_after"`
+			Params     map[string]int `json:"params"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") != strconv.Itoa(c.want) ||
+			body.Error != "rate_limited" || body.Code != "too_many_requests" || body.RetryAfter != c.want || body.Params["retry_after"] != c.want {
+			t.Errorf("wait %v: %d %q %+v, want %d s", c.wait, rec.Code, rec.Header().Get("Retry-After"), body, c.want)
 		}
 	}
 }

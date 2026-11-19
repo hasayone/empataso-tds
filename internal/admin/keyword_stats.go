@@ -95,7 +95,10 @@ func writeKeywordErr(w http.ResponseWriter, err error, msg string) {
 // f=keyword:contains:<text>. The body is {rows, truncated, conv_ready}; rows are ordered
 // by payout, then clicks, at most store.KeywordStatsLimit. The keys of hidden fields are
 // removed: leads, sales and rejected go with status, profit and depsum with profit.
-// A hidden keyword field is 403, a bad period or filter 400, both slots busy 429, a query
+// With limit, offset or sort the body is one page sorted on the server,
+// {rows, total, offset, limit, sort, dir, totals, truncated, conv_ready}, with the totals of
+// every keyword; see pageParams and store.KeywordStatsPage.
+// A hidden keyword field is 403, a bad period, filter, page or sort 400, both slots busy 429, a query
 // stopped by its limits 504, any other failure 500. A source without keyword statistics
 // answers 200 with an empty table.
 func (s *Server) handleKeywordStats(w http.ResponseWriter, r *http.Request) {
@@ -103,8 +106,16 @@ func (s *Server) handleKeywordStats(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	pq, paged, ok := s.pageParams(w, r, keywordSortKeys)
+	if !ok {
+		return
+	}
 	src, ok := s.cfg.Stats.(keywordStatser)
 	if !ok {
+		if paged {
+			writeJSON(w, http.StatusOK, emptyKeywordPage(pq))
+			return
+		}
 		writeJSON(w, http.StatusOK, store.KeywordStats{Rows: []store.KeywordRow{}})
 		return
 	}
@@ -113,6 +124,10 @@ func (s *Server) handleKeywordStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer release()
+	if paged {
+		s.writeKeywordPage(w, r, q, pq)
+		return
+	}
 	res, err := src.KeywordStats(r.Context(), q.from, q.to, q.conds, q.mode)
 	if err != nil {
 		writeKeywordErr(w, err, "keyword stats error")
@@ -122,6 +137,32 @@ func (s *Server) handleKeywordStats(w http.ResponseWriter, r *http.Request) {
 		res.Rows = []store.KeywordRow{}
 	}
 	s.writeStats(w, r, http.StatusOK, res)
+}
+
+// writeKeywordPage answers a paged keyword table request; the caller holds a keyword slot.
+// q is the checked request and pq the page. A source without KeywordStatsPage answers an
+// empty page. A failed query is written by writeKeywordErr.
+func (s *Server) writeKeywordPage(w http.ResponseWriter, r *http.Request, q keywordQuery, pq store.PageQuery) {
+	kp, ok := s.cfg.Stats.(keywordPager)
+	if !ok {
+		writeJSON(w, http.StatusOK, emptyKeywordPage(pq))
+		return
+	}
+	res, err := kp.KeywordStatsPage(r.Context(), q.from, q.to, q.conds, q.mode, pq)
+	if err != nil {
+		writeKeywordErr(w, err, "keyword stats error")
+		return
+	}
+	s.writeStats(w, r, http.StatusOK, res)
+}
+
+// emptyKeywordPage is the paged answer of a source without keyword statistics. It does not fail.
+func emptyKeywordPage(pq store.PageQuery) store.KeywordPage {
+	sort, dir := pq.Sort, pq.Dir()
+	if sort == "" {
+		sort, dir = store.KeywordDefaultSort, "desc"
+	}
+	return store.KeywordPage{Rows: []store.KeywordRow{}, Offset: pq.Offset, Limit: pq.Limit, Sort: sort, Dir: dir}
 }
 
 // handleKeywordTrend writes the day-by-day course of the top keywords of the table.

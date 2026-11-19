@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -224,7 +225,7 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !allowed {
-			writeErr(w, http.StatusTooManyRequests, "too many attempts")
+			writeRetryLater(w, msgTooManyAttempts, LoginLimitWindow)
 			return
 		}
 	}
@@ -240,7 +241,7 @@ func (s *Server) handleSetupPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !s.hashes.enter() {
-		writeErr(w, http.StatusTooManyRequests, "too many attempts")
+		writeRetryLater(w, msgTooManyAttempts, time.Second)
 		return
 	}
 	hash, err := security.HashPassword(body.Password)

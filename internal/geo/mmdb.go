@@ -39,7 +39,15 @@ type Paths struct {
 	DBIPASN string // DB-IP ASN Lite (same schema as GeoLite2-ASN)
 }
 
+// Kinds of a database slot, the same names the cron service uses for its geo sources.
+const (
+	KindCity    = "city"
+	KindASN     = "asn"
+	KindDBIPASN = "dbip_asn"
+)
+
 type source struct {
+	kind string
 	path string
 	r    atomic.Pointer[maxminddb.Reader]
 	st   atomic.Pointer[fileStamp]
@@ -62,6 +70,7 @@ func OpenWith(p Paths, log *slog.Logger) (*DB, error) {
 	}
 	d := &DB{log: log}
 	d.city.path, d.asn.path, d.dbip.path = p.City, p.ASN, p.DBIPASN
+	d.city.kind, d.asn.kind, d.dbip.kind = KindCity, KindASN, KindDBIPASN
 	var first error
 	loaded := false
 	for _, s := range d.sources() {
@@ -108,7 +117,11 @@ func (s *source) load() error {
 }
 
 // Reload re-reads the files that changed on disk and reports which did.
+// A nil DB has nothing to reload and returns nil.
 func (d *DB) Reload() (changed []string) {
+	if d == nil {
+		return nil
+	}
 	for _, s := range d.sources() {
 		before := s.st.Load()
 		if err := s.load(); err != nil {
@@ -187,6 +200,7 @@ func lookupASN(r *maxminddb.Reader, ip net.IP) asnRecord {
 
 // Info describes a loaded database, for the admin panel.
 type Info struct {
+	Kind   string    `json:"kind"` // KindCity, KindASN or KindDBIPASN
 	Path   string    `json:"path"`
 	Type   string    `json:"type"`   // "GeoLite2-City", "GeoLite2-ASN", …
 	Built  time.Time `json:"built"`  // build time from the database metadata
@@ -203,7 +217,7 @@ func (d *DB) Databases() []Info {
 		if s.path == "" {
 			continue
 		}
-		in := Info{Path: s.path}
+		in := Info{Kind: s.kind, Path: s.path}
 		if r := s.r.Load(); r != nil {
 			in.Loaded = true
 			in.Type = r.Metadata.DatabaseType

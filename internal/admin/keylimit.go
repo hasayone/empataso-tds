@@ -3,7 +3,6 @@ package admin
 import (
 	"math"
 	"net/http"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -37,6 +36,12 @@ type keyBucket struct {
 type limitDenial struct {
 	msg   string
 	retry int
+}
+
+// write answers the refused request with 429, the Retry-After header and retry_after in the body.
+// w is the response. There is no error return.
+func (d *limitDenial) write(w http.ResponseWriter) {
+	writeRetryLater(w, d.msg, time.Duration(d.retry)*time.Second)
 }
 
 // keyLimiter applies a token bucket and a heavy-request cap to every verified
@@ -152,8 +157,7 @@ func (s *Server) keyLimit(rule routeRule, next http.Handler) http.Handler {
 		}
 		release, den := s.keyLim.acquire(sess.KeyID, rule.heavy)
 		if den != nil {
-			w.Header().Set("Retry-After", strconv.Itoa(den.retry))
-			writeErr(w, http.StatusTooManyRequests, den.msg)
+			den.write(w)
 			return
 		}
 		defer release()

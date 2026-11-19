@@ -51,7 +51,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !allowed {
-			writeErr(w, http.StatusTooManyRequests, "too many attempts")
+			writeRetryLater(w, msgTooManyAttempts, LoginLimitWindow)
 			return
 		}
 	}
@@ -66,7 +66,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		if n := s.hashes.report(); n > 0 {
 			s.logWarn("login verifications refused: hashing slots exhausted", "since_last", n)
 		}
-		writeErr(w, http.StatusTooManyRequests, "too many attempts")
+		writeRetryLater(w, msgTooManyAttempts, time.Second)
 		return
 	}
 	hash, uid, userOK := s.credentialFor(body.Login)

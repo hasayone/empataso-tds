@@ -77,6 +77,7 @@ var cookieOnlyRoutes = map[string]bool{
 	"GET /api/me/views":              true,
 	"PUT /api/me/views":              true,
 	"POST /api/password":             true,
+	"DELETE /api/tools/lookups":      true,
 	"GET /api/api-keys":              true,
 	"POST /api/api-keys":             true,
 	"POST /api/api-keys/{id}/rotate": true,
@@ -166,7 +167,8 @@ var catalogCreateRoutes = map[string]bool{
 // skipAllowed lists routes skipped for roles that would otherwise pass the guard.
 // Side effects or long external work after the guard are avoided.
 var skipAllowed = map[string]string{
-	"POST /api/logout": "terminates the cookie session under test",
+	"POST /api/logout":          "terminates the cookie session under test",
+	"DELETE /api/tools/lookups": "owner only: the handler refuses ADMIN file users",
 }
 
 type matrixRole struct {

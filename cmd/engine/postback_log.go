@@ -49,6 +49,8 @@ type postbackLog struct {
 
 	stopOnce sync.Once
 	lost     atomic.Int64
+	// rejects caps the rejected inbound lines journaled per second (see journalIn).
+	rejects rejectGate
 
 	// mu orders note against Close: note holds it for reading from the check
 	// of closed to the send, Close sets closed under the write lock.

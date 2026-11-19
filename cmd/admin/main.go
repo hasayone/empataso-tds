@@ -338,11 +338,11 @@ func startGeo(ctx context.Context, cfg *admin.Config, log *slog.Logger) {
 	go db.Watch(ctx, time.Minute)
 }
 
-// limiterAdapter limits login to 10 attempts per minute per key (IP).
+// limiterAdapter limits login to admin.LoginLimitAttempts per admin.LoginLimitWindow per key (IP).
 type limiterAdapter struct{ c *store.Counters }
 
 func (a limiterAdapter) Allow(ctx context.Context, key string) (bool, error) {
-	return a.c.LoginAllow(ctx, key, 10, time.Minute)
+	return a.c.LoginAllow(ctx, key, admin.LoginLimitAttempts, admin.LoginLimitWindow)
 }
 
 // runRecovery prints one recovery code and stores only its hash.

@@ -472,35 +472,60 @@ func journalRouteDocs() map[string]routeDoc {
 			Errors:       []int{400, 500, 503, 504},
 		},
 		"GET /api/postback-log": {
-			ID: "list_postback_intake_log", Summary: "The raw log of received and sent postbacks.",
+			ID: "list_postback_intake_log", Summary: "The log of received and sent postbacks.",
 			Description: "Lists the postback lines of the period, the newest first: when it came, the subid of the click, the status, " +
-				"the payout, the outcome (ok, click_not_found, no_subid, no_store, store_error or an HTTP code of an outbound call) " +
-				"and the direction (in or out). limit defaults to 200 and is capped at 1000. Missing statistics give an empty list with 200. " +
-				"The caller must be able to open every panel section, otherwise the answer is 403. " +
-				"A query stopped as too heavy is 504 \"query too heavy\".",
+				"the payout, the outcome and the direction (in or out). An inbound line also has the sender ip, the network_id of the click, " +
+				"the method, the path and the params (a query string in which tokens, keys and signatures are *** and the key segment of /{key}/postback is masked), " +
+				"the useragent, the campaign_id of the click and duplicate (a repeat of a stored click and status). " +
+				"Outcomes: ok, click_not_found, no_subid, no_store, store_error, queued, retry, queue_full, retry_overflow, replayed, " +
+				"bad_key (wrong key or no secret), invalid (bad payout), method_not_allowed, or the result of an outbound call. " +
+				"Filters: outcome (duplicate selects accepted repeats, ok first arrivals), network, ip, cid, direction; offset and limit page the list " +
+				"(limit defaults to 200 and is capped at 1000). An administrator sees every line; any other caller with the conversions section sees " +
+				"the lines of the campaigns it may see, without lines that have no campaign. A hidden field is dropped from the lines, a hidden payout drops params as well. " +
+				"Missing statistics give an empty list with 200. A query stopped as too heavy is 504 \"query too heavy\".",
 			RU: docText{
-				Summary: "Сырой журнал принятых и отправленных постбэков.",
+				Summary: "Журнал принятых и отправленных постбэков.",
 				Description: "Список строк постбэков за период, сначала новые: время, subid клика, статус, " +
-					"выплата, итог (ok, click_not_found, no_subid, no_store, store_error или HTTP-код исходящего вызова) " +
-					"и направление (in или out). limit по умолчанию 200, максимум 1000. Без статистики ответ — пустой список с кодом 200. " +
-					"Вызывающий должен иметь право открывать все разделы панели, иначе ответ 403. " +
-					"Запрос, остановленный как слишком тяжёлый, даёт 504 «query too heavy».",
+					"выплата, итог и направление (in или out). У входящей строки есть ещё ip отправителя, network_id клика, " +
+					"метод, путь и params (строка запроса, где токены, ключи и подписи заменены на ***, а ключ в пути /{key}/postback скрыт), " +
+					"useragent, campaign_id клика и duplicate (повтор уже сохранённой пары клик + статус). " +
+					"Итоги: ok, click_not_found, no_subid, no_store, store_error, queued, retry, queue_full, retry_overflow, replayed, " +
+					"bad_key (неверный ключ или секрет не задан), invalid (неверная выплата), method_not_allowed или результат исходящего вызова. " +
+					"Фильтры: outcome (duplicate — принятые повторы, ok — первые), network, ip, cid, direction; offset и limit листают список " +
+					"(limit по умолчанию 200, максимум 1000). Администратор видит все строки; остальные с разделом конверсий — строки кампаний, " +
+					"которые им видны, без строк без кампании. Скрытое поле убирается из строк, скрытая выплата убирает и params. " +
+					"Без статистики ответ — пустой список с кодом 200. Запрос, остановленный как слишком тяжёлый, даёт 504 «query too heavy».",
 			},
 			UK: docText{
-				Summary: "Сирий журнал прийнятих і надісланих постбеків.",
+				Summary: "Журнал прийнятих і надісланих постбеків.",
 				Description: "Список рядків постбеків за період, спочатку нові: час, subid кліка, статус, " +
-					"виплата, підсумок (ok, click_not_found, no_subid, no_store, store_error або HTTP-код вихідного виклику) " +
-					"і напрямок (in або out). limit за замовчуванням 200, максимум 1000. Без статистики відповідь — порожній список із кодом 200. " +
-					"Викликаючий має мати право відкривати всі розділи панелі, інакше відповідь 403. " +
-					"Запит, зупинений як надто важкий, дає 504 «query too heavy».",
+					"виплата, підсумок і напрямок (in або out). Вхідний рядок має ще ip відправника, network_id кліка, " +
+					"метод, шлях і params (рядок запиту, де токени, ключі й підписи замінено на ***, а ключ у шляху /{key}/postback приховано), " +
+					"useragent, campaign_id кліка і duplicate (повтор уже збереженої пари клік + статус). " +
+					"Підсумки: ok, click_not_found, no_subid, no_store, store_error, queued, retry, queue_full, retry_overflow, replayed, " +
+					"bad_key (хибний ключ або секрет не задано), invalid (хибна виплата), method_not_allowed або результат вихідного виклику. " +
+					"Фільтри: outcome (duplicate — прийняті повтори, ok — перші), network, ip, cid, direction; offset і limit гортають список " +
+					"(limit за замовчуванням 200, максимум 1000). Адміністратор бачить усі рядки; інші з розділом конверсій — рядки кампаній, " +
+					"які їм видно, без рядків без кампанії. Приховане поле прибирається з рядків, прихована виплата прибирає й params. " +
+					"Без статистики відповідь — порожній список із кодом 200. Запит, зупинений як надто важкий, дає 504 «query too heavy».",
 			},
 			Query: append(append([]queryParam{}, rangeParams...),
+				strQ("outcome", "One outcome; duplicate selects accepted repeats.").
+					loc("Один итог; duplicate — принятые повторы.", "Один підсумок; duplicate — прийняті повтори."),
+				strQ("network", "Affiliate network id of the click.").loc("Id партнёрской сети клика.", "Id партнерської мережі кліка."),
+				strQ("ip", "Sender address.").loc("Адрес отправителя.", "Адреса відправника."),
+				strQ("cid", "Click id (subid).").loc("Id клика (subid).", "Id кліка (subid)."),
+				strQ("direction", "in or out.").loc("in или out.", "in або out."),
+				intQ("offset", "Rows to skip.").loc("Сколько строк пропустить.", "Скільки рядків пропустити."),
 				intQ("limit", "Rows to return, at most 1000. Default: 200.").
 					loc("Сколько строк вернуть, не больше 1000. По умолчанию 200.", "Скільки рядків повернути, не більше 1000. За замовчуванням 200.")),
 			Response: []any{map[string]any{
 				"ts": "2026-11-16T10:20:00Z", "subid": "c1", "status": "sale", "payout": 30.5, "outcome": "ok", "direction": "in",
+				"ip": "203.0.113.20", "network_id": "net-example", "method": "GET", "path": "/postback",
+				"params": "currency=USD&key=%2A%2A%2A&payout=30.5&status=sale&subid=c1", "useragent": "ExampleNetwork/1.0",
+				"campaign_id": "promo",
 			}},
-			Errors: []int{403, 500, 504},
+			Errors: []int{400, 500, 504},
 		},
 		"GET /api/report": {
 			ID: "get_report", Summary: "Report rows for the period.",
@@ -510,7 +535,12 @@ func journalRouteDocs() map[string]routeDoc {
 				"cost is the click cost of the row in cents by currency code, for example {\"USD\": 4200}; the field is absent when no click of the row has a price. " +
 				"An empty currency code means the tracker currency of imported clicks. cost is hidden from roles without access to cost. " +
 				"A condition on a field the conversions table does not have leaves conv at zero instead of failing. " +
-				"Missing statistics give an empty answer with 200. A bad filter is 400 and a query stopped as too heavy is 504 \"query too heavy\".",
+				"With limit, offset or sort the answer is one page sorted on the server over the whole period: " +
+				"{rows, total, offset, limit, sort, dir, sort_cur, totals, truncated}. total counts every row; totals {hits, unique, bots, conv, profit, depsum, cost} " +
+				"are the sums of every row, unique being the first-step uniques; ratios such as CR are taken from these sums. " +
+				"The cost sort uses the currency with the largest total cost, named in sort_cur, and puts rows without cost in it last. " +
+				"truncated is true only above " + strconv.Itoa(store.PageMaxRows) + " visit groups: the set stops there, the totals still count every visit. " +
+				"Missing statistics give an empty answer with 200. A bad filter, page or sort is 400 and a query stopped as too heavy is 504 \"query too heavy\".",
 			RU: docText{
 				Summary: "Строки отчёта за период.",
 				Description: "Визиты и конверсии, сгруппированные по кампании, потоку, стране, офферу и источнику трафика. " +
@@ -519,7 +549,12 @@ func journalRouteDocs() map[string]routeDoc {
 					"cost — расход кликов строки в центах по коду валюты, например {\"USD\": 4200}; поля нет, если ни у одного клика строки нет цены. " +
 					"Пустой код валюты означает валюту трекера у перенесённых кликов. Для ролей без доступа к расходу поле cost скрыто. " +
 					"Условие по полю, которого нет в таблице конверсий, оставляет conv нулём и не вызывает ошибку. " +
-					"Без статистики ответ пустой с кодом 200. Неверный фильтр даёт 400, запрос, остановленный как слишком тяжёлый, — 504 «query too heavy».",
+					"С limit, offset или sort ответ — одна страница, отсортированная на сервере по всему периоду: " +
+					"{rows, total, offset, limit, sort, dir, sort_cur, totals, truncated}. total — число всех строк; totals {hits, unique, bots, conv, profit, depsum, cost} " +
+					"— суммы по всем строкам, unique — уники первого шага; отношения вроде CR считаются из этих сумм. " +
+					"Сортировка по расходу идёт по валюте с наибольшим общим расходом (она в sort_cur), строки без расхода в ней — в конце. " +
+					"truncated равен true только при больше чем " + strconv.Itoa(store.PageMaxRows) + " группах визитов: набор обрывается, итоги всё равно считают все визиты. " +
+					"Без статистики ответ пустой с кодом 200. Неверный фильтр, страница или сортировка дают 400, запрос, остановленный как слишком тяжёлый, — 504 «query too heavy».",
 			},
 			UK: docText{
 				Summary: "Рядки звіту за період.",
@@ -529,13 +564,18 @@ func journalRouteDocs() map[string]routeDoc {
 					"cost — витрати кліків рядка в центах за кодом валюти, наприклад {\"USD\": 4200}; поля немає, якщо жоден клік рядка не має ціни. " +
 					"Порожній код валюти означає валюту трекера в перенесених кліків. Для ролей без доступу до витрат поле cost приховане. " +
 					"Умова за полем, якого немає в таблиці конверсій, залишає conv нулем і не спричиняє помилку. " +
-					"Без статистики відповідь порожня з кодом 200. Хибний фільтр дає 400, запит, зупинений як надто важкий, — 504 «query too heavy».",
+					"З limit, offset або sort відповідь — одна сторінка, відсортована на сервері за весь період: " +
+					"{rows, total, offset, limit, sort, dir, sort_cur, totals, truncated}. total — кількість усіх рядків; totals {hits, unique, bots, conv, profit, depsum, cost} " +
+					"— суми за всіма рядками, unique — унікальні першого кроку; відношення на кшталт CR рахуються з цих сум. " +
+					"Сортування за витратами йде за валютою з найбільшими загальними витратами (вона в sort_cur), рядки без витрат у ній — у кінці. " +
+					"truncated дорівнює true лише при понад " + strconv.Itoa(store.PageMaxRows) + " групах візитів: набір обривається, підсумки все одно рахують усі візити. " +
+					"Без статистики відповідь порожня з кодом 200. Хибний фільтр, сторінка чи сортування дають 400, запит, зупинений як надто важкий, — 504 «query too heavy».",
 			},
 			Query: joinParams(rangeParams, filterParams, []queryParam{
-				strQ("meta", "Pass 1 to get {rows, truncated} instead of the bare array; truncated is true when the rows were cut.").
-					loc("Передайте 1, чтобы получить {rows, truncated} вместо голого массива; truncated равен true, если строки были обрезаны.",
-						"Передайте 1, щоб отримати {rows, truncated} замість голого масиву; truncated дорівнює true, якщо рядки було обрізано."),
-			}),
+				strQ("meta", "Pass 1 to get {rows, truncated} instead of the bare array; truncated is true when the rows were cut at 2000.").
+					loc("Передайте 1, чтобы получить {rows, truncated} вместо голого массива; truncated равен true, если строки обрезаны на 2000.",
+						"Передайте 1, щоб отримати {rows, truncated} замість голого масиву; truncated дорівнює true, якщо рядки обрізано на 2000."),
+			}, tablePageParams(store.SliceSortKeys, store.SliceDefaultSort)),
 			Response: []any{map[string]any{
 				"group": "promo", "stream": "main", "country": "us", "offer": "o1", "source": "s1",
 				"hits": 1250, "unique": 980, "uniq_first": 900, "bots": 140, "conv": 12, "profit": 360.5, "depsum": 0,
@@ -631,7 +671,9 @@ func keywordRouteDocs() map[string]routeDoc {
 				"and the money fields are then zero and mean nothing. An empty keyword is the clicks that carried none. " +
 				"conv and profit count all statuses, as /api/report does; leads, sales and rejected split conv by status. " +
 				"A hidden status field removes leads, sales and rejected from every row, conv and profit stay. " +
-				"A hidden profit field removes profit and depsum, a hidden uniq field removes unique.",
+				"A hidden profit field removes profit and depsum, a hidden uniq field removes unique. " +
+				"With limit, offset or sort the answer is one page sorted on the server: {rows, total, offset, limit, sort, dir, totals, truncated, conv_ready}; " +
+				"total counts every keyword, totals {hits, unique, conv, leads, sales, rejected, profit, depsum} are their sums, ratios are taken from the sums, truncated is false.",
 			RU: docText{
 				Summary: "Клики, конверсии и выплата по каждому ключевому слову.",
 				Description: sharedRU + "Ответ — {rows, truncated, conv_ready}. Строка — {keyword, hits, unique, conv, leads, " +
@@ -640,7 +682,9 @@ func keywordRouteDocs() map[string]routeDoc {
 					"и денежные поля тогда равны нулю и ничего не значат. Пустое keyword — клики без ключевого слова. " +
 					"conv и profit считают все статусы, как и /api/report; leads, sales и rejected делят conv по статусам. " +
 					"Скрытое поле status убирает leads, sales и rejected из каждой строки, conv и profit остаются. " +
-					"Скрытое поле profit убирает profit и depsum, скрытое поле uniq — unique.",
+					"Скрытое поле profit убирает profit и depsum, скрытое поле uniq — unique. " +
+					"С limit, offset или sort ответ — одна страница, отсортированная на сервере: {rows, total, offset, limit, sort, dir, totals, truncated, conv_ready}; " +
+					"total — число всех ключей, totals {hits, unique, conv, leads, sales, rejected, profit, depsum} — их суммы, отношения считаются из сумм, truncated равен false.",
 			},
 			UK: docText{
 				Summary: "Кліки, конверсії та виплата за кожним ключовим словом.",
@@ -650,13 +694,15 @@ func keywordRouteDocs() map[string]routeDoc {
 					"і грошові поля тоді дорівнюють нулю й нічого не означають. Порожнє keyword — кліки без ключового слова. " +
 					"conv і profit враховують усі статуси, як і /api/report; leads, sales і rejected ділять conv за статусами. " +
 					"Приховане поле status прибирає leads, sales і rejected з кожного рядка, conv і profit залишаються. " +
-					"Приховане поле profit прибирає profit і depsum, приховане поле uniq — unique.",
+					"Приховане поле profit прибирає profit і depsum, приховане поле uniq — unique. " +
+					"З limit, offset або sort відповідь — одна сторінка, відсортована на сервері: {rows, total, offset, limit, sort, dir, totals, truncated, conv_ready}; " +
+					"total — кількість усіх ключів, totals {hits, unique, conv, leads, sales, rejected, profit, depsum} — їхні суми, відношення рахуються із сум, truncated дорівнює false.",
 			},
 			Query: joinParams(rangeParams, filterParams, []queryParam{
 				strQ("by", "Attribution mode: empty groups by the last click; origin uses the first click's campaign, keyword and stream. Unknown values are 400; origin is 403 when origin fields are hidden.").
 					loc("Режим атрибуции: пусто группирует по последнему клику; origin использует кампанию, ключевое слово и поток первого клика. Неизвестное значение — 400; origin — 403, если поля первоисточника скрыты.",
 						"Режим атрибуції: порожньо групує за останнім кліком; origin використовує кампанію, ключове слово й потік першого кліку. Невідоме значення — 400; origin — 403, якщо поля першоджерела приховані."),
-			}),
+			}, tablePageParams(store.KeywordSortKeys, store.KeywordDefaultSort)),
 			Response: map[string]any{
 				"rows": []any{
 					map[string]any{
@@ -808,7 +854,7 @@ func toolRouteDocs() map[string]routeDoc {
 				},
 				"lists": []any{map[string]any{"list": "wap", "label": "example-operator"}},
 				"databases": []any{map[string]any{
-					"path": "/data/GeoLite2-City.mmdb", "type": "GeoLite2-City", "built": "2026-11-01T00:00:00Z", "loaded": true,
+					"kind": "city", "path": "/data/GeoLite2-City.mmdb", "type": "GeoLite2-City", "built": "2026-11-01T00:00:00Z", "loaded": true,
 				}},
 			},
 			Errors: []int{400},

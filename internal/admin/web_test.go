@@ -556,8 +556,9 @@ func TestCalloutRowGap(t *testing.T) {
 	must(t, pop, "{cls:'mt'})}\n    <div class=\"row wrap\" style=\"gap:8px;margin-bottom:12px\"><button type=\"button\" id=\"pb-pop-lead\">", "lead and sale buttons follow the callout directly and keep a gap above the footer")
 }
 
-// TestSettingsMasonry — settings cards keep content height in two columns.
-func TestSettingsMasonry(t *testing.T) {
+// TestSettingsGrid checks that settings cards fill columns of a bounded width: two in the container, more on a
+// wide screen in the full width, one on a phone, and that the dashboard tiles stop stretching in the full width.
+func TestSettingsGrid(t *testing.T) {
 	html := spaSource()
 	src := spaFunctionLine(html, "settings")
 	if src == "" {
@@ -565,10 +566,10 @@ func TestSettingsMasonry(t *testing.T) {
 	}
 	must(t, src, `class="bds setgrid"`, "settings wrapper is setgrid")
 	mustNot(t, src, `grid-template-columns:repeat(auto-fit,minmax(340px,440px))`, "settings drops the stretched grid")
-	must(t, html, `.bds.setgrid{display:block;column-count:2`, "two-column masonry")
-	must(t, html, `break-inside:avoid`, "card does not split across columns")
-	must(t, html, `@media (max-width:760px){.bds.setgrid{column-count:1}}`, "one column below 760px")
-	must(t, html, `.bds{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}`, "default board grid stays")
+	must(t, html, `.bds.setgrid{grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--card-w)),1fr));max-width:var(--set-w)}`, "settings columns of a bounded width")
+	must(t, html, `--set-w:var(--read-w);--card-w:380px;`, "the container keeps two settings columns")
+	must(t, html, `.bds{display:grid;grid-template-columns:repeat(auto-fit,minmax(max(210px,var(--tile-floor)),1fr));gap:12px}`, "board tiles have a floor")
+	mustNot(t, html, `column-count:2`, "no fixed two-column masonry")
 }
 
 // TestCampaignMoneyAndROIDisplay — money and ROI cells show zeros, not em dashes.
@@ -2215,7 +2216,11 @@ func TestAppearanceAccents(t *testing.T) {
 	must(t, html, `:root[data-accent="green"]`, "green accent tokens")
 	must(t, html, `:root[data-accent="graphite"]`, "graphite accent tokens")
 	must(t, html, `:root[data-accent="brand"]{`, "brand accent tokens")
-	must(t, html, `const ACCENTS=['violet','blue','green','graphite','brand']`, "brand accent in the list")
+	must(t, html, `const ACCENTS=['violet','blue','green','graphite','yellow','fire','brand']`, "every accent in the list")
+	must(t, html, `:root[data-accent="yellow"]{`, "yellow accent tokens")
+	must(t, html, `:root[data-accent="fire"]{`, "fire accent tokens")
+	must(t, html, `--accent-fill:#facc15;--accent-fill-h:#eab308;--accent-fill-fg:#12151c}`, "yellow fills carry dark text")
+	must(t, html, `button.primary,.btn.primary{background:var(--accent-fill);border-color:var(--accent-fill);color:var(--accent-fill-fg)}`, "primary buttons use the fill tokens")
 	must(t, html, `:root[data-accent="brand"] button.primary`, "brand primary button gradient")
 	must(t, html, `.swatch[data-accent-pick="brand"]`, "brand swatch")
 	for _, key := range []string{"accent.brand':'Brand'", "accent.brand':'Фирменная'", "accent.brand':'Фірмова'"} {

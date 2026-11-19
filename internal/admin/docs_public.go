@@ -153,8 +153,7 @@ func (s *Server) docsGate(next http.HandlerFunc) http.HandlerFunc {
 		if s.keyLim != nil {
 			release, den := s.keyLim.acquire(docsLimitPrefix+s.clientIP(r), false)
 			if den != nil {
-				w.Header().Set("Retry-After", strconv.Itoa(den.retry))
-				writeErr(w, http.StatusTooManyRequests, den.msg)
+				den.write(w)
 				return
 			}
 			defer release()
