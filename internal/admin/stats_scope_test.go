@@ -231,6 +231,43 @@ func TestStatsScopeConds(t *testing.T) {
 	}
 }
 
+// TestStatsKeptCampaignKeepsScope checks the filter the dashboard sends for a kept campaign: a campaign the
+// account may not see never widens its scope, on the summary, facts and recent clicks alike.
+func TestStatsKeptCampaignKeepsScope(t *testing.T) {
+	st := &recStats{}
+	_, srv := scopeServer(t, st, "")
+	sel := newClient(t)
+	if code, _ := login(t, sel, srv.URL, "sel", "secret1"); code != http.StatusOK {
+		t.Fatalf("sel login %d", code)
+	}
+	for _, path := range []string{"/api/stats/summary", "/api/stats/facts", "/api/logs"} {
+		for _, kept := range []string{"c1", "c2"} {
+			resp, err := sel.Get(srv.URL + path + "?f=campaign_id:eq:" + kept)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("%s kept %s: %d", path, kept, resp.StatusCode)
+			}
+			conds := st.snapshot()
+			sc, ok := scopeCond(conds)
+			if !ok || len(sc.Values) != 1 || sc.Values[0] != "c1" {
+				t.Fatalf("%s kept %s: scope must stay c1, got %+v", path, kept, conds)
+			}
+			var own *store.Cond
+			for i := range conds {
+				if !conds[i].Scope && conds[i].Field == "campaign_id" {
+					own = &conds[i]
+				}
+			}
+			if own == nil || own.Op != "eq" || len(own.Values) != 1 || own.Values[0] != kept {
+				t.Fatalf("%s kept %s: the kept campaign is its own condition, got %+v", path, kept, conds)
+			}
+		}
+	}
+}
+
 func TestStatsStripCostKeys(t *testing.T) {
 	keys := statsStripKeys(viewer{hidden: map[string]bool{"cost": true}}, nil)
 	for _, k := range []string{"cost_cur", "cost", "cost_cents"} {

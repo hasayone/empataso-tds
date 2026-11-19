@@ -562,6 +562,14 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   withCamp.logs.conds.push({ f: 'campaign_id', op: 'eq', v: ['g1'] });
   eq(collectPageViews(withCamp).logs.conds.some(c => c.f === 'campaign_id'), true, 'page views manual campaign cond saved');
   eq(applyPageViews({ range: { id: 'week' } }, def).range.id, 'week', 'page views period week');
+  eq(collectPageViews(def).dashboard.campaign, undefined, 'no kept campaign is not in the body');
+  const kept = applyPageViews({ dashboard: { campaign: ' promo ' } }, def);
+  eq(kept.dashCampaign, 'promo', 'the kept campaign is read trimmed');
+  eq(collectPageViews(kept).dashboard.campaign, 'promo', 'the kept campaign is written back');
+  eq(applyPageViews(collectPageViews(kept), def).dashCampaign, 'promo', 'the kept campaign survives collect then apply');
+  eq(applyPageViews({ dashboard: { campaign: '' } }, kept).dashCampaign, undefined, 'an empty campaign clears the choice');
+  eq(applyPageViews({ dashboard: { campaign: 7 } }, kept).dashCampaign, 'promo', 'a campaign that is not text is ignored');
+  eq('campaign' in collectPageViews(applyPageViews({ dashboard: { campaign: '' } }, kept)).dashboard, false, 'a cleared campaign leaves no key behind');
 }
 {
   const def = defaultPageViewState();
