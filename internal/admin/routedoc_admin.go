@@ -281,15 +281,18 @@ func publicRouteDocs() map[string]routeDoc {
 		"POST /api/login": cookieDoc("login",
 			docOf("Sign in with a login and a password.",
 				"Body login and password. 200 with the CSRF token and the session cookie; 401 for wrong credentials; "+
-					"429 for too many attempts; 503 when sign-in is closed on this host, or with the text \"session store unavailable\" "+
+					"429 for too many attempts (10 a minute per address), with the wait in Retry-After and retry_after; "+
+					"503 when sign-in is closed on this host, or with the text \"session store unavailable\" "+
 					"when Redis is unavailable: the attempt counter or the session store failed. That answer does not depend on the password."),
 			docOf("Вход по логину и паролю.",
 				"Тело: login и password. 200 с CSRF-токеном и cookie сессии; 401 при неверных данных; "+
-					"429 при слишком частых попытках; 503, если вход на этом хосте закрыт, либо с текстом \"session store unavailable\", "+
+					"429 при слишком частых попытках (10 в минуту с адреса), с ожиданием в Retry-After и retry_after; "+
+					"503, если вход на этом хосте закрыт, либо с текстом \"session store unavailable\", "+
 					"когда Redis недоступен: не сработал счётчик попыток или хранилище сессий. Такой ответ не зависит от пароля."),
 			docOf("Вхід за логіном і паролем.",
 				"Тіло: login і password. 200 із CSRF-токеном і cookie сесії; 401 при хибних даних; "+
-					"429 при надто частих спробах; 503, якщо вхід на цьому хості закритий, або з текстом \"session store unavailable\", "+
+					"429 при надто частих спробах (10 за хвилину з адреси), з очікуванням у Retry-After і retry_after; "+
+					"503, якщо вхід на цьому хості закритий, або з текстом \"session store unavailable\", "+
 					"коли Redis недоступний: не спрацював лічильник спроб або сховище сесій. Така відповідь не залежить від пароля.")),
 		"POST /api/recover": cookieDoc("recover_password",
 			docOf("Set a new password with a one-time recovery code.",
@@ -993,13 +996,16 @@ func updateRouteDocs() map[string]routeDoc {
 				"Тіло: confirm, що дорівнює rollback. 202 з id запиту; 409 з кодом причини, якщо відкіт зараз почати не можна.")),
 		"POST /api/update/check": cookieDoc("check_update",
 			docOf("Ask the updater to look for a new version.",
-				"The body is empty. 202 with the request id; 429 when the last check was less than 5 minutes ago; "+
+				"The body is empty. 202 with the request id; 429 rate_limited when the last check, a manual one or the one the updater "+
+					"runs after an apply, was less than 5 minutes ago, with the seconds left in Retry-After and retry_after; "+
 					"409 with the reason code when a check cannot start now."),
 			docOf("Запрос поиска новой версии.",
-				"Тело пустое. 202 с id запроса; 429, если прошлая проверка была меньше 5 минут назад; "+
+				"Тело пустое. 202 с id запроса; 429 rate_limited, если прошлая проверка (ручная или та, что агент делает после "+
+					"применения) была меньше 5 минут назад, с оставшимися секундами в Retry-After и retry_after; "+
 					"409 с кодом причины, если проверку сейчас начать нельзя."),
 			docOf("Запит пошуку нової версії.",
-				"Тіло порожнє. 202 з id запиту; 429, якщо попередня перевірка була менше 5 хвилин тому; "+
+				"Тіло порожнє. 202 з id запиту; 429 rate_limited, якщо попередня перевірка (ручна або та, яку агент робить після "+
+					"застосування) була менше 5 хвилин тому, із секундами, що лишилися, у Retry-After і retry_after; "+
 					"409 з кодом причини, якщо перевірку зараз почати не можна.")),
 	}
 }

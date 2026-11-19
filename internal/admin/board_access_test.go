@@ -9,6 +9,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
@@ -317,19 +318,42 @@ func TestBoardCrossSectionCampaignLink(t *testing.T) {
 	}
 }
 
-func TestBoardPostbackLogClosedForLimitedUser(t *testing.T) {
-	groups := &boardMemGroups{}
+// TestBoardPostbackLogScopedForLimitedUser checks that a user with the conversions
+// section reads the postback log limited to the campaigns of the sections they may open.
+func TestBoardPostbackLogScopedForLimitedUser(t *testing.T) {
+	groups := &boardMemGroups{list: []config.Group{
+		{ID: "s1", Name: "SEO one", BoardID: "seo"},
+		{ID: "a1", Name: "ASO one", BoardID: "aso"},
+	}}
+	stats := &limitStats{}
 	hs, _ := boardTestServer(t, groups, "", func(s *Server) {
+		s.cfg.Stats = stats
 		_ = s.users.Add(security.User{
 			ID: "u1", Login: "u1", Hash: mustHash(t, "p@ss"), Enabled: true,
 			Type: security.UserRegular, BoardIDs: []string{"seo"},
-			Access: security.Access{Sections: []string{string(secConversions)}},
+			Access: security.Access{
+				Sections: []string{string(secConversions)},
+				Grants:   map[string]security.Grant{resCampaigns: {Mode: security.ModeFull}},
+			},
 		})
 	})
 	c, _ := boardLogin(t, hs.URL, "u1", "p@ss")
 	resp, _ := boardGet(t, c, hs.URL+"/api/postback-log", "seo")
-	if resp.StatusCode != http.StatusForbidden {
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("postback-log %d", resp.StatusCode)
+	}
+	sc := stats.query.Scope
+	if sc == nil {
+		t.Fatal("a limited user must read a scoped log")
+	}
+	in := sc.Op == "in" && slices.Contains(sc.Values, "s1") && !slices.Contains(sc.Values, "a1")
+	nin := sc.Op == "nin" && slices.Contains(sc.Values, "a1") && !slices.Contains(sc.Values, "s1")
+	if !in && !nin {
+		t.Fatalf("scope %+v, want only the SEO campaign", sc)
+	}
+	admin, _ := boardLogin(t, hs.URL, "admin", "p@ss")
+	if resp, _ := boardGet(t, admin, hs.URL+"/api/postback-log", "seo"); resp.StatusCode != http.StatusOK || stats.query.Scope != nil {
+		t.Fatalf("the administrator reads the whole log: %d %+v", resp.StatusCode, stats.query.Scope)
 	}
 }
 

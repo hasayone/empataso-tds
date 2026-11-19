@@ -179,12 +179,7 @@ func decodeViewsBody(w http.ResponseWriter, r *http.Request) (map[string]json.Ra
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, viewsMaxBody))
 	var body map[string]json.RawMessage
 	if err := dec.Decode(&body); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			writeErr(w, http.StatusRequestEntityTooLarge, "body too large")
-			return nil, false
-		}
-		writeErr(w, http.StatusBadRequest, "bad json")
+		writeBodyErr(w, err)
 		return nil, false
 	}
 	return filterViewPages(body), true

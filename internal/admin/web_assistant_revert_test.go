@@ -12,7 +12,7 @@ func TestAssistantWidgetChatRevert(t *testing.T) {
 	must(t, paint, "back.innerHTML=icon('undo');", "the button has the undo icon")
 	must(t, paint, "back.onclick=()=>aiRevertChat(c,back);", "the button starts the chat revert")
 	must(t, html, `undo:'<path d="M9 14 4 9l5-5"/>`, "the undo icon exists")
-	must(t, html, "const IC_UI_ONLY=new Set(['sortoff','sortdesc','sortasc','undo']);", "the undo icon is not offered for boards")
+	must(t, html, "const IC_UI_ONLY=new Set(['sortoff','sortdesc','sortasc','undo','pgfirst','pgprev','pgnext','pglast']);", "the undo icon is not offered for boards")
 	must(t, assistantFn(html, "aiHistLoad"), "call('GET','/api/ai/changes?status=done')", "the applied edits are read with the list")
 	run := assistantFn(html, "aiRevertChat")
 	must(t, run, "list.map(aiChangeLine).join('\\n')", "the confirmation lists the edits")

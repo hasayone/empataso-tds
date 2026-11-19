@@ -893,6 +893,43 @@ func TestUpdateCheckRateLimited(t *testing.T) {
 	if code != http.StatusTooManyRequests || !strings.Contains(string(body), "rate_limited") {
 		t.Errorf("rate limited: %d %s", code, body)
 	}
+	if n := retryAfterOf(t, body); n < 299 || n > 300 {
+		t.Errorf("retry_after right after a check: %d", n)
+	}
+}
+
+// TestUpdateCheckWaitFromLastRun verifies that check.json written two minutes ago, as the updater leaves it right after
+// an apply, refuses a manual check with the three minutes left in retry_after.
+func TestUpdateCheckWaitFromLastRun(t *testing.T) {
+	dir := t.TempDir()
+	inboxDir := t.TempDir()
+	_, srv := newUpdateServer(t, dir, inboxDir)
+	c, csrf := loginAdmin(t, srv.URL)
+	writeAgentFile(t, dir, cron.AgentFile{Schema: 1, At: time.Now(), Inbox: true})
+	check := freshCheck()
+	check.At = time.Now().Add(-2 * time.Minute)
+	writeCheckFile(t, dir, check)
+
+	code, body := callJSON(t, c, http.MethodPost, srv.URL+"/api/update/check", csrf, "{}")
+	if code != http.StatusTooManyRequests {
+		t.Fatalf("check two minutes after the last run: %d %s", code, body)
+	}
+	if n := retryAfterOf(t, body); n < 179 || n > 180 {
+		t.Errorf("retry_after two minutes after the last run: %d", n)
+	}
+}
+
+// retryAfterOf reads retry_after of a 429 answer body.
+// t is the test handle and body the raw answer. It returns the seconds; a body without the field fails the test.
+func retryAfterOf(t *testing.T, body []byte) int {
+	t.Helper()
+	var v struct {
+		RetryAfter *int `json:"retry_after"`
+	}
+	if err := json.Unmarshal(body, &v); err != nil || v.RetryAfter == nil {
+		t.Fatalf("no retry_after in %s (%v)", body, err)
+	}
+	return *v.RetryAfter
 }
 
 // TestUpdateVersionWithFakeEngine verifies GET /api/version with a fake engine

@@ -156,7 +156,7 @@ func TestAnalyticsLimitsOnEveryQuery(t *testing.T) {
 		"EachPostback": func(c *CH, ctx context.Context) {
 			_, _ = c.EachPostback(ctx, PostbackQuery{From: from, To: to}, 10, nil, func(PostbackRow) error { return nil })
 		},
-		"PostbackLog": func(c *CH, ctx context.Context) { _, _ = c.PostbackLog(ctx, from, to, 10) },
+		"PostbackLog": func(c *CH, ctx context.Context) { _, _ = c.PostbackLog(ctx, PostbackLogQuery{From: from, To: to, Limit: 10}) },
 		"CatalogRefs": func(c *CH, ctx context.Context) { _, _ = c.CatalogRefs(ctx, "example.com") },
 	}
 	for name, call := range calls {

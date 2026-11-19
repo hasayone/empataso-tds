@@ -111,7 +111,8 @@ func (s *Server) resolve(ip netip.Addr, lists *dirLists) (geo.Geo, visitorInfo) 
 }
 
 // handleLookup — what the engine would learn from an IP address: geo, network,
-// and which of the .dat lists it falls into.
+// and which of the .dat lists it falls into. Every answered check goes to the
+// lookup history of the caller.
 func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 	ip, err := netip.ParseAddr(strings.TrimSpace(r.URL.Query().Get("ip")))
 	if err != nil {
@@ -127,11 +128,14 @@ func (s *Server) handleLookup(w http.ResponseWriter, r *http.Request) {
 		Label string `json:"label,omitempty"`
 	}
 	hits := []hit{}
+	names := []string{}
 	for _, name := range lists.names() {
 		if label, ok := lists.Lookup(name, ip); ok {
 			hits = append(hits, hit{List: name, Label: label})
+			names = append(names, name)
 		}
 	}
+	s.recordLookup(r, vi, names)
 	dbs := []geo.Info{}
 	if s.cfg.Geo != nil {
 		dbs = append(dbs, s.cfg.Geo.Databases()...)

@@ -61,7 +61,7 @@ func (fakeStats) EachPostback(_ context.Context, _ store.PostbackQuery, _ int, p
 	}
 	return false, nil
 }
-func (fakeStats) PostbackLog(context.Context, time.Time, time.Time, int) ([]store.PostbackLogRow, error) {
+func (fakeStats) PostbackLog(context.Context, store.PostbackLogQuery) ([]store.PostbackLogRow, error) {
 	return []store.PostbackLogRow{}, nil
 }
 func (fakeStats) Slice(context.Context, time.Time, time.Time) ([]store.SliceRow, error) {

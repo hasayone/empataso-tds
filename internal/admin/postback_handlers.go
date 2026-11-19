@@ -15,28 +15,66 @@ import (
 // postbackLogMaxLimit is the most rows one GET /api/postback-log answers.
 const postbackLogMaxLimit = 1000
 
-// handlePostbackLog writes the raw postback intake log.
-// r supplies from, to and limit; limit defaults to 200 and is capped at
-// postbackLogMaxLimit. Missing stats yields an empty list with 200.
-// A query failure is 500.
+// postbackLogOutcomes lists the outcome filter values GET /api/postback-log accepts.
+var postbackLogOutcomes = map[string]bool{
+	"ok": true, store.PostbackOutcomeDuplicate: true, "click_not_found": true, "no_subid": true,
+	"no_store": true, "store_error": true, "queued": true, "retry": true, "queue_full": true,
+	"retry_overflow": true, "replayed": true, store.PostbackOutcomeBadKey: true,
+	store.PostbackOutcomeInvalid: true, store.PostbackOutcomeMethod: true,
+}
+
+// handlePostbackLog writes one page of the postback intake log, newest first.
+// r supplies from, to, limit and offset (limit defaults to 200 and is capped at
+// postbackLogMaxLimit) and the filters outcome, network, ip, cid and direction.
+// An administrator sees every line. Anyone else with the conversions section sees
+// the lines of the campaigns they may see in the sections they may open; lines
+// without a campaign (rejected requests, clicks not found, outbound calls) are
+// left out for them. Fields hidden for the viewer are dropped, and a hidden payout
+// drops the parameters too. A filter on a hidden ip or an unknown outcome is 400.
+// Missing stats yields an empty list with 200. A query failure is 500.
 func (s *Server) handlePostbackLog(w http.ResponseWriter, r *http.Request) {
 	v := s.viewerFrom(r.Context())
-	if !v.boardsAll {
-		writeErr(w, http.StatusForbidden, "forbidden")
+	q := r.URL.Query()
+	pq := store.PostbackLogQuery{
+		Outcome: q.Get("outcome"), Network: q.Get("network"), IP: q.Get("ip"),
+		CID: q.Get("cid"), Direction: q.Get("direction"),
+		Limit:  min(atoiDef(q.Get("limit"), 200), postbackLogMaxLimit),
+		Offset: max(atoiDef(q.Get("offset"), 0), 0),
+	}
+	if pq.Outcome != "" && !postbackLogOutcomes[pq.Outcome] {
+		writeErr(w, http.StatusBadRequest, "bad outcome")
 		return
+	}
+	if pq.Direction != "" && pq.Direction != "in" && pq.Direction != "out" {
+		writeErr(w, http.StatusBadRequest, "direction must be in or out")
+		return
+	}
+	if pq.IP != "" && fieldHidden(v, "ip") {
+		writeErr(w, http.StatusBadRequest, "bad filter: hidden field ip")
+		return
+	}
+	if !v.admin {
+		scope, err := s.campaignScope(r.Context())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "groups error")
+			return
+		}
+		pq.Scope = &store.Cond{Field: "campaign_id", Op: "in", Values: []string{store.ScopeNone}, Scope: true}
+		if len(scope) > 0 {
+			pq.Scope = &scope[0]
+		}
 	}
 	if s.cfg.Stats == nil {
 		writeJSON(w, http.StatusOK, []store.PostbackLogRow{})
 		return
 	}
-	from, to := parseRange(r)
-	limit := min(atoiDef(r.URL.Query().Get("limit"), 200), postbackLogMaxLimit)
-	rows, err := s.cfg.Stats.PostbackLog(r.Context(), from, to, limit)
+	pq.From, pq.To = parseRange(r)
+	rows, err := s.cfg.Stats.PostbackLog(r.Context(), pq)
 	if err != nil {
 		writeStatsErr(w, err, "postback log error")
 		return
 	}
-	writeJSON(w, http.StatusOK, rows)
+	s.writeStatsExtra(w, r, http.StatusOK, rows, map[string][]string{"profit": {"payout", "params"}})
 }
 
 // postbackFilter reads the conversion-journal query shared by the table and CSV export.

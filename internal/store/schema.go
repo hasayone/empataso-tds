@@ -82,6 +82,7 @@ func (c *CH) ensureSchemaWaves(withOrigin bool) {
 	ORDER BY ts
 	TTL ts + INTERVAL 90 DAY`)
 	c.schemaExec(postbackLogDedupSQL)
+	c.schemaExec(postbackLogDetailSQL)
 	c.probeColumns()
 	c.netCols = c.ready("events", waveNet)
 	c.clickCols = c.ready("events", waveClick) && c.ready("conversions", waveClick)
@@ -123,8 +124,8 @@ func (c *CH) schemaExec(query string) {
 	}
 }
 
-// probeColumns fills readyFlags from one system.columns read.
-// It asks for events and conversions together, under one 10s timeout.
+// probeColumns fills readyFlags and pblogDetail from one system.columns read.
+// It asks for events, conversions and postback_log together, under one 10s timeout.
 // A wave is ready only when every expected column name was returned.
 // A query or scan error is logged and leaves every non-base wave unset,
 // so those waves stay not ready. Base is not decided here: ready reports
@@ -136,16 +137,27 @@ func (c *CH) probeColumns() {
 		return
 	}
 	c.readyFlags = readyFromColumns(have)
+	c.pblogDetail.Store(hasColumns(have["postback_log"], postbackLogDetailCols))
 }
 
-// readColumnSet lists column names of events and conversions.
+// hasColumns reports whether present holds every name of cols. A nil present holds none.
+func hasColumns(present map[string]bool, cols []string) bool {
+	for _, col := range cols {
+		if !present[col] {
+			return false
+		}
+	}
+	return len(cols) > 0
+}
+
+// readColumnSet lists column names of events, conversions and postback_log.
 // One SELECT against system.columns, one timeout. have[table][name] is
 // true when that column exists. A query, scan or rows error is returned
 // and have is nil.
 func (c *CH) readColumnSet() (map[string]map[string]bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), schemaTimeout)
 	defer cancel()
-	rows, err := c.conn.Query(ctx, `SELECT table, name FROM system.columns WHERE database = currentDatabase() AND table IN ('events','conversions')`)
+	rows, err := c.conn.Query(ctx, `SELECT table, name FROM system.columns WHERE database = currentDatabase() AND table IN ('events','conversions','postback_log')`)
 	if err != nil {
 		return nil, err
 	}

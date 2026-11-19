@@ -49,7 +49,7 @@ type StatsProvider interface {
 	// EachPostback streams conversions matching q in journal order, up to max rows.
 	// prepare runs once with match totals before the first row; nil is skipped.
 	EachPostback(ctx context.Context, q store.PostbackQuery, max int, prepare func(store.PostbackTotals) error, fn func(store.PostbackRow) error) (truncated bool, err error)
-	PostbackLog(ctx context.Context, from, to time.Time, limit int) ([]store.PostbackLogRow, error)
+	PostbackLog(ctx context.Context, q store.PostbackLogQuery) ([]store.PostbackLogRow, error)
 	Slice(ctx context.Context, from, to time.Time) ([]store.SliceRow, error)
 	// Fields lists journal fields and ready waves without a query.
 	Fields() store.FieldsInfo
@@ -89,6 +89,15 @@ type ListsStore interface {
 type LoginLimiter interface {
 	Allow(ctx context.Context, key string) (bool, error)
 }
+
+// LoginLimitAttempts is how many login, setup and recovery attempts one address may make per LoginLimitWindow.
+const LoginLimitAttempts = 10
+
+// LoginLimitWindow is the window of LoginLimitAttempts; a refused attempt is told to wait this long.
+const LoginLimitWindow = time.Minute
+
+// msgTooManyAttempts is the error text of a refused login, setup or recovery attempt.
+const msgTooManyAttempts = "too many attempts"
 
 // ImportSink writes imported clicks and conversions and removes them for one host.
 // InsertEvents writes a click batch. An empty batch returns nil.
@@ -410,6 +419,9 @@ type Server struct {
 	audit  *auditLog
 	keyLim *keyLimiter
 
+	// lookups is the IP check history of the Tools page. New sets it; nil records nothing.
+	lookups *lookupHistory
+
 	// docsOnce builds docs, the public API reference, on its first request.
 	docsOnce sync.Once
 	docs     *publicDocs
@@ -481,7 +493,8 @@ func New(cfg Config) (*Server, error) {
 		return nil, fmt.Errorf("admin: trusted proxies: %w", err)
 	}
 	s := &Server{cfg: cfg, hashes: newHashGate(0), loginFPKey: key, ktJob: newKeitaroJob(), trustedProxies: prefixes,
-		audit: newAuditLog(cfg.DataDir), keyLim: newKeyLimiter(nil), kwSlots: make(chan struct{}, keywordSlots)}
+		audit: newAuditLog(cfg.DataDir), keyLim: newKeyLimiter(nil), kwSlots: make(chan struct{}, keywordSlots),
+		lookups: newLookupHistory(cfg.DataDir)}
 	s.ktJob = loadKeitaroJob(cfg.KeitaroJobFile, s.logWarn)
 	hash, err := initialHash(cfg)
 	if err != nil {
@@ -730,6 +743,10 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "DELETE /api/pages/{name}", http.HandlerFunc(s.handlePageDelete))
 
 	s.handle(mux, "GET /api/lookup", http.HandlerFunc(s.handleLookup))
+	s.handle(mux, "GET /api/tools/lookups", http.HandlerFunc(s.handleLookupHistory))
+	s.handle(mux, "DELETE /api/tools/lookups", http.HandlerFunc(s.handleLookupHistoryClear))
+	s.handle(mux, "GET /api/tools/geo", http.HandlerFunc(s.handleToolsGeo))
+	s.handle(mux, geoDownloadPattern, http.HandlerFunc(s.handleToolsGeoDownload))
 	s.handle(mux, "POST /api/simulate", http.HandlerFunc(s.handleSimulate))
 	s.handle(mux, "GET /api/cron", http.HandlerFunc(s.handleCronGet))
 	s.handle(mux, "PUT /api/cron", http.HandlerFunc(s.handleCronSave))
@@ -1005,6 +1022,22 @@ func writeErrParams(w http.ResponseWriter, code int, msg string, params map[stri
 		body["params"] = params
 	}
 	writeJSON(w, code, body)
+}
+
+// writeRetryLater writes a 429 answer that tells when the request may be repeated.
+// w is the response, msg the error text and wait the time left until a repeat is accepted,
+// rounded up to whole seconds and never below one. The answer carries the Retry-After header and
+// {"error", "code": "too_many_requests", "retry_after", "params": {"retry_after"}}. There is no error return.
+func writeRetryLater(w http.ResponseWriter, msg string, wait time.Duration) {
+	secs := int((wait + time.Second - 1) / time.Second)
+	if secs < 1 {
+		secs = 1
+	}
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	writeJSON(w, http.StatusTooManyRequests, map[string]any{
+		"error": msg, "code": errCode(http.StatusTooManyRequests, msg),
+		"retry_after": secs, "params": map[string]any{"retry_after": secs},
+	})
 }
 
 // errCode returns the stable machine-readable code of an error answer.

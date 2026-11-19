@@ -97,7 +97,7 @@ func TestSpaShareCeiling(t *testing.T) {
 	must(t, spaFunctionLine(html, "saveAll"), "if(cronDirty())await saveCron()", "the block does not hold back the cron settings")
 	must(t, spaFunctionLine(html, "syncSaveBar"), "saveBlock()", "the save button is disabled over 100")
 	must(t, spaFunctionLine(html, "collectStream"), "shareInt(share.value)", "a typed share is a whole non-negative percent")
-	must(t, spaFunctionLine(html, "saveAll"), "toast(e.message,true)", "server answers are translated by toast")
+	must(t, spaFunctionLine(html, "saveAll"), "toast(e,true)", "server answers, with their status and code, are translated by toast")
 	must(t, html, "'shares exceed 100':'err.shares'", "400 shares exceed 100 is translated")
 	must(t, html, `max="100"`, "share percent ceiling")
 }
@@ -189,7 +189,7 @@ func TestNamecheapUI(t *testing.T) {
 	must(t, dom, `id="dom-register"`, "register button")
 	must(t, dom, "meIsAdmin()", "purchase actions are for administrators")
 	must(t, html, "registrar_status==='pending'", "pending status from the domain row")
-	must(t, spaFunctionLine(html, "call"), "e.body=j", "the error body reaches the caller")
+	must(t, spaFunctionLine(html, "call"), "apiError(msg,r.status,j,path,", "the error body reaches the caller")
 
 	for _, forbidden := range []string{"api.cloudflare.com", "certificate", "setHosts"} {
 		mustNot(t, strings.ToLower(reg+panel+ns), strings.ToLower(forbidden), "DNS and certificates stay outside the registrar window")
@@ -266,26 +266,47 @@ func TestSpaReportUniqTotal(t *testing.T) {
 	must(t, pure, "function reportTotals(", "reportTotals is in the pure block")
 	must(t, pure, "r.uniq_first!=null?r.uniq_first:r.unique", "the total takes uniq_first, then unique")
 	must(t, spaFunctionLine(html, "reportCellText"), "if(id==='uniq') return machine?csvNum(r.unique):fmt(r.unique)", "a row cell shows its own unique")
+	must(t, pure, "totals:paged&&obj.totals", "the totals come from the server for the whole set")
 	total := spaFunctionLine(html, "reportTotalCells")
-	must(t, total, "reportTotals(rows)", "the total row is built from the sums")
+	must(t, total, "reportCellText(tot, c.id, machine)", "the total row shows the server sums")
 	must(t, total, "'cr'", "the ratio is computed from the totals")
+	must(t, total, "trFill('rep.total'", "the total row names how many rows it covers")
 	paint := spaFunctionLine(html, "paintReport")
-	must(t, paint, "reportTotalCells(rows,cols,false,cut)", "the table has a total row")
-	must(t, paint, "reportTotalCells(rows,cols,true,cut)", "the CSV has a total row")
-	must(t, paint, "id:'rep-cut'", "a cut report says so")
+	must(t, paint, "reportTotalCells(tot,cols,false,total)", "the table has a total row of the whole set")
+	must(t, paint, "id:'rep-cut'", "a report stopped at the server limit says so")
+	must(t, paint, "REPORT.truncated?calloutHTML('info'", "the limit note is calm, not a warning")
 	must(t, paint, "c.id!=='cost'||priced", "the cost column needs a priced row")
-	must(t, paint, "rows=sortReportRows(rows, REP_SORT, repMeta)", "the table sorts cost by one currency")
-	must(t, paint, "trFill('rep.cost.sort',{cur:reportCostCur(rows)})", "the cost header names its sort currency")
-	mustNot(t, paint, "applySort(", "every report sort goes through sortReportRows")
+	must(t, paint, "trFill('rep.cost.sort',{cur:reportCostCur(tot)})", "the cost header names its sort currency")
+	mustNot(t, paint, "applySort(", "the report is sorted on the server")
+	mustNot(t, html, "function sortReportRows(", "no report sort runs in the page")
 	must(t, paint, "c.on&&(c.id!=='cost'||priced)", "the cost column shows only when a row has a price")
+	must(t, paint, `id="reppage-top"`, "the report has a pager above the table")
+	must(t, paint, `id="reppage"`, "the report has a pager below the table")
+	must(t, paint, "sizes:TABLE_PAGE_SIZES, numbers:true", "the report uses the numbered shared pager")
+	must(t, paint, "bindSort(view(), REP_SORT, ()=>{REP_PAGE_I=0; loadReport(live)})", "a new sort reloads from page one")
+	must(t, paint, "REP_PAGE_I=0;\n    await loadReport(live);", "a new filter reloads from page one")
+	must(t, spaFunctionLine(html, "report"), "REP_PAGE_I=0;", "a new period or entry starts at page one")
 	must(t, total, "'cost'", "the cost column has a total")
-	must(t, total, "if(cut||!rows.length) return []", "a cut report has no total row")
-	must(t, spaFunctionLine(html, "reportQS"), "qs.set('meta','1')", "the page asks for the truncated flag")
+	must(t, total, "if(!tot||!(n>0)) return []", "an empty set has no total row")
+	qs := spaFunctionLine(html, "reportQS")
+	must(t, qs, "qs.set('limit'", "the page asks for one window")
+	must(t, qs, "qs.set('offset'", "the page asks for its offset")
+	must(t, qs, "qs.set('sort', REP_SORT.k)", "the sort is sent to the server")
 	must(t, spaFunctionLine(html, "setReport"), "reportData(body)", "the answer is read through reportData")
+	must(t, spaFunctionLine(html, "loadReport"), "markBusy(q('#rep-tw')", "the table shows that it waits")
+	must(t, spaFunctionLine(html, "loadReport"), "my!==REP_GEN", "a late answer is dropped")
+	exp := spaFunctionLine(html, "reportExport")
+	must(t, exp, "reportQS(TABLE_EXPORT_MAX, 0)", "the export reads the whole set up to the limit")
+	must(t, exp, "trFill('rep.export.cut'", "an export over the limit says so")
 	mustNot(t, html, "REPORT_ROWS=next", "no answer bypasses reportData")
 	must(t, paint, "<tfoot>", "the total is a footer row")
-	if n := strings.Count(html, "'rep.cut':"); n != 3 {
-		t.Errorf("dictionary key rep.cut is defined %d time(s), want one per language", n)
+	for _, k := range []string{"rep.cut", "rep.total", "rep.export.cut", "pg.first", "pg.prev", "pg.next", "pg.last", "pg.page", "pg.size", "pg.rows"} {
+		if n := strings.Count(html, "'"+k+"':"); n != 3 {
+			t.Errorf("dictionary key %s is defined %d time(s), want one per language", k, n)
+		}
+	}
+	for _, k := range []string{"'rep.cut':'Showing the first 2000", "'kws.cut':", "'kws.prev':", "'kws.next':"} {
+		mustNot(t, html, k, "the old cut warning and keyword pager keys are gone")
 	}
 	rep := catalogBranch(html, "report")
 	must(t, rep, "['uniq','col.uniq',1]", "the report has a unique column")
@@ -502,7 +523,7 @@ func TestSpaRoleKeys(t *testing.T) {
 	}
 	must(t, pure, "may read a hidden field", "named macro text")
 	must(t, pure, "uses hidden field", "hidden macro text")
-	must(t, spaFunctionLine(html, "toast"), "errText(msg)", "failed toasts are translated")
+	must(t, spaFunctionLine(html, "toast"), "errParts(msg)", "failed toasts are translated")
 }
 
 // TestSpaRolesUI checks the roles editor: it shares the access editor with the user form,
@@ -867,7 +888,7 @@ func TestSpaAdminHost(t *testing.T) {
 // TestSpaAutomationLayout checks automation masonry, card headers, arrange mode and keitaro hints.
 func TestSpaAutomationLayout(t *testing.T) {
 	html := spaSource()
-	must(t, html, "column-count:2", "automation two-column masonry")
+	must(t, html, ".jobs{column-width:460px;column-gap:14px}", "automation masonry adds columns with the width")
 	must(t, html, `id="cron-arrange"`, "arrange settings control")
 	if st, gear := strings.Index(html, `<span id="cronstate">`), strings.Index(html, `id="cron-arrange"`); st < 0 || gear < 0 || st > gear {
 		t.Error("the service status stands left of the arrange gear in the automation header")
@@ -971,6 +992,18 @@ func TestSpaPageViews(t *testing.T) {
 	mustNot(t, html, "localStorage.setItem('NET_PAGE'", "networks page size is not in localStorage")
 	mustNot(t, spaFunctionLine(html, "paintServerPager"), "localStorage", "the pager saves the size with the account")
 	must(t, spaFunctionLine(html, "paintServerPager"), "touchPageViews()", "a new page size is sent")
+	numbered := spaFunctionLine(html, "paintNumberedPager")
+	must(t, numbered, "touchPageViews()", "a new page size of the numbered pager is sent")
+	must(t, numbered, "pagerPages(pageIndex, pages, 2)", "the numbered pager draws its page numbers through pagerPages")
+	must(t, numbered, `aria-current="page"`, "the current page is marked for assistive tech")
+	for _, id := range []string{"'first','pgfirst','pg.first'", "'prev','pgprev','pg.prev'", "'next','pgnext','pg.next'", "'last','pglast','pg.last'"} {
+		must(t, numbered, id, "the numbered pager has first, previous, next and last")
+	}
+	mustNot(t, numbered, "localStorage", "the numbered pager saves the size with the account")
+	must(t, html, "report:2000, keyword_stats:2000", "views cap report and keyword page sizes")
+	must(t, spaFunctionLine(html, "defaultPageViewState"), "report:{conds:[], page:1000}", "the report defaults to 1000 rows")
+	must(t, spaFunctionLine(html, "pageViewFromGlobals"), "page:REP_PAGE", "the report page size is collected")
+	must(t, spaFunctionLine(html, "pageViewFromGlobals"), "page:KWS_PAGE", "the keyword page size is collected")
 	must(t, spaFunctionLine(html, "pageViewLegacy"), "FLOW_PAGE_KEY", "browser sizes seed an account without them")
 	must(t, spaFunctionLine(html, "applyRange"), "touchPageViews()", "period changes touch views")
 	mustNot(t, spaFunctionLine(html, "applyRange"), "localStorage.setItem(RANGE_KEY", "range is not stored locally")
@@ -1074,7 +1107,7 @@ func TestSpaBoardPanel(t *testing.T) {
 	must(t, spaFunctionLine(html, "userMenuItems"), "appendBoardUserMenuItems", "profile menu lists sections")
 	boardSwitchLine := spaFunctionLine(html, "boardSwitchItems")
 	mustNot(t, boardSwitchLine, "boardCreateMenuNode", "header board menu is switch-only")
-	must(t, html, ".menu button.primary{background:var(--accent)", "a primary button inside a menu keeps the accent fill")
+	must(t, html, ".menu button.primary{background:var(--accent-fill)", "a primary button inside a menu keeps the accent fill")
 	must(t, spaFunctionLine(html, "boardImportSectionHTML"), `class="bi-row"`, "import row stays within the dialog")
 	must(t, html, ".bi-row input{width:16px", "import checkbox stays a checkbox")
 	must(t, html, ".bi-row span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis", "import name ellipsizes")
@@ -1220,23 +1253,20 @@ func TestSpaBoardInclude(t *testing.T) {
 	must(t, spaFunctionLine(html, "s2sGlobalHTML"), "boardPickRows(S2S_LIST||[], g,", "postback templates stay in the campaign section")
 	must(t, spaFunctionLine(html, "duplicateFlow"), "c.board_id=boardEffectiveId()", "a copy takes the section open in this tab")
 	body := spaFunctionLine(html, "saveFlows")
-	start := strings.Index(body, "if(!point){")
-	if start < 0 {
-		t.Fatal("full save branch missing")
+	del := strings.Index(body, "call('DELETE','/api/groups/")
+	rename := strings.Index(body, "await put(g,prev.id)")
+	full := strings.Index(body, "call('PUT','/api/groups',GROUPS)")
+	if del < 0 || rename < 0 || full < 0 || del > rename || rename > full {
+		t.Fatalf("saveFlows must delete, then rename, then write the array: delete=%d rename=%d full=%d", del, rename, full)
 	}
-	branch := body[start:]
-	ret := strings.Index(branch, "return;")
-	if ret < 0 {
-		t.Fatal("full save branch does not return")
+	must(t, body, "e.status!==404", "a missing campaign delete still counts as done")
+	must(t, body, "DIRTY.size>FLOW_POINT_MAX", "only many changes send the whole list")
+	if strings.Contains(body, "drop.add(prev.id)") {
+		t.Fatal("a changed id must be renamed on the server, not deleted")
 	}
-	branch = branch[:ret]
-	del := strings.Index(branch, "call('DELETE','/api/groups/")
-	put := strings.Index(branch, "call('PUT','/api/groups'")
-	if del < 0 || put < 0 || del > put {
-		t.Fatalf("full PUT must delete before writing the array: delete=%d put=%d", del, put)
+	if strings.Contains(spaFunctionLine(html, "duplicateFlow"), "ORDER_DIRTY") {
+		t.Fatal("a copy must not force a whole-list save")
 	}
-	must(t, branch, "e.status!==404", "a missing campaign delete still counts as done")
-	must(t, branch, "prev.id!==g.id", "a changed id deletes the previous row")
 }
 
 // TestSpaIconKeysAreAllowed keeps the interface icon set (IC) and the board icon subset apart: the
@@ -1310,7 +1340,7 @@ func TestSpaKeywordStatsUI(t *testing.T) {
 	keys := []string{
 		"keys.hint", "kws.tab.stats", "kws.tab.lists", "kws.search", "kws.col.keyword", "kws.col.hits", "kws.col.uniq",
 		"kws.col.conv", "kws.col.leads", "kws.col.sales", "kws.col.rej", "kws.col.cr", "kws.col.trend", "kws.nokey",
-		"kws.cut", "kws.err.heavy", "kws.err.busy", "kws.err.range", "kws.hint",
+		"kws.err.heavy", "kws.err.busy", "kws.err.range", "kws.hint",
 		"kws.by.last", "kws.by.origin", "kws.hint.origin",
 	}
 	for _, k := range keys {
@@ -1343,8 +1373,10 @@ func TestSpaKeywordStatsUI(t *testing.T) {
 	must(t, block, "KWS.by=b.dataset.kwsBy==='origin'?'origin':''; syncKwsModeUI(); reload()", "clicking attribution updates the switch before reload")
 	must(t, block, "q('#kws-q').value='';\n    syncKwsModeUI();", "reset updates the attribution switch")
 	must(t, block, "filterBuilder('events', KWS.conds", "the filter builder edits KWS.conds")
-	must(t, block, "applySort(", "the table sorts through applySort")
-	must(t, block, "bindSort(", "the table binds the shared sort")
+	mustNot(t, block, "applySort(", "the statistics are sorted on the server")
+	must(t, block, "bindSort(wrap, KWS_SORT, ()=>{KWS_PAGE_I=0; loadKwStats(true)})", "a new sort reloads from page one")
+	must(t, spaFunctionLine(html, "kwsPageQS"), "qs.set('sort', KWS_SORT.k)", "the sort is sent to the server")
+	must(t, spaFunctionLine(html, "kwsExport"), "kwsPageQS(TABLE_EXPORT_MAX, 0)", "the export reads the whole set up to the limit")
 	must(t, block, "csvTable(", "the export goes through csvTable")
 	must(t, block, "downloadHTML(", "the HTML export goes through downloadHTML")
 	must(t, block, "const my=++KWS_GEN", "a late answer is dropped by the generation counter")
@@ -1362,7 +1394,7 @@ func TestSpaKeywordStatsUI(t *testing.T) {
 	mustNot(t, block, "href=\"#/flows/", "a keyword row links nowhere")
 
 	must(t, html, "'keyword_stats'];", "keyword_stats is a sort page of the saved views")
-	must(t, spaFunctionLine(html, "defaultPageViewState"), "keyword_stats:{campaign:'', by:'', conds:[]}", "the default view holds keyword_stats")
+	must(t, spaFunctionLine(html, "defaultPageViewState"), "keyword_stats:{campaign:'', by:'', conds:[], page:1000}", "the default view holds keyword_stats")
 	must(t, spaFunctionLine(html, "pageViewFromGlobals"), "keyword_stats:{sort:sort(KWS_SORT)", "the snapshot holds keyword_stats")
 	must(t, spaFunctionLine(html, "collectPageViews"), "out.keyword_stats.campaign", "collect keeps the campaign of keyword_stats")
 	must(t, spaFunctionLine(html, "collectPageViews"), "out.keyword_stats.by", "collect keeps keyword attribution")
@@ -1383,8 +1415,7 @@ func TestSpaKeywordStatsUI(t *testing.T) {
 	must(t, block, "e.name==='AbortError'", "a cancelled request shows no error")
 	must(t, spaFunctionLine(html, "render"), "kwsAbort()", "leaving the page cancels the requests")
 	must(t, spaFunctionLine(html, "call"), "o.signal=opts.signal", "call passes the abort signal on")
-	must(t, block, "tr('kws.prev')", "the pager has neutral back labels")
-	must(t, block, "tr('kws.next')", "the pager has neutral forward labels")
+	must(t, block, "sizes:TABLE_PAGE_SIZES, numbers:true", "the statistics use the numbered shared pager")
 	mustNot(t, block, "tr('Newer')", "the keyword pager does not say Newer")
 	mustNot(t, block, "tr('Older')", "the keyword pager does not say Older")
 	mustNot(t, html, "tr('from ?q=')", "the lists tab no longer names only ?q=")

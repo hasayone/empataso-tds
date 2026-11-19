@@ -150,8 +150,11 @@ func postbackResult(cid string, hasStore bool, recErr error) (code int, outcome,
 // handlePostback is the internal implementation called by both /postback and
 // the Keitaro /{key}/postback path in root. pathKey is the key extracted from
 // the URL path segment; it overrides the "key" query or form parameter when
-// non-empty. The auth outcome bad_key is counted in stats but the rejected
-// request is not written to the postback journal.
+// non-empty. Every request is written to the postback journal with its sender,
+// method, masked path and parameters and User-Agent (see journalIn): accepted
+// ones with the click's campaign and network, rejected ones (wrong method, bad
+// key, bad payout) with their reason. The journal never delays or changes the
+// answer.
 //
 // The whole handler is bounded by postbackHandlerTimeout, and the store call in
 // it by postbackStoreTimeout; the writes to the disk queue are not cancellable
@@ -164,11 +167,12 @@ func postbackResult(cid string, hasStore bool, recErr error) (code int, outcome,
 // (missing click) in place of the one postbackResult gave, and the answer is
 // the same. An unsigned click id without a click is a final 404.
 func (d *engineDeps) handlePostback(w http.ResponseWriter, r *http.Request, pathKey string) {
+	q := r.URL.Query()
 	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		d.journalIn(r, pathKey, q, parsePostback(q), store.PostbackOutcomeMethod, store.ConversionResult{})
 		writePostback(w, http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	q := r.URL.Query()
 	if r.Method == http.MethodPost {
 		_ = r.ParseForm()
 		if len(r.Form) > 0 {
@@ -176,8 +180,8 @@ func (d *engineDeps) handlePostback(w http.ResponseWriter, r *http.Request, path
 		}
 	}
 	// Auth check: key is taken from the URL path segment first, then from the
-	// query or POST form. A rejected key is counted in stats as bad_key but
-	// is not written to the postback journal.
+	// query or POST form. A rejected key is counted in stats as bad_key and
+	// journaled with the key masked.
 	if d != nil {
 		authKey := pathKey
 		if authKey == "" {
@@ -186,10 +190,12 @@ func (d *engineDeps) handlePostback(w http.ResponseWriter, r *http.Request, path
 		switch d.pbAuth.check(authKey, d.log) {
 		case authDenyBadKey:
 			d.stats.postbacks.note("bad_key")
+			d.journalIn(r, pathKey, q, parsePostback(q), store.PostbackOutcomeBadKey, store.ConversionResult{})
 			writePostback(w, http.StatusForbidden, "bad key")
 			return
 		case authDenyNoSecret:
 			d.stats.postbacks.note("bad_key")
+			d.journalIn(r, pathKey, q, parsePostback(q), store.PostbackOutcomeBadKey, store.ConversionResult{})
 			writePostback(w, http.StatusForbidden, "postback secret not set")
 			return
 		}
@@ -199,6 +205,7 @@ func (d *engineDeps) handlePostback(w http.ResponseWriter, r *http.Request, path
 		if d != nil {
 			d.stats.postbacks.note("invalid")
 		}
+		d.journalIn(r, pathKey, q, in, store.PostbackOutcomeInvalid, store.ConversionResult{})
 		writePostback(w, http.StatusBadRequest, "invalid payout")
 		return
 	}
@@ -207,8 +214,8 @@ func (d *engineDeps) handlePostback(w http.ResponseWriter, r *http.Request, path
 	defer cancelAll()
 	cs := d.convStore()
 	var recErr error
+	var res store.ConversionResult
 	if in.cid != "" && cs != nil {
-		var res store.ConversionResult
 		sctx, cancel := context.WithTimeout(ctx, postbackStoreTimeout)
 		res, recErr = cs.RecordConversion(sctx, store.PostbackIn{
 			CID: in.cid, Profit: in.profit, DepSum: in.depSum, Status: in.status,
@@ -232,8 +239,8 @@ func (d *engineDeps) handlePostback(w http.ResponseWriter, r *http.Request, path
 	}
 	if d != nil {
 		d.stats.postbacks.note(outcome)
-		d.notePostback(in.cid, in.status, outcome, "in", in.profit)
 	}
+	d.journalIn(r, pathKey, q, in, outcome, res)
 	writePostback(w, code, errMsg)
 }
 

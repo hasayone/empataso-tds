@@ -284,11 +284,11 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 		InboxDir:       inboxDir,
 		RequestPending: requestFileExists(inboxDir),
 	}
-	checkCode := s.checkPreconditions(snap)
+	checkCode, wait := s.checkPreconditions(snap)
 	if checkCode != "" {
 		s.updateWriteMu.Unlock()
-		if checkCode == "rate_limited" {
-			writeErr(w, http.StatusTooManyRequests, checkCode)
+		if checkCode == updateCodeRateLimited {
+			writeRetryLater(w, checkCode, wait)
 			return
 		}
 		writeErr(w, http.StatusConflict, checkCode)
@@ -337,37 +337,40 @@ func (s *Server) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{"id": id})
 }
 
+// updateCodeRateLimited is the refusal of POST /api/update/check inside updateCheckWindow of the last check.
+const updateCodeRateLimited = "rate_limited"
+
 // checkPreconditions checks preconditions for POST /api/update/check in order.
-// Returns the code of the first failing check, or "" on success.
-// rate_limited is returned (with 429 HTTP status) when too recent.
-func (s *Server) checkPreconditions(snap updateSnapshot) string {
+// snap is the state read under updateWriteMu. It returns the code of the first failing check, or "" on success,
+// and for updateCodeRateLimited (answered with 429) the time left until a new check is accepted; otherwise the wait is 0.
+// The window counts from the last accepted request of this process and from check.At of the last run, which the
+// updater also writes right after an apply, unless that run described another build.
+func (s *Server) checkPreconditions(snap updateSnapshot) (string, time.Duration) {
 	if snap.InboxDir == "" {
-		return "inbox_absent"
+		return "inbox_absent", 0
 	}
 	if _, err := os.Stat(snap.InboxDir); err != nil {
-		return "inbox_absent"
+		return "inbox_absent", 0
 	}
 	if snap.Agent == nil || !snap.Agent.Fresh(snap.Now, updateAgentMaxAge) || !snap.Agent.Inbox {
-		return "updater_absent"
+		return "updater_absent", 0
 	}
 	if snap.RequestPending {
-		return "request_pending"
+		return "request_pending", 0
 	}
 	if snap.State != nil && snap.State.Result == cron.StateRunning && snap.State.FinishedAt == nil {
-		return "running"
+		return "running", 0
 	}
-	// Rate limit: in-memory.
 	s.updateCheckMu.Lock()
-	lastCheck := s.updateCheckAt
+	last := s.updateCheckAt
 	s.updateCheckMu.Unlock()
-	if !lastCheck.IsZero() && snap.Now.Sub(lastCheck) < updateCheckWindow {
-		return "rate_limited"
+	if snap.Check != nil && !checkForOtherBuild(snap.Check) && snap.Check.At.After(last) {
+		last = snap.Check.At
 	}
-	// Rate limit: check.At from the last run, unless that run described another build.
-	if snap.Check != nil && !checkForOtherBuild(snap.Check) && !snap.Check.At.IsZero() && snap.Now.Sub(snap.Check.At) < updateCheckWindow {
-		return "rate_limited"
+	if wait := updateCheckWindow - snap.Now.Sub(last); !last.IsZero() && wait > 0 {
+		return updateCodeRateLimited, min(wait, updateCheckWindow)
 	}
-	return ""
+	return "", 0
 }
 
 // newUpdateID generates a 16 lowercase hex character run identifier using crypto/rand.

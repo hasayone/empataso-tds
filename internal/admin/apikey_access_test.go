@@ -30,6 +30,7 @@ var expectedActionRoutes = func() map[string]string {
 		{"PUT /api/groups", security.ActionGroupsReplace},
 		{"PUT /api/cron", security.ActionCron},
 		{"POST /api/cron/run", security.ActionCron},
+		{geoDownloadPattern, security.ActionCron},
 		{"POST /api/boards", security.ActionBoards},
 		{"PUT /api/boards/order", security.ActionBoards},
 		{"PATCH /api/boards/{id}", security.ActionBoards},
@@ -107,15 +108,20 @@ func TestRouteFlagsMatchTables(t *testing.T) {
 	}
 }
 
-// limitStats records the limit asked of PostbackLog.
+// limitStats records the query asked of PostbackLog and answers rows.
 type limitStats struct {
 	richStats
 	limit int
+	query store.PostbackLogQuery
+	rows  []store.PostbackLogRow
 }
 
-func (l *limitStats) PostbackLog(_ context.Context, _, _ time.Time, limit int) ([]store.PostbackLogRow, error) {
-	l.limit = limit
-	return []store.PostbackLogRow{}, nil
+func (l *limitStats) PostbackLog(_ context.Context, q store.PostbackLogQuery) ([]store.PostbackLogRow, error) {
+	l.limit, l.query = q.Limit, q
+	if l.rows == nil {
+		return []store.PostbackLogRow{}, nil
+	}
+	return l.rows, nil
 }
 
 // keyRig is an admin server with users, roles, offers and an API key file.

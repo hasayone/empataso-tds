@@ -57,9 +57,14 @@ func TestSliceMetaAddsCost(t *testing.T) {
 	}}}}
 	c = &CH{conn: cut}
 	kept := []SliceRow{{Group: "g1", Stream: "s1", Country: "us"}}
-	got, err := c.addSliceCost(context.Background(), "q", nil, kept, map[sliceKey]int{{"g1", "s1", "us", "", ""}: 0}, true)
-	if err != nil || len(got) != 1 || got[0].Cost[""] != 5 {
-		t.Fatalf("a cut report must not grow: err=%v rows=%+v", err, got)
+	var tot SliceTotals
+	set := sliceSet{rows: kept, index: map[sliceKey]int{{"g1", "s1", "us", "", ""}: 0}, truncated: true, tot: &tot}
+	err = c.addSliceCost(context.Background(), "q", nil, &set)
+	if err != nil || len(set.rows) != 1 || set.rows[0].Cost[""] != 5 {
+		t.Fatalf("a cut report must not grow: err=%v rows=%+v", err, set.rows)
+	}
+	if tot.Cost[""] != 12 {
+		t.Fatalf("the total cost counts the dropped cell too: %+v", tot.Cost)
 	}
 
 	plain := &fakeConn{results: []*fakeRows{{data: [][]any{{"g1", "s1", "us", "", "", uint64(1), uint64(1), uint64(1), uint64(0)}}}, {}}}

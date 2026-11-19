@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -120,20 +121,114 @@ func TestGroupPutUpsert(t *testing.T) {
 		t.Fatalf("d after put: %+v", d)
 	}
 
-	resp = csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups/b", csrf, config.Group{ID: "nope", Name: "X"})
-	defer resp.Body.Close()
-	var er struct {
-		Error string `json:"error"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&er); err != nil {
-		t.Fatal(err)
-	}
-	if resp.StatusCode != http.StatusBadRequest || er.Error != "id mismatch" {
-		t.Fatalf("mismatch %d %q", resp.StatusCode, er.Error)
+	resp = csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups/b", csrf, config.Group{ID: "nope", Name: "X", Num: b.Num})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("rename b %d", resp.StatusCode)
 	}
 	got = fetchGroups(t, c, srv.URL)
-	if !slices.Equal(groupIDs(got), []string{"a", "b", "c", "d"}) {
-		t.Fatalf("ids after mismatch: %v", groupIDs(got))
+	if !slices.Equal(groupIDs(got), []string{"a", "nope", "c", "d"}) {
+		t.Fatalf("ids after rename: %v", groupIDs(got))
+	}
+}
+
+// TestGroupPutRename checks PUT /api/groups/{old} with another id in the body: the campaign keeps its
+// place, number and section under the new id, links of other campaigns follow it, and a taken, malformed
+// or missing id is refused without touching the list.
+func TestGroupPutRename(t *testing.T) {
+	srv := groupAPIServer(t)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+
+	hub := config.Group{ID: "hub", Name: "Hub", Status: true, Redirect: "group", Out: "old",
+		Streams: []config.Stream{{Name: "s1", Status: true, Out: config.Output{Redirect: "group", Out: "old"}}}}
+	resp := csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups", csrf, []config.Group{
+		{ID: "old", Name: "Old", Status: true, Num: 7, Aliases: []string{"keep"}},
+		hub,
+		{ID: "other", Name: "Other", Status: true, Aliases: []string{"busy"}},
+	})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("seed %d", resp.StatusCode)
+	}
+
+	refuse := func(path string, body config.Group, code int, msg string) {
+		t.Helper()
+		status, raw, err := doJSON(c, http.MethodPut, srv.URL+path, csrf, body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var er struct {
+			Error string `json:"error"`
+		}
+		_ = json.Unmarshal(raw, &er)
+		if status != code || er.Error != msg {
+			t.Fatalf("PUT %s as %q: %d %q, want %d %q", path, body.ID, status, er.Error, code, msg)
+		}
+	}
+	refuse("/api/groups/old", config.Group{ID: "other", Name: "Old"}, http.StatusConflict, "campaign id is taken: other")
+	refuse("/api/groups/old", config.Group{ID: "busy", Name: "Old"}, http.StatusConflict, "campaign id is taken: busy")
+	refuse("/api/groups/old", config.Group{ID: "a/b", Name: "Old"}, http.StatusBadRequest, "campaign id must not contain spaces, /, ? or #")
+	refuse("/api/groups/ghost", config.Group{ID: "fresh", Name: "Ghost"}, http.StatusNotFound, "not found")
+	if got := fetchGroups(t, c, srv.URL); !slices.Equal(groupIDs(got), []string{"old", "hub", "other"}) {
+		t.Fatalf("ids after refused renames: %v", groupIDs(got))
+	}
+
+	resp = csrfDo(t, c, http.MethodPut, srv.URL+"/api/groups/old", csrf,
+		config.Group{ID: "fresh", Name: "Fresh", Status: true, Num: 7, Aliases: []string{"keep"}})
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("rename %d", resp.StatusCode)
+	}
+	got := fetchGroups(t, c, srv.URL)
+	if !slices.Equal(groupIDs(got), []string{"fresh", "hub", "other"}) {
+		t.Fatalf("ids after rename: %v", groupIDs(got))
+	}
+	fresh, _ := groupByID(got, "fresh")
+	if fresh.Name != "Fresh" || fresh.Num != 7 || !slices.Equal(fresh.Aliases, []string{"keep"}) {
+		t.Fatalf("renamed campaign: %+v", fresh)
+	}
+	h, _ := groupByID(got, "hub")
+	if h.Out != "fresh" || h.Streams[0].Out.Out != "fresh" {
+		t.Fatalf("hub links: default %q, stream %q", h.Out, h.Streams[0].Out.Out)
+	}
+}
+
+// TestRenameGroupKeepsStored checks that renameGroup leaves the stored list and its streams untouched,
+// gives the save checks the old row under the new id and reports the campaigns whose links moved.
+func TestRenameGroupKeepsStored(t *testing.T) {
+	stored := []config.Group{
+		{ID: "a", Name: "A", BoardID: "seo"},
+		{ID: "b", Streams: []config.Stream{{Name: "s", Out: config.Output{Redirect: "group", Out: " a "}}}},
+		{ID: "c", Redirect: "http_redirect", Out: "a"},
+	}
+	before, groups, moved := renameGroup(stored, "a", config.Group{ID: "z", Name: "Z"})
+	if stored[0].ID != "a" || stored[1].Streams[0].Out.Out != " a " {
+		t.Fatalf("stored changed: %+v", stored)
+	}
+	if before[0].ID != "z" || before[0].Name != "A" || before[0].BoardID != "seo" {
+		t.Fatalf("baseline row: %+v", before[0])
+	}
+	if groups[0].ID != "z" || groups[0].Name != "Z" || groups[1].Streams[0].Out.Out != "z" || groups[2].Out != "a" {
+		t.Fatalf("candidate: %+v", groups)
+	}
+	if !slices.Equal(moved, []int{1}) {
+		t.Fatalf("moved %v, want [1]", moved)
+	}
+}
+
+// TestGroupPutBodyTooLarge checks that a campaign body over maxGroupBody answers 413, not 400.
+func TestGroupPutBodyTooLarge(t *testing.T) {
+	srv := groupAPIServer(t)
+	c := newClient(t)
+	_, csrf := login(t, c, srv.URL, "admin", "p@ss")
+	big := config.Group{ID: "a", Name: strings.Repeat("x", maxGroupBody)}
+	status, _, err := doJSON(c, http.MethodPut, srv.URL+"/api/groups/a", csrf, big)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status %d, want 413", status)
 	}
 }
 

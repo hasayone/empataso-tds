@@ -59,6 +59,9 @@ type CH struct {
 	// name those columns only after ensureSchema has seen them.
 	// maybeRefreshOriginWave can set these true later without a restart.
 	rootEvents, rootConv atomic.Bool
+	// pblogDetail: postback_log carries the detail columns (postbackLogDetailCols).
+	// Writes and reads name them only after ensureSchema has seen them.
+	pblogDetail atomic.Bool
 	// rootMissing counts conversions whose root click was not in the lookup window.
 	rootMissing atomic.Int64
 	originProbeMu   sync.Mutex

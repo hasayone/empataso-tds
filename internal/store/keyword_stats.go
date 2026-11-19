@@ -332,9 +332,46 @@ func (c *CH) keywordUnion(p keywordPlan, from, to time.Time) (string, []any) {
 // sel is the select list over the grouped union. It is the one place that fixes the
 // order of the table, and the trend selects its keywords through it.
 func keywordRankedSQL(sel, union string, limit int) string {
-	return fmt.Sprintf(`SELECT %s FROM (
+	return keywordOrderedSQL(sel, union, keywordOrder, limit, 0)
+}
+
+// keywordOrderedSQL groups union by keyword, orders it by order and keeps limit rows from offset.
+// sel is the select list over the grouped union and order a full ORDER BY clause.
+// A zero offset is left out of the SQL. The SQL does not fail.
+func keywordOrderedSQL(sel, union, order string, limit, offset int) string {
+	q := fmt.Sprintf(`SELECT %s FROM (
 		%s
-		) GROUP BY k %s LIMIT %d`, sel, union, keywordOrder, limit)
+		) GROUP BY k %s LIMIT %d`, sel, union, order, limit)
+	if offset > 0 {
+		q += fmt.Sprintf(" OFFSET %d", offset)
+	}
+	return q
+}
+
+// keywordRows runs a keyword table query and scans at most limit rows of it.
+// It returns the rows, never nil, cut true when the query had a row beyond limit,
+// and any query or scan error.
+func (c *CH) keywordRows(ctx context.Context, q string, args []any, limit int) ([]KeywordRow, bool, error) {
+	rows, err := c.conn.Query(ctx, q, args...)
+	if err != nil {
+		return nil, false, err
+	}
+	defer rows.Close()
+	out := []KeywordRow{}
+	for rows.Next() {
+		if len(out) >= limit {
+			return out, true, nil
+		}
+		var r KeywordRow
+		var hits, uniq, conv, leads, sales, rejected uint64
+		if err := rows.Scan(&r.Keyword, &hits, &uniq, &conv, &leads, &sales, &rejected, &r.Profit, &r.DepSum); err != nil {
+			return nil, false, err
+		}
+		r.Hits, r.Unique, r.Conv = int64(hits), int64(uniq), int64(conv)
+		r.Leads, r.Sales, r.Rejected = int64(leads), int64(sales), int64(rejected)
+		out = append(out, r)
+	}
+	return out, false, rows.Err()
 }
 
 // keywordStatsSQL is the table query over union, asking one row beyond KeywordStatsLimit.
@@ -363,26 +400,8 @@ func (c *CH) KeywordStats(ctx context.Context, from, to time.Time, conds []Cond,
 		return out, nil
 	}
 	union, args := c.keywordUnion(p, from, to)
-	rows, err := c.conn.Query(c.keywordCtx(ctx), keywordStatsSQL(union), args...)
+	out.Rows, out.Truncated, err = c.keywordRows(c.keywordCtx(ctx), keywordStatsSQL(union), args, KeywordStatsLimit)
 	if err != nil {
-		return KeywordStats{}, err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		if len(out.Rows) >= KeywordStatsLimit {
-			out.Truncated = true
-			break
-		}
-		var r KeywordRow
-		var hits, uniq, conv, leads, sales, rejected uint64
-		if err := rows.Scan(&r.Keyword, &hits, &uniq, &conv, &leads, &sales, &rejected, &r.Profit, &r.DepSum); err != nil {
-			return KeywordStats{}, err
-		}
-		r.Hits, r.Unique, r.Conv = int64(hits), int64(uniq), int64(conv)
-		r.Leads, r.Sales, r.Rejected = int64(leads), int64(sales), int64(rejected)
-		out.Rows = append(out.Rows, r)
-	}
-	if err := rows.Err(); err != nil {
 		return KeywordStats{}, err
 	}
 	out.ConvReady = p.convReady
