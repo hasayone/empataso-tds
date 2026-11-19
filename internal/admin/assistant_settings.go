@@ -15,7 +15,7 @@ import (
 // default: the two token limits have none (no limit), the two USD limits are the amounts below.
 const (
 	aiDefaultMaxOutput    = 2048
-	aiDefaultMaxSteps     = 6
+	aiDefaultMaxSteps     = 30
 	aiDefaultTurnInput    = 60000
 	aiDefaultDailyUSD     = 5.0
 	aiDefaultUserDailyUSD = 2.0
@@ -27,21 +27,25 @@ const aiNoLimit = -1
 
 // Bounds of the values a PUT accepts. aiMaxOutputCap, aiMaxStepsCap and aiTurnInputCap are the
 // hard ceilings of the per-turn limits, which have no unlimited form: 32000 output tokens is
-// the largest answer the supported models give, 20 steps bounds the tool loop, and 200000
-// input tokens is the context window of the smallest supported model. The daily limits take
-// null for no limit or a value from 0 to aiTokensCap and aiUSDCap.
+// the largest answer the supported models give, 60 steps bounds the tool loop against a model
+// that never stops, and 200000 input tokens is the context window of the smallest supported
+// model. The daily limits take null for no limit or a value from 0 to aiTokensCap and aiUSDCap.
+//
+// aiLegacyMaxSteps is the value every earlier save stored as the default of max_steps; it reads
+// as "not set" and takes aiDefaultMaxSteps, so installed settings leave the old working limit.
 const (
-	aiSettingsBody  = 1 << 18
-	aiMaxOutputCap  = 32000
-	aiMaxStepsCap   = 20
-	aiTurnInputCap  = 200_000
-	aiTokensCap     = 1_000_000_000_000
-	aiUSDCap        = 1_000_000
-	aiPriceCap      = 100_000
-	aiMaxModels     = 1000
-	aiModelIDMax    = 128
-	aiKeyMax        = 512
-	aiKeyMaskPrefix = "••••"
+	aiSettingsBody   = 1 << 18
+	aiMaxOutputCap   = 32000
+	aiMaxStepsCap    = 60
+	aiLegacyMaxSteps = 6
+	aiTurnInputCap   = 200_000
+	aiTokensCap      = 1_000_000_000_000
+	aiUSDCap         = 1_000_000
+	aiPriceCap       = 100_000
+	aiMaxModels      = 1000
+	aiModelIDMax     = 128
+	aiKeyMax         = 512
+	aiKeyMaskPrefix  = "••••"
 )
 
 // aiLimits holds the effective limits of the settings with the defaults applied. A nil daily
@@ -90,6 +94,16 @@ func aiClampTurn(v, def, ceiling int) int {
 	return v
 }
 
+// aiClampSteps returns the effective max_steps for the stored v: aiDefaultMaxSteps for a missing,
+// non-positive or aiLegacyMaxSteps value, aiMaxStepsCap for a larger one than the ceiling,
+// otherwise v.
+func aiClampSteps(v int) int {
+	if v == aiLegacyMaxSteps {
+		return aiDefaultMaxSteps
+	}
+	return aiClampTurn(v, aiDefaultMaxSteps, aiMaxStepsCap)
+}
+
 // aiClampDaily returns the stored daily limit p made safe: nil (the default) for NaN,
 // aiNoLimit for any negative value, ceiling for a value above it, otherwise p itself.
 func aiClampDaily[T int64 | float64](p *T, ceiling T) *T {
@@ -114,7 +128,7 @@ func aiClampDaily[T int64 | float64](p *T, ceiling T) *T {
 func (st aiSettings) limits() aiLimits {
 	return aiLimits{
 		MaxOutput:       aiClampTurn(st.MaxOutputTokens, aiDefaultMaxOutput, aiMaxOutputCap),
-		MaxSteps:        aiClampTurn(st.MaxSteps, aiDefaultMaxSteps, aiMaxStepsCap),
+		MaxSteps:        aiClampSteps(st.MaxSteps),
 		TurnInput:       aiClampTurn(st.TurnInputTokens, aiDefaultTurnInput, aiTurnInputCap),
 		DailyTokens:     aiDailyLimit(st.DailyTokens, aiTokensCap, nil),
 		UserDailyTokens: aiDailyLimit(st.UserDailyTokens, aiTokensCap, nil),

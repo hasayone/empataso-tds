@@ -18,7 +18,7 @@ const (
 	// aiTurnMaxProcess is how many turns the process runs at once, whatever the users.
 	aiTurnMaxProcess = 2
 	// aiTurnTimeout is the longest a turn runs, all provider calls and tool runs together.
-	aiTurnTimeout = 120 * time.Second
+	aiTurnTimeout = 300 * time.Second
 	// aiHeartbeat is the period of the ": ping" comment that keeps the stream open behind nginx
 	// (60 s) and Cloudflare (100 s).
 	aiHeartbeat = 15 * time.Second
@@ -93,6 +93,8 @@ type aiTurn struct {
 	// settled is set once the chat holds its final status, or the user is gone and there is
 	// nothing to store.
 	settled bool
+	// compactions counts the context compactions of the turn, up to aiMaxCompactions.
+	compactions int
 }
 
 // joined returns the reply text so far, cut to aiAssistantTextMax bytes on a character boundary.
@@ -165,7 +167,8 @@ func (t *aiTurn) complete(ctx context.Context, req aiRequest) (rep aiReply, err 
 }
 
 // loop runs the model, up to max_steps calls. Before each call the user is checked again and the
-// quota is reserved. A reply without tool calls ends the turn; tool calls are run (read tools) or
+// quota is reserved. When the conversation has grown to half of the input room, the turn compacts
+// it itself (see compact) and goes on with the same task; compaction calls are not steps. A reply without tool calls ends the turn; tool calls are run (read tools) or
 // stored as proposals (propose tools) and their results go back to the model. It returns nil for
 // a finished turn, or the error that stopped it: the context error, errAISessionGone, an
 // ai_quota, provider, ai_input_too_large or ai_steps_limit error.
@@ -178,8 +181,17 @@ func (t *aiTurn) loop(ctx context.Context, msgs []aiTurnMsg) error {
 		if !t.s.aiSessionValid(t.sess) {
 			return errAISessionGone
 		}
-		if step > 1 && t.estimate(msgs) > lim.TurnInput {
-			return newAIError(http.StatusBadRequest, aiErrInputTooLarge, "the input of the turn passed turn_input_tokens")
+		if step > 1 {
+			if t.needsCompact(msgs, lim) {
+				compacted, err := t.compact(ctx, msgs, lim)
+				if err != nil {
+					return err
+				}
+				msgs = compacted
+			}
+			if t.estimate(msgs) > lim.TurnInput {
+				return newAIError(http.StatusBadRequest, aiErrInputTooLarge, "the input of the turn passed turn_input_tokens")
+			}
 		}
 		t.sse.event("status", map[string]any{"text": aiStepText(t.lang, step, lim.MaxSteps), "step": step, "max": lim.MaxSteps})
 		rep, err := t.complete(ctx, aiRequest{Model: t.model, System: t.system(), Messages: msgs, Tools: t.specs, MaxTokens: lim.MaxOutput})

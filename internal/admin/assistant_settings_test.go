@@ -315,7 +315,7 @@ func TestAISettingsModelMustBeAllowed(t *testing.T) {
 func TestAISettingsLimits(t *testing.T) {
 	e := newAITestEnv(t, nil)
 	v := e.view(t)
-	if v.MaxOutputTokens != 2048 || v.MaxSteps != 6 || v.TurnInputTokens != 60000 || v.DailyTokens != nil ||
+	if v.MaxOutputTokens != 2048 || v.MaxSteps != 30 || v.TurnInputTokens != 60000 || v.DailyTokens != nil ||
 		v.UserDailyTokens != nil || aiTestVal(v.DailyUSD) != 5 || aiTestVal(v.UserDailyUSD) != 2 {
 		t.Fatalf("defaults: tokens have no limit, USD keeps its default: %+v", v)
 	}
@@ -484,7 +484,7 @@ func TestAISettingsDamagedFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := e.view(t)
-	if v.Error == "" || v.Enabled || v.MaxSteps != 6 {
+	if v.Error == "" || v.Enabled || v.MaxSteps != 30 {
 		t.Fatalf("damaged file view: %+v", v)
 	}
 	if _, err := e.s.aiLoad(); err == nil {
@@ -1230,7 +1230,7 @@ func TestAISettingsTurnLimitsHaveCeilings(t *testing.T) {
 			}
 		}
 	}
-	if aiMaxOutputCap != 32000 || aiMaxStepsCap != 20 || aiTurnInputCap != 200000 {
+	if aiMaxOutputCap != 32000 || aiMaxStepsCap != 60 || aiTurnInputCap != 200000 {
 		t.Fatal("the documented ceilings changed")
 	}
 }
@@ -1295,7 +1295,7 @@ func TestAISettingsFileCannotPassCeilings(t *testing.T) {
 		t.Fatal(err)
 	}
 	for name, l := range map[string]aiLimits{"loaded": lim(st), "raw": lim(aiSettings{MaxSteps: 1000, MaxOutputTokens: 1 << 30, TurnInputTokens: 1 << 30})} {
-		if l.MaxSteps != 20 || l.MaxOutput != 32000 || l.TurnInput != 200000 {
+		if l.MaxSteps != 60 || l.MaxOutput != 32000 || l.TurnInput != 200000 {
 			t.Errorf("%s: per-turn limits not clamped: %+v", name, l)
 		}
 	}
@@ -1304,7 +1304,7 @@ func TestAISettingsFileCannotPassCeilings(t *testing.T) {
 		t.Fatalf("daily limits: negative is no limit, zero stays, huge is cut: %+v", l)
 	}
 	v := e.view(t)
-	if v.MaxSteps != 20 || v.MaxOutputTokens != 32000 || v.TurnInputTokens != 200000 {
+	if v.MaxSteps != 60 || v.MaxOutputTokens != 32000 || v.TurnInputTokens != 200000 {
 		t.Fatalf("the view shows the effective values: %+v", v)
 	}
 	if _, err = e.s.aiReserve("u", "mystery", st); err == nil {
@@ -1330,7 +1330,7 @@ func TestAISettingsViewLimitBounds(t *testing.T) {
 	if err := json.Unmarshal([]byte(body), &got); err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]float64{"max_output_tokens": 32000, "max_steps": 20, "turn_input_tokens": 200000}
+	want := map[string]float64{"max_output_tokens": 32000, "max_steps": 60, "turn_input_tokens": 200000}
 	if len(got.Ceilings) != len(want) {
 		t.Fatalf("limit_ceilings: %v", got.Ceilings)
 	}
@@ -1342,7 +1342,7 @@ func TestAISettingsViewLimitBounds(t *testing.T) {
 	if len(got.Max) != 2 || got.Max["tokens"] != 1e12 || got.Max["usd"] != 1e6 {
 		t.Fatalf("limit_max: %v", got.Max)
 	}
-	if v := e.mustPut(t, `{"max_steps":5}`); v.LimitCeilings.MaxSteps != 20 || v.LimitMax.Tokens != 1e12 {
+	if v := e.mustPut(t, `{"max_steps":5}`); v.LimitCeilings.MaxSteps != 60 || v.LimitMax.Tokens != 1e12 {
 		t.Fatalf("PUT answers with the bounds too: %+v %+v", v.LimitCeilings, v.LimitMax)
 	}
 }

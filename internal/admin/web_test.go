@@ -234,7 +234,7 @@ func TestDashboardRecentClicks(t *testing.T) {
 	must(t, dash, `id="dash-panels"`, "panels gear stays")
 	must(t, dash, `id="recent"`, "recent clicks card")
 	must(t, dash, `pageAllowed(ME,'logs')`, "recent clicks only with logs access")
-	must(t, dash, "/api/logs?'+rangeQS()+'&limit=10", "recent clicks read the click log for the period")
+	must(t, dash, "/api/logs?'+dashQS()+'&limit=10", "recent clicks read the click log for the period and the kept campaign")
 	must(t, dash, "recentRows(", "recent rows go through recentRows")
 	must(t, dash, "x.campaign_id||", "recent clicks link by campaign slug")
 	mustNot(t, dash, "#/flows/${esc(x.group)}", "recent clicks must not link by campaign name")

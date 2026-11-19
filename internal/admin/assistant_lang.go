@@ -83,6 +83,21 @@ var aiStepTexts = map[string]string{
 	"uk": "Крок %d з %d",
 }
 
+// aiCompactTexts holds the status line shown while the assistant compacts its own context.
+var aiCompactTexts = map[string]string{
+	"en": "Compacting the conversation to keep going",
+	"ru": "Сжимаю контекст, чтобы продолжить",
+	"uk": "Стискаю контекст, щоб продовжити",
+}
+
+// aiCompactText returns the status line of a context compaction in lang.
+func aiCompactText(lang string) string {
+	if text, ok := aiCompactTexts[lang]; ok {
+		return text
+	}
+	return aiCompactTexts[aiLangDefault]
+}
+
 // aiStepText returns the status line of step out of max in lang.
 func aiStepText(lang string, step, max int) string {
 	format, ok := aiStepTexts[lang]
