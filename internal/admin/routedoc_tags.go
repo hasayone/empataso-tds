@@ -22,7 +22,7 @@ var docTags = []docTag{
 		[]string{"/api/groups", "/api/campaigns", "/api/s2s", "/api/spend"}},
 	{"offers", "Offers", "Офферы", "Офери", []string{"/api/offers"}},
 	{"landings", "Landings", "Лендинги", "Лендінги", []string{"/api/landings"}},
-	{"networks", "Affiliate networks", "Партнёрские сети", "Партнерські мережі", []string{"/api/affiliate-networks"}},
+	{"networks", "Affiliate networks", "Партнёрские сети", "Партнерські мережі", []string{"/api/affiliate-networks", "/api/affiliate-network-templates"}},
 	{"sources", "Traffic sources", "Источники трафика", "Джерела трафіку", []string{"/api/traffic-sources"}},
 	{"domains", "Domains", "Домены", "Домени", []string{"/api/domains", "/api/registrars", "/api/cloudflare"}},
 	{"stats", "Statistics and reports", "Статистика и отчёты", "Статистика і звіти", []string{"/api/stats", "/api/report"}},

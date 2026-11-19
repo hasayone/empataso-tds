@@ -106,6 +106,8 @@ var cookieRoutes = append([]string{
 	"GET /api/checker/apps/{group}", "PUT /api/checker/apps/{group}",
 	"POST /api/checker/apps/{group}/create", "POST /api/checker/apps/{group}/refresh",
 	"GET /api/docs/settings", "PUT /api/docs/settings",
+	"POST /api/affiliate-network-templates", "PUT /api/affiliate-network-templates/{id}",
+	"DELETE /api/affiliate-network-templates/{id}",
 	"GET /api/registrars/namecheap", "PUT /api/registrars/namecheap",
 	"POST /api/registrars/namecheap/test", "POST /api/registrars/namecheap/check",
 	"POST /api/registrars/namecheap/register",
@@ -258,6 +260,14 @@ func addCatalogRoutes(m map[string]routeRule, rule func(section) routeRule, addC
 	addCRUD("/api/landings", secLandings)
 	addCRUD("/api/traffic-sources", secSources)
 	addCRUD("/api/affiliate-networks", secNetworks)
+	for _, p := range []string{
+		"GET /api/affiliate-network-templates",
+		"POST /api/affiliate-network-templates",
+		"PUT /api/affiliate-network-templates/{id}",
+		"DELETE /api/affiliate-network-templates/{id}",
+	} {
+		m[p] = rule(secNetworks)
+	}
 	addCRUD("/api/domains", secDomains)
 
 	land := rule(secLandings)

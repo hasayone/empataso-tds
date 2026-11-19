@@ -228,6 +228,7 @@ func applyDataFiles(cfg *admin.Config, groupsFile string, log *slog.Logger) {
 	cfg.NamecheapURL = config.Env("EMTDS_NAMECHEAP_URL")
 	cfg.NamecheapSandboxURL = config.Env("EMTDS_NAMECHEAP_SANDBOX_URL")
 	cfg.CloudflareFile = getenv("EMTDS_CLOUDFLARE_FILE", filepath.Join(dir, "cloudflare.json"))
+	cfg.NetTemplatesFile = getenv("EMTDS_NET_TEMPLATES_FILE", filepath.Join(dir, "net-templates.json"))
 	cfg.CheckerFile = getenv("EMTDS_CHECKER_FILE", filepath.Join(dir, "checker.json"))
 	cfg.CheckerAppsFile = getenv("EMTDS_CHECKER_APPS_FILE", filepath.Join(dir, "checker-apps.json"))
 	cfg.DocsFile = getenv("EMTDS_DOCS_FILE", filepath.Join(dir, "docs.json"))

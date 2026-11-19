@@ -726,7 +726,8 @@ func TestAssistantWidgetErrorCodesFromBackend(t *testing.T) {
 		must(t, line, n+":'ai.chat.err.ai_confirm_required."+n+"'", "the confirmation "+n)
 		check("ai.chat.err.ai_confirm_required."+n, "confirmation "+n)
 	}
-	for _, k := range []string{"ai.chat.err.ai_bad_limit.range", "ai.chat.err.ai_bad_limit.zero", "ai.chat.err.ai_bad_model.no_catalog", "ai.chat.err.ai_bad_model.no_tools", "ai.chat.err.ai_bad_request.invalid", "ai.chat.err.ai_bad_request.models_required", "ai.chat.err.ai_has_links.list", "ai.chat.err.ai_redacted_value.field"} {
+	for _, k := range []string{"ai.chat.err.ai_bad_limit.range", "ai.chat.err.ai_bad_limit.zero", "ai.chat.err.ai_bad_model.no_catalog", "ai.chat.err.ai_bad_model.no_tools", "ai.chat.err.ai_bad_request.invalid", "ai.chat.err.ai_bad_request.models_required", "ai.chat.err.ai_has_links.list", "ai.chat.err.ai_redacted_value.field",
+		"ai.chat.err.ai_provider_error.empty_summary", "ai.chat.err.ai_provider_error.overload", "ai.chat.err.ai_provider_error.unreachable"} {
 		check(k, "param variant")
 	}
 }

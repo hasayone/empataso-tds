@@ -99,6 +99,8 @@ type aiTurn struct {
 	settled bool
 	// compactions counts the context compactions of the turn, up to aiMaxCompactions.
 	compactions int
+	// compactSkipped is set when a compaction returned no summary and the turn went on without it.
+	compactSkipped bool
 	// nudges counts the replies in a row that ended in a promise or a cut and were answered with a
 	// nudge; a reply with tool calls resets it. toolRuns counts the tool calls of the turn.
 	nudges, toolRuns int
@@ -186,7 +188,9 @@ func (t *aiTurn) complete(ctx context.Context, req aiRequest) (rep aiReply, err 
 
 // loop runs the model, up to max_steps calls. Before each call the user is checked again and the
 // quota is reserved. When the conversation has grown to half of the input room, the turn compacts
-// it itself (see compact) and goes on with the same task; compaction calls are not steps. A reply without tool calls ends the turn; tool calls are run (read tools) or
+// it itself (see compact) and goes on with the same task; compaction calls are not steps. A
+// compaction that returns no summary does not end the turn while the conversation still fits
+// (see keepsWithoutCompaction). A reply without tool calls ends the turn; tool calls are run (read tools) or
 // stored as proposals (propose tools) and their results go back to the model. It returns nil for
 // a finished turn, or the error that stopped it: the context error, errAISessionGone, an
 // ai_quota, provider, ai_input_too_large or ai_steps_limit error.
@@ -203,9 +207,12 @@ func (t *aiTurn) loop(ctx context.Context, msgs []aiTurnMsg) error {
 			if t.needsCompact(msgs, lim) {
 				compacted, err := t.compact(ctx, msgs, lim)
 				if err != nil {
-					return err
+					if err = t.keepsWithoutCompaction(err, msgs, lim); err != nil {
+						return err
+					}
+				} else {
+					msgs, t.compactSkipped = compacted, false
 				}
-				msgs = compacted
 			}
 			if t.estimate(msgs) > lim.TurnInput {
 				return newAIError(http.StatusBadRequest, aiErrInputTooLarge, "the input of the turn passed turn_input_tokens")

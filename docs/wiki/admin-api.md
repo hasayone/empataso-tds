@@ -282,6 +282,7 @@ nginx менять не нужно: в `deploy/nginx/emtds.conf` (по IP) и `e
 | Маршрут | Что делает | Галочка ключа |
 | --- | --- | --- |
 | `DELETE /api/affiliate-networks/{id}` | Удалить партнёрскую сеть. |  |
+| `GET /api/affiliate-network-templates` | Список шаблонов партнёрских сетей. |  |
 | `GET /api/affiliate-networks` | Список партнёрских сетей. |  |
 | `GET /api/affiliate-networks/{id}` | Получить партнёрскую сеть. |  |
 | `POST /api/affiliate-networks` | Создать партнёрскую сеть. |  |
@@ -415,6 +416,7 @@ nginx менять не нужно: в `deploy/nginx/emtds.conf` (по IP) и `e
 
 Эти маршруты работают только в сессии браузера; ключ получает `403`.
 
+- `DELETE /api/affiliate-network-templates/{id}` — Сброс или удаление шаблона сети.
 - `DELETE /api/ai/chats/{id}` — Удалить ИИ-чат
 - `DELETE /api/api-keys/{id}` — Отзыв API-ключа или удаление уже отозванного.
 - `DELETE /api/roles/{id}` — Удаление роли.
@@ -445,6 +447,7 @@ nginx менять не нужно: в `deploy/nginx/emtds.conf` (по IP) и `e
 - `GET /api/system/signals` — Метки шапки: есть ли коммит новее и какие службы не отвечают.
 - `GET /api/users` — Список аккаунтов панели.
 - `GET /api/users/{id}` — Один аккаунт панели.
+- `POST /api/affiliate-network-templates` — Добавление шаблона сети.
 - `POST /api/ai/changes/{id}/apply` — Применить предложенную правку
 - `POST /api/ai/changes/{id}/reject` — Отклонить предложенную правку
 - `POST /api/ai/changes/{id}/revert` — Откатить применённую правку
@@ -479,6 +482,7 @@ nginx менять не нужно: в `deploy/nginx/emtds.conf` (по IP) и `e
 - `POST /api/update/check` — Запрос поиска новой версии.
 - `POST /api/update/rollback` — Запрос возврата на предыдущую версию.
 - `POST /api/users` — Создание аккаунта панели.
+- `PUT /api/affiliate-network-templates/{id}` — Сохранение правки шаблона сети.
 - `PUT /api/ai/settings` — Изменить настройки ИИ-помощника
 - `PUT /api/api-keys/{id}` — Изменение API-ключа.
 - `PUT /api/checker/apps/{group}` — Сохранение полей чекера у кампании.

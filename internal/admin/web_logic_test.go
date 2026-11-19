@@ -727,9 +727,25 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq(dashSetRows('kpis', [{ id: 'cr', on: false }, { id: 'cost', on: true }, { id: 'visits', on: true }], hid),
     [{ id: 'cr', on: false }, { id: 'visits', on: true }, { id: 'unique', on: true }, { id: 'conv', on: true }, { id: 'bots', on: true }],
     'saved order wins, hidden cards are not offered, new ids are appended on');
-  eq(dashSetRows('blocks', undefined, new Set(['recent'])).map(r => r.id), ['chart', 'perf', 'visitors'], 'without the logs section the recent block is not offered');
+  eq(dashSetRows('blocks', undefined, new Set(['recent'])).map(r => r.id), ['chart', 'perf', 'offers', 'visitors'], 'without the logs section the recent block is not offered');
   eq(dashSetRows('blocks', [{ id: 'perf', on: false }, { id: 'chart', on: true }]).map(r => r.id + ':' + r.on),
-    ['perf:false', 'chart:true', 'visitors:true', 'recent:true'], 'a block switched off stays in the list');
+    ['perf:false', 'chart:true', 'offers:false', 'visitors:true', 'recent:true'], 'a block switched off stays in the list, the offers block is off until switched on');
+  eq(dashSetRows('blocks', undefined).map(r => r.id + ':' + r.on), ['chart:true', 'perf:true', 'offers:false', 'visitors:true', 'recent:true'], 'by default the offers block is off');
+  eq(dashSetStored('blocks', dashSetRows('blocks', undefined)), null, 'the default blocks store nothing');
+  const withOffers = dashSetRows('blocks', undefined); withOffers[2].on = true;
+  eq(dashSetStored('blocks', withOffers).map(r => r.id + ':' + r.on), ['chart:true', 'perf:true', 'offers:true', 'visitors:true', 'recent:true'], 'the offers block switched on is stored');
+  eq(dashSetRows('blocks', dashSetStored('blocks', withOffers))[2], { id: 'offers', on: true }, 'a stored offers block comes back on');
+  eq(dashSetRows('blocks', [{ id: 'chart', on: true }, { id: 'perf', on: true }, { id: 'visitors', on: true }, { id: 'recent', on: true }]).find(r => r.id === 'offers').on, false, 'an account that never stored the block gets it off');
+  eq(dashFoldOffers([
+    { offer: '7', hits: 5, unique: 4, uniq_first: 3, conv: 1, profit: 10.5, group: 'a', stream: 's' },
+    { offer: '7', hits: 3, unique: 2, conv: 0, profit: 0, group: 'b', stream: 't' },
+    { offer: '2', hits: 9, unique: 6, conv: 2, profit: 4 },
+    { offer: '', hits: 100, unique: 90, conv: 9, profit: 9 },
+    { hits: 50 },
+    { offer: '10', hits: 8, unique: 1, conv: 0, profit: 0 }]),
+    [{ id: '2', hits: 9, unique: 6, conv: 2, profit: 4 }, { id: '7', hits: 8, unique: 6, conv: 1, profit: 10.5 }, { id: '10', hits: 8, unique: 1, conv: 0, profit: 0 }],
+    'rows fold to the offer: sums, own uniques, no empty offer, most visits first, ties by id as numbers');
+  eq(dashFoldOffers(null), [], 'no rows, no offers');
   eq(dashSetRows('recent', [{ id: 'ts', on: false }, { id: 'ip', on: false }], new Set(['os', 'browser', 'out', 'campaign'])).map(r => r.id + ':' + r.on),
     ['ts:true', 'ip:false'], 'the recent table keeps one column on');
   eq(dashSetRows('kpis', [{ id: 'visits', on: false }]).filter(r => r.on).length, 8, 'every card may be switched off');
@@ -737,7 +753,7 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq(dashSetStored('kpis', dashSetRows('kpis', undefined)), null, 'the default rows store nothing');
   eq(dashSetStored('kpis', dashSetRows('kpis', undefined, hid), hid), null, 'the default rows without hidden cards store nothing');
   const moved = dashSetRows('blocks', undefined); moved.reverse();
-  eq(dashSetStored('blocks', moved).map(r => r.id), ['recent', 'visitors', 'perf', 'chart'], 'a new order is stored');
+  eq(dashSetStored('blocks', moved).map(r => r.id), ['recent', 'visitors', 'offers', 'perf', 'chart'], 'a new order is stored');
   const off = dashSetRows('recent', undefined); off[2].on = false;
   eq(dashSetStored('recent', off).filter(r => !r.on).map(r => r.id), ['os'], 'a switched off column is stored');
 

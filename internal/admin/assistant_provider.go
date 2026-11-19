@@ -36,6 +36,16 @@ const (
 	aiErrTextLimit = 200
 )
 
+// Reasons of an ai_provider_error, the "reason" param the panel words in its language.
+const (
+	// aiReasonOverload: the provider answered with a 5xx status, it is overloaded or down.
+	aiReasonOverload = "overload"
+	// aiReasonUnreachable: the exchange failed before an answer came, with no timeout.
+	aiReasonUnreachable = "unreachable"
+	// aiReasonEmptySummary: the model returned no text for the summary of a context compaction.
+	aiReasonEmptySummary = "empty_summary"
+)
+
 // aiRoleTool is the role of a tool result message in the model conversation. The
 // roles user and assistant are aiRoleUser and aiRoleAssistant.
 const aiRoleTool = "tool"
@@ -416,7 +426,9 @@ func (c *aiClient) transportErr(ctx context.Context, err error) error {
 	case errors.Is(err, errAIRedirect):
 		return c.fail(http.StatusBadGateway, aiErrProvider, "the provider redirected the request")
 	}
-	return c.fail(http.StatusBadGateway, aiErrProvider, "the provider is not reachable")
+	e := c.fail(http.StatusBadGateway, aiErrProvider, "the provider is not reachable")
+	e.Params = map[string]any{"reason": aiReasonUnreachable}
+	return e
 }
 
 // retryDelay returns the wait before the retry and whether the retry is allowed.
@@ -471,7 +483,11 @@ func (c *aiClient) statusErr(status int, body []byte) *aiError {
 	if msg := aiProviderMessage(body); msg != "" {
 		text += ": " + msg
 	}
-	return c.fail(http.StatusBadGateway, aiErrProvider, text)
+	e := c.fail(http.StatusBadGateway, aiErrProvider, text)
+	if status >= http.StatusInternalServerError {
+		e.Params = map[string]any{"reason": aiReasonOverload}
+	}
+	return e
 }
 
 // aiProviderCode extracts the machine error code of a provider error body: error.code, else

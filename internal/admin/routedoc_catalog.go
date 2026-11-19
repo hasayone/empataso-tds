@@ -307,7 +307,7 @@ var postbackSample = map[string]any{
 // the domain check and the boards.
 func campaignRouteDocs() map[string]routeDoc {
 	docs := map[string]routeDoc{}
-	for _, part := range []map[string]routeDoc{campaignCoreDocs(), landingFileDocs(), spendDocs(), boardDocs()} {
+	for _, part := range []map[string]routeDoc{campaignCoreDocs(), landingFileDocs(), spendDocs(), boardDocs(), netTemplateDocs()} {
 		maps.Copy(docs, part)
 	}
 	return docs

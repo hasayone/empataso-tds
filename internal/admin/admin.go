@@ -212,6 +212,11 @@ type Config struct {
 	CloudflareURL  string
 	CloudflareHTTP *http.Client
 
+	// NetTemplatesFile is net-templates.json on the data volume: the edits and the added templates
+	// of the network template catalog; empty disables saving them. The embedded catalog never
+	// lives there, so an image update cannot erase an edit.
+	NetTemplatesFile string
+
 	// CheckerFile is checker.json, the checker integration settings; empty disables saving it.
 	// CheckerAppsFile is checker-apps.json, the application queue; empty disables the queue.
 	// CheckerURL replaces the checker API address; empty keeps the address from the settings.
@@ -321,6 +326,9 @@ type Server struct {
 
 	// domainMu serializes every write of domains.json: create, replace, delete and check.
 	domainMu sync.Mutex
+
+	// netTplMu serializes the read, change and write of the network template edits file.
+	netTplMu sync.Mutex
 
 	// groupsMu serializes List, modify and Save of groups.json in the admin API.
 	groupsMu sync.Mutex

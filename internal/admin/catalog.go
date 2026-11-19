@@ -265,6 +265,10 @@ func validOfferPayoutCurrency(code string) string {
 
 func registerNetworks(s *Server, mux *http.ServeMux) {
 	mountCRUD(s, mux, "/api/affiliate-networks", s.networkCatalog())
+	s.handle(mux, "GET /api/affiliate-network-templates", http.HandlerFunc(s.handleNetworkTemplates))
+	s.handle(mux, "POST /api/affiliate-network-templates", http.HandlerFunc(s.handleNetworkTemplateCreate))
+	s.handle(mux, "PUT /api/affiliate-network-templates/{id}", http.HandlerFunc(s.handleNetworkTemplateUpdate))
+	s.handle(mux, "DELETE /api/affiliate-network-templates/{id}", http.HandlerFunc(s.handleNetworkTemplateDelete))
 }
 
 // networkCatalog returns the handlers' state of the affiliate network catalog.

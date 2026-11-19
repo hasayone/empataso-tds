@@ -1665,8 +1665,8 @@ func TestSPASettingsPickers(t *testing.T) {
 	mustNot(t, html, `id="tzfind"`, "timezone search field")
 	mustNot(t, html, `id="sp-find"`, "spend timezone search")
 	mustNot(t, html, `id="pb-card"`, "postback card in settings")
-	ep := spaFunctionLine(html, "enginePostback")
-	must(t, ep, "&payout={payout}", "engine postback keeps payout")
+	ep := spaFunctionLine(html, "netTplPostback")
+	must(t, ep, "split('{origin}').join(postbackOrigin())", "template postback takes the public origin")
 	pb := spaFunctionLine(html, "openPostbacks")
 	if pb == "" {
 		t.Fatal("openPostbacks missing")

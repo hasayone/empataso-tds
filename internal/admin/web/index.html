@@ -327,6 +327,32 @@
   .chk input[type=checkbox]{width:16px;height:16px;min-width:16px;padding:0;border:0;box-shadow:none;background:transparent}
   .hint{font-size:12px;color:var(--subtle);line-height:1.45;max-width:var(--text-w)}
   .hint.err{color:var(--bad)}
+  .fld>label.lbl-h{display:flex;align-items:center;gap:6px}
+  .qh{position:relative;display:inline-flex;align-items:center;justify-content:center;flex:none;width:16px;height:16px;border:1px solid var(--border-strong);border-radius:50%;background:var(--surface);color:var(--muted);font-size:11px;font-weight:700;line-height:1;cursor:help}
+  .qh:hover,.qh:focus{color:var(--accent);border-color:var(--accent);outline:none}
+  .qh-pop{display:none;position:absolute;left:-8px;top:calc(100% + 6px);z-index:40;width:min(380px,72vw);padding:10px 12px;border:1px solid var(--border-strong);border-radius:var(--r-sm);background:var(--surface);box-shadow:var(--shadow-2);color:var(--fg);font-size:12.5px;font-weight:400;line-height:1.5;text-align:left;cursor:default}
+  .qh:hover .qh-pop,.qh:focus .qh-pop{display:block}
+  .qh-pop b{display:block;margin-bottom:4px;font-weight:600}
+  .qh-pop div+div{margin-top:4px}
+  .qh-pop code{font-family:var(--mono);font-size:12px;word-break:break-all}
+  .qh-pop .hint{display:block;margin-top:4px}
+  textarea.net-pb{min-height:0;resize:vertical}
+  .net-notes{margin:0 0 14px;padding:12px 14px;border:1px solid var(--border);border-left:3px solid var(--accent);border-radius:var(--r-sm);background:var(--surface-2);color:var(--fg);font-size:13px;line-height:1.6;min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word}
+  .net-notes[hidden]{display:none}
+  .net-notes b{display:block;margin-bottom:8px;font-weight:600}
+  .net-notes p{margin:0 0 10px}
+  .net-notes p:last-child{margin-bottom:0}
+  .net-notes a{color:var(--accent);text-decoration:underline;text-underline-offset:2px;overflow-wrap:anywhere}
+  .net-notes code{display:inline;padding:1px 6px;border:1px solid var(--border);border-radius:4px;background:var(--surface);color:var(--accent);font-family:var(--mono);font-size:12px;line-height:1.7;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-all}
+  .net-notes dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 12px;margin:10px 0 0}
+  .net-notes dt{color:var(--muted)}
+  .net-notes dd{margin:0;font-family:var(--mono);font-size:12px;overflow-wrap:anywhere}
+  .net-notes .net-conv-t{margin:12px 0 0;padding-top:10px;border-top:1px solid var(--border);color:var(--muted)}
+  .net-tpl-row{display:flex;gap:6px;align-items:center}
+  .net-tpl-row>.pk,.net-tpl-row>select{flex:1;min-width:0}
+  .net-tpl-edit{margin:0 0 14px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2)}
+  .net-tpl-edit[hidden]{display:none}
+  .net-tpl-edit .row{display:flex;gap:6px;align-items:center;margin-top:6px}
   .g2{display:grid;grid-template-columns:1fr 1fr;gap:0 14px} .g2>.callout{grid-column:1/-1} .g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:0 14px}
   .src-pair{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
   .src-pair.param3{grid-template-columns:1fr 1fr 1fr}
@@ -379,6 +405,7 @@
   .hoverline:empty{display:none}
   .dockline{position:fixed;left:max(var(--main-pad),calc(50% - var(--main-w)/2 + var(--main-pad)));right:max(var(--main-pad),calc(50% - var(--main-w)/2 + var(--main-pad)));bottom:0;z-index:30;background:var(--surface);border-top:1px solid var(--border);padding:6px 16px}
   .ftable th.pick,.ftable td.pick{width:36px;padding-left:8px;padding-right:0;text-align:center}
+  .tw table:not(.ftable) th.pick,.tw table:not(.ftable) td.pick{width:36px;padding-left:8px;padding-right:0;text-align:center;vertical-align:middle}
   .spin svg{animation:spin .5s linear infinite;transform-origin:center}
   @keyframes spin{to{transform:rotate(360deg)}}
   @media (prefers-reduced-motion:reduce){.spin svg{animation:none}}
@@ -1045,9 +1072,9 @@
   .canvas-traffic[aria-pressed="true"]{color:var(--accent);border-color:var(--accent)}
   .grip.lock{cursor:not-allowed;opacity:.4}
   .grip.lock:hover{background:none;color:var(--subtle)}
-  .node .trafbar{position:absolute;left:10px;right:10px;bottom:3px;height:3px;border-radius:2px;background:var(--surface-2);overflow:hidden;pointer-events:none}
+  .node .trafbar{position:absolute;left:10px;right:10px;bottom:3px;height:4px;border-radius:2px;background:var(--border-strong);overflow:hidden;pointer-events:none}
   .node .trafbar i{display:block;height:100%;border-radius:2px;background:var(--accent)}
-  .canvas.compact .node .trafbar{bottom:2px;height:2px}
+  .canvas.compact .node .trafbar{bottom:2px;height:3px}
   .canvas.compact{padding:22px 22px 24px 0}
   .canvas.compact .frow{margin-bottom:8px}
   .canvas.compact .node{padding:5px 8px 5px 6px;gap:2px 8px}
@@ -7430,17 +7457,21 @@ function annotateChart(raw){
 /** DASH_LABELS maps every id of DASH_SETS to the dictionary key of its caption in the preferences window. */
 const DASH_LABELS={
   kpis:{visits:'Visits',unique:'Unique',conv:'Conversions',cost:'col.cost',revenue:'col.revenue',profit:'Profit',cr:'CR',roi:'col.roi',bots:'Bots'},
-  blocks:{chart:'Visits over time',perf:'Performance by flow and stream',visitors:'Who visits',recent:'dash.recent'},
+  blocks:{chart:'Visits over time',perf:'Performance by flow and stream',offers:'dash.offers',visitors:'Who visits',recent:'dash.recent'},
   recent:{ts:'log.ts',campaign:'fld.campaign',os:'fld.os',browser:'fld.browser',ip:'fld.ip',out:'dash.recent.out'}
 };
 /** dashSetHidden returns the ids of a dashboard set the current user must not see.
  * @param {string} name set name from DASH_SETS
- * @returns {Set<string>} cards that rest on a hidden field, recent-clicks columns of hidden fields, or the recent block without the logs section
+ * @returns {Set<string>} cards that rest on a hidden field, recent-clicks columns of hidden fields, the recent block without the logs section,
+ *   the offers block without the report section or with the offer field hidden
  */
 function dashSetHidden(name){
   if(name==='kpis') return hiddenCols(ME);
   if(name==='recent') return hiddenFields(ME);
-  return pageAllowed(ME,'logs')?new Set():new Set(['recent']);
+  const out=new Set();
+  if(!pageAllowed(ME,'logs')) out.add('recent');
+  if(!pageAllowed(ME,'report')||hiddenFields(ME).has('offer_id')) out.add('offers');
+  return out;
 }
 /** dashRows returns the rows of a dashboard set as the account has them now.
  * @param {string} name set name from DASH_SETS
@@ -7581,6 +7612,10 @@ async function dashboard(_,live,quiet){
       <div class="ch"><b>${tr('Performance by flow and stream')}</b><span class="hint">${tr('click a column to sort, a row to open the flow')}</span><div class="spacer"></div><button type="button" class="icon" id="perffold" hidden></button><button id="perftop" hidden></button><button type="button" class="icon" id="perfexport" aria-haspopup="menu" title="${tr('Export')}" aria-label="${tr('Export')}">${icon('download')}</button></div>
       <div id="perfwrap"></div>
     </div>`,
+    offers:`<div class="card pad" id="dash-offers" style="margin-bottom:14px">
+      <div class="ch"><b>${tr('dash.offers')}</b><span class="hint" id="dash-offers-n"></span></div>
+      <div id="dash-offers-body">${tableWait()}</div>
+    </div>`,
     visitors:`<div class="row" style="justify-content:space-between;margin:28px 0 12px"><h2 style="margin:0">${tr('Who visits')}</h2><button type="button" class="icon" id="dash-panels" title="${tr('dash.panels')}">${icon('settings')}</button></div>
     <div class="bds" style="margin-bottom:14px">${dashDims().filter(d=>dashPanelOn(d.id)).map(d=>`<div class="card pad bd" data-bd="${esc(d.id)}"><div class="bt">${esc(d.label)}</div><div id="bd-${esc(d.id)}" class="bars"><span class="muted">…</span></div></div>`).join('')}${dashExtraDim()&&dashPanelOn('custom')?`<div class="card pad bd" data-bd="custom"><div class="bt">${esc(tr('dash.dim'))}</div><div class="fld">${dashExtraSelect(dashExtraDim())}</div><div id="bd-custom" class="bars"><span class="muted">…</span></div></div>`:''}</div>`,
     recent:pageAllowed(ME,'logs')?`<div class="card pad" id="recent" style="margin-bottom:14px"><div class="ch"><b>${tr('dash.recent')}</b><div class="spacer"></div><a href="#/logs">${tr('dash.recent.all')}</a></div><div id="recent-table">${tableWait()}</div></div>`:''
@@ -7608,6 +7643,7 @@ async function dashboard(_,live,quiet){
     const extra=dashExtraDim();
     if(extra&&dashPanelOn('custom')) loadBreakdown(extra, 'bd-custom');
     loadRecent();
+    loadDashOffers();
   };
   dashCampaignBind(groups||[], live);
   q('#dash-refresh').onclick=()=>busy(q('#dash-refresh'), reloadDash);
@@ -7670,6 +7706,38 @@ function recentRowHTML(x, ids){
   const cells={ts:`<td>${esc(when(x.ts))}</td>`, campaign:`<td>${camp}</td>`, os:`<td>${esc(x.os||'')}</td>`, browser:`<td>${esc(x.browser||'')}</td>`, ip:`<td class="mono">${esc(x.ip||'')}</td>`, out:`<td class="ell" title="${esc(out)}">${destHTML(x)}</td>`};
   const order=ids||dashRows('recent').filter(r=>r.on).map(r=>r.id);
   return `<tr>${order.map(id=>cells[id]).join('')}</tr>`;
+}
+/** DASH_OFFERS_N is how many offers the dashboard offers block lists. */
+const DASH_OFFERS_N=10;
+/** DASH_OFFERS_GEN numbers the offers requests, so an answer for an earlier period or campaign is dropped. */
+let DASH_OFFERS_GEN=0;
+/** loadDashOffers fills the offers block of the dashboard from GET /api/report for the dashboard period and campaign.
+ * Nothing is requested while the block is off (it is not on the page). The columns are visits, uniques, conversions and revenue,
+ * as the report has them; a column hidden from the user is left out. The block lists the first DASH_OFFERS_N offers by visits.
+ * A failed request shows «no data».
+ * @returns {Promise<void>} */
+async function loadDashOffers(){
+  if(!q('#dash-offers-body')) return;
+  const my=++DASH_OFFERS_GEN;
+  const qs=new URLSearchParams(dashQS());
+  qs.set('meta','1');
+  const [body]=await Promise.all([call('GET','/api/report?'+qs.toString()).catch(()=>null), ensureCatalogs()]);
+  const box=q('#dash-offers-body');
+  if(!box||my!==DASH_OFFERS_GEN) return;
+  if(body===null){ box.innerHTML=stateHTML(tr('no data')); return; }
+  const all=dashFoldOffers(reportData(body).rows);
+  const list=all.slice(0, DASH_OFFERS_N);
+  const hint=q('#dash-offers-n');
+  if(hint) hint.textContent=all.length>list.length?list.length+' '+tr('of')+' '+all.length:'';
+  if(!list.length){ box.innerHTML=stateHTML(tr('No traffic in this period')); return; }
+  const hideM=hiddenCols(ME), shown=(id,html)=>hideM.has(id)?'':html;
+  const head=`<th>${tr('stream.offer')}</th><th class="num">${tr('Hits')}</th>${shown('unique',`<th class="num">${tr('Unique')}</th>`)}<th class="num">${tr('Conv')}</th>${shown('revenue',`<th class="num">${tr('col.revenue')}</th>`)}`;
+  const rows=list.map(o=>{
+    const name=idLabel('offer_id', o.id)||o.id;
+    const revCls=moneyCellCls('rev', {amount:o.profit, ready:true});
+    return `<tr><td class="ell" title="${esc(name)}">${esc(name)}</td><td class="num">${fmt(o.hits)}</td>${shown('unique',`<td class="num">${fmt(o.unique)}</td>`)}<td class="num ${o.conv?'ok':''}">${fmt(o.conv)}</td>${shown('revenue',`<td class="num${revCls?' '+revCls:''}">${moneyText(o.profit||0,'USD',2)}</td>`)}</tr>`;
+  }).join('');
+  box.innerHTML=`<div class="tw"><table class="perft"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
 }
 // loadRecent fills the recent-clicks card from GET /api/logs for the dashboard period. It returns nothing.
 // The card is absent for a user without the logs section, so nothing is requested then.
@@ -10916,9 +10984,18 @@ function pageViewDashPanels(list){
  * Only values the dashboard itself computes are listed. */
 const DASH_SETS={
   kpis:['visits','unique','conv','cost','revenue','profit','cr','roi','bots'],
-  blocks:['chart','perf','visitors','recent'],
+  blocks:['chart','perf','offers','visitors','recent'],
   recent:['ts','campaign','os','browser','ip','out']
 };
+/** DASH_OFF_BY_DEFAULT lists, per dashboard set, the ids that are off until the account switches them on. */
+const DASH_OFF_BY_DEFAULT={blocks:['offers']};
+/** dashDefaultOn tells whether an id of a dashboard set is on in the default state.
+ * @param {string} name set name from DASH_SETS
+ * @param {string} id id inside the set
+ * @returns {boolean} false for an id listed in DASH_OFF_BY_DEFAULT */
+function dashDefaultOn(name, id){
+  return !(DASH_OFF_BY_DEFAULT[name]||[]).includes(id);
+}
 /** DASH_SET_KEYS maps a set of DASH_SETS to its field in the page-view snapshot (the same name is the key of DASH_VIEW). */
 const DASH_SET_KEYS={kpis:'dashKpis', blocks:'dashBlocks', recent:'dashRecent'};
 /** pageViewDashSet validates the {id, on} rows of one dashboard set for storage.
@@ -10946,7 +11023,7 @@ function dashSetRows(name, saved, hidden){
     if(!left.has(r.id)) return;
     left.delete(r.id); out.push({id:r.id, on:r.on});
   });
-  left.forEach(id=>out.push({id, on:true}));
+  left.forEach(id=>out.push({id, on:dashDefaultOn(name, id)}));
   if(name==='recent'&&out.length&&!out.some(r=>r.on)) out[0].on=true;
   return out;
 }
@@ -10954,13 +11031,32 @@ function dashSetRows(name, saved, hidden){
  * @param {string} name set name from DASH_SETS
  * @param {Array<{id:string,on:boolean}>} rows edited rows
  * @param {Set<string>} [hidden] ids hidden from the user
- * @returns {Array<{id:string,on:boolean}>|null} null when the rows are the default order with everything on, so the account keeps nothing
+ * @returns {Array<{id:string,on:boolean}>|null} null when the rows are the default order in the default state, so the account keeps nothing
  */
 function dashSetStored(name, rows, hidden){
   const v=pageViewDashSet(name, rows);
   if(!v) return null;
   const def=(DASH_SETS[name]||[]).filter(id=>!(hidden&&hidden.has(id)));
-  return v.length===def.length&&v.every((r,i)=>r.on&&r.id===def[i])?null:v;
+  return v.length===def.length&&v.every((r,i)=>r.id===def[i]&&r.on===dashDefaultOn(name, r.id))?null:v;
+}
+/** dashFoldOffers sums report rows up to the offer for the dashboard offers block.
+ * Rows are split by campaign, stream, country and source; an empty offer id is not an offer.
+ * Uniques are the rows' own, as in the offers table. Rows come out by visits, most first, then by id.
+ * @param {object[]} rows rows of GET /api/report
+ * @returns {Array<{id:string,hits:number,unique:number,conv:number,profit:number}>} one entry per offer */
+function dashFoldOffers(rows){
+  const by=new Map();
+  (Array.isArray(rows)?rows:[]).forEach(r=>{
+    const id=String(r&&r.offer!=null?r.offer:'').trim();
+    if(!id) return;
+    let o=by.get(id);
+    if(!o){ o={id, hits:0, unique:0, conv:0, profit:0}; by.set(id, o); }
+    o.hits+=+r.hits||0;
+    o.unique+=+r.unique||0;
+    o.conv+=+r.conv||0;
+    o.profit+=+r.profit||0;
+  });
+  return [...by.values()].sort((a,b)=>b.hits-a.hits||a.id.localeCompare(b.id, undefined, {numeric:true}));
 }
 /** pageViewAutomationOrder validates automation card order ids for storage.
  * @param {*} list candidate id list
@@ -11771,14 +11867,14 @@ en:{
 'dash.pref.title':'Preferences','dash.pref.kpis':'Metrics','dash.pref.blocks':'Blocks','dash.pref.recent':'Recent clicks',
 'kws.by.last':'Last click','kws.by.origin':'Origin','kws.hint.origin':'Origin mode counts only the first click. A conversion uses the keyword and stream of the first click; only campaign, keyword, stream, country, device, OS and browser filters are available.',
 'nav.dashboard':'Dashboard','nav.flows':'Campaigns','nav.offers':'Offers','nav.landings':'Landings','nav.logs':'Click log','nav.conversions':'Conversion log','nav.keywords':'Keywords','nav.lists':'Lists','nav.tools':'Tools','nav.networks':'Affiliate networks','nav.sources':'Sources','nav.domains':'Domains','nav.report':'Report','nav.reports':'Reports','nav.menu':'Menu','nav.more':'More','nav.automation':'Automation','Flow':'Campaign','Flow / stream':'Campaign / stream','open flow':'open campaign','no such flow':'no such campaign','All flows':'All campaigns','Choose a flow…':'Choose a campaign…','Delete flow':'Delete campaign','Delete flows?':'Delete campaigns?','Duplicate flow':'Duplicate campaign','Flow on / off':'Campaign on / off','Move to flow':'Move to campaign','No flows yet':'No campaigns yet','Performance by flow and stream':'Performance by campaign and stream','Send the visitor to flow':'Send the visitor to campaign','There is no flow':'There is no campaign','There is no other flow yet. Create one first.':'There is no other campaign yet. Create one first.','the flow’s':'the campaign’s','Aliases — other IDs that open this flow':'Aliases — other IDs that open this campaign','— choose a flow —':'— choose a campaign —','click a column to sort, a row to open the flow':'click a column to sort, a row to open the campaign','collected per flow and day':'collected per campaign and day','Its streams are tried with the same visitor; the log shows the flow that finally served them.':'Its streams are tried with the same visitor; the log shows the campaign that finally served them.','Statistics of this flow will be deleted from the log. This cannot be undone.':'Statistics of this campaign will be deleted from the log. This cannot be undone.','flows':'campaigns','Another flow':'Another campaign','New flow':'New campaign','Switch flow':'Switch campaign','Flows':'Campaigns','kt.stream.note':'Keitaro: stream #{n}','out.empty':'empty','conv.rejected':'Rejected','land.files.hint':'How many files are uploaded','land.kind.hint':'PHP, HTML or an address','dom.role.hint':'Admin, campaign links, or both','dom.campaigns.hint':'How many campaigns use this domain',
-'menu.settings':'Settings','menu.integrations':'Integrations','int.st.on':'Connected','int.st.off':'Not set up','int.st.err':'Error','int.st.run':'Import running','int.add':'Connect','int.add.title':'Connect an integration','int.added':'Added','int.empty':'Connect your first integration','int.drop':'Remove from list','int.desc.keitaro':'Move campaigns, offers and stats from Keitaro','int.desc.namecheap':'Buy domains and point their DNS','int.desc.cloudflare':'Park domains: zones, DNS and SSL','prof.users':'Users','users.title':'Users','users.new':'Create user','users.login':'Login','users.type':'Type','users.state':'State','users.enabled':'Enabled','users.disabled':'Disabled','users.lang':'Language','users.tz':'Timezone','users.source':'Source','users.created':'Created','users.edit':'Edit','users.access':'Access','users.password':'Password','users.enable':'Enable','users.disable':'Disable','users.delete':'Delete','users.delete.confirm':'Delete user','users.pw.hint':'At least 6 characters','users.saved':'Saved','users.src.env':'Environment','users.src.owner':'Environment owner, full access','users.type.admin':'Administrator','users.type.user':'User','users.src.rights':'Full access','users.src.custom':'Assigned access','users.src.imported':'Imported from Keitaro','users.created.env':'Set at install','users.src.file':'Users file','prof.account':'Account','dash.recent':'Recent clicks','dash.recent.all':'All clicks','dash.recent.out':'Destination','prof.account.login':'Login','prof.account.type':'Type','prof.account.source':'Source','acc.title':'Access','acc.mode':'Access mode','acc.sections':'Sections','acc.sec.groups':'Groups','acc.res.campaigns':'Campaigns','acc.res.offers':'Offers','acc.res.landings':'Landings','acc.res.sources':'Sources','acc.res.networks':'Networks','acc.res.domains':'Domains','acc.mode.full':'Full access','acc.mode.read':'Read only','acc.mode.selected':'Selected only','acc.mode.created':'Created and selected','acc.entities':'Entities','acc.labels':'Labels','acc.hidden':'Hidden metrics','acc.hidden.profit':'Profit and revenue','acc.hidden.cost':'Cost and spend','acc.none':'None','kt.users':'Users','kt.users.hint':'Imported users are disabled and have no password','kt.c.users':'Users','int.title':'Integrations','dash.panels':'Panels','company.title':'Company','company.name':'Name','company.logo':'Logo','company.clear':'Remove logo','company.logo.big':'Image only, up to 200 KB','company.hint':'Shown in the header and on the sign-in screen for everyone.','set.sec.access':'Company and access','set.sec.ui':'Interface','set.sec.stats':'Statistics','set.sec.bots':'Bot protection','menu.keitaro':'Keitaro import','kt.title':'Keitaro import','kt.need':'Enter the Keitaro address and the API key below, then press Save.','kt.conn':'Connection','kt.check':'Check connection','kt.ok':'Connected, campaigns:','kt.api':'Admin API v1. Keitaro version is not determined: the tracker gives no signs.','kt.api.ver':'Admin API v1. Keitaro {v}. Signs: {signs}.','kt.api.conflict':'Admin API v1. Keitaro version is not determined: the signs disagree ({signs}).','kt.sig.subid':'SubID format','kt.sig.click_id':'click_id','kt.sig.event_id':'event_id','kt.sig.conversion_id':'conversion_id','kt.sig.event_type':'event_type','kt.sig.rebill':'Rebill type','kt.sig.custom_type':'custom conversion type','kt.what':'What to transfer','kt.domains':'Domains','kt.networks':'Affiliate networks','kt.offers':'Offers','kt.landings':'Landings','kt.sources':'Traffic sources','kt.campaigns':'Campaigns with settings','kt.conversions':'Conversions','kt.clicks':'Clicks','kt.period':'Period','kt.period.global':'Current period','kt.period.custom':'Dates','kt.run':'Transfer','kt.one.id':'Keitaro campaign ID','kt.one.run':'Dosync one campaign','kt.one.bad':'Enter a positive Keitaro campaign ID','kt.purge':'Remove imported','kt.purge.confirm':'Remove everything this import created? Your own campaigns and catalogs stay.','kt.result':'Result','kt.removed':'Removed','kt.nolosses':'Everything transferred without losses','kt.c.groups':'Campaigns','kt.c.offers':'Offers','kt.c.landings':'Landings','kt.c.networks':'Affiliate networks','kt.c.sources':'Traffic sources','kt.c.domains':'Domains','kt.c.conversions':'Conversions','kt.c.clicks':'Clicks','kt.kind.disabled':'Disabled','kt.kind.skipped':'Skipped','kt.kind.approximated':'Approximated','kt.kind.changed':'Changed','kt.col.ref':'Object','kt.col.detail':'Detail','kt.busy':'Import is already running','kt.progress':'Progress','kt.stage.idle':'Idle','kt.stage.snapshot':'Reading catalogs','kt.stage.streams':'Reading campaign streams','kt.stage.catalogs':'Saving catalogs','kt.stage.groups':'Saving campaigns','kt.stage.conversions':'Conversions','kt.stage.clicks':'Clicks','kt.stage.done':'Finished','cron.ktsync.title':'Data refresh','cron.ktsync.hint':'Loads clicks, conversions and new campaigns with their settings from the last checkpoint with overlap; campaigns already imported are untouched.','cron.ktsync.newcamps':'new campaigns {n}','cron.ktsync.camps.pending':'New campaigns queued','cron.ktsync.camps.deleted':'Skipped, deleted here','cron.ktsync.camps.failed':'Not imported','cron.ktsync.camps.paused':'New campaigns paused until {time}: {reason}','cron.ktsync.off':'Keitaro is not configured','cron.ktsync.needkt':'Configure Keitaro in {link}.','cron.ktsync.needimport':'Run a full Keitaro import first — {link}.','cron.ktsync.cursor.clicks':'Clicks cursor','cron.ktsync.cursor.convs':'Conversions cursor','cron.ktsync.lag':'Lag','cron.ktsync.last':'Last run','cron.ktsync.timezone':'Tracker time is ahead of the server','cron.ktsync.noconv':'Configure Telegram above to enable conversion alerts.','kt.sync.busy':'Catch-up is already running','kt.sync.requested':'Catch-up requested','kt.stage.failed':'Failed','kt.stage.landing_files':'Saving landing files','kt.stage.lists':'Saving lists','kt.stage.pages':'Saving pages','kt.stage.users':'Saving users','err.network':'No connection to the server. Check your connection and try again.','cf.intro':'Cloudflare account. The token lets the admin read zones and manage DNS records and settings of the domains you connect.','cf.token':'API token','cf.account':'Account ID','cf.ip':'Server public IP','cf.ip.empty':'EMTDS_PUBLIC_IP is not set on the server','cf.ip.local':'Cloudflare integration does not run on a local machine: it needs a server with a public IP','nc.local':'The admin runs on a local machine, so the outgoing IP found here is your own connection, not a server. A server with a public IP is needed for real use.','cf.test':'Check','cf.test.ok':'ok, zones: {n}','cf.test.fail':'Check failed','cf.file.err':'Settings file error','cf.err.load':'Cloudflare settings are unavailable','cf.reg.use':'Connect through Cloudflare — name servers change to Cloudflare, the A record points to {ip}','cf.reg.err':'Cloudflare setup failed','cf.reg.hosterr':'DNS records failed','cf.reg.manual':'Set these name servers at the registrar: {ns}','cf.buy.title':'Buy {domain}?','cf.buy.sum':'Domain: {domain}\nTerm: {years} yr\nPrice: {price}\nDNS: {dns}','cf.dns.cf':'Cloudflare (name servers to Cloudflare, A record to {ip})','cf.dns.ns':'own name servers: {ns}','cf.dns.a':'A record to {ip}','cf.dns.none':'no DNS changes','dom.state.on':'Enabled','dom.state.off':'Disabled','dom.state.pending':'Awaiting payment','dom.elsewhere':'Not pointed: A points to {ips}, needed {ip}','dom.elsewhere.short':'Not pointed: A points to {ips}','dom.cfpending':'Waiting for Cloudflare: NS {ns}','dom.cfpending.short':'Waiting for Cloudflare','dom.tls':'Server certificate rejected','cf.connecting':'Connecting to Cloudflare…','cf.connect':'Connect through Cloudflare','cf.connect.title':'Connect {host} through Cloudflare?','cf.connect.ask':'A zone is created in Cloudflare and the A record points to the server. Set the Cloudflare name servers at your registrar.','cf.connect.ask.nc':'The name servers of the domain at Namecheap change to Cloudflare and the A record points to the server. Until the zone is active the domain may be unreachable.','cf.connect.done':'Connected to Cloudflare, waiting for the zone to activate','cf.connect.set':'Name servers changed, waiting for Cloudflare to activate the zone','cf.ns.title':'Name servers','cf.ns.hint':'Set these name servers at the registrar of the domain.','cf.ns.copy':'Copy','cf.ns.copied':'Copied','cf.ns.select':'Copy the selected text by hand','dom.conn.title':'Domain connected','dom.conn.title.many':'Domains connected','dom.conn.text':'These domains now reach the server:','dom.conn.ok':'Got it','dom.conn.go':'Go to domains','kt.col.count':'Count','kt.col.refs':'Where','kt.groups.more':'more groups not shown:','page.open':'Open page','page.hint':'Output is stored as a file; edit it via “Open page”.','page.missing':'The file does not exist yet; saving creates it.','kt.c.lists':'IP lists','kt.c.pages':'Pages','menu.logout':'Log out','sig.update':'A newer commit is ready to install','sig.down.title':'A service does not answer','sig.down.text':'Not answering: {list}. Restart the server or this service. The state and the commands are in Settings → {about}.','sig.down.ok':'Close','sig.down.go':'Open {about}','sig.svc.engine':'engine','sig.svc.clickhouse':'ClickHouse','sig.svc.redis':'Redis',
+'menu.settings':'Settings','menu.integrations':'Integrations','int.st.on':'Connected','int.st.off':'Not set up','int.st.err':'Error','int.st.run':'Import running','int.add':'Connect','int.add.title':'Connect an integration','int.added':'Added','int.empty':'Connect your first integration','int.drop':'Remove from list','int.desc.keitaro':'Move campaigns, offers and stats from Keitaro','int.desc.namecheap':'Buy domains and point their DNS','int.desc.cloudflare':'Park domains: zones, DNS and SSL','prof.users':'Users','users.title':'Users','users.new':'Create user','users.login':'Login','users.type':'Type','users.state':'State','users.enabled':'Enabled','users.disabled':'Disabled','users.lang':'Language','users.tz':'Timezone','users.source':'Source','users.created':'Created','users.edit':'Edit','users.access':'Access','users.password':'Password','users.enable':'Enable','users.disable':'Disable','users.delete':'Delete','users.delete.confirm':'Delete user','users.pw.hint':'At least 6 characters','users.saved':'Saved','users.src.env':'Environment','users.src.owner':'Environment owner, full access','users.type.admin':'Administrator','users.type.user':'User','users.src.rights':'Full access','users.src.custom':'Assigned access','users.src.imported':'Imported from Keitaro','users.created.env':'Set at install','users.src.file':'Users file','prof.account':'Account','dash.recent':'Recent clicks','dash.offers':'Offers','dash.recent.all':'All clicks','dash.recent.out':'Destination','prof.account.login':'Login','prof.account.type':'Type','prof.account.source':'Source','acc.title':'Access','acc.mode':'Access mode','acc.sections':'Sections','acc.sec.groups':'Groups','acc.res.campaigns':'Campaigns','acc.res.offers':'Offers','acc.res.landings':'Landings','acc.res.sources':'Sources','acc.res.networks':'Networks','acc.res.domains':'Domains','acc.mode.full':'Full access','acc.mode.read':'Read only','acc.mode.selected':'Selected only','acc.mode.created':'Created and selected','acc.entities':'Entities','acc.labels':'Labels','acc.hidden':'Hidden metrics','acc.hidden.profit':'Profit and revenue','acc.hidden.cost':'Cost and spend','acc.none':'None','kt.users':'Users','kt.users.hint':'Imported users are disabled and have no password','kt.c.users':'Users','int.title':'Integrations','dash.panels':'Panels','company.title':'Company','company.name':'Name','company.logo':'Logo','company.clear':'Remove logo','company.logo.big':'Image only, up to 200 KB','company.hint':'Shown in the header and on the sign-in screen for everyone.','set.sec.access':'Company and access','set.sec.ui':'Interface','set.sec.stats':'Statistics','set.sec.bots':'Bot protection','menu.keitaro':'Keitaro import','kt.title':'Keitaro import','kt.need':'Enter the Keitaro address and the API key below, then press Save.','kt.conn':'Connection','kt.check':'Check connection','kt.ok':'Connected, campaigns:','kt.api':'Admin API v1. Keitaro version is not determined: the tracker gives no signs.','kt.api.ver':'Admin API v1. Keitaro {v}. Signs: {signs}.','kt.api.conflict':'Admin API v1. Keitaro version is not determined: the signs disagree ({signs}).','kt.sig.subid':'SubID format','kt.sig.click_id':'click_id','kt.sig.event_id':'event_id','kt.sig.conversion_id':'conversion_id','kt.sig.event_type':'event_type','kt.sig.rebill':'Rebill type','kt.sig.custom_type':'custom conversion type','kt.what':'What to transfer','kt.domains':'Domains','kt.networks':'Affiliate networks','kt.offers':'Offers','kt.landings':'Landings','kt.sources':'Traffic sources','kt.campaigns':'Campaigns with settings','kt.conversions':'Conversions','kt.clicks':'Clicks','kt.period':'Period','kt.period.global':'Current period','kt.period.custom':'Dates','kt.run':'Transfer','kt.one.id':'Keitaro campaign ID','kt.one.run':'Dosync one campaign','kt.one.bad':'Enter a positive Keitaro campaign ID','kt.purge':'Remove imported','kt.purge.confirm':'Remove everything this import created? Your own campaigns and catalogs stay.','kt.result':'Result','kt.removed':'Removed','kt.nolosses':'Everything transferred without losses','kt.c.groups':'Campaigns','kt.c.offers':'Offers','kt.c.landings':'Landings','kt.c.networks':'Affiliate networks','kt.c.sources':'Traffic sources','kt.c.domains':'Domains','kt.c.conversions':'Conversions','kt.c.clicks':'Clicks','kt.kind.disabled':'Disabled','kt.kind.skipped':'Skipped','kt.kind.approximated':'Approximated','kt.kind.changed':'Changed','kt.col.ref':'Object','kt.col.detail':'Detail','kt.busy':'Import is already running','kt.progress':'Progress','kt.stage.idle':'Idle','kt.stage.snapshot':'Reading catalogs','kt.stage.streams':'Reading campaign streams','kt.stage.catalogs':'Saving catalogs','kt.stage.groups':'Saving campaigns','kt.stage.conversions':'Conversions','kt.stage.clicks':'Clicks','kt.stage.done':'Finished','cron.ktsync.title':'Data refresh','cron.ktsync.hint':'Loads clicks, conversions and new campaigns with their settings from the last checkpoint with overlap; campaigns already imported are untouched.','cron.ktsync.newcamps':'new campaigns {n}','cron.ktsync.camps.pending':'New campaigns queued','cron.ktsync.camps.deleted':'Skipped, deleted here','cron.ktsync.camps.failed':'Not imported','cron.ktsync.camps.paused':'New campaigns paused until {time}: {reason}','cron.ktsync.off':'Keitaro is not configured','cron.ktsync.needkt':'Configure Keitaro in {link}.','cron.ktsync.needimport':'Run a full Keitaro import first — {link}.','cron.ktsync.cursor.clicks':'Clicks cursor','cron.ktsync.cursor.convs':'Conversions cursor','cron.ktsync.lag':'Lag','cron.ktsync.last':'Last run','cron.ktsync.timezone':'Tracker time is ahead of the server','cron.ktsync.noconv':'Configure Telegram above to enable conversion alerts.','kt.sync.busy':'Catch-up is already running','kt.sync.requested':'Catch-up requested','kt.stage.failed':'Failed','kt.stage.landing_files':'Saving landing files','kt.stage.lists':'Saving lists','kt.stage.pages':'Saving pages','kt.stage.users':'Saving users','err.network':'No connection to the server. Check your connection and try again.','cf.intro':'Cloudflare account. The token lets the admin read zones and manage DNS records and settings of the domains you connect.','cf.token':'API token','cf.account':'Account ID','cf.ip':'Server public IP','cf.ip.empty':'EMTDS_PUBLIC_IP is not set on the server','cf.ip.local':'Cloudflare integration does not run on a local machine: it needs a server with a public IP','nc.local':'The admin runs on a local machine, so the outgoing IP found here is your own connection, not a server. A server with a public IP is needed for real use.','cf.test':'Check','cf.test.ok':'ok, zones: {n}','cf.test.fail':'Check failed','cf.file.err':'Settings file error','cf.err.load':'Cloudflare settings are unavailable','cf.reg.use':'Connect through Cloudflare — name servers change to Cloudflare, the A record points to {ip}','cf.reg.err':'Cloudflare setup failed','cf.reg.hosterr':'DNS records failed','cf.reg.manual':'Set these name servers at the registrar: {ns}','cf.buy.title':'Buy {domain}?','cf.buy.sum':'Domain: {domain}\nTerm: {years} yr\nPrice: {price}\nDNS: {dns}','cf.dns.cf':'Cloudflare (name servers to Cloudflare, A record to {ip})','cf.dns.ns':'own name servers: {ns}','cf.dns.a':'A record to {ip}','cf.dns.none':'no DNS changes','dom.state.on':'Enabled','dom.state.off':'Disabled','dom.state.pending':'Awaiting payment','dom.elsewhere':'Not pointed: A points to {ips}, needed {ip}','dom.elsewhere.short':'Not pointed: A points to {ips}','dom.cfpending':'Waiting for Cloudflare: NS {ns}','dom.cfpending.short':'Waiting for Cloudflare','dom.tls':'Server certificate rejected','cf.connecting':'Connecting to Cloudflare…','cf.connect':'Connect through Cloudflare','cf.connect.title':'Connect {host} through Cloudflare?','cf.connect.ask':'A zone is created in Cloudflare and the A record points to the server. Set the Cloudflare name servers at your registrar.','cf.connect.ask.nc':'The name servers of the domain at Namecheap change to Cloudflare and the A record points to the server. Until the zone is active the domain may be unreachable.','cf.connect.done':'Connected to Cloudflare, waiting for the zone to activate','cf.connect.set':'Name servers changed, waiting for Cloudflare to activate the zone','cf.ns.title':'Name servers','cf.ns.hint':'Set these name servers at the registrar of the domain.','cf.ns.copy':'Copy','cf.ns.copied':'Copied','cf.ns.select':'Copy the selected text by hand','dom.conn.title':'Domain connected','dom.conn.title.many':'Domains connected','dom.conn.text':'These domains now reach the server:','dom.conn.ok':'Got it','dom.conn.go':'Go to domains','kt.col.count':'Count','kt.col.refs':'Where','kt.groups.more':'more groups not shown:','page.open':'Open page','page.hint':'Output is stored as a file; edit it via “Open page”.','page.missing':'The file does not exist yet; saving creates it.','kt.c.lists':'IP lists','kt.c.pages':'Pages','menu.logout':'Log out','sig.update':'A newer commit is ready to install','sig.down.title':'A service does not answer','sig.down.text':'Not answering: {list}. Restart the server or this service. The state and the commands are in Settings → {about}.','sig.down.ok':'Close','sig.down.go':'Open {about}','sig.svc.engine':'engine','sig.svc.clickhouse':'ClickHouse','sig.svc.redis':'Redis',
 'users.board.main':'Main section «{name}»','users.board.main.hint':'Membership in other sections does not clear this mark.','users.board.all':'All sections: this account sees every section.','users.board.member':'Also by membership: {list}.','users.board.member.none':'No membership in other sections; members are set in Section settings.','users.board.empty':'Without the main section and without membership the user sees no section.','board.none':'You have no access to any section. Ask an administrator to add you to one.','board.people.main':'Membership adds this section to the user. The main section is set in the user card and does not change here.','board.main':'Default','board.switch':'Section','board.sections':'Sections','board.settings':'Section settings','board.create':'New section name','board.import':'Import from Default','board.empty':'Nothing to copy from the default view yet.','board.page.title':'Sections','board.add':'Create section','board.icon':'Icon','board.recent':'Recent','board.all':'All icons','board.colors':'Color','board.name':'Name','board.id':'ID','board.delete':'Delete','board.move':'Move','board.delete.confirm':'Delete this section?','board.inuse':'This section still has records','board.saved':'Saved','board.expand':'Composition and members','board.include':'Section view','board.include_all':'Show contents of all sections','board.collapse':'Hide details','board.compose.title':'Composition','board.compose.folders':'folders','board.compose.save':'Save composition','board.compose.saved':'Composition saved','board.compose.addid':'Add ID','board.compose.add':'Add','board.compose.search':'Search by ID or name','err.csrf':'The session is out of date. Refresh the page.','board.people.title':'Members','board.people.role':'Role','board.people.add':'Add member','board.people.remove':'Remove','board.people.save':'Save members','board.people.saved':'Members saved','board.role.read':'Read','board.role.edit':'Edit','board.role.created':'Created only',
 'period.today':'Today','period.yesterday':'Yesterday','period.week':'This week','period.7d':'Last 7 days','period.month':'This month','period.prevmonth':'Previous month','period.30d':'Last 30 days','period.year':'This year','period.all':'All time','period.dates':'Date range','period.times':'Time range','period.need':'Pick both ends of the range',
 'settings.country':'Country','settings.lang':'Interface language','settings.search':'Find a country','settings.geo':'Default source for a new campaign','settings.geo.cf':'CDN header','settings.geo.db':'Geo database','settings.hint':'Search matches the code and the English, Russian and Ukrainian names at once.','settings.tz':'Statistics timezone','settings.tz.find':'Find a timezone','settings.tz.hint':'Periods and times in reports use this zone. The visitor’s own zone is unchanged.',
 'flows.title':'Campaigns','dirty.title':'Unsaved changes:','dirty.flow':'Campaign','dirty.removed':'Removed: {n}','dirty.all':'Show all','dirty.less':'Fold','flow.compact':'Compact view','flow.expanded':'Detailed view','flow.traffic.off':'Sorting: off','flow.traffic.desc':'Order by traffic: most first','flow.traffic.asc':'Order by traffic: fewest first','flow.traffic.lock':'Turn off sorting to change the order','flow.revenue.asc':'Order by revenue: least first','flow.revenue.desc':'Order by revenue: most first','flows.table':'Table','flows.cards':'Cards','flows.search':'Search campaigns and streams…','flows.new':'New campaign','flows.bulk.on':'Enable','flows.bulk.off':'Disable','flows.bulk.dup':'Duplicate','flows.bulk.del':'Delete','flows.bulk.n':'selected','flows.col.id':'Campaign','flows.col.num':'ID','flows.col.name':'Campaign name','flows.col.url':'URL','flows.col.streams':'Streams','flows.page':'Per page','flows.page.custom':'Custom','flows.state':'State','flows.state.all':'All','flows.state.on':'On','flows.state.off':'Off','flows.state.hits':'With visits','flows.state.any':'All states','flows.source.all':'All sources','flows.nosource':'No source','flows.nofolder':'No group','flows.sum':'Total','flows.sum.sel':'Selected','flows.visits':'visits','flows.bots':'bots','flows.conv':'conv','flows.profit':'profit','flows.nostreams':'No streams — every visitor gets the default','flows.more':'more','flows.streams':'streams','flows.logs':'Logs','flows.log.clicks':'Click log','flows.log.conv':'Conversion log','tester.ip':'IP address','tester.country':'Country','tester.lang':'Language','tester.referer':'Referer','tester.key':'Keyword','tester.query':'URL parameters','tester.hint':'Uses the campaigns on screen, saved or not. Impression limits, bot checks and the antiflood depend on live traffic and are not simulated.','src.title':'Traffic sources','src.new':'New source','src.our':'Our name','src.theirs':'Name in the link','src.empty':'No sources yet','src.link':'Campaign link','log.traffic':'Traffic','log.postbacks':'Postbacks and S2S','log.system':'System','log.outcome':'Outcome','log.direction':'Direction','rep.title':'Report','rep.csv':'Download CSV','rep.empty':'Nothing in this period',
 'conv.title':'Conversions','conv.subid':'Subid','conv.status':'Status','conv.lead':'Lead','conv.sale':'Sale','conv.campaign':'Campaign','conv.stream':'Stream','conv.offer':'Offer','conv.landing':'Landing','conv.network':'Network','conv.source':'Source','conv.columns':'Columns','conv.all':'All',
-'net.title':'Networks','net.create':'New network','net.name':'Name','net.url':'Postback URL','net.param':'Offer parameters','net.template':'Template','net.save':'Save','net.empty':'No networks yet','net.copy':'Copy','net.hint':'A note for the partner cabinet. The tracker does not call this URL.',
-'off.title':'Offers','off.new':'New offer','off.name':'Name','off.group':'Group','off.url':'URL','off.local':'Local','off.empty':'No offers yet','off.tab.redirect':'Redirect','off.tab.local':'Local','off.local.soon':'HTML is in development','off.countries':'Countries','off.payout':'Payout','off.model':'Model','off.currency':'Currency','off.payout.param':'payout parameter','off.again':'Add another','off.allnets':'All networks','off.allgroups':'All groups','off.search':'Search offers…','land.search':'Search landings…','net.search':'Search networks…','src.search':'Search sources…','dom.search':'Search domains…','cat.groups.search':'Search group…','grp.create':'Create group','off.visits':'Visits','off.conv':'Conv','off.revenue':'Revenue','col.clicks':'Clicks','col.day':'Date','col.leads':'Leads','col.sales':'Sales','col.rej':'Rejected','col.rej.hint':'Postbacks with status rejected','money.nocost':'No cost recorded: set the price parameter on the campaign or add a cost entry','then.mode.offers':'Landings and offers','then.mode.url':'Direct URL','then.mode.action':'Action','share.label':'Share, %','share.hint':'Share of visitors sent to this row. One list may add up to 100 at most.','share.dead':'gets no traffic','s2s.global':'Shared templates','s2s.global.empty':'No shared templates yet','s2s.global.edit':'Shared templates…','col.cr':'CR','col.uepc':'uEPC','col.epc':'EPC','col.cpc':'CPC','col.revenue':'Revenue','col.cost':'Cost','col.profit':'Profit','col.depsum':'DepSum','col.roi':'ROI','col.crok':'CR confirmed','col.crrej':'CR rejected','col.uniq':'Unique','col.conv':'Conversions','col.spend':'Update cost','bot.title':'Bot protection','bot.save':'Save protection','bot.hint':'User-Agent is the browser string, not a country. Names of crawlers are lines in Lists, file signature_ua.dat, one substring per line.','bot.bl':'Blacklist','bot.bl.hint':'One full User-Agent per line. The match is exact.','bot.bl.save':'Save blacklist','bot.proxy.default':'Proxy check: default.','bot.proxy.wait':'Proxy check: default; it turns on once the iCloud Private Relay list is downloaded (Automation → ip_lists).','bot.proxy.reset':'Reset proxy check to default','pb.title':'Postbacks','pb.hint':'These URLs belong to this tracker. Paste them into the partner cabinet. The tracker does not call them.','pb.lead':'Lead','pb.sale':'Sale','pb.rejected':'Rejected','pb.copy':'Copy','pb.copyall':'Copy all','pb.docs':'Documentation','pb.url':'Postback URL','pb.host':'Host','pb.copy.url':'Copy','pb.nokey':'No postback key is needed: the click id in subid is enough. Replace each REPLACE with the macro of your network.','pb.local':'This is a local address. On the server the host is a link domain or the admin host.',
+'net.title':'Networks','net.create':'New network','net.name':'Name','net.label':'Name','net.tpl.ph':'Choose a template','net.tpl.notes':'Template instructions (read-only)','net.tpl.conv':'Statuses of the network (the tracker does not map them)','net.tpl.edit':'Edit template','net.tpl.add':'New template','net.tpl.edited':'The template has your edits.','net.tpl.ed.ins':'Instructions','net.tpl.ed.hint':'An empty field keeps the catalog value. {origin} stands for the address of this tracker.','net.tpl.ed.reset':'Reset to catalog','net.tpl.ed.del':'Delete template','net.tpl.state.none':'The settings of this template were not extracted. Fill the fields in by hand.','net.tpl.state.partial':'Only some fields of this template are known. Fill the rest by hand.','net.param.help.t':'Offer parameters','net.param.help.a':'Parameters to add to all offers.','net.param.help.req':'Required','net.param.help.ex1':'your_sub1={subid}','net.param.help.opt':'Optional:','net.param.help.ex2':'your_sub2={campaign_name}&...','net.url':'Postback URL','net.param':'Offer parameters','net.template':'Template','net.save':'Save','net.empty':'No networks yet','net.copy':'Copy','net.hint':'A note for the partner cabinet. The tracker does not call this URL.',
+'off.title':'Offers','off.new':'New offer','off.name':'Name','off.group':'Group','off.url':'URL','off.local':'Local','off.empty':'No offers yet','off.tab.redirect':'Redirect','off.tab.local':'Local','off.local.soon':'HTML is in development','off.countries':'Countries','off.payout':'Payout','off.model':'Model','off.currency':'Currency','off.payout.param':'payout parameter','off.again':'Add another','off.allnets':'All networks','cat.pick.page':'Select all on this page','cat.pick.row':'Select row','net.del.many':'Delete {n} networks?','off.del.many':'Delete {n} offers?','off.allgroups':'All groups','off.search':'Search offers…','land.search':'Search landings…','net.search':'Search networks…','src.search':'Search sources…','dom.search':'Search domains…','cat.groups.search':'Search group…','grp.create':'Create group','off.visits':'Visits','off.conv':'Conv','off.revenue':'Revenue','col.clicks':'Clicks','col.day':'Date','col.leads':'Leads','col.sales':'Sales','col.rej':'Rejected','col.rej.hint':'Postbacks with status rejected','money.nocost':'No cost recorded: set the price parameter on the campaign or add a cost entry','then.mode.offers':'Landings and offers','then.mode.url':'Direct URL','then.mode.action':'Action','share.label':'Share, %','share.hint':'Share of visitors sent to this row. One list may add up to 100 at most.','share.dead':'gets no traffic','s2s.global':'Shared templates','s2s.global.empty':'No shared templates yet','s2s.global.edit':'Shared templates…','col.cr':'CR','col.uepc':'uEPC','col.epc':'EPC','col.cpc':'CPC','col.revenue':'Revenue','col.cost':'Cost','col.profit':'Profit','col.depsum':'DepSum','col.roi':'ROI','col.crok':'CR confirmed','col.crrej':'CR rejected','col.uniq':'Unique','col.conv':'Conversions','col.spend':'Update cost','bot.title':'Bot protection','bot.save':'Save protection','bot.hint':'User-Agent is the browser string, not a country. Names of crawlers are lines in Lists, file signature_ua.dat, one substring per line.','bot.bl':'Blacklist','bot.bl.hint':'One full User-Agent per line. The match is exact.','bot.bl.save':'Save blacklist','bot.proxy.default':'Proxy check: default.','bot.proxy.wait':'Proxy check: default; it turns on once the iCloud Private Relay list is downloaded (Automation → ip_lists).','bot.proxy.reset':'Reset proxy check to default','pb.title':'Postbacks','pb.hint':'These URLs belong to this tracker. Paste them into the partner cabinet. The tracker does not call them.','pb.lead':'Lead','pb.sale':'Sale','pb.rejected':'Rejected','pb.copy':'Copy','pb.copyall':'Copy all','pb.docs':'Documentation','pb.url':'Postback URL','pb.host':'Host','pb.copy.url':'Copy','pb.nokey':'No postback key is needed: the click id in subid is enough. Replace each REPLACE with the macro of your network.','pb.local':'This is a local address. On the server the host is a link domain or the admin host.',
 'pbd.title':'Postback documentation','pbd.back':'Back','pbd.c.p':'Parameter','pbd.c.a':'Also accepted','pbd.c.m':'Meaning',
 'pbd.fmt.t':'URL format','pbd.fmt.b':'The network calls this tracker when a click converts. Use GET or POST on <code>/postback</code> of any link domain or of the admin host (without a port). You can add a key with <code>&amp;key=</code> (the secret set in EMTDS_POSTBACK_SECRET); without it the postback is accepted as long as strict mode is not enabled.','pbd.fmt.b2':'Replace every <code>REPLACE</code> with the macro of the network. Parameters may also come in the POST form body. The answer is JSON: <code>{"status":"success"}</code> or <code>{"status":"error","error":"…"}</code>. The tracker never calls the postback URL of the network.',
 'pbd.par.t':'Parameters','pbd.p.subid':'Click id, required. The first non-empty of the three names.','pbd.p.status':'Conversion status. The first non-empty of the three names; letter case does not matter.','pbd.p.payout':'Payout, your revenue: a number with a dot. The first of the three names that parses as a number; values are not added up. Empty or not a number stays 0; NaN and Inf are rejected with 400.','pbd.p.depsum':'Deposit amount. Kept in its own column and never added to the payout. Empty or not a number stays 0.','pbd.p.tid':'Transaction id of the network, up to 128 bytes. Optional.',
@@ -11831,7 +11927,7 @@ en:{
 'ai.chat.del.title':'Delete “{title}”?','ai.chat.del.text':'This is the second confirmation. The assistant will delete the record; you can revert it afterwards while nothing blocks the restore.','ai.chat.del.ok':'Delete',
 'ai.chat.applied':'Edit applied','ai.chat.rejected':'Edit rejected','ai.chat.reverted':'Edit reverted',
 'ai.chat.err.ai_disabled':'The assistant is switched off.','ai.chat.err.ai_busy':'The assistant is still working on the previous message.','ai.chat.err.ai_quota':'The daily limit of the assistant is used up.','ai.chat.err.ai_quota.user_budget':'Your daily USD budget for the assistant is used up.','ai.chat.err.ai_quota.group_budget':'The daily USD budget of your group for the assistant is used up.',
-'ai.chat.err.ai_bad_model':'This model is not allowed. Pick another one.','ai.chat.err.ai_provider_error':'The AI provider failed. Try again later.','ai.chat.err.ai_timeout':'The AI provider did not answer in time.',
+'ai.chat.err.ai_bad_model':'This model is not allowed. Pick another one.','ai.chat.err.ai_provider_error':'The AI provider failed. Try again later.','ai.chat.err.ai_provider_error.empty_summary':'The conversation did not compact: the model returned an empty summary and the context no longer fits. What was found is kept above; start a new message or a shorter task.','ai.chat.err.ai_provider_error.overload':'The AI provider is overloaded or down (a server error on its side). Try again in a minute.','ai.chat.err.ai_provider_error.unreachable':'The AI provider could not be reached (network failure). Try again in a minute.','ai.chat.err.ai_timeout':'The AI provider did not answer in time.',
 'ai.chat.err.ai_rate_limited':'The AI provider limits requests. Wait a little and try again.','ai.chat.err.ai_bad_key':'The provider rejected the API key. Check it in Integrations.',
 'ai.chat.err.ai_disk_full':'No room left for the assistant history. Delete old chats.','ai.chat.err.keitaro_running':'A Keitaro transfer is running. Apply and revert are off until it ends.',
 'ai.chat.err.ai_conflict':'Changed by hand since, so the revert is impossible. Ask the assistant for a new edit.','ai.chat.err.ai_stale':'The record changed after the proposal. Reject it and ask the assistant for a new edit.',
@@ -11870,14 +11966,14 @@ ru:{
 'dash.pref.title':'Предпочтения','dash.pref.kpis':'Метрики','dash.pref.blocks':'Блоки','dash.pref.recent':'Последние клики',
 'kws.by.last':'Последний клик','kws.by.origin':'Первоисточник','kws.hint.origin':'Режим первоисточника считает только первый клик. Конверсия получает ключевое слово и поток первого клика; доступны только фильтры кампании, ключевого слова, потока, страны, устройства, ОС и браузера.',
 'nav.dashboard':'Сводка','nav.flows':'Кампании','nav.offers':'Офферы','nav.landings':'Лендинги','nav.logs':'Лог кликов','nav.conversions':'Лог конверсий','nav.keywords':'Ключевые слова','nav.lists':'Списки','nav.tools':'Инструменты','nav.networks':'Партнёрские сети','nav.sources':'Источники','nav.domains':'Домены','nav.report':'Отчёт','nav.reports':'Отчёты','nav.menu':'Меню','nav.more':'Прочее','nav.automation':'Автоматизация','kt.stream.note':'Keitaro: поток #{n}','out.empty':'пусто','conv.rejected':'Отклонён','land.files.hint':'Сколько файлов загружено','land.kind.hint':'PHP, HTML или адрес','dom.role.hint':'Админка, ссылки кампаний или оба','dom.campaigns.hint':'Сколько кампаний используют домен',
-'menu.settings':'Настройки','menu.integrations':'Интеграции','int.st.on':'Подключено','int.st.off':'Не настроено','int.st.err':'Ошибка','int.st.run':'Идёт перенос','int.add':'Подключить','int.add.title':'Подключить интеграцию','int.added':'Добавлено','int.empty':'Подключите первую интеграцию','int.drop':'Убрать из списка','int.desc.keitaro':'Перенос кампаний, офферов и статистики из Keitaro','int.desc.namecheap':'Покупка доменов и их DNS','int.desc.cloudflare':'Парковка доменов: зоны, DNS и SSL','prof.users':'Пользователи','users.title':'Пользователи','users.new':'Создать пользователя','users.login':'Логин','users.type':'Тип','users.state':'Состояние','users.enabled':'Включён','users.disabled':'Выключен','users.lang':'Язык','users.tz':'Пояс','users.source':'Источник','users.created':'Создан','users.edit':'Править','users.access':'Доступ','users.password':'Пароль','users.enable':'Включить','users.disable':'Выключить','users.delete':'Удалить','users.delete.confirm':'Удалить пользователя','users.pw.hint':'Не меньше 6 символов','users.saved':'Сохранено','users.src.env':'Окружение','users.src.owner':'Владелец окружения, полные права','users.type.admin':'Администратор','users.type.user':'Пользователь','users.src.rights':'Полные права','users.src.custom':'Свои права','users.src.imported':'Перенесён из Keitaro','users.created.env':'Задан при установке','users.src.file':'Файл пользователей','prof.account':'Аккаунт','dash.recent':'Последние клики','dash.recent.all':'Все клики','dash.recent.out':'Направление','prof.account.login':'Логин','prof.account.type':'Тип','prof.account.source':'Источник','acc.title':'Доступ','acc.mode':'Режим доступа','acc.sections':'Разделы','acc.sec.groups':'Группы','acc.res.campaigns':'Кампании','acc.res.offers':'Офферы','acc.res.landings':'Лендинги','acc.res.sources':'Источники','acc.res.networks':'Сети','acc.res.domains':'Домены','acc.mode.full':'Полный','acc.mode.read':'Только чтение','acc.mode.selected':'Только выбранные','acc.mode.created':'Созданные и выбранные','acc.entities':'Сущности','acc.labels':'Метки','acc.hidden':'Скрытые метрики','acc.hidden.profit':'Прибыль и доход','acc.hidden.cost':'Расход и cost','acc.none':'Нет','kt.users':'Пользователи','kt.users.hint':'Перенесённые пользователи выключены и без пароля','kt.c.users':'Пользователи','int.title':'Интеграции','dash.panels':'Панели','company.title':'Компания','company.name':'Название','company.logo':'Логотип','company.clear':'Убрать логотип','company.logo.big':'Только картинка до 200 КБ','company.hint':'Видно в шапке и на экране входа у всех.','set.sec.access':'Компания и доступ','set.sec.ui':'Интерфейс','set.sec.stats':'Статистика','set.sec.bots':'Защита от ботов','menu.keitaro':'Перенос из Keitaro','kt.title':'Перенос из Keitaro','kt.need':'Укажите адрес Keitaro и API-токен ниже и нажмите «Сохранить».','kt.conn':'Соединение','kt.check':'Проверить соединение','kt.ok':'Соединение есть, кампаний:','kt.api':'Admin API v1. Версия Keitaro не определена: признаков нет.','kt.api.ver':'Admin API v1. Keitaro {v}. Признаки: {signs}.','kt.api.conflict':'Admin API v1. Версия Keitaro не определена: признаки противоречат ({signs}).','kt.sig.subid':'формат SubID','kt.sig.click_id':'click_id','kt.sig.event_id':'event_id','kt.sig.conversion_id':'conversion_id','kt.sig.event_type':'event_type','kt.sig.rebill':'тип Rebill','kt.sig.custom_type':'свой тип конверсии','kt.what':'Что переносим','kt.domains':'Домены','kt.networks':'Партнёрские сети','kt.offers':'Офферы','kt.landings':'Лендинги','kt.sources':'Источники','kt.campaigns':'Кампании с настройками','kt.conversions':'Конверсии','kt.clicks':'Клики','kt.period':'Период','kt.period.global':'Текущий период','kt.period.custom':'Даты','kt.run':'Перенести','kt.one.id':'Keitaro ID кампании','kt.one.run':'Досинк одной кампании','kt.one.bad':'Укажите положительный Keitaro ID кампании','kt.purge':'Удалить импортированное','kt.purge.confirm':'Удалить всё, что создал перенос? Свои кампании и каталоги останутся.','kt.result':'Результат','kt.removed':'Удалено','kt.nolosses':'Всё перенесено без потерь','kt.c.groups':'Кампании','kt.c.offers':'Офферы','kt.c.landings':'Лендинги','kt.c.networks':'Партнёрские сети','kt.c.sources':'Источники','kt.c.domains':'Домены','kt.c.conversions':'Конверсии','kt.c.clicks':'Клики','kt.kind.disabled':'Выключено','kt.kind.skipped':'Пропущено','kt.kind.approximated':'Приближено','kt.kind.changed':'Изменено','kt.col.ref':'Объект','kt.col.detail':'Подробность','kt.busy':'Перенос уже идёт','kt.progress':'Ход переноса','kt.stage.idle':'Ожидание','kt.stage.snapshot':'Чтение каталогов','kt.stage.streams':'Чтение потоков кампаний','kt.stage.catalogs':'Запись каталогов','kt.stage.groups':'Запись кампаний','kt.stage.conversions':'Конверсии','kt.stage.clicks':'Клики','kt.stage.done':'Готово','kt.stage.failed':'Ошибка','cron.ktsync.title':'Актуализация данных','cron.ktsync.hint':'Догружает клики, конверсии и новые кампании с их настройками с последнего курсора с запасом назад; уже перенесённые кампании не трогает.','cron.ktsync.newcamps':'новых кампаний {n}','cron.ktsync.camps.pending':'Новых кампаний в очереди','cron.ktsync.camps.deleted':'Пропущено, удалены у нас','cron.ktsync.camps.failed':'Не перенесены','cron.ktsync.camps.paused':'Новые кампании на паузе до {time}: {reason}','cron.ktsync.off':'Keitaro не настроен','cron.ktsync.needkt':'Настройте Keitaro в {link}.','cron.ktsync.needimport':'Сначала нужен полный импорт Keitaro — {link}.','cron.ktsync.cursor.clicks':'Курсор кликов','cron.ktsync.cursor.convs':'Курсор конверсий','cron.ktsync.lag':'Отставание','cron.ktsync.last':'Последний прогон','cron.ktsync.timezone':'Время трекера опережает сервер','cron.ktsync.noconv':'Настройте Telegram выше, чтобы включить оповещения о конверсиях.','kt.sync.busy':'Уже идёт актуализация','kt.sync.requested':'Актуализация запрошена','kt.stage.landing_files':'Запись файлов лендингов','kt.stage.lists':'Запись списков','kt.stage.pages':'Запись страниц','kt.stage.users':'Запись пользователей','err.network':'Нет связи с сервером. Проверьте соединение и повторите.','cf.intro':'Аккаунт Cloudflare. Токен позволяет админке читать зоны и управлять DNS-записями и настройками подключаемых доменов.','cf.token':'API-токен','cf.account':'Account ID','cf.ip':'Публичный IP сервера','cf.ip.empty':'EMTDS_PUBLIC_IP не задан на сервере','cf.ip.local':'Интеграция с Cloudflare не запускается на локальной машине: нужен сервер с публичным IP','nc.local':'Админка запущена на локальной машине: найденный исходящий IP — это ваше подключение, а не сервер. Для работы нужен сервер с публичным IP.','cf.test':'Проверить','cf.test.ok':'ок, зон: {n}','cf.test.fail':'Проверка не прошла','cf.file.err':'Ошибка файла настроек','cf.err.load':'Настройки Cloudflare недоступны','cf.reg.use':'Подключить через Cloudflare — NS сменятся на Cloudflare, A-запись на {ip}','cf.reg.err':'Не удалось настроить Cloudflare','cf.reg.hosterr':'Не удалось записать DNS-записи','cf.reg.manual':'Укажите эти NS у регистратора: {ns}','cf.buy.title':'Купить {domain}?','cf.buy.sum':'Домен: {domain}\nСрок: {years} г.\nЦена: {price}\nDNS: {dns}','cf.dns.cf':'Cloudflare (NS на Cloudflare, A-запись на {ip})','cf.dns.ns':'свои NS: {ns}','cf.dns.a':'A-запись на {ip}','cf.dns.none':'DNS не меняется','dom.state.on':'Включён','dom.state.off':'Выключен','dom.state.pending':'Ожидает оплаты','dom.elsewhere':'Не направлен: A указывает на {ips}, нужен {ip}','dom.elsewhere.short':'Не направлен: A указывает на {ips}','dom.cfpending':'Ждём Cloudflare: NS {ns}','dom.cfpending.short':'Ждём Cloudflare','dom.tls':'Сертификат сервера отклонён','cf.connecting':'Подключение к Cloudflare…','cf.connect':'Подключить через Cloudflare','cf.connect.title':'Подключить {host} через Cloudflare?','cf.connect.ask':'В Cloudflare создаётся зона, A-запись указывает на сервер. NS Cloudflare нужно будет указать у регистратора.','cf.connect.ask.nc':'NS домена в Namecheap сменятся на Cloudflare, A-запись будет указывать на сервер. Пока зона не активна, домен может быть недоступен.','cf.connect.done':'Подключено к Cloudflare, ждём активации зоны','cf.connect.set':'NS сменены, ждём активации зоны в Cloudflare','cf.ns.title':'Серверы имён','cf.ns.hint':'Укажите эти NS у регистратора домена.','cf.ns.copy':'Копировать','cf.ns.copied':'Скопировано','cf.ns.select':'Скопируйте выделенный текст вручную','dom.conn.title':'Домен подключён','dom.conn.title.many':'Домены подключены','dom.conn.text':'Эти домены теперь доходят до сервера:','dom.conn.ok':'Понятно','dom.conn.go':'Перейти к доменам','kt.col.count':'Сколько','kt.col.refs':'Где','kt.groups.more':'ещё групп не показано:','page.open':'Открыть страницу','page.hint':'Вывод хранится файлом; правите его через «Открыть страницу».','page.missing':'Файла ещё нет; сохранение создаст его.','kt.c.lists':'IP-списки','kt.c.pages':'Страницы','menu.logout':'Выйти','sig.update':'Готов более новый коммит для установки','sig.down.title':'Служба не отвечает','sig.down.text':'Не отвечает: {list}. Перезапустите сервер или эту службу. Состояние и команды — в «Настройки → {about}».','sig.down.ok':'Закрыть','sig.down.go':'Открыть «{about}»','sig.svc.engine':'движок','sig.svc.clickhouse':'ClickHouse','sig.svc.redis':'Redis',
+'menu.settings':'Настройки','menu.integrations':'Интеграции','int.st.on':'Подключено','int.st.off':'Не настроено','int.st.err':'Ошибка','int.st.run':'Идёт перенос','int.add':'Подключить','int.add.title':'Подключить интеграцию','int.added':'Добавлено','int.empty':'Подключите первую интеграцию','int.drop':'Убрать из списка','int.desc.keitaro':'Перенос кампаний, офферов и статистики из Keitaro','int.desc.namecheap':'Покупка доменов и их DNS','int.desc.cloudflare':'Парковка доменов: зоны, DNS и SSL','prof.users':'Пользователи','users.title':'Пользователи','users.new':'Создать пользователя','users.login':'Логин','users.type':'Тип','users.state':'Состояние','users.enabled':'Включён','users.disabled':'Выключен','users.lang':'Язык','users.tz':'Пояс','users.source':'Источник','users.created':'Создан','users.edit':'Править','users.access':'Доступ','users.password':'Пароль','users.enable':'Включить','users.disable':'Выключить','users.delete':'Удалить','users.delete.confirm':'Удалить пользователя','users.pw.hint':'Не меньше 6 символов','users.saved':'Сохранено','users.src.env':'Окружение','users.src.owner':'Владелец окружения, полные права','users.type.admin':'Администратор','users.type.user':'Пользователь','users.src.rights':'Полные права','users.src.custom':'Свои права','users.src.imported':'Перенесён из Keitaro','users.created.env':'Задан при установке','users.src.file':'Файл пользователей','prof.account':'Аккаунт','dash.recent':'Последние клики','dash.offers':'Офферы','dash.recent.all':'Все клики','dash.recent.out':'Направление','prof.account.login':'Логин','prof.account.type':'Тип','prof.account.source':'Источник','acc.title':'Доступ','acc.mode':'Режим доступа','acc.sections':'Разделы','acc.sec.groups':'Группы','acc.res.campaigns':'Кампании','acc.res.offers':'Офферы','acc.res.landings':'Лендинги','acc.res.sources':'Источники','acc.res.networks':'Сети','acc.res.domains':'Домены','acc.mode.full':'Полный','acc.mode.read':'Только чтение','acc.mode.selected':'Только выбранные','acc.mode.created':'Созданные и выбранные','acc.entities':'Сущности','acc.labels':'Метки','acc.hidden':'Скрытые метрики','acc.hidden.profit':'Прибыль и доход','acc.hidden.cost':'Расход и cost','acc.none':'Нет','kt.users':'Пользователи','kt.users.hint':'Перенесённые пользователи выключены и без пароля','kt.c.users':'Пользователи','int.title':'Интеграции','dash.panels':'Панели','company.title':'Компания','company.name':'Название','company.logo':'Логотип','company.clear':'Убрать логотип','company.logo.big':'Только картинка до 200 КБ','company.hint':'Видно в шапке и на экране входа у всех.','set.sec.access':'Компания и доступ','set.sec.ui':'Интерфейс','set.sec.stats':'Статистика','set.sec.bots':'Защита от ботов','menu.keitaro':'Перенос из Keitaro','kt.title':'Перенос из Keitaro','kt.need':'Укажите адрес Keitaro и API-токен ниже и нажмите «Сохранить».','kt.conn':'Соединение','kt.check':'Проверить соединение','kt.ok':'Соединение есть, кампаний:','kt.api':'Admin API v1. Версия Keitaro не определена: признаков нет.','kt.api.ver':'Admin API v1. Keitaro {v}. Признаки: {signs}.','kt.api.conflict':'Admin API v1. Версия Keitaro не определена: признаки противоречат ({signs}).','kt.sig.subid':'формат SubID','kt.sig.click_id':'click_id','kt.sig.event_id':'event_id','kt.sig.conversion_id':'conversion_id','kt.sig.event_type':'event_type','kt.sig.rebill':'тип Rebill','kt.sig.custom_type':'свой тип конверсии','kt.what':'Что переносим','kt.domains':'Домены','kt.networks':'Партнёрские сети','kt.offers':'Офферы','kt.landings':'Лендинги','kt.sources':'Источники','kt.campaigns':'Кампании с настройками','kt.conversions':'Конверсии','kt.clicks':'Клики','kt.period':'Период','kt.period.global':'Текущий период','kt.period.custom':'Даты','kt.run':'Перенести','kt.one.id':'Keitaro ID кампании','kt.one.run':'Досинк одной кампании','kt.one.bad':'Укажите положительный Keitaro ID кампании','kt.purge':'Удалить импортированное','kt.purge.confirm':'Удалить всё, что создал перенос? Свои кампании и каталоги останутся.','kt.result':'Результат','kt.removed':'Удалено','kt.nolosses':'Всё перенесено без потерь','kt.c.groups':'Кампании','kt.c.offers':'Офферы','kt.c.landings':'Лендинги','kt.c.networks':'Партнёрские сети','kt.c.sources':'Источники','kt.c.domains':'Домены','kt.c.conversions':'Конверсии','kt.c.clicks':'Клики','kt.kind.disabled':'Выключено','kt.kind.skipped':'Пропущено','kt.kind.approximated':'Приближено','kt.kind.changed':'Изменено','kt.col.ref':'Объект','kt.col.detail':'Подробность','kt.busy':'Перенос уже идёт','kt.progress':'Ход переноса','kt.stage.idle':'Ожидание','kt.stage.snapshot':'Чтение каталогов','kt.stage.streams':'Чтение потоков кампаний','kt.stage.catalogs':'Запись каталогов','kt.stage.groups':'Запись кампаний','kt.stage.conversions':'Конверсии','kt.stage.clicks':'Клики','kt.stage.done':'Готово','kt.stage.failed':'Ошибка','cron.ktsync.title':'Актуализация данных','cron.ktsync.hint':'Догружает клики, конверсии и новые кампании с их настройками с последнего курсора с запасом назад; уже перенесённые кампании не трогает.','cron.ktsync.newcamps':'новых кампаний {n}','cron.ktsync.camps.pending':'Новых кампаний в очереди','cron.ktsync.camps.deleted':'Пропущено, удалены у нас','cron.ktsync.camps.failed':'Не перенесены','cron.ktsync.camps.paused':'Новые кампании на паузе до {time}: {reason}','cron.ktsync.off':'Keitaro не настроен','cron.ktsync.needkt':'Настройте Keitaro в {link}.','cron.ktsync.needimport':'Сначала нужен полный импорт Keitaro — {link}.','cron.ktsync.cursor.clicks':'Курсор кликов','cron.ktsync.cursor.convs':'Курсор конверсий','cron.ktsync.lag':'Отставание','cron.ktsync.last':'Последний прогон','cron.ktsync.timezone':'Время трекера опережает сервер','cron.ktsync.noconv':'Настройте Telegram выше, чтобы включить оповещения о конверсиях.','kt.sync.busy':'Уже идёт актуализация','kt.sync.requested':'Актуализация запрошена','kt.stage.landing_files':'Запись файлов лендингов','kt.stage.lists':'Запись списков','kt.stage.pages':'Запись страниц','kt.stage.users':'Запись пользователей','err.network':'Нет связи с сервером. Проверьте соединение и повторите.','cf.intro':'Аккаунт Cloudflare. Токен позволяет админке читать зоны и управлять DNS-записями и настройками подключаемых доменов.','cf.token':'API-токен','cf.account':'Account ID','cf.ip':'Публичный IP сервера','cf.ip.empty':'EMTDS_PUBLIC_IP не задан на сервере','cf.ip.local':'Интеграция с Cloudflare не запускается на локальной машине: нужен сервер с публичным IP','nc.local':'Админка запущена на локальной машине: найденный исходящий IP — это ваше подключение, а не сервер. Для работы нужен сервер с публичным IP.','cf.test':'Проверить','cf.test.ok':'ок, зон: {n}','cf.test.fail':'Проверка не прошла','cf.file.err':'Ошибка файла настроек','cf.err.load':'Настройки Cloudflare недоступны','cf.reg.use':'Подключить через Cloudflare — NS сменятся на Cloudflare, A-запись на {ip}','cf.reg.err':'Не удалось настроить Cloudflare','cf.reg.hosterr':'Не удалось записать DNS-записи','cf.reg.manual':'Укажите эти NS у регистратора: {ns}','cf.buy.title':'Купить {domain}?','cf.buy.sum':'Домен: {domain}\nСрок: {years} г.\nЦена: {price}\nDNS: {dns}','cf.dns.cf':'Cloudflare (NS на Cloudflare, A-запись на {ip})','cf.dns.ns':'свои NS: {ns}','cf.dns.a':'A-запись на {ip}','cf.dns.none':'DNS не меняется','dom.state.on':'Включён','dom.state.off':'Выключен','dom.state.pending':'Ожидает оплаты','dom.elsewhere':'Не направлен: A указывает на {ips}, нужен {ip}','dom.elsewhere.short':'Не направлен: A указывает на {ips}','dom.cfpending':'Ждём Cloudflare: NS {ns}','dom.cfpending.short':'Ждём Cloudflare','dom.tls':'Сертификат сервера отклонён','cf.connecting':'Подключение к Cloudflare…','cf.connect':'Подключить через Cloudflare','cf.connect.title':'Подключить {host} через Cloudflare?','cf.connect.ask':'В Cloudflare создаётся зона, A-запись указывает на сервер. NS Cloudflare нужно будет указать у регистратора.','cf.connect.ask.nc':'NS домена в Namecheap сменятся на Cloudflare, A-запись будет указывать на сервер. Пока зона не активна, домен может быть недоступен.','cf.connect.done':'Подключено к Cloudflare, ждём активации зоны','cf.connect.set':'NS сменены, ждём активации зоны в Cloudflare','cf.ns.title':'Серверы имён','cf.ns.hint':'Укажите эти NS у регистратора домена.','cf.ns.copy':'Копировать','cf.ns.copied':'Скопировано','cf.ns.select':'Скопируйте выделенный текст вручную','dom.conn.title':'Домен подключён','dom.conn.title.many':'Домены подключены','dom.conn.text':'Эти домены теперь доходят до сервера:','dom.conn.ok':'Понятно','dom.conn.go':'Перейти к доменам','kt.col.count':'Сколько','kt.col.refs':'Где','kt.groups.more':'ещё групп не показано:','page.open':'Открыть страницу','page.hint':'Вывод хранится файлом; правите его через «Открыть страницу».','page.missing':'Файла ещё нет; сохранение создаст его.','kt.c.lists':'IP-списки','kt.c.pages':'Страницы','menu.logout':'Выйти','sig.update':'Готов более новый коммит для установки','sig.down.title':'Служба не отвечает','sig.down.text':'Не отвечает: {list}. Перезапустите сервер или эту службу. Состояние и команды — в «Настройки → {about}».','sig.down.ok':'Закрыть','sig.down.go':'Открыть «{about}»','sig.svc.engine':'движок','sig.svc.clickhouse':'ClickHouse','sig.svc.redis':'Redis',
 'users.board.main':'Основной раздел «{name}»','users.board.main.hint':'Участие в других разделах эту отметку не снимает.','users.board.all':'Все разделы: аккаунт видит каждый раздел.','users.board.member':'Также по участию: {list}.','users.board.member.none':'Нет участия в других разделах; участников задают в настройках разделов.','users.board.empty':'Без основного раздела и без участия пользователь не увидит ни одного раздела.','board.none':'У вас нет доступа ни к одному разделу. Попросите администратора добавить вас в раздел.','board.people.main':'Участие добавляет пользователю этот раздел. Основной раздел задаётся в карточке пользователя и здесь не меняется.','board.main':'По умолчанию','board.switch':'Раздел','board.sections':'Разделы','board.settings':'Настройки разделов','board.create':'Имя нового раздела','board.import':'Импорт из вида по умолчанию','board.empty':'В виде по умолчанию пока нечего копировать.','board.page.title':'Разделы','board.add':'Создать раздел','board.icon':'Иконка','board.recent':'Недавние','board.all':'Все иконки','board.colors':'Цвет','board.name':'Имя','board.id':'ID','board.delete':'Удалить','board.move':'Переместить','board.delete.confirm':'Удалить этот раздел?','board.inuse':'В разделе есть записи','board.saved':'Сохранено','board.expand':'Состав и участники','board.include':'Вид раздела','board.include_all':'Отображать содержимое всех разделов','board.collapse':'Свернуть','board.compose.title':'Состав','board.compose.folders':'папки','board.compose.save':'Сохранить состав','board.compose.saved':'Состав сохранён','board.compose.addid':'Добавить id','board.compose.add':'Добавить','board.compose.search':'Поиск по id или имени','err.csrf':'Сессия устарела. Обновите страницу.','board.people.title':'Участники','board.people.role':'Роль','board.people.add':'Добавить участника','board.people.remove':'Убрать','board.people.save':'Сохранить участников','board.people.saved':'Участники сохранены','board.role.read':'Чтение','board.role.edit':'Редактирование','board.role.created':'Только свои',
 'period.today':'Сегодня','period.yesterday':'Вчера','period.week':'Текущая неделя','period.7d':'Последние 7 дней','period.month':'Текущий месяц','period.prevmonth':'Предыдущий месяц','period.30d':'Последние 30 дней','period.year':'Текущий год','period.all':'За всё время','period.dates':'Интервал дат','period.times':'Интервал времени','period.need':'Укажите оба края интервала',
 'settings.country':'Страна','settings.lang':'Язык интерфейса','settings.search':'Найти страну','settings.geo':'Источник страны для новой кампании','settings.geo.cf':'Заголовок CDN','settings.geo.db':'Гео-база','settings.hint':'Поиск сразу по коду и по английскому, русскому и украинскому имени.','settings.tz':'Часовой пояс статистики','settings.tz.find':'Найти часовой пояс','settings.tz.hint':'Периоды и время в отчётах считаются в этом поясе. Пояс самого посетителя не меняется.',
 'flows.title':'Кампании','dirty.title':'Несохранённые изменения:','dirty.flow':'Кампания','dirty.removed':'Удалено: {n}','dirty.all':'Показать все','dirty.less':'Свернуть','flow.compact':'Компактный вид','flow.expanded':'Подробный вид','flow.traffic.off':'Сортировка: выкл','flow.traffic.desc':'Сортировка по трафику: больше сверху','flow.traffic.asc':'Сортировка по трафику: меньше сверху','flow.traffic.lock':'Выключите сортировку, чтобы менять порядок','flow.revenue.asc':'Сортировка по доходу: меньше сверху','flow.revenue.desc':'Сортировка по доходу: больше сверху','flows.table':'Таблица','flows.cards':'Карточки','flows.search':'Поиск кампаний и потоков…','flows.new':'Новая кампания','flows.bulk.on':'Включить','flows.bulk.off':'Выключить','flows.bulk.dup':'Дублировать','flows.bulk.del':'Удалить','flows.bulk.n':'выбрано','flows.col.id':'Кампания','flows.col.num':'ID','flows.col.name':'Имя кампании','flows.col.url':'URL','flows.col.streams':'Потоки','flows.page':'На странице','flows.page.custom':'Своё','flows.state':'Состояние','flows.state.all':'Все','flows.state.on':'Включённые','flows.state.off':'Выключенные','flows.state.hits':'С визитами','flows.state.any':'Все состояния','flows.source.all':'Все источники','flows.nosource':'Без источника','flows.nofolder':'Без группы','flows.sum':'Всего','flows.sum.sel':'Выбранные','flows.visits':'визиты','flows.bots':'боты','flows.conv':'конверсии','flows.profit':'прибыль','flows.nostreams':'Нет потоков — каждый посетитель получает ответ по умолчанию','flows.more':'ещё','flows.streams':'потоков','flows.logs':'Логи','flows.log.clicks':'Лог кликов','flows.log.conv':'Лог конверсий','tester.ip':'IP-адрес','tester.country':'Страна','tester.lang':'Язык','tester.referer':'Реферер','tester.key':'Ключевое слово','tester.query':'Параметры URL','tester.hint':'Берёт кампании с экрана, сохранённые или нет. Лимиты показов, проверка ботов и антифлуд зависят от живого трафика и здесь не считаются.','src.title':'Источники трафика','src.new':'Новый источник','src.our':'Имя у нас','src.theirs':'Имя в ссылке','src.empty':'Источников пока нет','src.link':'Ссылка кампании','log.traffic':'Трафик','log.postbacks':'Postbacks и S2S','log.system':'Системный','log.outcome':'Исход','log.direction':'Направление','rep.title':'Отчёт','rep.csv':'Скачать CSV','rep.empty':'За этот период пусто',
 'conv.title':'Конверсии','conv.subid':'Subid','conv.status':'Статус','conv.lead':'Лид','conv.sale':'Продажа','conv.campaign':'Кампания','conv.stream':'Поток','conv.offer':'Оффер','conv.landing':'Лендинг','conv.network':'Сеть','conv.source':'Источник','conv.columns':'Столбцы','conv.all':'Все',
-'net.title':'Сети','net.create':'Новая сеть','net.name':'Имя','net.url':'Postback URL','net.param':'Параметры оффера','net.template':'Шаблон','net.save':'Сохранить','net.empty':'Сетей пока нет','net.copy':'Копировать','net.hint':'Заметка для кабинета сети. Трекер этот адрес не вызывает.',
-'off.title':'Офферы','off.new':'Новый оффер','off.name':'Имя','off.group':'Группа','off.url':'URL','off.local':'Локальный','off.empty':'Офферов пока нет','off.tab.redirect':'Редирект','off.tab.local':'Локальный','off.local.soon':'HTML в разработке','off.countries':'Страны','off.payout':'Выплата','off.model':'Модель','off.currency':'Валюта','off.payout.param':'Параметр payout','off.again':'Добавить ещё','off.allnets':'Все сети','off.allgroups':'Все группы','off.search':'Поиск офферов…','land.search':'Поиск лендингов…','net.search':'Поиск сетей…','src.search':'Поиск источников…','dom.search':'Поиск доменов…','cat.groups.search':'Поиск группы…','grp.create':'Создать группу','off.visits':'Визиты','off.conv':'Конверсии','off.revenue':'Доход','col.clicks':'Клики','col.day':'Дата','col.leads':'Лиды','col.sales':'Продажи','col.rej':'Отклонённые','col.rej.hint':'Постбеки со статусом rejected','money.nocost':'Расход не записан: задайте параметр цены в кампании или внесите расход','then.mode.offers':'Лендинги и офферы','then.mode.url':'Прямой URL','then.mode.action':'Действие','share.label':'Доля, %','share.hint':'Доля посетителей, которые попадут на эту строку. Сумма одного списка — не больше 100.','share.dead':'не получает трафик','s2s.global':'Общие шаблоны','s2s.global.empty':'Общих шаблонов пока нет','s2s.global.edit':'Общие шаблоны…','col.cr':'CR','col.uepc':'uEPC','col.epc':'EPC','col.cpc':'CPC','col.revenue':'Доход','col.cost':'Расход','col.profit':'Прибыль','col.depsum':'DepSum','col.roi':'ROI','col.crok':'CR подтв.','col.crrej':'CR режима','col.uniq':'Уники','col.conv':'Конверсии','col.spend':'Расход','bot.title':'Защита от ботов','bot.save':'Сохранить набор','bot.hint':'User-Agent — строка браузера, не страна. Имена краулеров дописывают в «Списках», файл signature_ua.dat, одна подстрока на строку.','bot.bl':'Чёрный список','bot.bl.hint':'Одна полная строка User-Agent на линию. Совпадение точное.','bot.bl.save':'Сохранить список','bot.proxy.default':'Проверка прокси: по умолчанию.','bot.proxy.wait':'Проверка прокси: по умолчанию; включится после загрузки списка iCloud Private Relay (Автоматизация → ip_lists).','bot.proxy.reset':'Сбросить проверку прокси к умолчанию','pb.title':'Постбеки','pb.hint':'Это адреса этого трекера. Их вставляют в кабинет партнёрской сети. Трекер сам по ним не ходит.','pb.lead':'Лид','pb.sale':'Продажа','pb.rejected':'Отклонено','pb.copy':'Копировать','pb.copyall':'Копировать все','pb.docs':'Документация','pb.url':'Postback URL','pb.host':'Хост','pb.copy.url':'Скопировать','pb.nokey':'Ключ постбека не нужен: достаточно id клика в subid. Каждое REPLACE замените макросом вашей сети.','pb.local':'Это локальный адрес. На сервере хост — домен для ссылок или хост админки.',
+'net.title':'Сети','net.create':'Новая сеть','net.name':'Имя','net.label':'Название','net.tpl.ph':'Выберите шаблон','net.tpl.notes':'Инструкция шаблона (только чтение)','net.tpl.conv':'Статусы сети (трекер их не сопоставляет)','net.tpl.edit':'Править шаблон','net.tpl.add':'Новый шаблон','net.tpl.edited':'В шаблоне есть ваши правки.','net.tpl.ed.ins':'Инструкция','net.tpl.ed.hint':'Пустое поле оставляет значение каталога. {origin} — адрес этого трекера.','net.tpl.ed.reset':'Сбросить к каталогу','net.tpl.ed.del':'Удалить шаблон','net.tpl.state.none':'Параметры этого шаблона не извлечены. Заполните поля вручную.','net.tpl.state.partial':'У шаблона известна только часть полей. Остальные заполните вручную.','net.param.help.t':'Параметры оффера','net.param.help.a':'Параметры, которые нужно добавлять ко всем офферам.','net.param.help.req':'Обязательно','net.param.help.ex1':'ваш_sub1={subid}','net.param.help.opt':'Опционально:','net.param.help.ex2':'ваш_sub2={campaign_name}&...','net.url':'Postback URL','net.param':'Параметры оффера','net.template':'Шаблон','net.save':'Сохранить','net.empty':'Сетей пока нет','net.copy':'Копировать','net.hint':'Заметка для кабинета сети. Трекер этот адрес не вызывает.',
+'off.title':'Офферы','off.new':'Новый оффер','off.name':'Имя','off.group':'Группа','off.url':'URL','off.local':'Локальный','off.empty':'Офферов пока нет','off.tab.redirect':'Редирект','off.tab.local':'Локальный','off.local.soon':'HTML в разработке','off.countries':'Страны','off.payout':'Выплата','off.model':'Модель','off.currency':'Валюта','off.payout.param':'Параметр payout','off.again':'Добавить ещё','off.allnets':'Все сети','cat.pick.page':'Выбрать все на этой странице','cat.pick.row':'Выбрать строку','net.del.many':'Удалить сетей: {n}?','off.del.many':'Удалить офферов: {n}?','off.allgroups':'Все группы','off.search':'Поиск офферов…','land.search':'Поиск лендингов…','net.search':'Поиск сетей…','src.search':'Поиск источников…','dom.search':'Поиск доменов…','cat.groups.search':'Поиск группы…','grp.create':'Создать группу','off.visits':'Визиты','off.conv':'Конверсии','off.revenue':'Доход','col.clicks':'Клики','col.day':'Дата','col.leads':'Лиды','col.sales':'Продажи','col.rej':'Отклонённые','col.rej.hint':'Постбеки со статусом rejected','money.nocost':'Расход не записан: задайте параметр цены в кампании или внесите расход','then.mode.offers':'Лендинги и офферы','then.mode.url':'Прямой URL','then.mode.action':'Действие','share.label':'Доля, %','share.hint':'Доля посетителей, которые попадут на эту строку. Сумма одного списка — не больше 100.','share.dead':'не получает трафик','s2s.global':'Общие шаблоны','s2s.global.empty':'Общих шаблонов пока нет','s2s.global.edit':'Общие шаблоны…','col.cr':'CR','col.uepc':'uEPC','col.epc':'EPC','col.cpc':'CPC','col.revenue':'Доход','col.cost':'Расход','col.profit':'Прибыль','col.depsum':'DepSum','col.roi':'ROI','col.crok':'CR подтв.','col.crrej':'CR режима','col.uniq':'Уники','col.conv':'Конверсии','col.spend':'Расход','bot.title':'Защита от ботов','bot.save':'Сохранить набор','bot.hint':'User-Agent — строка браузера, не страна. Имена краулеров дописывают в «Списках», файл signature_ua.dat, одна подстрока на строку.','bot.bl':'Чёрный список','bot.bl.hint':'Одна полная строка User-Agent на линию. Совпадение точное.','bot.bl.save':'Сохранить список','bot.proxy.default':'Проверка прокси: по умолчанию.','bot.proxy.wait':'Проверка прокси: по умолчанию; включится после загрузки списка iCloud Private Relay (Автоматизация → ip_lists).','bot.proxy.reset':'Сбросить проверку прокси к умолчанию','pb.title':'Постбеки','pb.hint':'Это адреса этого трекера. Их вставляют в кабинет партнёрской сети. Трекер сам по ним не ходит.','pb.lead':'Лид','pb.sale':'Продажа','pb.rejected':'Отклонено','pb.copy':'Копировать','pb.copyall':'Копировать все','pb.docs':'Документация','pb.url':'Postback URL','pb.host':'Хост','pb.copy.url':'Скопировать','pb.nokey':'Ключ постбека не нужен: достаточно id клика в subid. Каждое REPLACE замените макросом вашей сети.','pb.local':'Это локальный адрес. На сервере хост — домен для ссылок или хост админки.',
 'pbd.title':'Документация по постбекам','pbd.back':'Назад','pbd.c.p':'Параметр','pbd.c.a':'Также принимается','pbd.c.m':'Смысл',
 'pbd.fmt.t':'Формат ссылки','pbd.fmt.b':'Сеть вызывает этот трекер, когда клик конвертировался. Нужен GET или POST на <code>/postback</code> любого домена для ссылок или хоста админки (без порта). Ключ можно добавить параметром <code>&amp;key=</code> (секрет EMTDS_POSTBACK_SECRET); без ключа постбек принимается, пока не включён строгий режим.','pbd.fmt.b2':'Каждое <code>REPLACE</code> замените макросом сети. Параметры могут прийти и в теле формы POST. Ответ — JSON: <code>{"status":"success"}</code> или <code>{"status":"error","error":"…"}</code>. Адрес постбека сети трекер сам не вызывает.',
 'pbd.par.t':'Параметры','pbd.p.subid':'Id клика, обязателен. Первое непустое из трёх имён.','pbd.p.status':'Статус конверсии. Первое непустое из трёх имён; регистр букв не важен.','pbd.p.payout':'Выплата, ваш доход: число с точкой. Берётся первое из трёх имён, которое разбирается как число; значения не складываются. Пустое или не число остаётся 0; NaN и Inf отклоняются с 400.','pbd.p.depsum':'Сумма депозита. Хранится в своём столбце и к выплате никогда не прибавляется. Пустое или не число остаётся 0.','pbd.p.tid':'Идентификатор сделки в сети, не больше 128 байт. Необязателен.',
@@ -11930,7 +12026,7 @@ ru:{
 'ai.chat.del.title':'Удалить «{title}»?','ai.chat.del.text':'Второе подтверждение. Ассистент удалит запись; после этого её можно откатить, пока ничто не мешает восстановлению.','ai.chat.del.ok':'Удалить',
 'ai.chat.applied':'Правка применена','ai.chat.rejected':'Правка отклонена','ai.chat.reverted':'Правка откачена',
 'ai.chat.err.ai_disabled':'Ассистент выключен.','ai.chat.err.ai_busy':'Ассистент ещё отвечает на предыдущее сообщение.','ai.chat.err.ai_quota':'Суточный лимит ассистента исчерпан.','ai.chat.err.ai_quota.user_budget':'Ваш суточный бюджет ассистента в USD исчерпан.','ai.chat.err.ai_quota.group_budget':'Суточный бюджет вашей группы для ассистента в USD исчерпан.',
-'ai.chat.err.ai_bad_model':'Эта модель не разрешена. Выберите другую.','ai.chat.err.ai_provider_error':'Сбой у провайдера AI. Повторите позже.','ai.chat.err.ai_timeout':'Провайдер AI не ответил вовремя.',
+'ai.chat.err.ai_bad_model':'Эта модель не разрешена. Выберите другую.','ai.chat.err.ai_provider_error':'Сбой у провайдера AI. Повторите позже.','ai.chat.err.ai_provider_error.empty_summary':'Контекст не сжался: модель вернула пустую сводку, а разговор уже не помещается в окно. Найденное сохранено выше; начните новое сообщение или задачу покороче.','ai.chat.err.ai_provider_error.overload':'Провайдер AI перегружен или недоступен (серверная ошибка с его стороны). Повторите через минуту.','ai.chat.err.ai_provider_error.unreachable':'Провайдер AI не отвечает (сбой сети). Повторите через минуту.','ai.chat.err.ai_timeout':'Провайдер AI не ответил вовремя.',
 'ai.chat.err.ai_rate_limited':'Провайдер AI ограничивает запросы. Подождите немного и повторите.','ai.chat.err.ai_bad_key':'Провайдер отклонил ключ API. Проверьте его в интеграциях.',
 'ai.chat.err.ai_disk_full':'Для истории ассистента не осталось места. Удалите старые чаты.','ai.chat.err.keitaro_running':'Идёт перенос Keitaro. Применение и откат выключены до его конца.',
 'ai.chat.err.ai_conflict':'Изменено вручную, откат невозможен. Попросите ассистента новую правку.','ai.chat.err.ai_stale':'Запись изменилась после предложения. Отклоните его и попросите ассистента новую правку.',
@@ -11969,14 +12065,14 @@ uk:{
 'dash.pref.title':'Уподобання','dash.pref.kpis':'Метрики','dash.pref.blocks':'Блоки','dash.pref.recent':'Останні кліки',
 'kws.by.last':'Останній клік','kws.by.origin':'Першоджерело','kws.hint.origin':'Режим першоджерела враховує лише перший клік. Конверсія отримує ключове слово й потік першого кліку; доступні лише фільтри кампанії, ключового слова, потоку, країни, пристрою, ОС і браузера.',
 'nav.dashboard':'Зведення','nav.flows':'Кампанії','nav.offers':'Офери','nav.landings':'Лендінги','nav.logs':'Лог кліків','nav.conversions':'Лог конверсій','nav.keywords':'Ключові слова','nav.lists':'Списки','nav.tools':'Інструменти','nav.networks':'Партнерські мережі','nav.sources':'Джерела','nav.domains':'Домени','nav.report':'Звіт','nav.reports':'Звіти','nav.menu':'Меню','nav.more':'Інше','nav.automation':'Автоматизація','kt.stream.note':'Keitaro: потік #{n}','out.empty':'порожньо','conv.rejected':'Відхилено','land.files.hint':'Скільки файлів завантажено','land.kind.hint':'PHP, HTML або адреса','dom.role.hint':'Адмінка, посилання кампаній або обидва','dom.campaigns.hint':'Скільки кампаній використовують домен',
-'menu.settings':'Налаштування','menu.integrations':'Інтеграції','int.st.on':'Підключено','int.st.off':'Не налаштовано','int.st.err':'Помилка','int.st.run':'Іде перенесення','int.add':'Підключити','int.add.title':'Підключити інтеграцію','int.added':'Додано','int.empty':'Підключіть першу інтеграцію','int.drop':'Прибрати зі списку','int.desc.keitaro':'Перенесення кампаній, офферів і статистики з Keitaro','int.desc.namecheap':'Купівля доменів та їхній DNS','int.desc.cloudflare':'Паркування доменів: зони, DNS і SSL','prof.users':'Користувачі','users.title':'Користувачі','users.new':'Створити користувача','users.login':'Логін','users.type':'Тип','users.state':'Стан','users.enabled':'Увімкнено','users.disabled':'Вимкнено','users.lang':'Мова','users.tz':'Пояс','users.source':'Джерело','users.created':'Створено','users.edit':'Правити','users.access':'Доступ','users.password':'Пароль','users.enable':'Увімкнути','users.disable':'Вимкнути','users.delete':'Видалити','users.delete.confirm':'Видалити користувача','users.pw.hint':'Не менше 6 символів','users.saved':'Збережено','users.src.env':'Оточення','users.src.owner':'Власник оточення, повні права','users.type.admin':'Адміністратор','users.type.user':'Користувач','users.src.rights':'Повні права','users.src.custom':'Свої права','users.src.imported':'Перенесено з Keitaro','users.created.env':'Задано під час встановлення','users.src.file':'Файл користувачів','prof.account':'Обліковий запис','dash.recent':'Останні кліки','dash.recent.all':'Усі кліки','dash.recent.out':'Напрямок','prof.account.login':'Логін','prof.account.type':'Тип','prof.account.source':'Джерело','acc.title':'Доступ','acc.mode':'Режим доступу','acc.sections':'Розділи','acc.sec.groups':'Групи','acc.res.campaigns':'Кампанії','acc.res.offers':'Офери','acc.res.landings':'Лендінги','acc.res.sources':'Джерела','acc.res.networks':'Мережі','acc.res.domains':'Домени','acc.mode.full':'Повний','acc.mode.read':'Лише читання','acc.mode.selected':'Лише обрані','acc.mode.created':'Створені й обрані','acc.entities':'Сутності','acc.labels':'Мітки','acc.hidden':'Приховані метрики','acc.hidden.profit':'Прибуток і дохід','acc.hidden.cost':'Витрата і cost','acc.none':'Немає','kt.users':'Користувачі','kt.users.hint':'Перенесені користувачі вимкнені і без пароля','kt.c.users':'Користувачі','int.title':'Інтеграції','dash.panels':'Панелі','company.title':'Компанія','company.name':'Назва','company.logo':'Логотип','company.clear':'Прибрати логотип','company.logo.big':'Лише зображення до 200 КБ','company.hint':'Видно в шапці та на екрані входу в усіх.','set.sec.access':'Компанія і доступ','set.sec.ui':'Інтерфейс','set.sec.stats':'Статистика','set.sec.bots':'Захист від ботів','menu.keitaro':'Перенесення з Keitaro','kt.title':'Перенесення з Keitaro','kt.need':'Вкажіть адресу Keitaro й API-токен нижче та натисніть «Зберегти».','kt.conn':'З’єднання','kt.check':'Перевірити з’єднання','kt.ok':'З’єднання є, кампаній:','kt.api':'Admin API v1. Версію Keitaro не визначено: ознак немає.','kt.api.ver':'Admin API v1. Keitaro {v}. Ознаки: {signs}.','kt.api.conflict':'Admin API v1. Версію Keitaro не визначено: ознаки суперечать ({signs}).','kt.sig.subid':'формат SubID','kt.sig.click_id':'click_id','kt.sig.event_id':'event_id','kt.sig.conversion_id':'conversion_id','kt.sig.event_type':'event_type','kt.sig.rebill':'тип Rebill','kt.sig.custom_type':'власний тип конверсії','kt.what':'Що переносимо','kt.domains':'Домени','kt.networks':'Партнерські мережі','kt.offers':'Офери','kt.landings':'Лендінги','kt.sources':'Джерела','kt.campaigns':'Кампанії з налаштуваннями','kt.conversions':'Конверсії','kt.clicks':'Кліки','kt.period':'Період','kt.period.global':'Поточний період','kt.period.custom':'Дати','kt.run':'Перенести','kt.one.id':'Keitaro ID кампанії','kt.one.run':'Досинк однієї кампанії','kt.one.bad':'Вкажіть додатний Keitaro ID кампанії','kt.purge':'Видалити імпортоване','kt.purge.confirm':'Видалити все, що створив перенос? Свої кампанії і каталоги залишаться.','kt.result':'Результат','kt.removed':'Видалено','kt.nolosses':'Усе перенесено без втрат','kt.c.groups':'Кампанії','kt.c.offers':'Офери','kt.c.landings':'Лендінги','kt.c.networks':'Партнерські мережі','kt.c.sources':'Джерела','kt.c.domains':'Домени','kt.c.conversions':'Конверсії','kt.c.clicks':'Кліки','kt.kind.disabled':'Вимкнено','kt.kind.skipped':'Пропущено','kt.kind.approximated':'Наближено','kt.kind.changed':'Змінено','kt.col.ref':'Об’єкт','kt.col.detail':'Подробиця','kt.busy':'Перенесення вже триває','kt.progress':'Перебіг','kt.stage.idle':'Очікування','kt.stage.snapshot':'Читання каталогів','kt.stage.streams':'Читання потоків кампаній','kt.stage.catalogs':'Запис каталогів','kt.stage.groups':'Запис кампаній','kt.stage.conversions':'Конверсії','kt.stage.clicks':'Кліки','kt.stage.done':'Готово','cron.ktsync.title':'Актуалізація даних','cron.ktsync.hint':'Довантажує кліки, конверсії та нові кампанії з їхніми налаштуваннями з останнього курсора з запасом назад; уже перенесені кампанії не чіпає.','cron.ktsync.newcamps':'нових кампаній {n}','cron.ktsync.camps.pending':'Нових кампаній у черзі','cron.ktsync.camps.deleted':'Пропущено, видалені у нас','cron.ktsync.camps.failed':'Не перенесені','cron.ktsync.camps.paused':'Нові кампанії на паузі до {time}: {reason}','cron.ktsync.off':'Keitaro не налаштовано','cron.ktsync.needkt':'Налаштуйте Keitaro в {link}.','cron.ktsync.needimport':'Спочатку потрібен повний імпорт Keitaro — {link}.','cron.ktsync.cursor.clicks':'Курсор кліків','cron.ktsync.cursor.convs':'Курсор конверсій','cron.ktsync.lag':'Відставання','cron.ktsync.last':'Останній прогін','cron.ktsync.timezone':'Час трекера випереджає сервер','cron.ktsync.noconv':'Налаштуйте Telegram вище, щоб увімкнути сповіщення про конверсії.','kt.sync.busy':'Вже йде актуалізація','kt.sync.requested':'Актуалізацію запрошено','kt.stage.failed':'Помилка','kt.stage.landing_files':'Запис файлів лендінгів','kt.stage.lists':'Запис списків','kt.stage.pages':'Запис сторінок','kt.stage.users':'Запис користувачів','err.network':'Немає зв’язку із сервером. Перевірте з’єднання і повторіть.','cf.intro':'Акаунт Cloudflare. Токен дозволяє адмінці читати зони та керувати DNS-записами і налаштуваннями доменів, що підключаються.','cf.token':'API-токен','cf.account':'Account ID','cf.ip':'Публічна IP-адреса сервера','cf.ip.empty':'EMTDS_PUBLIC_IP не задано на сервері','cf.ip.local':'Інтеграція з Cloudflare не запускається на локальній машині: потрібен сервер із публічною IP-адресою','nc.local':'Адмінка запущена на локальній машині: знайдена вихідна IP — це ваше підключення, а не сервер. Для роботи потрібен сервер із публічною IP-адресою.','cf.test':'Перевірити','cf.test.ok':'ок, зон: {n}','cf.test.fail':'Перевірка не пройшла','cf.file.err':'Помилка файлу налаштувань','cf.err.load':'Налаштування Cloudflare недоступні','cf.reg.use':'Підключити через Cloudflare — NS зміняться на Cloudflare, A-запис на {ip}','cf.reg.err':'Не вдалося налаштувати Cloudflare','cf.reg.hosterr':'Не вдалося записати DNS-записи','cf.reg.manual':'Вкажіть ці NS у реєстратора: {ns}','cf.buy.title':'Купити {domain}?','cf.buy.sum':'Домен: {domain}\nТермін: {years} р.\nЦіна: {price}\nDNS: {dns}','cf.dns.cf':'Cloudflare (NS на Cloudflare, A-запис на {ip})','cf.dns.ns':'власні NS: {ns}','cf.dns.a':'A-запис на {ip}','cf.dns.none':'DNS не змінюється','dom.state.on':'Увімкнено','dom.state.off':'Вимкнено','dom.state.pending':'Очікує оплати','dom.elsewhere':'Не спрямовано: A вказує на {ips}, потрібен {ip}','dom.elsewhere.short':'Не спрямовано: A вказує на {ips}','dom.cfpending':'Чекаємо Cloudflare: NS {ns}','dom.cfpending.short':'Чекаємо Cloudflare','dom.tls':'Сертифікат сервера відхилено','cf.connecting':'Підключення до Cloudflare…','cf.connect':'Підключити через Cloudflare','cf.connect.title':'Підключити {host} через Cloudflare?','cf.connect.ask':'У Cloudflare створюється зона, A-запис вказує на сервер. NS Cloudflare потрібно буде вказати у реєстратора.','cf.connect.ask.nc':'NS домену в Namecheap зміняться на Cloudflare, A-запис вказуватиме на сервер. Поки зона не активна, домен може бути недоступним.','cf.connect.done':'Підключено до Cloudflare, чекаємо активації зони','cf.connect.set':'NS змінено, чекаємо активації зони в Cloudflare','cf.ns.title':'Сервери імен','cf.ns.hint':'Вкажіть ці NS у реєстратора домену.','cf.ns.copy':'Копіювати','cf.ns.copied':'Скопійовано','cf.ns.select':'Скопіюйте виділений текст вручну','dom.conn.title':'Домен підключено','dom.conn.title.many':'Домени підключено','dom.conn.text':'Ці домени тепер доходять до сервера:','dom.conn.ok':'Зрозуміло','dom.conn.go':'Перейти до доменів','kt.col.count':'Скільки','kt.col.refs':'Де','kt.groups.more':'ще груп не показано:','page.open':'Відкрити сторінку','page.hint':'Вивід зберігається файлом; редагуйте його через «Відкрити сторінку».','page.missing':'Файлу ще немає; збереження створить його.','kt.c.lists':'IP-списки','kt.c.pages':'Сторінки','menu.logout':'Вийти','sig.update':'Готовий новіший коміт для встановлення','sig.down.title':'Служба не відповідає','sig.down.text':'Не відповідає: {list}. Перезапустіть сервер або цю службу. Стан і команди — у «Налаштування → {about}».','sig.down.ok':'Закрити','sig.down.go':'Відкрити «{about}»','sig.svc.engine':'рушій','sig.svc.clickhouse':'ClickHouse','sig.svc.redis':'Redis',
+'menu.settings':'Налаштування','menu.integrations':'Інтеграції','int.st.on':'Підключено','int.st.off':'Не налаштовано','int.st.err':'Помилка','int.st.run':'Іде перенесення','int.add':'Підключити','int.add.title':'Підключити інтеграцію','int.added':'Додано','int.empty':'Підключіть першу інтеграцію','int.drop':'Прибрати зі списку','int.desc.keitaro':'Перенесення кампаній, офферів і статистики з Keitaro','int.desc.namecheap':'Купівля доменів та їхній DNS','int.desc.cloudflare':'Паркування доменів: зони, DNS і SSL','prof.users':'Користувачі','users.title':'Користувачі','users.new':'Створити користувача','users.login':'Логін','users.type':'Тип','users.state':'Стан','users.enabled':'Увімкнено','users.disabled':'Вимкнено','users.lang':'Мова','users.tz':'Пояс','users.source':'Джерело','users.created':'Створено','users.edit':'Правити','users.access':'Доступ','users.password':'Пароль','users.enable':'Увімкнути','users.disable':'Вимкнути','users.delete':'Видалити','users.delete.confirm':'Видалити користувача','users.pw.hint':'Не менше 6 символів','users.saved':'Збережено','users.src.env':'Оточення','users.src.owner':'Власник оточення, повні права','users.type.admin':'Адміністратор','users.type.user':'Користувач','users.src.rights':'Повні права','users.src.custom':'Свої права','users.src.imported':'Перенесено з Keitaro','users.created.env':'Задано під час встановлення','users.src.file':'Файл користувачів','prof.account':'Обліковий запис','dash.recent':'Останні кліки','dash.offers':'Офери','dash.recent.all':'Усі кліки','dash.recent.out':'Напрямок','prof.account.login':'Логін','prof.account.type':'Тип','prof.account.source':'Джерело','acc.title':'Доступ','acc.mode':'Режим доступу','acc.sections':'Розділи','acc.sec.groups':'Групи','acc.res.campaigns':'Кампанії','acc.res.offers':'Офери','acc.res.landings':'Лендінги','acc.res.sources':'Джерела','acc.res.networks':'Мережі','acc.res.domains':'Домени','acc.mode.full':'Повний','acc.mode.read':'Лише читання','acc.mode.selected':'Лише обрані','acc.mode.created':'Створені й обрані','acc.entities':'Сутності','acc.labels':'Мітки','acc.hidden':'Приховані метрики','acc.hidden.profit':'Прибуток і дохід','acc.hidden.cost':'Витрата і cost','acc.none':'Немає','kt.users':'Користувачі','kt.users.hint':'Перенесені користувачі вимкнені і без пароля','kt.c.users':'Користувачі','int.title':'Інтеграції','dash.panels':'Панелі','company.title':'Компанія','company.name':'Назва','company.logo':'Логотип','company.clear':'Прибрати логотип','company.logo.big':'Лише зображення до 200 КБ','company.hint':'Видно в шапці та на екрані входу в усіх.','set.sec.access':'Компанія і доступ','set.sec.ui':'Інтерфейс','set.sec.stats':'Статистика','set.sec.bots':'Захист від ботів','menu.keitaro':'Перенесення з Keitaro','kt.title':'Перенесення з Keitaro','kt.need':'Вкажіть адресу Keitaro й API-токен нижче та натисніть «Зберегти».','kt.conn':'З’єднання','kt.check':'Перевірити з’єднання','kt.ok':'З’єднання є, кампаній:','kt.api':'Admin API v1. Версію Keitaro не визначено: ознак немає.','kt.api.ver':'Admin API v1. Keitaro {v}. Ознаки: {signs}.','kt.api.conflict':'Admin API v1. Версію Keitaro не визначено: ознаки суперечать ({signs}).','kt.sig.subid':'формат SubID','kt.sig.click_id':'click_id','kt.sig.event_id':'event_id','kt.sig.conversion_id':'conversion_id','kt.sig.event_type':'event_type','kt.sig.rebill':'тип Rebill','kt.sig.custom_type':'власний тип конверсії','kt.what':'Що переносимо','kt.domains':'Домени','kt.networks':'Партнерські мережі','kt.offers':'Офери','kt.landings':'Лендінги','kt.sources':'Джерела','kt.campaigns':'Кампанії з налаштуваннями','kt.conversions':'Конверсії','kt.clicks':'Кліки','kt.period':'Період','kt.period.global':'Поточний період','kt.period.custom':'Дати','kt.run':'Перенести','kt.one.id':'Keitaro ID кампанії','kt.one.run':'Досинк однієї кампанії','kt.one.bad':'Вкажіть додатний Keitaro ID кампанії','kt.purge':'Видалити імпортоване','kt.purge.confirm':'Видалити все, що створив перенос? Свої кампанії і каталоги залишаться.','kt.result':'Результат','kt.removed':'Видалено','kt.nolosses':'Усе перенесено без втрат','kt.c.groups':'Кампанії','kt.c.offers':'Офери','kt.c.landings':'Лендінги','kt.c.networks':'Партнерські мережі','kt.c.sources':'Джерела','kt.c.domains':'Домени','kt.c.conversions':'Конверсії','kt.c.clicks':'Кліки','kt.kind.disabled':'Вимкнено','kt.kind.skipped':'Пропущено','kt.kind.approximated':'Наближено','kt.kind.changed':'Змінено','kt.col.ref':'Об’єкт','kt.col.detail':'Подробиця','kt.busy':'Перенесення вже триває','kt.progress':'Перебіг','kt.stage.idle':'Очікування','kt.stage.snapshot':'Читання каталогів','kt.stage.streams':'Читання потоків кампаній','kt.stage.catalogs':'Запис каталогів','kt.stage.groups':'Запис кампаній','kt.stage.conversions':'Конверсії','kt.stage.clicks':'Кліки','kt.stage.done':'Готово','cron.ktsync.title':'Актуалізація даних','cron.ktsync.hint':'Довантажує кліки, конверсії та нові кампанії з їхніми налаштуваннями з останнього курсора з запасом назад; уже перенесені кампанії не чіпає.','cron.ktsync.newcamps':'нових кампаній {n}','cron.ktsync.camps.pending':'Нових кампаній у черзі','cron.ktsync.camps.deleted':'Пропущено, видалені у нас','cron.ktsync.camps.failed':'Не перенесені','cron.ktsync.camps.paused':'Нові кампанії на паузі до {time}: {reason}','cron.ktsync.off':'Keitaro не налаштовано','cron.ktsync.needkt':'Налаштуйте Keitaro в {link}.','cron.ktsync.needimport':'Спочатку потрібен повний імпорт Keitaro — {link}.','cron.ktsync.cursor.clicks':'Курсор кліків','cron.ktsync.cursor.convs':'Курсор конверсій','cron.ktsync.lag':'Відставання','cron.ktsync.last':'Останній прогін','cron.ktsync.timezone':'Час трекера випереджає сервер','cron.ktsync.noconv':'Налаштуйте Telegram вище, щоб увімкнути сповіщення про конверсії.','kt.sync.busy':'Вже йде актуалізація','kt.sync.requested':'Актуалізацію запрошено','kt.stage.failed':'Помилка','kt.stage.landing_files':'Запис файлів лендінгів','kt.stage.lists':'Запис списків','kt.stage.pages':'Запис сторінок','kt.stage.users':'Запис користувачів','err.network':'Немає зв’язку із сервером. Перевірте з’єднання і повторіть.','cf.intro':'Акаунт Cloudflare. Токен дозволяє адмінці читати зони та керувати DNS-записами і налаштуваннями доменів, що підключаються.','cf.token':'API-токен','cf.account':'Account ID','cf.ip':'Публічна IP-адреса сервера','cf.ip.empty':'EMTDS_PUBLIC_IP не задано на сервері','cf.ip.local':'Інтеграція з Cloudflare не запускається на локальній машині: потрібен сервер із публічною IP-адресою','nc.local':'Адмінка запущена на локальній машині: знайдена вихідна IP — це ваше підключення, а не сервер. Для роботи потрібен сервер із публічною IP-адресою.','cf.test':'Перевірити','cf.test.ok':'ок, зон: {n}','cf.test.fail':'Перевірка не пройшла','cf.file.err':'Помилка файлу налаштувань','cf.err.load':'Налаштування Cloudflare недоступні','cf.reg.use':'Підключити через Cloudflare — NS зміняться на Cloudflare, A-запис на {ip}','cf.reg.err':'Не вдалося налаштувати Cloudflare','cf.reg.hosterr':'Не вдалося записати DNS-записи','cf.reg.manual':'Вкажіть ці NS у реєстратора: {ns}','cf.buy.title':'Купити {domain}?','cf.buy.sum':'Домен: {domain}\nТермін: {years} р.\nЦіна: {price}\nDNS: {dns}','cf.dns.cf':'Cloudflare (NS на Cloudflare, A-запис на {ip})','cf.dns.ns':'власні NS: {ns}','cf.dns.a':'A-запис на {ip}','cf.dns.none':'DNS не змінюється','dom.state.on':'Увімкнено','dom.state.off':'Вимкнено','dom.state.pending':'Очікує оплати','dom.elsewhere':'Не спрямовано: A вказує на {ips}, потрібен {ip}','dom.elsewhere.short':'Не спрямовано: A вказує на {ips}','dom.cfpending':'Чекаємо Cloudflare: NS {ns}','dom.cfpending.short':'Чекаємо Cloudflare','dom.tls':'Сертифікат сервера відхилено','cf.connecting':'Підключення до Cloudflare…','cf.connect':'Підключити через Cloudflare','cf.connect.title':'Підключити {host} через Cloudflare?','cf.connect.ask':'У Cloudflare створюється зона, A-запис вказує на сервер. NS Cloudflare потрібно буде вказати у реєстратора.','cf.connect.ask.nc':'NS домену в Namecheap зміняться на Cloudflare, A-запис вказуватиме на сервер. Поки зона не активна, домен може бути недоступним.','cf.connect.done':'Підключено до Cloudflare, чекаємо активації зони','cf.connect.set':'NS змінено, чекаємо активації зони в Cloudflare','cf.ns.title':'Сервери імен','cf.ns.hint':'Вкажіть ці NS у реєстратора домену.','cf.ns.copy':'Копіювати','cf.ns.copied':'Скопійовано','cf.ns.select':'Скопіюйте виділений текст вручну','dom.conn.title':'Домен підключено','dom.conn.title.many':'Домени підключено','dom.conn.text':'Ці домени тепер доходять до сервера:','dom.conn.ok':'Зрозуміло','dom.conn.go':'Перейти до доменів','kt.col.count':'Скільки','kt.col.refs':'Де','kt.groups.more':'ще груп не показано:','page.open':'Відкрити сторінку','page.hint':'Вивід зберігається файлом; редагуйте його через «Відкрити сторінку».','page.missing':'Файлу ще немає; збереження створить його.','kt.c.lists':'IP-списки','kt.c.pages':'Сторінки','menu.logout':'Вийти','sig.update':'Готовий новіший коміт для встановлення','sig.down.title':'Служба не відповідає','sig.down.text':'Не відповідає: {list}. Перезапустіть сервер або цю службу. Стан і команди — у «Налаштування → {about}».','sig.down.ok':'Закрити','sig.down.go':'Відкрити «{about}»','sig.svc.engine':'рушій','sig.svc.clickhouse':'ClickHouse','sig.svc.redis':'Redis',
 'users.board.main':'Основний розділ «{name}»','users.board.main.hint':'Участь в інших розділах цю позначку не знімає.','users.board.all':'Усі розділи: акаунт бачить кожен розділ.','users.board.member':'Також за участю: {list}.','users.board.member.none':'Немає участі в інших розділах; учасників задають у налаштуваннях розділів.','users.board.empty':'Без основного розділу і без участі користувач не побачить жодного розділу.','board.none':'У вас немає доступу до жодного розділу. Попросіть адміністратора додати вас до розділу.','board.people.main':'Участь додає користувачу цей розділ. Основний розділ задається в картці користувача і тут не змінюється.','board.main':'За замовчуванням','board.switch':'Розділ','board.sections':'Розділи','board.settings':'Налаштування розділів','board.create':'Назва нового розділу','board.import':'Імпорт із виду за замовчуванням','board.empty':'У виді за замовчуванням поки нічого копіювати.','board.page.title':'Розділи','board.add':'Створити розділ','board.icon':'Іконка','board.recent':'Нещодавні','board.all':'Усі іконки','board.colors':'Колір','board.name':'Назва','board.id':'ID','board.delete':'Видалити','board.move':'Перемістити','board.delete.confirm':'Видалити цей розділ?','board.inuse':'У розділі є записи','board.saved':'Збережено','board.expand':'Склад і учасники','board.include':'Вид розділу','board.include_all':'Показувати вміст усіх розділів','board.collapse':'Згорнути','board.compose.title':'Склад','board.compose.folders':'папки','board.compose.save':'Зберегти склад','board.compose.saved':'Склад збережено','board.compose.addid':'Додати id','board.compose.add':'Додати','board.compose.search':'Пошук за id або імʼям','err.csrf':'Сесія застаріла. Оновіть сторінку.','board.people.title':'Учасники','board.people.role':'Роль','board.people.add':'Додати учасника','board.people.remove':'Прибрати','board.people.save':'Зберегти учасників','board.people.saved':'Учасників збережено','board.role.read':'Читання','board.role.edit':'Редагування','board.role.created':'Лише свої',
 'period.today':'Сьогодні','period.yesterday':'Вчора','period.week':'Поточний тиждень','period.7d':'Останні 7 днів','period.month':'Поточний місяць','period.prevmonth':'Попередній місяць','period.30d':'Останні 30 днів','period.year':'Поточний рік','period.all':'За весь час','period.dates':'Інтервал дат','period.times':'Інтервал часу','period.need':'Вкажіть обидва краї інтервалу',
 'settings.country':'Країна','settings.lang':'Мова інтерфейсу','settings.search':'Знайти країну','settings.geo':'Джерело країни для нової кампанії','settings.geo.cf':'Заголовок CDN','settings.geo.db':'Гео-база','settings.hint':'Пошук одразу за кодом і за англійською, російською та українською назвою.','settings.tz':'Часовий пояс статистики','settings.tz.find':'Знайти часовий пояс','settings.tz.hint':'Періоди й час у звітах рахуються в цьому поясі. Пояс самого відвідувача не змінюється.',
 'flows.title':'Кампанії','dirty.title':'Незбережені зміни:','dirty.flow':'Кампанія','dirty.removed':'Видалено: {n}','dirty.all':'Показати всі','dirty.less':'Згорнути','flow.compact':'Компактний вигляд','flow.expanded':'Докладний вигляд','flow.traffic.off':'Сортування: вимк','flow.traffic.desc':'Сортування за трафіком: більше зверху','flow.traffic.asc':'Сортування за трафіком: менше зверху','flow.traffic.lock':'Вимкніть сортування, щоб змінювати порядок','flow.revenue.asc':'Сортування за доходом: менше зверху','flow.revenue.desc':'Сортування за доходом: більше зверху','flows.table':'Таблиця','flows.cards':'Картки','flows.search':'Пошук кампаній і потоків…','flows.new':'Нова кампанія','flows.bulk.on':'Увімкнути','flows.bulk.off':'Вимкнути','flows.bulk.dup':'Дублювати','flows.bulk.del':'Видалити','flows.bulk.n':'обрано','flows.col.id':'Кампанія','flows.col.num':'ID','flows.col.name':'Назва кампанії','flows.col.url':'URL','flows.col.streams':'Потоки','flows.page':'На сторінці','flows.page.custom':'Своє','flows.state':'Стан','flows.state.all':'Усі','flows.state.on':'Увімкнені','flows.state.off':'Вимкнені','flows.state.hits':'З візитами','flows.state.any':'Усі стани','flows.source.all':'Усі джерела','flows.nosource':'Без джерела','flows.nofolder':'Без групи','flows.sum':'Разом','flows.sum.sel':'Обрані','flows.visits':'візити','flows.bots':'боти','flows.conv':'конверсії','flows.profit':'прибуток','flows.nostreams':'Немає потоків — кожен відвідувач отримує відповідь за замовчуванням','flows.more':'ще','flows.streams':'потоків','flows.logs':'Журнали','flows.log.clicks':'Лог кліків','flows.log.conv':'Лог конверсій','tester.ip':'IP-адреса','tester.country':'Країна','tester.lang':'Мова','tester.referer':'Реферер','tester.key':'Ключове слово','tester.query':'Параметри URL','tester.hint':'Бере кампанії з екрана, збережені чи ні. Ліміти показів, перевірка ботів і антифлуд залежать від живого трафіку і тут не рахуються.','src.title':'Джерела трафіку','src.new':'Нове джерело','src.our':'Ім’я у нас','src.theirs':'Ім’я в посиланні','src.empty':'Джерел ще немає','src.link':'Посилання кампанії','log.traffic':'Трафік','log.postbacks':'Postbacks і S2S','log.system':'Системний','log.outcome':'Результат','log.direction':'Напрям','rep.title':'Звіт','rep.csv':'Завантажити CSV','rep.empty':'За цей період порожньо',
 'conv.title':'Конверсії','conv.subid':'Subid','conv.status':'Статус','conv.lead':'Лід','conv.sale':'Продаж','conv.campaign':'Кампанія','conv.stream':'Потік','conv.offer':'Офер','conv.landing':'Лендінг','conv.network':'Мережа','conv.source':'Джерело','conv.columns':'Стовпці','conv.all':'Усі',
-'net.title':'Мережі','net.create':'Нова мережа','net.name':'Назва','net.url':'Postback URL','net.param':'Параметри офера','net.template':'Шаблон','net.save':'Зберегти','net.empty':'Мереж ще немає','net.copy':'Копіювати','net.hint':'Нотатка для кабінету мережі. Трекер цю адресу не викликає.',
-'off.title':'Офери','off.new':'Новий офер','off.name':'Назва','off.group':'Група','off.url':'URL','off.local':'Локальний','off.empty':'Оферів ще немає','off.tab.redirect':'Редирект','off.tab.local':'Локальний','off.local.soon':'HTML у розробці','off.countries':'Країни','off.payout':'Виплата','off.model':'Модель','off.currency':'Валюта','off.payout.param':'Параметр payout','off.again':'Додати ще','off.allnets':'Усі мережі','off.allgroups':'Усі групи','off.search':'Пошук оферів…','land.search':'Пошук лендингів…','net.search':'Пошук мереж…','src.search':'Пошук джерел…','dom.search':'Пошук доменів…','cat.groups.search':'Пошук групи…','grp.create':'Створити групу','off.visits':'Візити','off.conv':'Конверсії','off.revenue':'Дохід','col.clicks':'Кліки','col.day':'Дата','col.leads':'Ліди','col.sales':'Продажі','col.rej':'Відхилені','col.rej.hint':'Постбеки зі статусом rejected','money.nocost':'Витрату не записано: задайте параметр ціни в кампанії або внесіть витрату','then.mode.offers':'Лендінги й офери','then.mode.url':'Прямий URL','then.mode.action':'Дія','share.label':'Частка, %','share.hint':'Частка відвідувачів, які потраплять на цей рядок. Сума одного списку — не більше 100.','share.dead':'не отримує трафік','s2s.global':'Спільні шаблони','s2s.global.empty':'Спільних шаблонів ще немає','s2s.global.edit':'Спільні шаблони…','col.cr':'CR','col.uepc':'uEPC','col.epc':'EPC','col.cpc':'CPC','col.revenue':'Дохід','col.cost':'Витрата','col.profit':'Прибуток','col.depsum':'DepSum','col.roi':'ROI','col.crok':'CR підтв.','col.crrej':'CR режиму','col.uniq':'Уніки','col.conv':'Конверсії','col.spend':'Витрата','bot.title':'Захист від ботів','bot.save':'Зберегти набір','bot.hint':'User-Agent — рядок браузера, не країна. Імена краулерів дописують у «Списках», файл signature_ua.dat, один підрядок на рядок.','bot.bl':'Чорний список','bot.bl.hint':'Один повний рядок User-Agent на лінію. Збіг точний.','bot.bl.save':'Зберегти список','bot.proxy.default':'Перевірка проксі: за замовчуванням.','bot.proxy.wait':'Перевірка проксі: за замовчуванням; увімкнеться після завантаження списку iCloud Private Relay (Автоматизація → ip_lists).','bot.proxy.reset':'Скинути перевірку проксі до замовчування','pb.title':'Постбеки','pb.hint':'Це адреси цього трекера. Їх вставляють у кабінет партнерської мережі. Трекер сам по них не ходить.','pb.lead':'Лід','pb.sale':'Продаж','pb.rejected':'Відхилено','pb.copy':'Копіювати','pb.copyall':'Копіювати всі','pb.docs':'Документація','pb.url':'Postback URL','pb.host':'Хост','pb.copy.url':'Скопіювати','pb.nokey':'Ключ постбека не потрібен: достатньо id кліку в subid. Кожне REPLACE замініть макросом вашої мережі.','pb.local':'Це локальна адреса. На сервері хост — домен для посилань або хост адмінки.',
+'net.title':'Мережі','net.create':'Нова мережа','net.name':'Назва','net.label':'Назва','net.tpl.ph':'Оберіть шаблон','net.tpl.notes':'Інструкція шаблону (лише читання)','net.tpl.conv':'Статуси мережі (трекер їх не зіставляє)','net.tpl.edit':'Редагувати шаблон','net.tpl.add':'Новий шаблон','net.tpl.edited':'У шаблоні є ваші правки.','net.tpl.ed.ins':'Інструкція','net.tpl.ed.hint':'Порожнє поле залишає значення каталогу. {origin} — адреса цього трекера.','net.tpl.ed.reset':'Скинути до каталогу','net.tpl.ed.del':'Видалити шаблон','net.tpl.state.none':'Параметри цього шаблону не отримано. Заповніть поля вручну.','net.tpl.state.partial':'У шаблону відома лише частина полів. Решту заповніть вручну.','net.param.help.t':'Параметри офера','net.param.help.a':'Параметри, які потрібно додавати до всіх оферів.','net.param.help.req':'Обов’язково','net.param.help.ex1':'ваш_sub1={subid}','net.param.help.opt':'Опційно:','net.param.help.ex2':'ваш_sub2={campaign_name}&...','net.url':'Postback URL','net.param':'Параметри офера','net.template':'Шаблон','net.save':'Зберегти','net.empty':'Мереж ще немає','net.copy':'Копіювати','net.hint':'Нотатка для кабінету мережі. Трекер цю адресу не викликає.',
+'off.title':'Офери','off.new':'Новий офер','off.name':'Назва','off.group':'Група','off.url':'URL','off.local':'Локальний','off.empty':'Оферів ще немає','off.tab.redirect':'Редирект','off.tab.local':'Локальний','off.local.soon':'HTML у розробці','off.countries':'Країни','off.payout':'Виплата','off.model':'Модель','off.currency':'Валюта','off.payout.param':'Параметр payout','off.again':'Додати ще','off.allnets':'Усі мережі','cat.pick.page':'Вибрати все на цій сторінці','cat.pick.row':'Вибрати рядок','net.del.many':'Видалити мереж: {n}?','off.del.many':'Видалити оферів: {n}?','off.allgroups':'Усі групи','off.search':'Пошук оферів…','land.search':'Пошук лендингів…','net.search':'Пошук мереж…','src.search':'Пошук джерел…','dom.search':'Пошук доменів…','cat.groups.search':'Пошук групи…','grp.create':'Створити групу','off.visits':'Візити','off.conv':'Конверсії','off.revenue':'Дохід','col.clicks':'Кліки','col.day':'Дата','col.leads':'Ліди','col.sales':'Продажі','col.rej':'Відхилені','col.rej.hint':'Постбеки зі статусом rejected','money.nocost':'Витрату не записано: задайте параметр ціни в кампанії або внесіть витрату','then.mode.offers':'Лендінги й офери','then.mode.url':'Прямий URL','then.mode.action':'Дія','share.label':'Частка, %','share.hint':'Частка відвідувачів, які потраплять на цей рядок. Сума одного списку — не більше 100.','share.dead':'не отримує трафік','s2s.global':'Спільні шаблони','s2s.global.empty':'Спільних шаблонів ще немає','s2s.global.edit':'Спільні шаблони…','col.cr':'CR','col.uepc':'uEPC','col.epc':'EPC','col.cpc':'CPC','col.revenue':'Дохід','col.cost':'Витрата','col.profit':'Прибуток','col.depsum':'DepSum','col.roi':'ROI','col.crok':'CR підтв.','col.crrej':'CR режиму','col.uniq':'Уніки','col.conv':'Конверсії','col.spend':'Витрата','bot.title':'Захист від ботів','bot.save':'Зберегти набір','bot.hint':'User-Agent — рядок браузера, не країна. Імена краулерів дописують у «Списках», файл signature_ua.dat, один підрядок на рядок.','bot.bl':'Чорний список','bot.bl.hint':'Один повний рядок User-Agent на лінію. Збіг точний.','bot.bl.save':'Зберегти список','bot.proxy.default':'Перевірка проксі: за замовчуванням.','bot.proxy.wait':'Перевірка проксі: за замовчуванням; увімкнеться після завантаження списку iCloud Private Relay (Автоматизація → ip_lists).','bot.proxy.reset':'Скинути перевірку проксі до замовчування','pb.title':'Постбеки','pb.hint':'Це адреси цього трекера. Їх вставляють у кабінет партнерської мережі. Трекер сам по них не ходить.','pb.lead':'Лід','pb.sale':'Продаж','pb.rejected':'Відхилено','pb.copy':'Копіювати','pb.copyall':'Копіювати всі','pb.docs':'Документація','pb.url':'Postback URL','pb.host':'Хост','pb.copy.url':'Скопіювати','pb.nokey':'Ключ постбека не потрібен: достатньо id кліку в subid. Кожне REPLACE замініть макросом вашої мережі.','pb.local':'Це локальна адреса. На сервері хост — домен для посилань або хост адмінки.',
 'pbd.title':'Документація щодо постбеків','pbd.back':'Назад','pbd.c.p':'Параметр','pbd.c.a':'Також приймається','pbd.c.m':'Зміст',
 'pbd.fmt.t':'Формат посилання','pbd.fmt.b':'Мережа викликає цей трекер, коли клік конвертувався. Потрібен GET або POST на <code>/postback</code> будь-якого домену для посилань або хоста адмінки (без порту). Ключ можна додати параметром <code>&amp;key=</code> (секрет EMTDS_POSTBACK_SECRET); без ключа постбек приймається, поки не ввімкнено суворий режим.','pbd.fmt.b2':'Кожне <code>REPLACE</code> замініть макросом мережі. Параметри можуть прийти й у тілі форми POST. Відповідь — JSON: <code>{"status":"success"}</code> або <code>{"status":"error","error":"…"}</code>. Адресу постбека мережі трекер сам не викликає.',
 'pbd.par.t':'Параметри','pbd.p.subid':'Id кліку, обовʼязковий. Перше непорожнє з трьох імен.','pbd.p.status':'Статус конверсії. Перше непорожнє з трьох імен; регістр літер не важливий.','pbd.p.payout':'Виплата, ваш дохід: число з крапкою. Береться перше з трьох імен, яке розбирається як число; значення не додаються. Порожнє або не число лишається 0; NaN і Inf відхиляються з 400.','pbd.p.depsum':'Сума депозиту. Зберігається у своєму стовпці і до виплати ніколи не додається. Порожнє або не число лишається 0.','pbd.p.tid':'Ідентифікатор угоди в мережі, не більше 128 байтів. Необовʼязковий.',
@@ -12029,7 +12125,7 @@ uk:{
 'ai.chat.del.title':'Видалити «{title}»?','ai.chat.del.text':'Друге підтвердження. Асистент видалить запис; після цього його можна відкотити, поки ніщо не заважає відновленню.','ai.chat.del.ok':'Видалити',
 'ai.chat.applied':'Правку застосовано','ai.chat.rejected':'Правку відхилено','ai.chat.reverted':'Правку відкочено',
 'ai.chat.err.ai_disabled':'Асистент вимкнений.','ai.chat.err.ai_busy':'Асистент ще відповідає на попереднє повідомлення.','ai.chat.err.ai_quota':'Добовий ліміт асистента вичерпано.','ai.chat.err.ai_quota.user_budget':'Ваш добовий бюджет асистента в USD вичерпано.','ai.chat.err.ai_quota.group_budget':'Добовий бюджет вашої групи для асистента в USD вичерпано.',
-'ai.chat.err.ai_bad_model':'Ця модель не дозволена. Оберіть іншу.','ai.chat.err.ai_provider_error':'Збій у провайдера AI. Повторіть пізніше.','ai.chat.err.ai_timeout':'Провайдер AI не відповів вчасно.',
+'ai.chat.err.ai_bad_model':'Ця модель не дозволена. Оберіть іншу.','ai.chat.err.ai_provider_error':'Збій у провайдера AI. Повторіть пізніше.','ai.chat.err.ai_provider_error.empty_summary':'Контекст не стиснувся: модель повернула порожній підсумок, а розмова вже не вміщується у вікно. Знайдене збережено вище; почніть нове повідомлення або коротше завдання.','ai.chat.err.ai_provider_error.overload':'Провайдер AI перевантажений або недоступний (серверна помилка з його боку). Повторіть за хвилину.','ai.chat.err.ai_provider_error.unreachable':'Провайдер AI не відповідає (збій мережі). Повторіть за хвилину.','ai.chat.err.ai_timeout':'Провайдер AI не відповів вчасно.',
 'ai.chat.err.ai_rate_limited':'Провайдер AI обмежує запити. Зачекайте трохи й повторіть.','ai.chat.err.ai_bad_key':'Провайдер відхилив ключ API. Перевірте його в інтеграціях.',
 'ai.chat.err.ai_disk_full':'Для історії асистента не лишилося місця. Видаліть старі чати.','ai.chat.err.keitaro_running':'Триває перенесення Keitaro. Застосування й відкат вимкнені до його кінця.',
 'ai.chat.err.ai_conflict':'Змінено вручну, відкат неможливий. Попросіть асистента нову правку.','ai.chat.err.ai_stale':'Запис змінився після пропозиції. Відхиліть її та попросіть асистента нову правку.',
@@ -12106,7 +12202,7 @@ ru:{
 'look up':'проверить','Routing':'Маршрутизация','Where from':'Откуда','bot':'бот','Click ID':'Click ID','default (no stream matched)':'по умолчанию (поток не подошёл)',
 'the engine cannot use it and this condition never matches':'движок не может это применить, условие никогда не сработает','Remove':'Убрать','this is what stopped the test visitor':'это остановило тестового посетителя',
 'Use a list of words':'Список слов','Use a regular expression':'Регулярное выражение','API key':'Ключ API','Flag at, verdicts':'Порог, вердиктов','Also check':'Также проверить','Alert below, % free':'Сигнал, если свободно меньше, %','Paths (empty = data directory)':'Пути (пусто = каталог данных)','Keep keyword files, days':'Хранить файлы ключей, дней','Message':'Сообщение',
-'Generic S2S':'Обычный S2S','clickid, goal, sum':'clickid, goal, sum','Create':'Создать','Delete network':'Удалить сеть','No networks yet':'Сетей пока нет',
+'Create':'Создать','Delete network':'Удалить сеть','No networks yet':'Сетей пока нет',
 'Too many attempts, try again later':'Слишком много попыток, попробуйте позже','Invalid login or password':'Неверный логин или пароль','Sign-in is temporarily unavailable':'Вход временно недоступен','Reset password':'Восстановить пароль','Login':'Логин','Recovery code':'Код восстановления','Set a new password':'Задать новый пароль','The recovery code is invalid or expired':'Код недействителен или истёк','Password updated. Sign in with the new one.':'Пароль обновлён. Войдите с новым.','Back to sign in':'Вернуться ко входу','Log out?':'Выйти?','There are unsaved changes; they will be lost.':'Есть несохранённые изменения, они пропадут.','Log out':'Выйти',
 'Delete flows?':'Удалить кампании?','They are removed when you save.':'Они удалятся, когда вы сохраните.','Flows':'Кампании','Edit':'Изменить','Move to flow':'Перенести в кампанию','Moved to':'Перенесено в','Choose a flow…':'Выберите кампанию…','from the link':'из ссылки','from search engines':'из поисковиков','Run now':'Запустить сейчас','Bot IP lists':'Списки IP ботов','Disk space':'Место на диске','Keyword cleanup':'Очистка ключевых слов','Conversion alerts':'Оповещения о конверсиях','VirusTotal':'VirusTotal','In lists':'В списках','Running…':'Выполняется…','done':'готово','failed':'ошибка','next':'далее','off':'выкл','Download fresh crawler ranges into the .dat lists the bot checks use.':'Скачивает свежие диапазоны краулеров в .dat-списки, которыми пользуются проверки ботов.','Download the MaxMind-format City and ASN databases. The engine reloads them by itself.':'Скачивает базы City и ASN в формате MaxMind. Движок подхватывает их сам.','Check the domains your streams send visitors to; a flagged domain is about to get browser warnings.':'Проверяет домены, куда потоки отправляют посетителей. Помеченный домен скоро получит предупреждение браузера.','Warn when the disk is nearly full — a full disk stops lists and logs from being written.':'Предупреждает, когда диск почти полон. Полный диск останавливает запись списков и журнала.','Delete collected keyword files after a number of days.':'Удаляет собранные файлы ключевых слов через заданное число дней.','Send every new conversion to Telegram.':'Отправляет каждую новую конверсию в Telegram.','Change the fetched page — find → replace':'Изменить загруженную страницу — найти → заменить','Change the page for bots — find → replace':'Изменить страницу для ботов — найти → заменить','Separation file (.dat, lines “key;output”)':'Файл разделения (.dat, строки «ключ;вывод»)','URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])':'URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])','Regexp (/…/, first group)':'Регулярное выражение (/…/, первая группа)','Cache, seconds':'Кеш, секунды','Code (macros allowed)':'Код (макросы можно)','Probability, %':'Вероятность, %','ID — the link is':'ID — ссылка','Aliases — other IDs that open this flow':'Алиасы — другие ID этой кампании','More than, requests':'Больше, запросов','Within, seconds':'За, секунд','— choose a flow —':'— выберите кампанию —','There is no other flow yet. Create one first.':'Другой кампании ещё нет. Сначала создайте её.','Country (as the CDN reports it)':'Страна (как сообщает CDN)','Any letter case; macros work in both.':'Регистр не важен, макросы работают в обеих частях.','what this stream is for — shown on the canvas':'зачем этот поток — видно на схеме','for you, shown in reports':'для вас, видно в отчётах'
 },
@@ -12152,7 +12248,7 @@ uk:{
 'look up':'перевірити','Routing':'Маршрутизація','Where from':'Звідки','bot':'бот','Click ID':'Click ID','default (no stream matched)':'за замовчуванням (потік не підійшов)',
 'the engine cannot use it and this condition never matches':'рушій не може це застосувати, умова ніколи не спрацює','Remove':'Прибрати','this is what stopped the test visitor':'це зупинило тестового відвідувача',
 'Use a list of words':'Список слів','Use a regular expression':'Регулярний вираз','API key':'Ключ API','Flag at, verdicts':'Поріг, вердиктів','Also check':'Також перевірити','Alert below, % free':'Сигнал, якщо вільно менше, %','Paths (empty = data directory)':'Шляхи (порожньо = каталог даних)','Keep keyword files, days':'Зберігати файли ключів, днів','Message':'Повідомлення',
-'Generic S2S':'Звичайний S2S','clickid, goal, sum':'clickid, goal, sum','Create':'Створити','Delete network':'Видалити мережу','No networks yet':'Мереж ще немає',
+'Create':'Створити','Delete network':'Видалити мережу','No networks yet':'Мереж ще немає',
 'Too many attempts, try again later':'Забагато спроб, спробуйте пізніше','Invalid login or password':'Невірний логін або пароль','Sign-in is temporarily unavailable':'Вхід тимчасово недоступний','Reset password':'Відновити пароль','Login':'Логін','Recovery code':'Код відновлення','Set a new password':'Задати новий пароль','The recovery code is invalid or expired':'Код недійсний або прострочений','Password updated. Sign in with the new one.':'Пароль оновлено. Увійдіть з новим.','Back to sign in':'Повернутися до входу','Log out?':'Вийти?','There are unsaved changes; they will be lost.':'Є незбережені зміни, вони зникнуть.','Log out':'Вийти',
 'Delete flows?':'Видалити кампанії?','They are removed when you save.':'Вони видаляться, коли ви збережете.','Flows':'Кампанії','Edit':'Змінити','Move to flow':'Перенести в кампанію','Moved to':'Перенесено в','Choose a flow…':'Оберіть кампанію…','from the link':'з посилання','from search engines':'з пошуковиків','Run now':'Запустити зараз','Bot IP lists':'Списки IP ботів','Disk space':'Місце на диску','Keyword cleanup':'Очищення ключових слів','Conversion alerts':'Сповіщення про конверсії','VirusTotal':'VirusTotal','In lists':'У списках','Running…':'Виконується…','done':'готово','failed':'помилка','next':'далі','off':'вимк','Download fresh crawler ranges into the .dat lists the bot checks use.':'Завантажує свіжі діапазони краулерів у .dat-списки, якими користуються перевірки ботів.','Download the MaxMind-format City and ASN databases. The engine reloads them by itself.':'Завантажує бази City і ASN у форматі MaxMind. Рушій підхоплює їх сам.','Check the domains your streams send visitors to; a flagged domain is about to get browser warnings.':'Перевіряє домени, куди потоки надсилають відвідувачів. Позначений домен незабаром отримає попередження браузера.','Warn when the disk is nearly full — a full disk stops lists and logs from being written.':'Попереджає, коли диск майже повний. Повний диск зупиняє запис списків і журналу.','Delete collected keyword files after a number of days.':'Видаляє зібрані файли ключових слів через задану кількість днів.','Send every new conversion to Telegram.':'Надсилає кожну нову конверсію в Telegram.','Change the fetched page — find → replace':'Змінити завантажену сторінку — знайти → замінити','Change the page for bots — find → replace':'Змінити сторінку для ботів — знайти → замінити','Separation file (.dat, lines “key;output”)':'Файл розділення (.dat, рядки «ключ;вивід»)','URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])':'URL ([IP] [COUNTRY] [CITY] [LANG] [KEY])','Regexp (/…/, first group)':'Регулярний вираз (/…/, перша група)','Cache, seconds':'Кеш, секунди','Code (macros allowed)':'Код (макроси можна)','Probability, %':'Ймовірність, %','ID — the link is':'ID — посилання','Aliases — other IDs that open this flow':'Аліаси — інші ID цієї кампанії','More than, requests':'Більше, запитів','Within, seconds':'За, секунд','— choose a flow —':'— оберіть кампанію —','There is no other flow yet. Create one first.':'Іншої кампанії ще немає. Спочатку створіть її.','Country (as the CDN reports it)':'Країна (як повідомляє CDN)','Any letter case; macros work in both.':'Регістр не важливий, макроси працюють в обох частинах.','what this stream is for — shown on the canvas':'навіщо цей потік — видно на схемі','for you, shown in reports':'для вас, видно у звітах'
 }
@@ -13420,6 +13516,58 @@ function campaignFolders(){
   names.sort((a,b)=>a.localeCompare(b));
   return names;
 }
+/** setCampaignFolder gives the campaigns one folder label, or takes the label off when it is empty.
+ * A saved campaign is written with PUT /api/groups/{id} of its last saved body with the label changed, so other unsaved
+ * edits stay in the draft and no request carries the whole list. A campaign that was never saved, or whose id changed
+ * since the save, changes only in memory and joins the drafts. Campaigns are written one by one: the first failed
+ * request rejects, campaigns already written keep the label and the rest stay unchanged.
+ * @param {object[]} list campaigns from GROUPS
+ * @param {string} label folder label; empty removes it
+ * @returns {Promise<void>} */
+async function setCampaignFolder(list, label){
+  const name=String(label||'').trim();
+  const apply=o=>{ if(name) o.folder=name; else delete o.folder; };
+  for(const g of list){
+    const prev=SNAP.get(g);
+    const renamed=!!(prev&&prev.id!==g.id);
+    if(!prev||renamed||!g.id){
+      apply(g);
+      markDirty(g);
+      continue;
+    }
+    const saved=groupParse(prev.json);
+    apply(saved);
+    await call('PUT','/api/groups/'+encodeURIComponent(prev.id), saved);
+    const dirty=DIRTY.has(g);
+    apply(g);
+    if(!dirty) SNAP.set(g,{id:g.id,json:groupJSON(g)});
+    else{
+      const snap=groupParse(prev.json);
+      apply(snap);
+      SNAP.set(g,{id:prev.id,json:groupJSON(snap)});
+    }
+    markDirty(g);
+  }
+}
+/** openFlowFolderPick asks for a group and writes it to the ticked campaigns with setCampaignFolder.
+ * Campaigns that took the label leave the selection even when a later one fails; the table is redrawn either way.
+ * @param {object[]} list ticked campaigns the role may change
+ * @returns {void} */
+function openFlowFolderPick(list){
+  const rows=()=>campaignFolders().map(name=>({group:name}));
+  const m=formModal(tr('dom.group.set'), `<div class="fld"><label>${tr('off.group')}</label>${groupFieldBlock('fbg','')}</div>`, async(box)=>{
+    const label=resolveGroupName(groupInputValue(q('#fbg',box)), rows());
+    try{ await setCampaignFolder(list, label); }
+    finally{
+      list.forEach(g=>{ if(String(g.folder||'').trim()===label) FLOW_PICK.delete(g.id); });
+      paintFlowCards();
+    }
+    toast(tr('Saved'));
+    return 'stay';
+  });
+  const inp=q('#fbg',m);
+  if(inp){ bindGroupCombo(inp, rows(), ()=>{}); bindGroupInlineCreate(m, 'fbg', rows()); }
+}
 /** clearCampaignFolder removes one folder label from every campaign that carries it.
  * name is the label. A saved campaign is written with PUT /api/groups/{id} of its last saved body without folder, so other unsaved edits stay in the draft. A campaign that was never saved, or whose id changed since the save, only loses the label in memory.
  * Campaigns are written one by one. The first failed request rejects and leaves the campaigns not yet reached unchanged.
@@ -13455,6 +13603,7 @@ async function clearCampaignFolder(name){
 const NO_GROUP='\u0000none';
 const CAT_Q={offers:'',landings:'',networks:'',sources:'',domains:''};
 const CAT_GROUP={offers:'',landings:'',networks:'',sources:'',domains:''};
+const CAT_NET={offers:''};
 let CAT_NEW_GROUP={offers:'',landings:'',networks:'',sources:''};
 /** groupLabels returns unique non-empty trimmed group names from catalog rows, sorted with localeCompare.
  * @param {Array} rows catalog records with optional group
@@ -13478,6 +13627,35 @@ function matchesGroup(row, pick){
   if(!pick) return true;
   if(pick===NO_GROUP) return !g;
   return g===String(pick).trim();
+}
+/** matchesNetwork tests an offer against the affiliate network filter pick.
+ * @param {{network_id?:string}} row offer
+ * @param {string} pick network id; empty is all networks
+ * @returns {boolean} false for an offer without a network once a network is picked */
+function matchesNetwork(row, pick){
+  if(!pick) return true;
+  return String(row&&row.network_id||'')===String(pick);
+}
+/** fillNetSelect rebuilds the network filter options: the networks some offer uses, sorted by name.
+ * The select is hidden when no offer has a network. A pick no offer uses any more is cleared.
+ * @param {HTMLSelectElement|null} sel network filter
+ * @param {Array} nets affiliate networks, for the names
+ * @param {Array} rows offers
+ * @param {string} pick current selection
+ * @returns {string} active pick */
+function fillNetSelect(sel, nets, rows, pick){
+  if(!sel) return pick||'';
+  const name=id=>{const n=(nets||[]).find(x=>x.id===id); return (n&&n.name)||id};
+  const ids=[...new Set((Array.isArray(rows)?rows:[]).map(r=>String(r&&r.network_id||'')).filter(Boolean))];
+  const list=ids.map(id=>({id,label:name(id)})).sort((a,b)=>a.label.localeCompare(b.label));
+  let p=pick||'';
+  if(!ids.includes(p)) p='';
+  const probe=document.createElement('select');
+  probe.innerHTML=opt('',tr('off.allnets'),p)+list.map(n=>opt(n.id,n.label,p)).join('');
+  if(sel.innerHTML!==probe.innerHTML) sel.innerHTML=probe.innerHTML;
+  sel.hidden=list.length===0;
+  if(sel.value!==p) sel.value=p;
+  return p;
 }
 /** textMatch is case-insensitive substring search across fields.
  * @param {string} q query
@@ -13551,12 +13729,13 @@ function bindSearchClear(inp){
 /** catalogBar returns the shared search, group filter and refresh toolbar for a catalog page.
  * @param {string} kind page id prefix (offers, landings, …)
  * @param {string} placeholderKey tr() key for the search placeholder
- * @param {{create?: string}} [opts] optional Create button HTML for the toolbar
+ * @param {{create?: string, net?: boolean}} [opts] optional Create button HTML for the toolbar; net adds the affiliate network filter
  * @returns {string} toolbar HTML */
 function catalogBar(kind, placeholderKey, opts){
   opts=opts||{};
   const create=opts.create||'';
-  return `<div class="toolbar bar-fit"><div class="lft">${create}${searchField(`<input id="${kind}-q" placeholder="${esc(tr(placeholderKey))}" value="${esc(CAT_Q[kind]||'')}" autocomplete="off">`)}</div><div class="rgt"><select id="${kind}-group" data-pick aria-label="${esc(tr('off.group'))}"></select><button type="button" class="icon" id="${kind}-refresh" title="${tr('Refresh')}" aria-label="${tr('Refresh')}">${icon('refresh')}</button></div></div>`;
+  const net=opts.net?`<select id="${kind}-net" data-pick aria-label="${esc(tr('stream.network'))}"></select>`:'';
+  return `<div class="toolbar bar-fit"><div class="lft">${create}${searchField(`<input id="${kind}-q" placeholder="${esc(tr(placeholderKey))}" value="${esc(CAT_Q[kind]||'')}" autocomplete="off">`)}</div><div class="rgt">${net}<select id="${kind}-group" data-pick aria-label="${esc(tr('off.group'))}"></select><button type="button" class="icon" id="${kind}-refresh" title="${tr('Refresh')}" aria-label="${tr('Refresh')}">${icon('refresh')}</button></div></div>`;
 }
 /** bindCatalogBar wires filter controls to repaint only the table and optional catalog refresh.
  * @param {string} kind page id prefix
@@ -13584,7 +13763,110 @@ function bindCatalogBar(kind, rows, paintTable, reload){
  * @param {string} kind page id prefix
  * @returns {boolean} */
 function catalogFiltered(kind){
-  return !!(String(CAT_Q[kind]||'').trim()||CAT_GROUP[kind]);
+  return !!(String(CAT_Q[kind]||'').trim()||CAT_GROUP[kind]||(CAT_NET[kind]||''));
+}
+/** CAT_PICK holds the ids ticked in the offers and networks tables; CAT_PICK_MEM is the Shift anchor of each. */
+const CAT_PICK={offers:new Set(), networks:new Set()};
+const CAT_PICK_MEM={offers:{anchor:'',span:[]}, networks:{anchor:'',span:[]}};
+/** CAT_API is the collection a catalog kind is stored under; the kind is also its key in the access grants. */
+const CAT_API={offers:'/api/offers', networks:'/api/affiliate-networks'};
+/** CAT_DEL_KEY is the tr() key of the delete confirmation of a kind; the text has {n}. */
+const CAT_DEL_KEY={offers:'off.del.many', networks:'net.del.many'};
+/** catalogPickSync drops ticked ids that the filter hides or that the role may not change.
+ * @param {string} kind offers or networks
+ * @param {Array} rows rows that pass the current filter
+ * @returns {void} */
+function catalogPickSync(kind, rows){
+  const ok=new Set(rows.filter(r=>canEdit(ME,kind,r)).map(r=>String(r.id)));
+  [...CAT_PICK[kind]].forEach(id=>{ if(!ok.has(id)) CAT_PICK[kind].delete(id); });
+}
+/** catalogPickHead is the header cell of the selection column: it ticks every changeable row of the page.
+ * @param {string} kind offers or networks
+ * @param {Array} page rows shown on this page
+ * @returns {string} th HTML; empty when the role may change no row of the page */
+function catalogPickHead(kind, page){
+  const ids=page.filter(r=>canEdit(ME,kind,r)).map(r=>String(r.id));
+  if(!ids.length) return '<th class="pick"></th>';
+  const label=esc(tr('cat.pick.page'));
+  return `<th class="pick"><input type="checkbox" data-cpick="*" ${ids.every(id=>CAT_PICK[kind].has(id))?'checked':''} title="${label}" aria-label="${label}"></th>`;
+}
+/** catalogPickCell is the checkbox cell of one row; a row the role may not change gets none.
+ * @param {string} kind offers or networks
+ * @param {object} row table row
+ * @returns {string} td HTML */
+function catalogPickCell(kind, row){
+  if(!canEdit(ME,kind,row)) return '<td class="pick"></td>';
+  const id=String(row.id);
+  return `<td class="pick"><input type="checkbox" data-cpick="${esc(id)}" ${CAT_PICK[kind].has(id)?'checked':''} aria-label="${esc(tr('cat.pick.row'))}"></td>`;
+}
+/** catalogBulkBar is the bar of group actions above the table, shown while something is ticked.
+ * @param {string} kind offers or networks
+ * @param {number} total rows that pass the current filter
+ * @returns {string} bar HTML, or empty without a selection */
+function catalogBulkBar(kind, total){
+  const n=CAT_PICK[kind].size;
+  if(!n) return '';
+  return `<div class="bulkbar"><b>${n}/${total}</b> ${tr('flows.bulk.n')} ${bulkAct(kind+'-bulk-group','lists',tr('dom.group.set'),false)}${bulkAct(kind+'-bulk-del','trash',tr('flows.bulk.del'),true)}</div>`;
+}
+/** bindCatalogPick wires the checkboxes and the bar buttons of a catalog table.
+ * @param {Element} grid element holding the table and the bar
+ * @param {string} kind offers or networks
+ * @param {{page:Array, all:Array, labels:Array, repaint:function, reload:function}} ctx page is the rows on screen,
+ * all the rows that pass the filter, labels every loaded row (group names), repaint redraws the table,
+ * reload fetches the page again
+ * @returns {void} */
+function bindCatalogPick(grid, kind, ctx){
+  qa('[data-cpick]',grid).forEach(box=>{
+    box.onclick=e=>{
+      e.stopPropagation();
+      const pick=CAT_PICK[kind], mem=CAT_PICK_MEM[kind];
+      const ids=ctx.page.filter(r=>canEdit(ME,kind,r)).map(r=>String(r.id));
+      if(box.dataset.cpick==='*'){
+        ids.forEach(id=>box.checked?pick.add(id):pick.delete(id));
+        mem.anchor=''; mem.span=[];
+      }else pickSpan(pick, mem, ids, box.dataset.cpick, e.shiftKey, box.checked);
+      ctx.repaint();
+    };
+  });
+  const picked=()=>ctx.all.filter(r=>CAT_PICK[kind].has(String(r.id))&&canEdit(ME,kind,r));
+  const bg=q('#'+kind+'-bulk-group',grid); if(bg) bg.onclick=()=>{ const list=picked(); if(list.length) catalogBulkGroup(kind, list, ctx); };
+  const bd=q('#'+kind+'-bulk-del',grid); if(bd) bd.onclick=()=>{ const list=picked(); if(list.length) catalogBulkDelete(kind, list, ctx); };
+}
+/** catalogBulkGroup asks for a group and writes it to each ticked row, one PUT per row.
+ * The first failed request stops the loop: rows already written keep the new group and leave the selection,
+ * the rest stay ticked and the error is shown. After a full pass the page is redrawn from the server.
+ * @param {string} kind offers or networks
+ * @param {Array} list ticked rows the role may change
+ * @param {{labels:Array, repaint:function}} ctx see bindCatalogPick
+ * @returns {void} */
+function catalogBulkGroup(kind, list, ctx){
+  const m=formModal(tr('dom.group.set'), `<div class="fld"><label>${tr('off.group')}</label>${groupFieldBlock('cbg','')}</div>`, async(box)=>{
+    const group=resolveGroupName(groupInputValue(q('#cbg',box)), ctx.labels);
+    for(const r of list){
+      try{ await call('PUT', CAT_API[kind]+'/'+encodeURIComponent(r.id), Object.assign({}, r, {group})); }
+      catch(e){ ctx.repaint(); throw e; }
+      r.group=group;
+      CAT_PICK[kind].delete(String(r.id));
+    }
+    toast(tr('Saved'));
+  });
+  const inp=q('#cbg',m);
+  if(inp){ bindGroupCombo(inp, ctx.labels, ()=>{}); bindGroupInlineCreate(m, 'cbg', ctx.labels); }
+}
+/** catalogBulkDelete asks once with the number of rows, then deletes them one by one.
+ * The first failed request stops the loop and its error is shown. The page is reloaded either way.
+ * @param {string} kind offers or networks
+ * @param {Array} list ticked rows the role may change
+ * @param {{reload:function}} ctx see bindCatalogPick
+ * @returns {Promise<void>} */
+async function catalogBulkDelete(kind, list, ctx){
+  if(!await ask(trFill(CAT_DEL_KEY[kind],{n:list.length}), '', tr('Delete'), true)) return;
+  for(const r of list){
+    try{ await call('DELETE', CAT_API[kind]+'/'+encodeURIComponent(r.id)); }
+    catch(e){ toast(e.message,true); break; }
+    CAT_PICK[kind].delete(String(r.id));
+  }
+  await ctx.reload();
 }
 /** resolveGroupName picks the stored spelling of a group label, case-insensitive.
  * @param {string} raw typed group
@@ -13837,6 +14119,7 @@ function exportOffers(asHTML){
   const netName=id=>{const n=nets.find(x=>x.id===id); return n?n.name||n.id:''};
   let list=(Array.isArray(OFFERS)?OFFERS:[]).filter(o=>{
     if(!matchesGroup(o, CAT_GROUP.offers)) return false;
+    if(!matchesNetwork(o, CAT_NET.offers)) return false;
     return textMatch(CAT_Q.offers, [o.id, o.name, o.group, o.url, netName(o.network_id)]);
   });
   const offMeta={text:['name','group','network'], name:['name']};
@@ -14141,6 +14424,7 @@ function paintFlowCards(){
       ${bulkAct('bulk-on','play',tr('flows.bulk.on'),false)}
       ${bulkAct('bulk-off','pause',tr('flows.bulk.off'),false)}
       ${bulkAct('bulk-dup','dup',tr('flows.bulk.dup'),false)}
+      ${GROUPS.some(g=>FLOW_PICK.has(g.id)&&canEdit(ME,'campaigns',g))?bulkAct('bulk-group','lists',tr('dom.group.set'),false):''}
       ${bulkAct('bulk-del','trash',tr('flows.bulk.del'),true)}</div>`:'';
     const span=cols.length+2;
     const importBtn=!boardIsMain()&&canCreate(ME,'campaigns')?`<div style="margin-top:12px"><button type="button" class="primary" id="flow-board-import">${icon('download')}${tr('board.import')}</button></div>`:'';
@@ -14167,6 +14451,7 @@ function paintFlowCards(){
     const bon=q('#bulk-on',grid); if(bon) bon.onclick=()=>{const list=picked(); list.forEach(g=>{g.status=true}); FLOW_PICK.clear(); markDirty(list); paintFlowCards()};
     const boff=q('#bulk-off',grid); if(boff) boff.onclick=()=>{const list=picked(); list.forEach(g=>{g.status=false}); FLOW_PICK.clear(); markDirty(list); paintFlowCards()};
     const bdup=q('#bulk-dup',grid); if(bdup) bdup.onclick=async()=>{const list=picked(); for(const g of list) await duplicateFlow(g,true); FLOW_PICK.clear(); paintFlowCards()};
+    const bgrp=q('#bulk-group',grid); if(bgrp) bgrp.onclick=()=>{const list=picked().filter(g=>canEdit(ME,'campaigns',g)); if(list.length) openFlowFolderPick(list)};
     const bdel=q('#bulk-del',grid); if(bdel) bdel.onclick=async()=>{
       const list=picked();
       if(!list.length) return;
@@ -14291,7 +14576,6 @@ function renderFlow(){
   const share=(n)=>p.hits?Math.round(n/p.hits*100)+'%':'';
   const lbl=(n)=>`<span class="flowlbl"><b>${fmt(n)}</b>${p.hits?' · '+share(n):''}</span>`;
   const orderMode=flowTrafficMode(FLOW_TRAFFIC);
-  const visitOrder=orderMode==='asc'||orderMode==='desc';
   const rowHTML=st.map((s,i)=>{
     const sp=perfOf(g,s.name), o=s.out||{}, bt=s.bots||{}, r=step&&step.streams&&step.streams[i];
     let verdict='', hit='';
@@ -14309,7 +14593,7 @@ function renderFlow(){
           <button class="icon sm ghost" data-more title="${tr('More')}">${icon('more')}</button>`:''}</div>
         <div class="chips">${condChips(s,hit)}</div>
         ${s.comment?`<div class="note" title="${esc(s.comment)}">${streamNoteHTML(s)}</div>`:''}
-        ${visitOrder?`<span class="trafbar"><i style="width:${p.hits?Math.min(100,Math.round(sp.hits/p.hits*100)):0}%"></i></span>`:''}
+        ${p.hits?`<span class="trafbar"><i style="width:${Math.min(100,Math.round(sp.hits/p.hits*100))}%"></i></span>`:''}
       </div>
       ${lbl(sp.hits)}
       <div class="dest" data-dest="${i}"${tip?` title="${esc(tip)}"`:''}>
@@ -16739,7 +17023,7 @@ function colCatalog(kind){
     ['uniq','col.uniq',0]
   ];
   if(kind==='networks') return [
-    ['id','flows.col.num',1],['name','net.name',1],['group','off.group',1],
+    ['id','flows.col.num',1],['name','net.label',1],['group','off.group',1],
     ['clicks','col.clicks',1],['leads','col.leads',1],['sales','col.sales',1],['rej','col.rej',1],
     ['cr','col.cr',1],['epc','col.epc',1],['cpc','col.cpc',1],
     ['revenue','col.revenue',1],['cost','col.cost',1],['profit','col.profit',1],['roi','col.roi',1],
@@ -22035,13 +22319,85 @@ async function openPostbacks(){
   q('#pb-pop-rejected',m).onclick=e=>{e.stopPropagation(); copyText(rejected(cur()), e.currentTarget)};
 }
 let PB_DOCS_BACK='conversions';
-function enginePostback(status){
-  return postbackOrigin()+'/postback?subid={subid}&status='+(status||'{status}')+'&payout={payout}';
+/**
+ * netTplPostback is the postback address of a catalog template with this tracker's public address in place of {origin}.
+ * @param {{postback_url?:string}} t template from GET /api/affiliate-network-templates
+ * @returns {string} address for the network cabinet, '' when the template has none
+ */
+function netTplPostback(t){
+  return String((t&&t.postback_url)||'').split('{origin}').join(postbackOrigin());
 }
-const NET_TEMPLATES=[
-  {id:'s2s',label:'Generic S2S',url:'',query:'sub1={subid}'},
-  {id:'click',label:'clickid, goal, sum',url:'https://example.com/postback?clickid={subid}&goal={status}&sum={payout}',query:''}
-];
+/**
+ * netTplFields lists the dialog fields a catalog template can fill and the value it gives each.
+ * A field the template does not know gets '' so a value filled by a previous template is cleared.
+ * @param {object} t template from the catalog
+ * @returns {{nname:string,nparam:string,nurl:string}} value by input id
+ */
+function netTplFields(t){
+  return {nname:String(t.name||''), nparam:String(t.offer_query||''), nurl:netTplPostback(t)};
+}
+/**
+ * netTplFromNetwork builds the body of a new template from a saved network that has none: its name and offer
+ * parameters as they are. The postback address is kept only when it is this tracker's own /postback address,
+ * rewritten to {origin}/postback without the from marker; a foreign host or a path token is dropped. No
+ * instruction is made up.
+ * @param {{name?:string,offer_query?:string,postback_url?:string}} n saved network
+ * @param {string} origin public address of this tracker, as postbackOrigin returns it
+ * @returns {{name:string,offer_query:string,postback_url:string,instruction:string}|null} POST body, null when the network has no name or no offer parameters
+ */
+function netTplFromNetwork(n, origin){
+  const name=String((n&&n.name)||'').trim(), query=String((n&&n.offer_query)||'').trim();
+  if(!name||!query) return null;
+  const pb=String((n&&n.postback_url)||'').trim(), base=String(origin||'').replace(/\/+$/,'')+'/postback';
+  let postback='';
+  if(origin&&(pb===base||pb.startsWith(base+'?'))){
+    const rest=pb.slice(base.length+1).split('&').filter(x=>x&&!/^from=/i.test(x)).join('&');
+    postback='{origin}/postback'+(rest?'?'+rest:'');
+  }
+  if(/:\/\//.test(postback)) postback='';
+  return {name, offer_query:query, postback_url:postback, instruction:''};
+}
+/**
+ * netInstructionHTML renders the instruction of a template as safe HTML. All text is escaped; only p, code, br
+ * and a with an http(s) address are let through, and every tag that was opened is closed. A numeric entity is
+ * decoded first. An instruction without p keeps its line breaks.
+ * @param {string} raw instruction as the catalog or a person wrote it
+ * @returns {string} HTML for the instruction box, '' when raw is empty
+ */
+function netInstructionHTML(raw){
+  const src=String(raw||'').trim().replace(/&#(\d{1,7});/g,(m,n)=>{const c=Number(n); return c>0&&c<=0x10FFFF?String.fromCodePoint(c):''});
+  const plain=!/<p[\s>]/i.test(src);
+  const txt=s=>{const h=esc(s); return plain?h.replace(/\r?\n/g,'<br>'):h};
+  const re=/<(\/?)(p|code)\s*>|<br\s*\/?>|<a\s+href="(https?:\/\/[^"\s<>]*)"(?:\s+target="_blank")?\s*>|<\/a\s*>/gi;
+  const open=[];
+  let out='', last=0, m;
+  const close=name=>{const i=open.lastIndexOf(name); if(i<0) return; while(open.length>i) out+='</'+open.pop()+'>'};
+  while((m=re.exec(src))){
+    out+=txt(src.slice(last,m.index)); last=re.lastIndex;
+    const tag=m[0].toLowerCase();
+    if(m[3]){ out+=`<a href="${esc(m[3])}" target="_blank" rel="noopener noreferrer">`; open.push('a') }
+    else if(tag.startsWith('</a')) close('a');
+    else if(tag.startsWith('<br')) out+='<br>';
+    else{
+      const name=m[2].toLowerCase();
+      if(m[1]) close(name);
+      else{ if(name==='p') close('p'); out+='<'+name+'>'; open.push(name) }
+    }
+  }
+  out+=txt(src.slice(last));
+  while(open.length) out+='</'+open.pop()+'>';
+  return out;
+}
+/**
+ * netConversionsHTML lists the status names the network uses, read-only: the tracker does not map them.
+ * @param {Object<string,string>|undefined} conv conversions of a template
+ * @returns {string} HTML of the list with its caption, '' when there are none
+ */
+function netConversionsHTML(conv){
+  const rows=Object.entries(conv||{});
+  if(!rows.length) return '';
+  return `<p class="net-conv-t">${esc(tr('net.tpl.conv'))}</p><dl>${rows.map(([k,v])=>`<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join('')}</dl>`;
+}
 let LAND_SORT={k:'',dir:-1};
 // Same extension set as server landingTextExt (GET/PUT /api/landings/{id}/files).
 const LAND_TEXT=new Set(['html','htm','php','css','js','txt','json','xml','svg']);
@@ -22429,22 +22785,140 @@ async function landings(arg,live){
 let NET_SORT={k:'',dir:-1}, NET_PAGE=50, NET_PAGE_I=0;
 async function networks(arg,live){
   showPageWait(tr('nav.networks'), '#networks-grid');
-  const [rows,offers]=await Promise.all([get('/api/affiliate-networks',[]), get('/api/offers',[]), loadMoney()]);
+  const [rows,offers,tplRows]=await Promise.all([get('/api/affiliate-networks',[]), get('/api/offers',[]), get('/api/affiliate-network-templates',[]), loadMoney()]);
   if(!live()) return;
   NETS=Array.isArray(rows)?rows:[];
+  let tpls=[], tplById=new Map();
+  const setTpls=list=>{tpls=Array.isArray(list)?list:[]; tplById=new Map(tpls.map(t=>[t.id,t]))};
+  setTpls(tplRows);
+  const tplWrite=canCreate(ME,'networks');
+  const tplOptions=()=>`<option value="">${esc(tr('net.tpl.ph'))}</option>${tpls.map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('')}`;
   document.body.classList.add('has-flowdock');
   let edit=null;
-  const netForm=(cur, preGroup)=>`<div class="fld"><label>${tr('net.template')}</label><select id="ntpl">${NET_TEMPLATES.map(t=>opt(t.id,t.label,cur?'': 's2s')).join('')}</select></div>
-    <div class="g2"><div class="fld"><label>${tr('net.name')}</label><input id="nname" value="${esc(cur?cur.name:'')}" autocomplete="off"></div>
+  const netForm=(cur, preGroup)=>`<div class="fld"><label>${tr('net.template')}</label><div class="net-tpl-row"><select id="ntpl" data-pick>${tplOptions()}</select>${tplWrite?`<button type="button" class="icon" id="ntpl-edit" disabled title="${esc(tr('net.tpl.edit'))}" aria-label="${esc(tr('net.tpl.edit'))}">${icon('edit')}</button><button type="button" class="icon" id="ntpl-add" title="${esc(tr('net.tpl.add'))}" aria-label="${esc(tr('net.tpl.add'))}">${icon('plus')}</button>`:''}</div></div>
+    <div class="net-tpl-edit" id="ntpl-ed" hidden></div>
+    <p class="hint" id="ntpl-info" hidden></p>
+    <div class="g2"><div class="fld"><label>${tr('net.label')}</label><input id="nname" value="${esc(cur?cur.name:'')}" autocomplete="off"></div>
     <div class="fld"><label>${tr('off.group')}</label>${groupFieldBlock('ngroup', cur?cur.group||'':preGroup||'')}</div></div>
-    <div class="fld"><label>${tr('net.url')}</label><input id="nurl" class="mono" value="${esc(cur?cur.postback_url||'':'')}" autocomplete="off"></div>
-    <div class="fld"><label>${tr('net.param')}</label><input id="nparam" value="${esc(cur?cur.offer_query||'':'')}" autocomplete="off" placeholder="sub1={subid}"></div>
-    <p class="hint">${tr('net.hint')}</p>`;
-  const applyTpl=(box)=>{
-    const t=NET_TEMPLATES.find(x=>x.id===q('#ntpl',box).value)||NET_TEMPLATES[0];
-    const url=q('#nurl',box), param=q('#nparam',box);
-    if(url&&!url.value.trim()) url.value=t.id==='s2s'?enginePostback('{status}'):t.url;
-    if(param&&!param.value.trim()) param.value=t.query||'';
+    <div class="fld"><label class="lbl-h" for="nparam">${tr('net.param')}${netParamHelp()}</label><input id="nparam" value="${esc(cur?cur.offer_query||'':'')}" autocomplete="off" placeholder="sub1={subid}"></div>
+    <div class="fld"><label for="nurl">${tr('net.url')}</label><textarea id="nurl" class="mono net-pb" rows="2" spellcheck="false" autocomplete="off">${esc(cur?cur.postback_url||'':'')}</textarea></div>
+    <p class="hint">${tr('net.hint')}</p>
+    <div class="net-notes" id="ntpl-notes" hidden></div>`;
+  /**
+   * netParamHelp is the question mark after the offer parameters label; hover or focus opens the popup
+   * with the parameters every offer of the network needs.
+   * @returns {string} HTML of the mark and its popup
+   */
+  const netParamHelp=()=>`<span class="qh" tabindex="0" role="note" aria-label="${esc(tr('net.param.help.t'))}">?<span class="qh-pop"><b>${esc(tr('net.param.help.a'))}</b><br>${esc(tr('net.param.help.req'))} <code>${esc(tr('net.param.help.ex1'))}</code><br>${esc(tr('net.param.help.opt'))} <code>${esc(tr('net.param.help.ex2'))}</code></span></span>`;
+  /**
+   * applyTpl shows the template picked in the dialog: it fills the name, offer parameters and postback address
+   * the template really has, prints the read-only instruction and says how much of the template is known.
+   * A field the person typed into is left alone; a field is replaced only while it is empty or still holds the
+   * value the previous template put there. filled keeps those values between calls.
+   * @param {Element} box dialog element
+   * @param {Object<string,string>} filled value last written by a template, by input id
+   * @param {boolean} [keep] true to leave every field as it is and only show the template notes
+   * @returns {void}
+   */
+  const applyTpl=(box, filled, keep)=>{
+    const info=q('#ntpl-info',box), notes=q('#ntpl-notes',box);
+    const t=tplById.get(q('#ntpl',box).value);
+    const editBtn=q('#ntpl-edit',box);
+    if(editBtn) editBtn.disabled=!t;
+    closeTplEditor(box);
+    info.hidden=true; info.textContent='';
+    notes.hidden=true; notes.innerHTML='';
+    if(!t){ Object.keys(filled).forEach(id=>{const el=q('#'+id,box); if(el&&el.value===filled[id]) el.value=''; filled[id]=''}); return }
+    const next=netTplFields(t);
+    if(!keep) Object.keys(next).forEach(id=>{
+      const el=q('#'+id,box);
+      if(!el) return;
+      if(!el.value.trim()||el.value===filled[id]){ el.value=next[id]; filled[id]=next[id] }
+    });
+    const msgs=[];
+    if(t.extracted!=='full') msgs.push(tr(t.extracted==='partial'?'net.tpl.state.partial':'net.tpl.state.none'));
+    if(t.edited) msgs.push(tr('net.tpl.edited'));
+    if(msgs.length){ info.textContent=msgs.join(' '); info.hidden=false }
+    const text=netInstructionHTML(t.instruction), conv=netConversionsHTML(t.conversions);
+    if(text||conv){
+      notes.innerHTML=(text?`<b>${esc(tr('net.tpl.notes'))}</b>${text}`:'')+conv;
+      notes.hidden=false;
+    }
+  };
+  /**
+   * closeTplEditor hides the template editor of the dialog and empties it.
+   * @param {Element} box dialog element
+   * @returns {void}
+   */
+  const closeTplEditor=(box)=>{
+    const ed=q('#ntpl-ed',box);
+    if(ed){ ed.hidden=true; ed.innerHTML='' }
+  };
+  /**
+   * openTplEditor opens the short editor of one template under the picker: the offer parameters, the postback
+   * address and the instruction, plus the name for a new template. Save sends PUT (or POST for a new one), then
+   * reloads the list, keeps the template selected and shows its fields in the dialog again; the reset button
+   * drops the edit of a catalog template or deletes an added one. A field left empty keeps the catalog value.
+   * @param {Element} box dialog element
+   * @param {Object<string,string>} filled value last written by a template, by input id
+   * @param {string} id template id, '' for a new template
+   * @returns {void}
+   */
+  const openTplEditor=(box, filled, id)=>{
+    const t=id?tplById.get(id):null;
+    if(id&&!t) return;
+    closeTplEditor(box);
+    const ed=q('#ntpl-ed',box);
+    ed.innerHTML=`<b>${esc(t?t.name:tr('net.tpl.add'))}</b>
+      ${t?'':`<div class="fld"><label for="ted-name">${esc(tr('net.label'))}</label><input id="ted-name" data-chip autocomplete="off" maxlength="80"></div>`}
+      <div class="fld"><label for="ted-q">${esc(tr('net.param'))}</label><textarea id="ted-q" class="mono net-pb" rows="2" spellcheck="false" autocomplete="off" placeholder="sub1={subid}">${esc(t?t.offer_query:'')}</textarea></div>
+      <div class="fld"><label for="ted-pb">${esc(tr('net.url'))}</label><textarea id="ted-pb" class="mono net-pb" rows="2" spellcheck="false" autocomplete="off">${esc(t?t.postback_url:'')}</textarea></div>
+      <div class="fld"><label for="ted-ins">${esc(tr('net.tpl.ed.ins'))}</label><textarea id="ted-ins" rows="4" autocomplete="off">${esc(t?t.instruction:'')}</textarea></div>
+      <p class="hint">${esc(tr('net.tpl.ed.hint'))}</p>
+      <div class="row"><button type="button" class="primary" id="ted-save">${esc(tr('Save'))}</button><button type="button" id="ted-cancel">${esc(tr('Cancel'))}</button><div class="spacer"></div>${t&&(t.edited||t.custom)?`<button type="button" class="${t.custom?'danger':''}" id="ted-reset">${esc(tr(t.custom?'net.tpl.ed.del':'net.tpl.ed.reset'))}</button>`:''}</div>`;
+    ed.hidden=false;
+    const value=sel=>q(sel,ed).value;
+    /**
+     * reload reads the list again, rebuilds the picker and selects want ('' keeps nothing selected).
+     * The dialog fields follow the template through applyTpl; typed values stay.
+     * @param {string} want template id to select
+     * @returns {Promise<void>}
+     */
+    const reload=async(want)=>{
+      setTpls(await get('/api/affiliate-network-templates',[]));
+      const pick=q('#ntpl',box);
+      pick.innerHTML=tplOptions();
+      pick.value=tplById.has(want)?want:'';
+      applyTpl(box, filled);
+    };
+    const run=async(job)=>{
+      try{ await job(); toast(tr('Saved')) }
+      catch(e){ toast(e.message, true) }
+    };
+    q('#ted-cancel',ed).onclick=()=>closeTplEditor(box);
+    q('#ted-save',ed).onclick=()=>run(async()=>{
+      const body={offer_query:value('#ted-q').trim(), postback_url:value('#ted-pb').trim(), instruction:value('#ted-ins').trim()};
+      if(t){
+        await call('PUT','/api/affiliate-network-templates/'+encodeURIComponent(t.id), body);
+        await reload(t.id);
+        return;
+      }
+      const made=await call('POST','/api/affiliate-network-templates', Object.assign({name:value('#ted-name').trim()}, body));
+      await reload(made&&made.id);
+    });
+    const nameEl=q('#ted-name',ed);
+    if(nameEl){
+      nameEl.onkeydown=e=>{ if(e.key==='Enter'){ e.preventDefault(); q('#ted-save',ed).click() } };
+      nameEl.focus();
+    }else q('#ted-q',ed).focus();
+    const reset=q('#ted-reset',ed);
+    if(reset) reset.onclick=async()=>{
+      if(t.custom&&!await ask(tr('net.tpl.ed.del')+' '+t.name+'?','',tr('Delete'),true)) return;
+      await run(async()=>{
+        await call('DELETE','/api/affiliate-network-templates/'+encodeURIComponent(t.id));
+        await reload(t.custom?'':t.id);
+      });
+    };
   };
   const openNet=(id)=>{
     const cur=id?(rows||[]).find(n=>n.id===id):null;
@@ -22458,8 +22932,44 @@ async function networks(arg,live){
       toast(tr('Saved'));
     });
     const ng=q('#ngroup',m); if(ng){ bindGroupCombo(ng, rows, ()=>{}); bindGroupInlineCreate(m, 'ngroup', rows); }
-    q('#ntpl',m).onchange=()=>applyTpl(m);
-    if(!cur) applyTpl(m);
+    const filled={nname:'', nparam:'', nurl:''};
+    q('#ntpl',m).onchange=()=>applyTpl(m, filled);
+    const editBtn=q('#ntpl-edit',m), addBtn=q('#ntpl-add',m);
+    if(editBtn) editBtn.onclick=()=>openTplEditor(m, filled, q('#ntpl',m).value);
+    if(addBtn) addBtn.onclick=()=>openTplEditor(m, filled, '');
+    if(cur) recogniseTpl(m, filled, cur);
+  };
+  /**
+   * findTplByName returns the template whose name is the given one, ignoring case and edge spaces.
+   * @param {string} name network name
+   * @returns {object|undefined} template or undefined
+   */
+  const findTplByName=(name)=>{
+    const key=String(name||'').trim().toLowerCase();
+    return key?tpls.find(t=>String(t.name).trim().toLowerCase()===key):undefined;
+  };
+  /**
+   * recogniseTpl runs when a saved network is opened. A template with the same name is selected and its
+   * notes are shown; the name, offer parameters and postback address already in the dialog stay as they are.
+   * With no such template, a person who may change networks gets one added from the network (see
+   * netTplFromNetwork), then it is selected the same way. Nothing else is touched and no other network is read.
+   * @param {Element} box dialog element
+   * @param {Object<string,string>} filled value last written by a template, by input id
+   * @param {object} n the network being edited
+   * @returns {Promise<void>}
+   */
+  const recogniseTpl=async(box, filled, n)=>{
+    const show=(t)=>{ q('#ntpl',box).value=t.id; applyTpl(box, filled, true) };
+    const hit=findTplByName(n.name);
+    if(hit){ show(hit); return }
+    const body=tplWrite?netTplFromNetwork(n, postbackOrigin()):null;
+    if(!body) return;
+    try{ await call('POST','/api/affiliate-network-templates', body) }catch(e){ return }
+    setTpls(await get('/api/affiliate-network-templates',[]));
+    if(!box.isConnected) return;
+    q('#ntpl',box).innerHTML=tplOptions();
+    const made=findTplByName(n.name);
+    if(made) show(made);
   };
   const networkRows=()=>(rows||[]).filter(n=>{
     if(!matchesGroup(n, CAT_GROUP.networks)) return false;
@@ -22477,11 +22987,12 @@ async function networks(arg,live){
     const metrics=new Map();
     (rows||[]).forEach(n=>metrics.set(n.id, networkMetrics(n.id)));
     const sorted=applySort(networkRows(), NET_SORT, (n,k)=>networkSortValue(n,k,metrics.get(n.id)), textIds);
+    catalogPickSync('networks', sorted);
     const sliced=catalogPageSlice(sorted, NET_PAGE, NET_PAGE_I);
     NET_PAGE_I=sliced.index;
     const emptyMsg=catalogFiltered('networks')?tr('Nothing matches'):tr('net.empty');
-    grid.innerHTML=`<div class="tw"><table><thead><tr>${sortableHead('networks', NET_SORT, cols, textIds)}<th></th></tr></thead><tbody>${
-      sliced.page.map(n=>{const del=canEdit(ME,'networks',n)?`<td><button type="button" class="icon sm danger" data-ndel="${esc(n.id)}" title="${tr('Delete')}">${icon('trash')}</button></td>`:'<td></td>'; return `<tr class="click" data-nedit="${esc(n.id)}">${networkRowHTML(n, metrics.get(n.id))}${del}</tr>`}).join('')||`<tr><td colspan="${ncols}">${emptyMsg}</td></tr>`
+    grid.innerHTML=`${catalogBulkBar('networks', sorted.length)}<div class="tw"><table><thead><tr>${catalogPickHead('networks', sliced.page)}${sortableHead('networks', NET_SORT, cols, textIds)}<th></th></tr></thead><tbody>${
+      sliced.page.map(n=>{const del=canEdit(ME,'networks',n)?`<td><button type="button" class="icon sm danger" data-ndel="${esc(n.id)}" title="${tr('Delete')}">${icon('trash')}</button></td>`:'<td></td>'; return `<tr class="click" data-nedit="${esc(n.id)}">${catalogPickCell('networks', n)}${networkRowHTML(n, metrics.get(n.id))}${del}</tr>`}).join('')||`<tr><td colspan="${ncols+1}">${emptyMsg}</td></tr>`
     }</tbody></table></div>
     ${edit?(()=>{
       let netOffers=(offers||[]).filter(o=>o.network_id===edit);
@@ -22494,7 +23005,7 @@ async function networks(arg,live){
     })():''}`;
     const netOff=q('#net-offers',grid); if(netOff) bindSort(netOff, NET_OFF_SORT, ()=>paintTable());
     qa('[data-nedit]',grid).forEach(row=>row.onclick=e=>{
-      if(e.target.closest('[data-ndel]')) return;
+      if(e.target.closest('[data-ndel],.pick')) return;
       const n=(rows||[]).find(x=>String(x.id)===row.dataset.nedit);
       if(n&&canEdit(ME,'networks',n)){ edit=row.dataset.nedit; paintTable(); openNet(edit); }
     });
@@ -22505,6 +23016,7 @@ async function networks(arg,live){
       catch(err){toast(err.message,true)}
     });
     bindSort(grid, NET_SORT, ()=>{NET_PAGE_I=0; if(live()) paintTable()});
+    bindCatalogPick(grid, 'networks', {page:sliced.page, all:sorted, labels:rows, repaint:()=>{if(live()) paintTable()}, reload:async()=>{NETS=null; await render()}});
     paintCatalogDock({
       prefix:'net',
       rows:sorted,
@@ -22623,12 +23135,15 @@ async function offers(arg,live){
   const netName=id=>{const n=(nets||[]).find(x=>x.id===id); return n?n.name||n.id:''};
   const offerRows=()=>(rows||[]).filter(o=>{
     if(!matchesGroup(o, CAT_GROUP.offers)) return false;
+    if(!matchesNetwork(o, CAT_NET.offers)) return false;
     return textMatch(CAT_Q.offers, [o.id, o.name, o.group, o.url, netName(o.network_id)]);
   });
   const paintTable=()=>{
     const grid=q('#offers-grid'); if(!grid||!live()) return;
     CAT_GROUP.offers=fillGroupSelect(q('#offers-group'), rows, CAT_GROUP.offers);
+    CAT_NET.offers=fillNetSelect(q('#offers-net'), nets, rows, CAT_NET.offers);
     let list=offerRows();
+    catalogPickSync('offers', list);
     const cols=loadCols('offers').filter(c=>c.on);
     const offMeta={text:['name','group','network'], name:['name']};
     const metrics=new Map();
@@ -22637,10 +23152,11 @@ async function offers(arg,live){
     const sliced=catalogPageSlice(list, OFF_PAGE, OFF_PAGE_I);
     OFF_PAGE_I=sliced.index;
     const emptyMsg=catalogFiltered('offers')?tr('Nothing matches'):tr('off.empty');
-    grid.innerHTML=`<div class="tw"><table><thead><tr>${sortableHead('offers', OFF_SORT, cols, offMeta)}</tr></thead><tbody>${
-      sliced.page.map(o=>`<tr class="click" data-oedit="${esc(o.id)}">${offerRowHTML(o, netName)}</tr>`).join('')||`<tr><td colspan="${Math.max(cols.length,1)}">${emptyMsg}</td></tr>`
+    grid.innerHTML=`${catalogBulkBar('offers', list.length)}<div class="tw"><table><thead><tr>${catalogPickHead('offers', sliced.page)}${sortableHead('offers', OFF_SORT, cols, offMeta)}</tr></thead><tbody>${
+      sliced.page.map(o=>`<tr class="click" data-oedit="${esc(o.id)}">${catalogPickCell('offers', o)}${offerRowHTML(o, netName)}</tr>`).join('')||`<tr><td colspan="${Math.max(cols.length,1)+1}">${emptyMsg}</td></tr>`
     }</tbody></table></div>`;
     bindSort(grid, OFF_SORT, ()=>{OFF_PAGE_I=0; if(live()) paintTable()});
+    bindCatalogPick(grid, 'offers', {page:sliced.page, all:list, labels:rows, repaint:()=>{if(live()) paintTable()}, reload:async()=>{OFFERS=null; await render()}});
     paintCatalogDock({
       prefix:'off',
       rows:list,
@@ -22651,7 +23167,8 @@ async function offers(arg,live){
       setIndex:v=>{OFF_PAGE_I=v},
       onPaint:()=>{if(live()) paintTable()}
     });
-    qa('[data-oedit]',grid).forEach(row=>row.onclick=()=>{
+    qa('[data-oedit]',grid).forEach(row=>row.onclick=e=>{
+      if(e.target.closest('.pick')) return;
       const o=(rows||[]).find(x=>String(x.id)===row.dataset.oedit);
       if(o&&canEdit(ME,'offers',o)) openOffer(row.dataset.oedit);
     });
@@ -22760,7 +23277,7 @@ async function offers(arg,live){
   };
   const mkOff=canCreate(ME,'offers'), grpOff=sectionAllowed(ME,'groups');
   view().innerHTML=`<div class="ph"><h1>${tr('off.title')}</h1><span class="sub">${periodLabel()}</span><div class="spacer"></div>${grpOff?groupHeadBtn('off-groups'):''}<button type="button" class="icon" data-col-gear="offers" title="${tr('cols.title')}" aria-label="${tr('cols.title')}">${icon('settings')}</button></div>
-    ${catalogBar('offers','off.search',{create:mkOff?createBtn('off-new'):''})}
+    ${catalogBar('offers','off.search',{create:mkOff?createBtn('off-new'):'', net:true})}
     <div id="offers-grid"></div>
     ${dockHTML('off','offexport')}`;
   const offNew=q('#off-new'); if(offNew) offNew.onclick=()=>openOffer(null);
@@ -22779,6 +23296,7 @@ async function offers(arg,live){
   if(gear) gear.onclick=()=>openCols('offers', ()=>{if(live()) paintTable()});
   q('#offexport').onclick=e=>{e.stopPropagation(); if(MENU){closeMenu();return} menu(e.currentTarget,[{label:tr('Export CSV'),on:()=>exportOffers(false)},{label:tr('Export HTML'),on:()=>exportOffers(true)}], 'end')};
   bindCatalogBar('offers', rows, ()=>{OFF_PAGE_I=0; paintTable()}, async()=>{OFFERS=null; await render()});
+  const offNet=q('#offers-net'); if(offNet) offNet.onchange=e=>{CAT_NET.offers=e.target.value; OFF_PAGE_I=0; paintTable()};
   paintTable();
   if(CAT_NEW_GROUP.offers) openOffer(null);
   if(OFFER_AGAIN){OFFER_AGAIN=false; openOffer(null)}
@@ -25123,7 +25641,8 @@ const AI_ERR_VARIANTS={
   ai_has_links:{list:'ai.chat.err.ai_has_links.list'},
   ai_landing_too_large:{size:'ai.chat.err.ai_landing_too_large.size',files:'ai.chat.err.ai_landing_too_large.files',symlink:'ai.chat.err.ai_landing_too_large.symlink'},
   ai_redacted_value:{field:'ai.chat.err.ai_redacted_value.field'},
-  ai_forbidden:{op:'ai.chat.err.ai_forbidden.op'}
+  ai_forbidden:{op:'ai.chat.err.ai_forbidden.op'},
+  ai_provider_error:{empty_summary:'ai.chat.err.ai_provider_error.empty_summary',overload:'ai.chat.err.ai_provider_error.overload',unreachable:'ai.chat.err.ai_provider_error.unreachable'}
 };
 /** AI_REQUIRED names the variant of AI_ERR_VARIANTS.ai_bad_request a missing field has of its own, by field. */
 const AI_REQUIRED={allowed_models:'models_required',keys:'key_required'};
@@ -25131,7 +25650,7 @@ const AI_REQUIRED={allowed_models:'models_required',keys:'key_required'};
 const AI_ERR_PICK={
   ai_quota:p=>p.scope, ai_bad_limit:p=>p.field?(+p.min===0?'zero':'range'):'', ai_bad_model:p=>p.reason, ai_bad_patch:p=>p.reason, ai_bad_request:p=>p.reason==='required'&&AI_REQUIRED[p.field]||p.reason, ai_conflict:p=>p.reason,
   ai_confirm_required:p=>p.need, ai_has_links:p=>aiLinks(p.links).length?'list':'', ai_landing_too_large:p=>p.reason, ai_redacted_value:p=>p.field?'field':'',
-  ai_forbidden:p=>p.op?'op':''
+  ai_forbidden:p=>p.op?'op':'', ai_provider_error:p=>p.reason
 };
 /** AI_RES_KEYS, AI_OP_KEYS and AI_ST_KEYS map the resource, the operation and the status of an edit card to dictionary keys. */
 const AI_RES_KEYS={offers:'ai.chat.res.offers',affiliate_networks:'ai.chat.res.affiliate_networks',traffic_sources:'ai.chat.res.traffic_sources',landings:'ai.chat.res.landings',campaigns:'ai.chat.res.campaigns'};
