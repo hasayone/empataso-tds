@@ -817,9 +817,11 @@ func TestCatalogNames(t *testing.T) {
 	must(t, rep, "reportCellText(", "report table and export share the cell text")
 	must(t, rep, "loadCols('report')", "report export uses the visible columns")
 	mustNot(t, rep, "r.group,r.stream,r.country", "report export does not dump raw ids")
-	must(t, spaFunctionLine(html, "pbCondsForQuery"), "f:'campaign_id'", "conversion filter uses campaign id")
+	must(t, spaFunctionLine(html, "entryCampaignConds"), "f:'campaign_id'", "the campaign button filters by campaign id")
 	mustNot(t, conv, "f:'campaign',", "conversion filter is not the campaign name")
-	must(t, conv, "nameOf(GROUPS, PB.campaignId)", "conversion title is the campaign name")
+	must(t, conv, "entryCampaignConds(arg)", "the campaign address becomes a visible conversion filter")
+	mustNot(t, spaFunctionLine(html, "pbCondsForQuery"), "campaign_id", "the conversion query adds no hidden campaign condition")
+	mustNot(t, spaFunctionLine(html, "logCondsForQuery"), "campaign_id", "the click query adds no hidden campaign condition")
 	must(t, pb, "dockTotal(r", "conversion counter uses the filtered count")
 	must(t, pb, "typeof r.total==='number'", "missing profit total is not drawn as zero")
 	pbPage := spaFunctionLine(html, "paintPbPage")
@@ -1455,20 +1457,27 @@ func TestSPAFlowCompact(t *testing.T) {
 	must(t, html, `class="k" title="${esc(label)}"`, "breakdown title shows label")
 }
 
-// TestSPAFlowTrafficOrder checks the canvas order-by-traffic toggle: the button sits next to the compact
-// toggle, the order is a page-view setting, and switching it never marks the campaign dirty or reaches
-// the saved stream order.
+// TestSPAFlowTrafficOrder checks the canvas order toggle: off, traffic both ways, then revenue both ways.
+// The order is a page-view setting, and switching it never marks the campaign dirty or reaches
+// the saved stream order. Opening a campaign leaves the button unpressed unless a saved view says otherwise.
 func TestSPAFlowTrafficOrder(t *testing.T) {
 	html := spaSource()
 	must(t, html, `id="ftraffic"`, "traffic order button")
 	must(t, html, "canvas-traffic", "traffic order button style")
 	must(t, html, "${flowTrafficButton()}", "traffic order button on the canvas")
 	must(t, html, "tb.onclick=toggleFlowTraffic", "traffic order button wired")
-	for _, key := range []string{"flow.traffic.off", "flow.traffic.desc", "flow.traffic.asc", "flow.traffic.lock"} {
+	must(t, html, `const FLOW_TRAFFIC_MODES=['','asc','desc','rev-asc','rev-desc']`, "order cycle is off, traffic, then revenue")
+	must(t, html, "let FLOW_TRAFFIC=''", "canvas order starts off")
+	for _, key := range []string{"flow.traffic.off", "flow.traffic.desc", "flow.traffic.asc", "flow.traffic.lock", "flow.revenue.asc", "flow.revenue.desc"} {
 		if n := strings.Count(html, "'"+key+"':"); n != 3 {
 			t.Errorf("%s: %d dictionary entries, want one per language", key, n)
 		}
 	}
+	btn := spaFunctionLine(html, "flowTrafficButton")
+	must(t, btn, `aria-pressed="${mode?'true':'false'}"`, "the button is pressed only while an order is on")
+	must(t, btn, `data-traffic="${key}"`, "the button names the current mode")
+	mustNot(t, btn, `data-traffic="asc"`, "the button is not stuck on fewest first")
+	must(t, btn, "aria-label=", "the accessible name is the current mode")
 	toggle := spaFunctionLine(html, "toggleFlowTraffic")
 	must(t, toggle, "touchPageViews()", "traffic order kept in page views")
 	for _, bad := range []string{"markDirty", "syncSaveBar", "moveStream", ".streams"} {
@@ -1478,10 +1487,61 @@ func TestSPAFlowTrafficOrder(t *testing.T) {
 		mustNot(t, spaFunctionLine(html, name), "FLOW_TRAFFIC", name+" ignores the traffic order")
 	}
 	render := spaFunctionLine(html, "renderFlow")
-	must(t, render, "flowTrafficOrder(", "rows drawn in traffic order")
-	must(t, render, `class="grip lock"`, "grip locked while ordered by traffic")
+	must(t, render, "flowTrafficOrder(", "rows drawn in the chosen order")
+	must(t, render, "flowCanvasValue(", "rows compare the stream value for the mode")
+	must(t, spaFunctionLine(html, "flowCanvasValue"), "sp.profit", "revenue order uses the stream profit")
+	must(t, render, `class="grip lock"`, "grip locked while an order is on")
 	must(t, render, `<span class="no">${i+1}</span>`, "stream number stays the stored position")
 	must(t, html, "traffic:FLOW_TRAFFIC", "traffic order in the page-view snapshot")
+}
+
+// TestSPAFlowHeaderIcons checks the campaign header and the stream hint.
+// The visitor check stays an icon button with the name in the tooltip.
+// Settings shows the gear and the word. Click log and conversion log are one Logs menu.
+// Conversions and revenue use c-rev only above zero.
+func TestSPAFlowHeaderIcons(t *testing.T) {
+	html := spaSource()
+	render := spaFunctionLine(html, "renderFlow")
+	if render == "" {
+		t.Fatal("renderFlow missing")
+	}
+	must(t, render, `id="testbtn"`, "test button keeps its id")
+	must(t, render, `class="icon${TESTER?' primary':''}" title="${tr('Test a visitor')}" aria-label="${tr('Test a visitor')}"`, "test button is an icon with a tooltip")
+	must(t, render, `aria-pressed="${TESTER?'true':'false'}">${icon('target')}</button>`, "test button shows only the target icon")
+	mustNot(t, render, `${icon('target')}${tr('Test a visitor')}`, "test button has no visible caption")
+	must(t, render, `id="gset" title="${tr('Settings')}" aria-label="${tr('Settings')}">${icon('settings')}${tr('Settings')}</button>`, "settings button shows the gear and the word")
+	mustNot(t, render, `id="gset" class="icon"`, "settings button is not icon-only")
+	must(t, render, `id="glogs" aria-haspopup="menu" aria-expanded="false" aria-label="${tr('flows.logs')}"`, "logs button is one menu")
+	must(t, render, `${icon('logs')}${tr('flows.logs')}${icon('down')}`, "logs button keeps the word")
+	mustNot(t, render, `id="gclicks"`, "separate click-log button is gone")
+	mustNot(t, render, `id="gconv"`, "separate conversion-log button is gone")
+	must(t, render, `{label:tr('flows.log.clicks'),icon:'click',on:()=>go('logs/'+encodeURIComponent(g.id))}`, "click log keeps its route and the click icon")
+	must(t, render, `{label:tr('flows.log.conv'),icon:'conversions',on:()=>go('conversions/'+encodeURIComponent(g.id))}`, "conversion log keeps its route and the sale icon")
+	must(t, render, `q('#testbtn').onclick`, "test button still toggles")
+	must(t, render, `gset.onclick=openFlowSettings`, "settings button still opens settings")
+	hint := spaFunctionLine(html, "streamHint")
+	if hint == "" {
+		t.Fatal("streamHint missing")
+	}
+	must(t, hint, `conv>0?'<span class="c-rev">'+convText+'</span>':convText`, "conversions are bright only above zero")
+	must(t, hint, `fmt(sp.bots)+' '+tr('bots')`, "bots stay outside the green span")
+	mustNot(t, hint, `c-rev">'+fmt(sp.bots)`, "bots are not painted as revenue")
+	money := spaFunctionLine(html, "branchMoney")
+	must(t, money, `profit>0?'<span class="c-rev">'+rev+'</span>':rev`, "revenue is bright only above zero")
+	must(t, money, `tr('col.cost')`, "spend stays in the hint")
+	mustNot(t, money, `c-rev">'+rev+'</span>'+' · '+tr('col.cost')`, "spend is not inside the revenue colour")
+	chips := spaFunctionLine(html, "condChips")
+	must(t, chips, `c.k==='bot'?icon('bot'):''`, "bot chip leads with the bot icon")
+	must(t, chips, `c.k==='unique'?'':lc`, "the word bot stays on the chip")
+	for _, line := range []string{
+		`'flows.logs':'Logs'`,
+		`'flows.logs':'Логи'`,
+		`'flows.logs':'Журнали'`,
+	} {
+		if n := strings.Count(html, line); n != 1 {
+			t.Errorf("%s: %d dictionary entries, want 1", line, n)
+		}
+	}
 }
 
 // TestSPAUsersPage checks the users tab, access helpers, Keitaro users import,

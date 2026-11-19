@@ -189,7 +189,7 @@ func (c *CH) postbackMatch(ctx context.Context, q PostbackQuery, originConv, roo
 	}
 	q.Status = strings.ToLower(strings.TrimSpace(q.Status))
 	where, args := postbackWhere(q, c.clickCols)
-	extra, extraArgs, skip, err := buildWhere(c, "conversions", q.Conds)
+	extra, extraArgs, skip, err := buildJournalWhere(c, "conversions", q.Conds)
 	if err != nil {
 		return PostbackTotals{}, "", nil, "", false, err
 	}

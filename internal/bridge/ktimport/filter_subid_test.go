@@ -27,7 +27,6 @@ func TestSubIDFilterExact(t *testing.T) {
 
 func TestSubIDFilterNotCarried(t *testing.T) {
 	cases := map[string]KFilter{
-		"substring": subFilter("sub_id_1", "contains", `["a"]`),
 		"regex":     subFilter("sub_id_1", "accept", `["/^a/"]`),
 		"too high":  subFilter("sub_id_31", "accept", `["a"]`),
 		"zero":      subFilter("sub_id_0", "accept", `["a"]`),

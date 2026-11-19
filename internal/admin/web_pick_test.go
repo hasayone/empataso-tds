@@ -39,6 +39,9 @@ func TestPickSelectWired(t *testing.T) {
 	} {
 		must(t, html, sel, "searchable picker "+sel)
 	}
+	mustNot(t, html, `<input id="tv_country"`, "visitor check has no country code field")
+	must(t, html, `const country=q('#tv_country_list');TV.country=country?country.value.trim():'';`, "visitor check reads the country from the list")
+	must(t, html, `<label for="tv_country_list">${tr('tester.country')}</label><select id="tv_country_list"`, "the country list keeps the country label")
 	mustNot(t, html, "gs.forEach(g=>s.insertAdjacentHTML(", "keyword campaigns are added in one pass, not one parse per campaign")
 	for _, key := range []string{"pick.more", "pick.search"} {
 		for _, lang := range []string{"en", "ru", "uk"} {

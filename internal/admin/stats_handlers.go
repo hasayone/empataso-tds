@@ -460,7 +460,8 @@ type reportMeta struct {
 // r supplies from, to and optional f=. When f= is present the slice is filtered.
 // With limit, offset or sort the body is one sorted page of the whole period:
 // {rows, total, offset, limit, sort, dir, sort_cur, totals, truncated}, see pageParams and
-// store.PageSlice. Without them, meta=1 gives {rows, truncated} instead of the bare array,
+// store.PageSlice. A paged request may add day=1 (and tz) to cut the rows by event day, see reportZone.
+// Without them, meta=1 gives {rows, truncated} instead of the bare array,
 // and truncated is true when the store cut the visit groups at store.SliceLimit; a store
 // without that answer reports false. Without meta the body is the array, as other clients expect.
 // A bad f=, page or sort is 400. Missing stats yields an empty list with 200. A query failure is 500.
@@ -474,8 +475,12 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+		tz, ok := reportZone(w, r)
+		if !ok {
+			return
+		}
 		from, to := parseRange(r)
-		s.writeReportPage(w, r, from, to, conds, pq)
+		s.writeReportPage(w, r, from, to, conds, pq, tz)
 		return
 	}
 	meta := r.URL.Query().Get("meta") == "1"

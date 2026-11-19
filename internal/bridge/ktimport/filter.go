@@ -191,28 +191,6 @@ func exactValues(label string, f KFilter) ([]string, string, bool, string) {
 	return values, mode, approx, ""
 }
 
-// subIDFilter кладёт Sub ID источника в точное правило sub_ids.
-//
-// Параметры: name — ключ правила вида sub_id_N; f — фильтр.
-// Результат: правила SubIDs с ключом sub_id_N. Подстрока и regex не переносятся.
-// Ошибки: нет.
-func subIDFilter(name string, f KFilter) (Rules, bool, bool, string) {
-	values, mode, approx, why := exactValues(name, f)
-	if why != "" {
-		return Rules{}, false, false, why
-	}
-	values, dropped := keepShort(values, maxSubIDValueLen)
-	if len(values) == 0 {
-		return Rules{}, false, false, "фильтр " + name + ": все значения длиннее " + strconv.Itoa(maxSubIDValueLen) + " байт, не переносится"
-	}
-	note := ""
-	if dropped > 0 {
-		approx = true
-		note = skippedValuesNote + strconv.Itoa(dropped) + " (длиннее " + strconv.Itoa(maxSubIDValueLen) + " байт), фильтр " + name
-	}
-	lf := listFlag(mode, values)
-	return Rules{SubIDs: map[string]SubIDFilter{name: {Flag: lf.Flag, Values: lf.Values}}}, true, approx, note
-}
 
 // maxSubIDValueLen — наибольшая длина значения правила sub_ids в байтах; админка
 // не сохраняет кампанию с более длинным значением.

@@ -109,3 +109,36 @@ func TestSubIDSelectUsesSourceMappedValue(t *testing.T) {
 		t.Fatalf("the raw name must not feed the rule when the source renames it, picked = %q", picked.Name)
 	}
 }
+
+// TestSubIDContains checks the substring mode: a value that lists several words
+// with "|", case, a numeric substring, a blank rule value and an old exact rule.
+func TestSubIDContains(t *testing.T) {
+	cases := []struct {
+		name  string
+		value string
+		f     config.SubIDFilter
+		want  bool
+	}{
+		{"word inside a pipe list", "Fonbet|Bovada|Another One", config.SubIDFilter{Flag: config.FlagB, Values: []string{"Fonbet"}, Contains: true}, true},
+		{"last word of the list", "Fonbet|Bovada|Another One", config.SubIDFilter{Flag: config.FlagB, Values: []string{"another one"}, Contains: true}, true},
+		{"case is ignored", "FONBET", config.SubIDFilter{Flag: config.FlagB, Values: []string{"fonbet"}, Contains: true}, true},
+		{"digits inside a longer number", "01243454", config.SubIDFilter{Flag: config.FlagB, Values: []string{"124345"}, Contains: true}, true},
+		{"one of several values", "Bovada", config.SubIDFilter{Flag: config.FlagB, Values: []string{"Fonbet", "Bova"}, Contains: true}, true},
+		{"no substring", "Bovada", config.SubIDFilter{Flag: config.FlagB, Values: []string{"Fonbet"}, Contains: true}, false},
+		{"blank rule value matches nothing", "Bovada", config.SubIDFilter{Flag: config.FlagB, Values: []string{"", "  "}, Contains: true}, false},
+		{"blacklist hit", "Fonbet|Bovada", config.SubIDFilter{Flag: config.FlagA, Values: []string{"Bovada"}, Contains: true}, false},
+		{"blacklist miss", "Fonbet", config.SubIDFilter{Flag: config.FlagA, Values: []string{"Bovada"}, Contains: true}, true},
+		{"exact rule is not a substring", "Fonbet|Bovada", config.SubIDFilter{Flag: config.FlagB, Values: []string{"Fonbet"}}, false},
+	}
+	for _, c := range cases {
+		s := stream("s", subRules(map[string]config.SubIDFilter{"sub_id_2": c.f}))
+		if got := Why(&s, subVisitor(map[int]string{2: c.value}), Deps{}) == ""; got != c.want {
+			t.Errorf("%s: pass = %v, want %v", c.name, got, c.want)
+		}
+	}
+	empty := config.SubIDFilter{Flag: config.FlagB, Values: []string{"x"}, Contains: true, Empty: true}
+	s := stream("s", subRules(map[string]config.SubIDFilter{"sub_id_2": empty}))
+	if Why(&s, subVisitor(nil), Deps{}) != "" {
+		t.Error("the empty marker still lets a blank sub id in contains mode")
+	}
+}

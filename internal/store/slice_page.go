@@ -7,7 +7,7 @@ import (
 )
 
 // SliceSortKeys are the report columns a page can be sorted by, in the order of the table.
-var SliceSortKeys = []string{"group", "stream", "country", "offer", "source", "hits", "uniq", "bots", "conv", "cr", "profit", "depsum", "cost"}
+var SliceSortKeys = []string{"day", "group", "stream", "country", "offer", "source", "hits", "uniq", "bots", "conv", "cr", "profit", "depsum", "cost"}
 
 // SliceDefaultSort is the report order when the request names none: the most visits first.
 const SliceDefaultSort = "hits"
@@ -60,7 +60,7 @@ func SumSlice(rows []SliceRow) SliceTotals {
 // Text columns compare case-insensitively; offer and source compare by label when it is not nil.
 // The cost column sorts by the currency with the largest total cost, and rows without cost
 // in it follow every other row in both directions. Every tie falls back to the cell identity
-// (campaign, stream, country, offer, source), so the order is the same on every request.
+// (campaign, stream, country, offer, source, day), so the order is the same on every request.
 // It returns the page with the total row count. It does not fail.
 func PageSlice(rows []SliceRow, tot SliceTotals, truncated bool, q PageQuery, label SliceLabel) SlicePage {
 	if q.Sort == "" {
@@ -95,6 +95,8 @@ func sliceCompare(key, cur string, label SliceLabel) func(a, b SliceRow) int {
 		return func(a, b SliceRow) int { return cmpFold(f(a), f(b)) }
 	}
 	switch key {
+	case "day":
+		return text(func(r SliceRow) string { return r.Day })
 	case "group":
 		return text(func(r SliceRow) string { return r.Group })
 	case "stream":
@@ -125,11 +127,11 @@ func sliceCompare(key, cur string, label SliceLabel) func(a, b SliceRow) int {
 	return func(SliceRow, SliceRow) int { return 0 }
 }
 
-// sliceIdentity orders two report rows by their cell: campaign, stream, country, offer, source.
+// sliceIdentity orders two report rows by their cell: campaign, stream, country, offer, source, day.
 // Two rows of one answer never share a cell. It does not fail.
 func sliceIdentity(a, b SliceRow) int {
 	return cmp.Or(cmp.Compare(a.Group, b.Group), cmp.Compare(a.Stream, b.Stream), cmp.Compare(a.Country, b.Country),
-		cmp.Compare(a.Offer, b.Offer), cmp.Compare(a.Source, b.Source))
+		cmp.Compare(a.Offer, b.Offer), cmp.Compare(a.Source, b.Source), cmp.Compare(a.Day, b.Day))
 }
 
 // topCurrency is the code with the largest amount in by; the smaller code wins a tie and

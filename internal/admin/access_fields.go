@@ -25,6 +25,7 @@ var fieldExtraKeys = map[string][]string{
 	"campaign_id": {"group_id"},
 	"uniq":        {"unique", "uniq_first"},
 	"bot":         {"bots"},
+	"ts":          {"day"},
 	"offer_id":    {"offer"},
 	"source_id":   {"source"},
 	"profit":      {"revenue", "payout", "depsum"},

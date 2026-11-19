@@ -150,6 +150,9 @@ type aiTurnMsg struct {
 	ToolCalls  []aiToolCall
 	ToolCallID string
 	ToolName   string
+	// Nudge marks a user message the server added to keep a turn going; it is not the request of
+	// the user and the providers send it as an ordinary user message.
+	Nudge bool
 }
 
 // aiRequest is one model call. MaxTokens limits the output; zero uses the provider default.

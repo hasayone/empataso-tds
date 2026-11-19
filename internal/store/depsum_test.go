@@ -86,14 +86,14 @@ func TestDepSumSQL(t *testing.T) {
 	if !strings.Contains(open, "toFloat64(0) AS depsum") || !strings.Contains(open, ", depsum FROM conversions") {
 		t.Fatalf("open union:\n%s", open)
 	}
-	off := sliceConvSQL(&CH{}, "")
+	off := sliceConvSQL(&CH{}, "", false)
 	if strings.Contains(off, "sum(depsum)") || strings.Contains(off, ", depsum") {
 		t.Fatalf("slice names the column: %s", off)
 	}
 	if !strings.Contains(off, "toFloat64(0) AS depsum_sum") || !strings.Contains(off, "sum(profit) AS profit_sum") {
 		t.Fatalf("slice sums: %s", off)
 	}
-	on := sliceConvSQL(&CH{depsumConv: true}, "")
+	on := sliceConvSQL(&CH{depsumConv: true}, "", false)
 	if !strings.Contains(on, "sum(depsum) AS depsum_sum") || !strings.Contains(on, "toFloat64(0) AS depsum") {
 		t.Fatalf("open slice: %s", on)
 	}

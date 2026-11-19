@@ -580,7 +580,7 @@ func TestAssistantToolsLimitedUserSeesWhatTheUISees(t *testing.T) {
 func TestAssistantToolsCampaignsLoseOutboundFields(t *testing.T) {
 	env := newAIToolEnv(t)
 	tool, _ := aiToolNamed("list_campaigns")
-	res, err := env.s.aiRunRead(context.Background(), env.root, "", tool, nil)
+	res, err := env.s.aiRunRead(context.Background(), env.root, "", tool, json.RawMessage(`{"ids":["g1"]}`))
 	if err != nil {
 		t.Fatal(err)
 	}

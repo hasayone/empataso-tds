@@ -114,19 +114,19 @@ func TestSliceRowsTotalsOfCutReport(t *testing.T) {
 	from, to := time.Now().Add(-time.Hour), time.Now()
 	conn := &fakeConn{results: []*fakeRows{
 		{data: [][]any{
-			{"g1", "s", "us", "", "", uint64(9), uint64(6), uint64(5), uint64(1)},
-			{"g2", "s", "us", "", "", uint64(4), uint64(4), uint64(4), uint64(0)},
-			{"g3", "s", "us", "", "", uint64(2), uint64(2), uint64(2), uint64(0)},
+			{"g1", "s", "us", "", "", "", uint64(9), uint64(6), uint64(5), uint64(1)},
+			{"g2", "s", "us", "", "", "", uint64(4), uint64(4), uint64(4), uint64(0)},
+			{"g3", "s", "us", "", "", "", uint64(2), uint64(2), uint64(2), uint64(0)},
 		}},
 		{data: [][]any{{uint64(15), uint64(11), uint64(1)}}},
 		{data: [][]any{
-			{"g1", "s", "us", "", "", "USD", int64(50)},
-			{"g3", "s", "us", "", "", "USD", int64(25)},
+			{"g1", "s", "us", "", "", "", "USD", int64(50)},
+			{"g3", "s", "us", "", "", "", "USD", int64(25)},
 		}},
-		{data: [][]any{{"g9", "s", "us", "", "", uint64(2), 7.5, 0.0}}},
+		{data: [][]any{{"g9", "s", "us", "", "", "", uint64(2), 7.5, 0.0}}},
 	}}
 	c := &CH{conn: conn, costCols: true}
-	rows, tot, cut, err := c.sliceRows(context.Background(), from, to, nil, 2, true)
+	rows, tot, cut, err := c.sliceRows(context.Background(), from, to, nil, 2, true, "")
 	if err != nil || !cut || len(rows) != 3 || rows[2].Group != "g9" || rows[2].Conv != 2 {
 		t.Fatalf("err=%v cut=%v rows=%+v", err, cut, rows)
 	}
@@ -138,9 +138,9 @@ func TestSliceRowsTotalsOfCutReport(t *testing.T) {
 		t.Fatalf("totals %+v, want %+v", tot, want)
 	}
 
-	whole := &fakeConn{results: []*fakeRows{{data: [][]any{{"g1", "s", "us", "", "", uint64(3), uint64(3), uint64(2), uint64(1)}}}, {}}}
+	whole := &fakeConn{results: []*fakeRows{{data: [][]any{{"g1", "s", "us", "", "", "", uint64(3), uint64(3), uint64(2), uint64(1)}}}, {}}}
 	c = &CH{conn: whole}
-	_, tot, cut, err = c.sliceRows(context.Background(), from, to, nil, PageMaxRows, true)
+	_, tot, cut, err = c.sliceRows(context.Background(), from, to, nil, PageMaxRows, true, "")
 	if err != nil || cut || len(whole.queries) != 2 || tot.Hits != 3 || tot.Unique != 2 || tot.Bots != 1 {
 		t.Fatalf("whole report: err=%v cut=%v queries=%d totals=%+v", err, cut, len(whole.queries), tot)
 	}

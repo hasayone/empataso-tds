@@ -139,6 +139,23 @@ func validateSubstr(f Field, vals []string) error {
 // ErrUnknownField and ErrBadCond come from ValidateConds. A ready check that
 // fails is not an error.
 func buildWhere(c *CH, table string, conds []Cond) (sql string, args []any, skip bool, err error) {
+	return buildWhereMode(c, table, conds, false)
+}
+
+// buildJournalWhere is buildWhere for the click and conversion journals.
+// A click that one campaign forwarded to another is stored under the campaign
+// that served it, with the campaign that received it in origin_*. For the
+// fields campaign and campaign_id a condition that is not a Scope therefore
+// matches either column, so the journal of the entry campaign shows its clicks
+// and conversions. Scope conditions and every other field stay exact.
+// Parameters and results are those of buildWhere.
+func buildJournalWhere(c *CH, table string, conds []Cond) (sql string, args []any, skip bool, err error) {
+	return buildWhereMode(c, table, conds, true)
+}
+
+// buildWhereMode is the body of buildWhere and buildJournalWhere.
+// entry true widens the campaign conditions to the origin columns, see buildJournalWhere.
+func buildWhereMode(c *CH, table string, conds []Cond, entry bool) (sql string, args []any, skip bool, err error) {
 	if err = ValidateConds(table, conds); err != nil {
 		return "", nil, false, err
 	}
@@ -158,6 +175,15 @@ func buildWhere(c *CH, table string, conds []Cond) (sql string, args []any, skip
 			vals = append([]string(nil), cond.Values...)
 			for i, v := range vals {
 				vals[i] = strings.ToLower(strings.TrimSpace(v))
+			}
+		}
+		if entry && !cond.Scope {
+			if frag, copies, ok := entryCampaignSQL(c, table, f, expr, cond.Op, len(vals)); ok {
+				b.WriteString(frag)
+				for i := 0; i < copies; i++ {
+					args = append(args, stringArgs(vals)...)
+				}
+				continue
 			}
 		}
 		if table == "conversions" && f.Name == "campaign_id" && (cond.Op == "eq" || cond.Op == "in") {
@@ -202,6 +228,53 @@ func convCampaignSQL(convExpr, eventsExpr string, n int) string {
 	list := placeholders(n)
 	return " AND (" + convExpr + " IN (" + list + ") OR (" + convExpr + " = '' AND cid IN " +
 		"(SELECT cid FROM events WHERE " + eventsExpr + " IN (" + list + ") AND cid != '')))"
+}
+
+// entryOrigin names the origin field that pairs with a campaign field.
+var entryOrigin = map[string]string{"campaign": "origin_campaign", "campaign_id": "origin_campaign_id"}
+
+// entryCampaignSQL is the journal fragment of a campaign or campaign_id condition
+// that also looks at the campaign the click entered through.
+// c supplies readiness, table is events or conversions, f is the field, expr its
+// column expression, op the operator and n the number of values, at least 1.
+// eq and in match the serving or the entry campaign. ne and nin match neither
+// and keep the non-empty requirement of the serving column. On conversions,
+// campaign_id keeps the rule of convCampaignSQL for rows without a campaign id.
+// copies says how many times the caller supplies the values, in the same order
+// for every placeholder. ok is false when f is not a campaign field, the op is
+// not one of the four, or the origin column is not ready on table; the caller
+// then builds the ordinary fragment. The fragment starts with " AND ".
+func entryCampaignSQL(c *CH, table string, f Field, expr, op string, n int) (sql string, copies int, ok bool) {
+	name, paired := entryOrigin[f.Name]
+	if !paired || (op != "eq" && op != "in" && op != "ne" && op != "nin") {
+		return "", 0, false
+	}
+	of, found := fieldByName(name)
+	if !found {
+		return "", 0, false
+	}
+	ocol, ow := of.tableCol(table)
+	if ocol == "" || !c.ready(table, ow) {
+		return "", 0, false
+	}
+	oexpr := columnExpr(of, ocol)
+	list := placeholders(n)
+	if op == "ne" || op == "nin" {
+		return " AND " + expr + " NOT IN (" + list + ") AND " + oexpr + " NOT IN (" + list + ") AND " + expr + " != ''", 2, true
+	}
+	if table != "conversions" || f.Name != "campaign_id" {
+		return " AND (" + expr + " IN (" + list + ") OR " + oexpr + " IN (" + list + "))", 2, true
+	}
+	evCol, _ := f.tableCol("events")
+	evExpr := columnExpr(f, evCol)
+	evMatch, evCopies := evExpr+" IN ("+list+")", 1
+	if col, w := of.tableCol("events"); col != "" && c.ready("events", w) {
+		evMatch = "(" + evExpr + " IN (" + list + ") OR " + columnExpr(of, col) + " IN (" + list + "))"
+		evCopies = 2
+	}
+	sql = " AND (" + expr + " IN (" + list + ") OR " + oexpr + " IN (" + list + ") OR (" + expr + " = '' AND cid IN " +
+		"(SELECT cid FROM events WHERE " + evMatch + " AND cid != '')))"
+	return sql, 2 + evCopies, true
 }
 
 // substrSQL is the fragment of a case-insensitive substring condition.

@@ -306,7 +306,7 @@ type Rules struct {
 	Proxy      int          `json:"proxy,omitempty"`
 	IPVersion  int          `json:"ip_version,omitempty"`
 
-	// SubIDs — правила Sub ID источника по ключам sub_id_1..sub_id_12, точное совпадение.
+	// SubIDs — правила Sub ID источника по ключам sub_id_1..sub_id_30, точное совпадение или «содержит».
 	SubIDs map[string]SubIDFilter `json:"sub_ids,omitempty"`
 }
 
@@ -319,10 +319,12 @@ type ListFilter struct {
 
 // SubIDFilter — правило одного Sub ID источника, зеркало config.SubIDFilter.
 // Flag 1 исключает совпадение, Flag 2 оставляет только совпадение. Empty означает пустое значение.
+// Contains включает совпадение по подстроке без учёта регистра вместо точного равенства.
 type SubIDFilter struct {
-	Flag   int      `json:"flag"`
-	Values []string `json:"values,omitempty"`
-	Empty  bool     `json:"empty,omitempty"`
+	Flag     int      `json:"flag"`
+	Values   []string `json:"values,omitempty"`
+	Empty    bool     `json:"empty,omitempty"`
+	Contains bool     `json:"contains,omitempty"`
 }
 
 // IPListFilter — файл списка IP в каталоге данных движка.

@@ -274,6 +274,8 @@ func keysGone(field string) []string {
 		return []string{"uniq", "unique", "uniq_first"}
 	case "bot":
 		return []string{"bot", "bots"}
+	case "ts":
+		return []string{"ts", "day"}
 	case "offer_id":
 		return []string{"offer_id", "offer"}
 	case "source_id":

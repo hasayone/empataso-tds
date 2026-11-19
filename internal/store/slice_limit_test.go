@@ -12,7 +12,7 @@ func TestSliceEventsSQLAsksOneExtraGroup(t *testing.T) {
 	for _, limit := range []int{SliceLimit, PageMaxRows} {
 		want := fmt.Sprintf("LIMIT %d", limit+1)
 		for _, click := range []bool{true, false} {
-			q := sliceEventsSQL(click, "uniq()", "uniqIf()", "", limit)
+			q := sliceEventsSQL(click, "uniq()", "uniqIf()", "", limit, false)
 			if !strings.Contains(q, want) {
 				t.Errorf("clickCols=%v: query has no %q:\n%s", click, want, q)
 			}

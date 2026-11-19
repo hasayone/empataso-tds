@@ -74,14 +74,27 @@ func extraChecks(r config.Rules) []ruleCheck {
 // subIDMatch reports whether a sub id value matches a rule.
 //
 // f is the rule and value the sub id read from the query. A blank value matches
-// when the rule has Empty; any other value matches when it equals one of the
-// rule's values, ignoring case and surrounding spaces.
+// when the rule has Empty. Any other value matches, ignoring case and
+// surrounding spaces, when it equals one of the rule's values or, for a rule
+// with Contains, when it includes one of them as a substring ("Fonbet" is in
+// "Fonbet|Bovada"). A blank rule value never matches in either mode.
 func subIDMatch(f config.SubIDFilter, value string) bool {
 	if value = strings.TrimSpace(value); value == "" {
 		return f.Empty
 	}
+	var folded string
+	if f.Contains {
+		folded = strings.ToLower(value)
+	}
 	for _, e := range f.Values {
-		if strings.EqualFold(strings.TrimSpace(e), value) {
+		e = strings.TrimSpace(e)
+		switch {
+		case e == "":
+		case f.Contains:
+			if strings.Contains(folded, strings.ToLower(e)) {
+				return true
+			}
+		case strings.EqualFold(e, value):
 			return true
 		}
 	}

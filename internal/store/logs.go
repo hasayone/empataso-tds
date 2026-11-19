@@ -148,7 +148,7 @@ func (c *CH) Logs(ctx context.Context, f LogFilter) ([]LogRow, int64, error) {
 	if f.HumansOnly {
 		where += " AND (bot = '' OR bot = '-')"
 	}
-	extra, extraArgs, skip, err := buildWhere(c, "events", f.Conds)
+	extra, extraArgs, skip, err := buildJournalWhere(c, "events", f.Conds)
 	if err != nil {
 		return nil, 0, err
 	}

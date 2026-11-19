@@ -30,6 +30,16 @@ const (
 
 	// aiCatalogIDsMax is the most ids one catalog call may ask for.
 	aiCatalogIDsMax = 200
+
+	// aiCampaignLimitMax is the largest page of list_campaigns and aiCampaignLimitDefault its
+	// default. A summary row has no streams and is about 100 bytes, so 200 rows are 20 to 30 KiB:
+	// a search through thousands of names takes dozens of calls, not hundreds.
+	aiCampaignLimitMax     = 200
+	aiCampaignLimitDefault = 100
+
+	// aiCampaignResultMax is the size in bytes of a page of campaign summaries. Rows past it are
+	// left for the next page (next_offset), so the answer is never cut inside a row.
+	aiCampaignResultMax = 32 << 10
 )
 
 // aiCatalogResources lists the resources whose list tool pages and searches in the executor: the
@@ -109,7 +119,10 @@ func buildAIToolRegistry() []aiTool {
 			t.Spec, t.bodyProp = aiReadSpec(t.Name, op, doc)
 			if verb == http.MethodGet && len(t.pathParams) == 0 && aiCatalogResources[t.Resource] {
 				t.catalog = true
-				aiAddCatalogArgs(&t.Spec)
+				aiAddCatalogArgs(&t.Spec, t)
+				if t.Resource == "campaigns" {
+					aiCampaignSpec(&t.Spec)
+				}
 			}
 			add(t)
 			continue
@@ -239,7 +252,8 @@ func aiReadSpec(name string, op map[string]any, doc routeDoc) (aiToolSpec, strin
 
 // aiAddCatalogArgs adds the arguments q, ids, limit and offset to the spec of a catalog list tool
 // and says in its description how the answer is paged. The executor, not the handler, serves them.
-func aiAddCatalogArgs(spec *aiToolSpec) {
+func aiAddCatalogArgs(spec *aiToolSpec, t aiTool) {
+	def, limitMax, _ := aiPageBounds(t)
 	props, _ := spec.Schema["properties"].(map[string]any)
 	if props == nil {
 		props = map[string]any{}
@@ -255,16 +269,38 @@ func aiAddCatalogArgs(spec *aiToolSpec) {
 		"description": "Return only the records with these ids.",
 	}
 	props["limit"] = map[string]any{
-		"type": "integer", "minimum": 1, "maximum": aiReadLimitMax,
-		"description": fmt.Sprintf("Records per page, %d by default, at most %d.", aiCatalogLimitDefault, aiReadLimitMax),
+		"type": "integer", "minimum": 1, "maximum": limitMax,
+		"description": fmt.Sprintf("Records per page, %d by default, at most %d.", def, limitMax),
 	}
 	props["offset"] = map[string]any{
 		"type": "integer", "minimum": 0, "description": "Records to skip, for the next page.",
 	}
-	spec.Description = joinNonEmpty("\n\n", spec.Description,
-		"The answer is {items, total, offset, limit}: total counts every match, items is one page. "+
-			"Use q to search by name (a substring of the name or id, ignoring case), ids for known ids, "+
-			"and offset to read the next page.")
+	spec.Description = joinNonEmpty("\n\n", spec.Description, aiCatalogPagingNote)
+}
+
+// aiCatalogPagingNote tells the model how the answer of a catalog list tool is paged.
+const aiCatalogPagingNote = "The answer is {items, total, offset, limit, next_offset}: total counts every match, items is one page, " +
+	"next_offset is the offset of the next page and is missing on the last one. " +
+	"Use q to search by name (a substring of the name or id, ignoring case), ids for known ids, " +
+	"and offset to read the next page."
+
+// aiCampaignListNote describes list_campaigns to the model in place of the route text, which
+// promises every campaign with its streams.
+const aiCampaignListNote = "List the campaigns the user may see. Each item is a summary {id, num, name, status, aliases, " +
+	"folder, board_id, domain_id, source_id, streams_total, streams_active}; id is the slug of the campaign page. " +
+	"To read the streams of a campaign pass ids with at most 5 ids: those campaigns come whole. " +
+	"The list can hold thousands of campaigns: take large pages, the summaries are small, and read page after page " +
+	"with offset = next_offset until it is missing, and never call a partial list all campaigns. " +
+	"A page may hold fewer rows than limit when the size is reached; next_offset says where to go on. "
+
+// aiCampaignSpec adapts the spec of the list_campaigns tool: the summary text replaces the route
+// text and the shared argument, which asks for the whole list as one object, is dropped. The
+// description says no number for a good page: the model picks it between 1 and the maximum.
+func aiCampaignSpec(spec *aiToolSpec) {
+	if props, ok := spec.Schema["properties"].(map[string]any); ok {
+		delete(props, "shared")
+	}
+	spec.Description = aiCampaignListNote + aiCatalogPagingNote
 }
 
 // aiProposeSpec builds the spec of a propose tool. Update takes {id, patch}, create {patch},

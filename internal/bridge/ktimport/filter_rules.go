@@ -648,8 +648,8 @@ func mergeConflict(base, part Rules, or bool) string {
 		return "фильтр get не склеен с прежним: смысл И/ИЛИ или режим accept/reject изменился бы"
 	}
 	for key, f := range part.SubIDs {
-		if prev, has := base.SubIDs[key]; has && !exactJoin(prev.Flag, f.Flag, or) {
-			return "фильтр " + key + " не склеен с прежним: смысл И/ИЛИ или режим accept/reject изменился бы"
+		if prev, has := base.SubIDs[key]; has && (!exactJoin(prev.Flag, f.Flag, or) || prev.Contains != f.Contains) {
+			return "фильтр " + key + " не склеен с прежним: смысл И/ИЛИ, режим accept/reject или способ сравнения изменился бы"
 		}
 	}
 	return ""
@@ -674,7 +674,7 @@ func mergeSubIDs(base, add map[string]SubIDFilter) map[string]SubIDFilter {
 		case !has:
 			out[key] = f
 		case prev.Flag == f.Flag:
-			out[key] = SubIDFilter{Flag: prev.Flag, Values: unique(append(append([]string{}, prev.Values...), f.Values...)), Empty: prev.Empty || f.Empty}
+			out[key] = SubIDFilter{Flag: prev.Flag, Values: unique(append(append([]string{}, prev.Values...), f.Values...)), Empty: prev.Empty || f.Empty, Contains: prev.Contains}
 		}
 	}
 	return out

@@ -217,7 +217,7 @@ func TestUniqCountByDims(t *testing.T) {
 // the summable first-step count next to it.
 func TestSliceEventsSQLUniques(t *testing.T) {
 	stepped := &CH{stepEvents: true, clickCols: true}
-	q := squash(sliceEventsSQL(true, stepped.uniqCount(nil, sliceDims(true)...), stepped.firstStepUniq(), " AND country = ?", SliceLimit))
+	q := squash(sliceEventsSQL(true, stepped.uniqCount(nil, sliceDims(true)...), stepped.firstStepUniq(), " AND country = ?", SliceLimit, false))
 	if !strings.Contains(q, "countIf(uniq = 1) AS uniq_hits, countIf(uniq = 1 AND step = 0) AS uniq_first") {
 		t.Errorf("with click columns: %s", q)
 	}
@@ -225,12 +225,12 @@ func TestSliceEventsSQLUniques(t *testing.T) {
 		t.Errorf("grouping or filter lost: %s", q)
 	}
 	bare := &CH{stepEvents: true}
-	q = squash(sliceEventsSQL(false, bare.uniqCount(nil, sliceDims(false)...), bare.firstStepUniq(), "", SliceLimit))
+	q = squash(sliceEventsSQL(false, bare.uniqCount(nil, sliceDims(false)...), bare.firstStepUniq(), "", SliceLimit, false))
 	if !strings.Contains(q, "countIf(uniq = 1 AND step = 0) AS uniq_hits, countIf(uniq = 1 AND step = 0) AS uniq_first") {
 		t.Errorf("without click columns: %s", q)
 	}
 	old := &CH{clickCols: true}
-	q = squash(sliceEventsSQL(true, old.uniqCount(nil, sliceDims(true)...), old.firstStepUniq(), "", SliceLimit))
+	q = squash(sliceEventsSQL(true, old.uniqCount(nil, sliceDims(true)...), old.firstStepUniq(), "", SliceLimit, false))
 	if strings.Contains(q, "step") {
 		t.Errorf("without the wave the report must not mention step: %s", q)
 	}

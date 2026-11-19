@@ -165,7 +165,11 @@ func (s *Server) aiRunReadWith(ctx context.Context, sess security.Session, board
 			return nil, errAISessionGone
 		}
 	}
-	rctx, cancel := context.WithTimeout(context.WithValue(ctx, sessionKey, sess), aiToolTimeout)
+	rctx := context.WithValue(ctx, sessionKey, sess)
+	if tool.Pattern == "GET /api/groups" {
+		rctx = context.WithValue(rctx, aiCampaignViewKey{}, page.campaignView())
+	}
+	rctx, cancel := context.WithTimeout(rctx, aiToolTimeout)
 	defer cancel()
 	rawMax := aiRawResultMax
 	if tool.catalog {
@@ -242,7 +246,11 @@ func (s *Server) aiShape(t aiTool, page aiCatalogQuery, body []byte, secrets []s
 		v = page.apply(v)
 	}
 	v = newAIRedactor(s.aiSecretsOr(secrets), !aiConfigResources[t.Resource]).value(v)
-	v, err := aiCompress(v, aiResultMax)
+	limit := aiResultMax
+	if t.catalog {
+		limit = page.resultMax
+	}
+	v, err := aiCompress(v, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -534,17 +542,28 @@ func aiCompress(v any, limit int) (any, error) {
 	return root, nil
 }
 
-// aiLargestSlot returns the non-empty array of root with the largest encoded size.
+// aiLargestSlot returns the array of root with the largest encoded size, preferring arrays of two
+// or more elements: a one-element array holds the record the caller asked for, so it is cut only
+// when no longer array is left, and the arrays inside that record are cut first.
 func aiLargestSlot(root any) (aiSlot, bool) {
 	var slots []aiSlot
 	aiCollectSlots(root, func(int) {}, func([]any) {}, &slots)
 	best, found := aiSlot{}, false
 	for _, s := range slots {
-		if !found || s.size > best.size {
+		if !found || aiSlotBetter(s, best) {
 			best, found = s, true
 		}
 	}
 	return best, found
+}
+
+// aiSlotBetter reports whether slot a should be cut before slot b: a longer array first, then the
+// larger one.
+func aiSlotBetter(a, b aiSlot) bool {
+	if (len(a.arr) > 1) != (len(b.arr) > 1) {
+		return len(a.arr) > 1
+	}
+	return a.size > b.size
 }
 
 // aiCollectSlots appends every non-empty array under node to out. mark and set are the hooks of

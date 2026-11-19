@@ -149,18 +149,18 @@ function boardEffectiveId(){ return 'b1'; }
 let RANGE = {id:'dates'};
 function rangeBounds(){ return {from:new Date('2026-01-01T00:00:00Z'), to:new Date('2026-01-02T00:00:00Z')}; }
 let DASH = {conds:[{f:'device',op:'eq',v:['mobile']}]};
-let LOGF = {conds:[{f:'country',op:'eq',v:['ru','us']},{f:'ip',op:'ne',v:'1.2.3.4'},null]};
-let PB = {conds:[{f:'status',op:'eq',v:['lead']}], campaignId:'c9'};
+let LOGF = {conds:[{f:'country',op:'eq',v:['ru','us']},{f:'ip',op:'ne',v:'1.2.3.4'},null,{f:'campaign_id',op:'eq',v:['g1']}]};
+let PB = {conds:[{f:'status',op:'eq',v:['lead']},{f:'campaign_id',op:'eq',v:['c9']}]};
 let REP = {conds:[{f:'os',op:'eq',v:['ios']}]};
-let LOG_TAB = 'postbacks', LOG_CAMPAIGN = 'g1';
+let LOG_TAB = 'postbacks';
 const AI_CTX_CONDS = 20;
 `
-	assistantNode(t, []string{"aiCondText", "aiPageContext"}, prelude, `
+	assistantNode(t, []string{"aiCondText", "campaignOfConds", "aiPageContext"}, prelude, `
 let c = aiPageContext();
 eq(c.page, 'logs', 'route page');
 eq(c.board, 'b1', 'board');
 eq(c.range, {id:'dates', from:'2026-01-01T00:00:00.000Z', to:'2026-01-02T00:00:00.000Z'}, 'period with resolved dates');
-eq(c.filters, ['country eq ru|us', 'ip ne 1.2.3.4'], 'conditions of the log, a bad one dropped');
+eq(c.filters, ['country eq ru|us', 'ip ne 1.2.3.4', 'campaign_id eq g1'], 'conditions of the log, a bad one dropped');
 eq(c.tab, 'postbacks', 'log tab');
 eq(c.campaign, 'g1', 'log campaign');
 CUR = {page:'flows', arg:'my-slug'};
@@ -168,7 +168,7 @@ c = aiPageContext();
 eq([c.page, c.arg, c.tab, c.campaign, c.filters], ['flows', 'my-slug', undefined, undefined, []], 'campaign address is the arg');
 CUR = {page:'conversions', arg:''};
 c = aiPageContext();
-eq([c.filters, c.campaign], [['status eq lead'], 'c9'], 'conversions conditions and campaign');
+eq([c.filters, c.campaign], [['status eq lead', 'campaign_id eq c9'], 'c9'], 'conversions conditions and campaign');
 CUR = {page:'dashboard', arg:''};
 eq(aiPageContext().filters, ['device eq mobile'], 'dashboard conditions');
 CUR = {page:'report', arg:''};

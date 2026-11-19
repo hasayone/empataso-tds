@@ -45,8 +45,12 @@ func (e *aiToolEnv) catalogPage(t *testing.T, sess security.Session, name, args 
 	if err != nil {
 		t.Fatalf("%s %s: %v", name, args, err)
 	}
-	if len(res) > aiResultMax {
-		t.Errorf("%s %s: %d bytes, over %d", name, args, len(res), aiResultMax)
+	limit := aiResultMax
+	if name == "list_campaigns" && !strings.Contains(args, `"ids"`) {
+		limit = aiCampaignResultMax
+	}
+	if len(res) > limit {
+		t.Errorf("%s %s: %d bytes, over %d", name, args, len(res), limit)
 	}
 	var page aiCatalogPage
 	if err := json.Unmarshal(res, &page); err != nil {
@@ -256,7 +260,11 @@ func TestAssistantToolsCatalogSpecs(t *testing.T) {
 			}
 		}
 		limit, _ := props["limit"].(map[string]any)
-		if limit["maximum"] != aiReadLimitMax {
+		wantMax := aiReadLimitMax
+		if tool.Name == "list_campaigns" {
+			wantMax = aiCampaignLimitMax
+		}
+		if limit["maximum"] != wantMax {
 			t.Errorf("%s: limit = %v", tool.Name, limit)
 		}
 		if !strings.Contains(tool.Spec.Description, "Use q to search by name") {

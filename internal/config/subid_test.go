@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -76,4 +77,20 @@ func jsonHasNoSubIDs(raw []byte) bool {
 	_ = json.Unmarshal(raw, &m)
 	_, has := m["sub_ids"]
 	return !has
+}
+
+// TestSubIDContainsJSON keeps the contains marker through JSON and leaves old rules without it.
+func TestSubIDContainsJSON(t *testing.T) {
+	raw, err := json.Marshal(Rules{SubIDs: map[string]SubIDFilter{"sub_id_2": {Flag: FlagB, Values: []string{"Fonbet"}, Contains: true}}})
+	if err != nil || !strings.Contains(string(raw), `"contains":true`) {
+		t.Fatalf("marshal %s %v", raw, err)
+	}
+	var out Rules
+	if err := json.Unmarshal(raw, &out); err != nil || !out.SubIDs["sub_id_2"].Contains {
+		t.Fatalf("round trip %+v %v", out.SubIDs, err)
+	}
+	old, _ := json.Marshal(Rules{SubIDs: map[string]SubIDFilter{"sub_id_2": {Flag: FlagB, Values: []string{"a"}}}})
+	if strings.Contains(string(old), "contains") {
+		t.Fatalf("exact rule wrote contains: %s", old)
+	}
 }

@@ -11,6 +11,10 @@ import (
 	"github.com/hasayone/empataso-tds/internal/config"
 )
 
+// handleGroupsGet answers every campaign the caller may see, with its streams, or with
+// ?shared=1 the same list with the long stream filters shared. A request of the assistant tool
+// carries an aiCampaignView in its context and gets the summary rows of that view instead.
+// A missing store gives an empty list; a store failure is 500.
 func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Groups == nil {
 		writeJSON(w, http.StatusOK, []config.Group{})
@@ -30,6 +34,10 @@ func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
 		if v.admin || v.canSee(resCampaigns, campaignRef(g)) {
 			filtered = append(filtered, g)
 		}
+	}
+	if view, ok := r.Context().Value(aiCampaignViewKey{}).(aiCampaignView); ok {
+		writeJSON(w, http.StatusOK, view.rows(filtered))
+		return
 	}
 	if r.URL.Query().Get("shared") == "1" {
 		writeJSON(w, http.StatusOK, shareGroupLists(filtered))

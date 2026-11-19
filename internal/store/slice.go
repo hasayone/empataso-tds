@@ -17,12 +17,15 @@ const SliceLimit = 2000
 // own uniques, so a landing row and an offer row each have theirs. UniqFirst
 // counts first-step uniques only; unlike Unique it can be summed over rows, and
 // the sum is the campaign's uniques, as in the dashboard summary.
+// Day is the event day (YYYY-MM-DD in the zone of the request); it is set only when the report is
+// cut by day, and then every other count is of that day alone.
 type SliceRow struct {
 	Group     string  `json:"group"`
 	Stream    string  `json:"stream"`
 	Country   string  `json:"country"`
 	Offer     string  `json:"offer"`
 	Source    string  `json:"source"`
+	Day       string  `json:"day,omitempty"`
 	Hits      int64   `json:"hits"`
 	Unique    int64   `json:"unique"`
 	UniqFirst int64   `json:"uniq_first"`
@@ -98,7 +101,7 @@ type SliceTotals struct {
 // It returns the rows, truncated true when more than SliceLimit visit groups exist (only the first SliceLimit by hits are kept), and the same errors as SliceFiltered.
 // Conversion groups outside the kept visit groups still come back as rows with Hits 0, so a truncated report is partial on both sides.
 func (c *CH) SliceMeta(ctx context.Context, from, to time.Time, conds []Cond) ([]SliceRow, bool, error) {
-	rows, _, truncated, err := c.sliceRows(ctx, from, to, conds, SliceLimit, false)
+	rows, _, truncated, err := c.sliceRows(ctx, from, to, conds, SliceLimit, false, "")
 	return rows, truncated, err
 }
 
@@ -109,17 +112,26 @@ func (c *CH) SliceMeta(ctx context.Context, from, to time.Time, conds []Cond) ([
 // visit groups exist (then only the first PageMaxRows by hits are rows, while the totals still
 // count every visit), and the errors of SliceFiltered; a failed visit totals query is an error too.
 func (c *CH) SliceAll(ctx context.Context, from, to time.Time, conds []Cond) ([]SliceRow, SliceTotals, bool, error) {
-	return c.sliceRows(ctx, from, to, conds, PageMaxRows, true)
+	return c.sliceRows(ctx, from, to, conds, PageMaxRows, true, "")
+}
+
+// SliceAllDays is SliceAll with one more grouping: the event day, which fills SliceRow.Day.
+// tz is the IANA zone name that cuts the days; the caller has checked it (see KeywordZone) and an
+// empty name means no day grouping, the answer of SliceAll. The totals are still those of the whole
+// period: first-step uniques are counted over it, not summed over days. Errors are those of SliceAll.
+func (c *CH) SliceAllDays(ctx context.Context, from, to time.Time, conds []Cond, tz string) ([]SliceRow, SliceTotals, bool, error) {
+	return c.sliceRows(ctx, from, to, conds, PageMaxRows, true, tz)
 }
 
 // sliceRows reads the report cells: visits, then click cost, then conversions.
 // ctx bounds every query. from and to are the window and conds filter both sides.
 // limit is the most visit groups kept, by hits. exact asks for the visit totals of every group
-// when the visit groups were cut; without it those totals count only the kept groups.
+// when the visit groups were cut or the cells are cut by day; without it those totals count only
+// the kept groups. tz is the zone of the day grouping, empty for none.
 // The cost and conversion totals always count every group, kept or not.
 // It returns the rows, the totals, whether the visit groups were cut, and the errors of SliceMeta.
 // A failed cost or conversion query is logged and keeps what was read, as SliceMeta always did.
-func (c *CH) sliceRows(ctx context.Context, from, to time.Time, conds []Cond, limit int, exact bool) ([]SliceRow, SliceTotals, bool, error) {
+func (c *CH) sliceRows(ctx context.Context, from, to time.Time, conds []Cond, limit int, exact bool, tz string) ([]SliceRow, SliceTotals, bool, error) {
 	ctx = c.analyticsCtx(ctx, 0)
 	var tot SliceTotals
 	evSQL, evArgs, skip, err := buildWhere(c, "events", conds)
@@ -133,20 +145,28 @@ func (c *CH) sliceRows(ctx context.Context, from, to time.Time, conds []Cond, li
 	if err != nil {
 		return nil, tot, false, err
 	}
+	day := tz != ""
+	// withZone puts the zone first: the day item opens each select list.
+	withZone := func(args []any) []any {
+		if !day {
+			return args
+		}
+		return append([]any{tz}, args...)
+	}
 	evAll := append([]any{from, to}, evArgs...)
-	q := sliceEventsSQL(c.clickCols, c.uniqCount(conds, sliceDims(c.clickCols)...), c.firstStepUniq(), evSQL, limit)
-	out, index, truncated, err := c.sliceVisits(ctx, q, evAll, limit, &tot)
+	q := sliceEventsSQL(c.clickCols, c.uniqCount(conds, sliceDims(c.clickCols)...), c.firstStepUniq(), evSQL, limit, day)
+	out, index, truncated, err := c.sliceVisits(ctx, q, withZone(evAll), limit, &tot)
 	if err != nil {
 		return nil, tot, false, err
 	}
-	if truncated && exact {
+	if exact && (truncated || day) {
 		if err := c.sliceVisitTotals(ctx, sliceEventTotalsSQL(c.firstStepUniq(), evSQL), evAll, &tot); err != nil {
 			return nil, tot, false, err
 		}
 	}
 	if c.costCols {
 		set := sliceSet{rows: out, index: index, truncated: truncated, tot: &tot}
-		if err := c.addSliceCost(ctx, sliceCostSQL(c.clickCols, evSQL), evAll, &set); err != nil {
+		if err := c.addSliceCost(ctx, sliceCostSQL(c.clickCols, evSQL, day), withZone(evAll), &set); err != nil {
 			log.Printf("clickhouse: slice cost: %v", err)
 		}
 		out = set.rows
@@ -157,24 +177,24 @@ func (c *CH) sliceRows(ctx context.Context, from, to time.Time, conds []Cond, li
 		}
 		return out, tot, truncated, nil
 	}
-	cq := sliceConvSQL(c, cvSQL)
-	pbs, err := c.conn.Query(ctx, cq, append([]any{from, to}, cvArgs...)...)
+	cq := sliceConvSQL(c, cvSQL, day)
+	pbs, err := c.conn.Query(ctx, cq, withZone(append([]any{from, to}, cvArgs...))...)
 	if err != nil {
 		log.Printf("clickhouse: slice conversions: %v", err)
 		return out, tot, truncated, nil
 	}
 	defer pbs.Close()
 	for pbs.Next() {
-		var group, stream, country, offerID, sourceID string
+		var group, stream, country, offerID, sourceID, dayKey string
 		var conv uint64
 		var profit, dep float64
-		if err := pbs.Scan(&group, &stream, &country, &offerID, &sourceID, &conv, &profit, &dep); err != nil {
+		if err := pbs.Scan(&group, &stream, &country, &offerID, &sourceID, &dayKey, &conv, &profit, &dep); err != nil {
 			return out, tot, truncated, nil
 		}
-		i, ok := index[sliceKey{group, stream, country, offerID, sourceID}]
+		i, ok := index[sliceKey{group, stream, country, offerID, sourceID, dayKey}]
 		if !ok {
 			i = len(out)
-			out = append(out, SliceRow{Group: group, Stream: stream, Country: country, Offer: offerID, Source: sourceID})
+			out = append(out, SliceRow{Group: group, Stream: stream, Country: country, Offer: offerID, Source: sourceID, Day: dayKey})
 		}
 		out[i].Conv, out[i].Profit, out[i].DepSum = int64(conv), profit, dep
 		tot.Conv += int64(conv)
@@ -205,11 +225,11 @@ func (c *CH) sliceVisits(ctx context.Context, q string, args []any, limit int, t
 		}
 		var row SliceRow
 		var hits, uniq, first, bots uint64
-		if err := rows.Scan(&row.Group, &row.Stream, &row.Country, &row.Offer, &row.Source, &hits, &uniq, &first, &bots); err != nil {
+		if err := rows.Scan(&row.Group, &row.Stream, &row.Country, &row.Offer, &row.Source, &row.Day, &hits, &uniq, &first, &bots); err != nil {
 			return nil, nil, false, err
 		}
 		row.Hits, row.Unique, row.UniqFirst, row.Bots = int64(hits), int64(uniq), int64(first), int64(bots)
-		index[sliceKey{row.Group, row.Stream, row.Country, row.Offer, row.Source}] = len(out)
+		index[sliceKey{row.Group, row.Stream, row.Country, row.Offer, row.Source, row.Day}] = len(out)
 		out = append(out, row)
 		tot.Hits += row.Hits
 		tot.Unique += row.UniqFirst
@@ -239,8 +259,8 @@ func (c *CH) sliceVisitTotals(ctx context.Context, q string, args []any, tot *Sl
 	return nil
 }
 
-// sliceKey is one report cell: campaign, stream, country, offer and source.
-type sliceKey struct{ group, stream, country, offer, source string }
+// sliceKey is one report cell: campaign, stream, country, offer, source and day (empty when not cut by day).
+type sliceKey struct{ group, stream, country, offer, source, day string }
 
 // sliceSet is the report being built: its rows, their index by cell, whether the visit
 // rows were cut at the limit, and the totals of the whole set.
@@ -266,7 +286,7 @@ func (c *CH) addSliceCost(ctx context.Context, q string, args []any, set *sliceS
 		var k sliceKey
 		var cur string
 		var cents int64
-		if err := rows.Scan(&k.group, &k.stream, &k.country, &k.offer, &k.source, &cur, &cents); err != nil {
+		if err := rows.Scan(&k.group, &k.stream, &k.country, &k.offer, &k.source, &k.day, &cur, &cents); err != nil {
 			return err
 		}
 		if set.tot.Cost == nil {
@@ -280,7 +300,7 @@ func (c *CH) addSliceCost(ctx context.Context, q string, args []any, set *sliceS
 		if !ok {
 			i = len(set.rows)
 			set.index[k] = i
-			set.rows = append(set.rows, SliceRow{Group: k.group, Stream: k.stream, Country: k.country, Offer: k.offer, Source: k.source})
+			set.rows = append(set.rows, SliceRow{Group: k.group, Stream: k.stream, Country: k.country, Offer: k.offer, Source: k.source, Day: k.day})
 		}
 		if set.rows[i].Cost == nil {
 			set.rows[i].Cost = map[string]int64{}
@@ -292,15 +312,28 @@ func (c *CH) addSliceCost(ctx context.Context, q string, args []any, set *sliceS
 
 // sliceCostSQL is the click cost half of the period report, grouped like sliceEventsSQL plus the currency.
 // clickCols adds the offer and source columns. evSQL is the buildWhere fragment, or empty.
-// Placeholders are from, to, then the filter args. Clicks with no price are left out. It does not fail.
-func sliceCostSQL(clickCols bool, evSQL string) string {
+// day cuts the cells by event day. Placeholders are the zone (only with day), from, to, then the
+// filter args. Clicks with no price are left out. It does not fail.
+func sliceCostSQL(clickCols bool, evSQL string, day bool) string {
 	offer, source, extra := "''", "''", ""
 	if clickCols {
 		offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
 	}
-	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, cost_cur, sum(cost_cents)
-		FROM events WHERE ts >= ? AND ts < ?`, offer, source) + evSQL + fmt.Sprintf(` AND cost_cents > 0
-		GROUP BY group_name, stream_name, country%s, cost_cur`, extra)
+	dsel, dgrp := sliceDaySQL(day)
+	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, %s AS day_key, cost_cur, sum(cost_cents)
+		FROM events WHERE ts >= ? AND ts < ?`, offer, source, dsel) + evSQL + fmt.Sprintf(` AND cost_cents > 0
+		GROUP BY group_name, stream_name, country%s%s, cost_cur`, extra, dgrp)
+}
+
+// sliceDaySQL is the day item of the period report queries.
+// on cuts the cells by event day: sel is the day in the zone given as the first placeholder of the
+// query, as text YYYY-MM-DD, and group the tail to append to GROUP BY. Off, sel is an empty text and
+// group is empty. Every query names the item day_key. It does not fail.
+func sliceDaySQL(on bool) (sel, group string) {
+	if !on {
+		return "''", ""
+	}
+	return "toString(toDate(ts, ?))", ", day_key"
 }
 
 // sliceDims lists the id fields the report groups events by.
@@ -319,17 +352,19 @@ func sliceDims(clickCols bool) []string {
 // evSQL is the buildWhere fragment, or empty. Placeholders are from, to, then
 // the filter args. limit is the most groups the caller keeps. The string is a full
 // SELECT that asks for limit+1 groups by hits; the extra one only tells the caller
-// the report is cut. It does not fail.
-func sliceEventsSQL(clickCols bool, uniq, first, evSQL string, limit int) string {
+// the report is cut. day cuts the groups by event day and puts the zone first among the
+// placeholders. It does not fail.
+func sliceEventsSQL(clickCols bool, uniq, first, evSQL string, limit int, day bool) string {
 	offer, source, extra := "''", "''", ""
 	if clickCols {
 		offer, source, extra = "offer_id", "source_id", ", offer_id, source_id"
 	}
-	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s,
+	dsel, dgrp := sliceDaySQL(day)
+	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, %s AS day_key,
 		count() AS hits, %s AS uniq_hits, %s AS uniq_first, countIf(bot != '' AND bot != '-') AS bots
-		FROM events WHERE ts >= ? AND ts < ?`, offer, source, uniq, first) + evSQL + fmt.Sprintf(`
-		GROUP BY group_name, stream_name, country%s
-		ORDER BY hits DESC LIMIT %d`, extra, limit+1)
+		FROM events WHERE ts >= ? AND ts < ?`, offer, source, dsel, uniq, first) + evSQL + fmt.Sprintf(`
+		GROUP BY group_name, stream_name, country%s%s
+		ORDER BY hits DESC LIMIT %d`, extra, dgrp, limit+1)
 }
 
 // sliceEventTotalsSQL is the visit total of the period report over every group:
@@ -347,8 +382,9 @@ func sliceEventTotalsSQL(first, evSQL string) string {
 // cvSQL is the extra AND fragment from buildWhere, or empty.
 // The payout sum is named profit_sum so a profit filter stays the column.
 // The deposit sum is named depsum_sum. A closed wave uses a typed zero and
-// does not name the column. The string is a full SELECT. It does not fail.
-func sliceConvSQL(c *CH, cvSQL string) string {
+// does not name the column. day cuts the cells by conversion day and puts the zone first among
+// the placeholders. The string is a full SELECT. It does not fail.
+func sliceConvSQL(c *CH, cvSQL string, day bool) string {
 	offer, source, extra := "''", "''", ""
 	click, ext, model, origin, root := false, false, false, false, false
 	depSum := "toFloat64(0) AS depsum_sum"
@@ -361,10 +397,11 @@ func sliceConvSQL(c *CH, cvSQL string) string {
 			depSum = "sum(depsum) AS depsum_sum"
 		}
 	}
-	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, count() AS conv, sum(profit) AS profit_sum, %s
+	dsel, dgrp := sliceDaySQL(day)
+	return fmt.Sprintf(`SELECT group_name, stream_name, country, %s, %s, %s AS day_key, count() AS conv, sum(profit) AS profit_sum, %s
 		FROM (
 		%s
 		) WHERE ts >= ? AND ts < ?%s%s
-		GROUP BY group_name, stream_name, country%s`,
-		offer, source, depSum, conversionUnion(click, ext, model, conversionLateWaves{origin: origin, root: root}, c != nil && c.subConv, c != nil && c.depsumConv), voidedConfirmedSQL("cid", "status"), cvSQL, extra)
+		GROUP BY group_name, stream_name, country%s%s`,
+		offer, source, dsel, depSum, conversionUnion(click, ext, model, conversionLateWaves{origin: origin, root: root}, c != nil && c.subConv, c != nil && c.depsumConv), voidedConfirmedSQL("cid", "status"), cvSQL, extra, dgrp)
 }

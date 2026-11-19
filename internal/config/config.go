@@ -258,12 +258,15 @@ const MaxRuleSubID = 30
 
 // SubIDFilter is one sub id rule. Flag is FlagA (exclude on match) or FlagB
 // (only on match); any other flag disables it. Values are compared exactly,
-// ignoring case. Empty makes an absent or blank sub id part of the matching set.
-// The rule is applied when Values is not empty or Empty is set.
+// ignoring case, unless Contains is set: then a value matches when it includes
+// one of Values as a substring, ignoring case. Empty makes an absent or blank
+// sub id part of the matching set. The rule is applied when Values is not empty
+// or Empty is set.
 type SubIDFilter struct {
-	Flag   Flag     `json:"flag"`
-	Values []string `json:"values,omitempty"`
-	Empty  bool     `json:"empty,omitempty"`
+	Flag     Flag     `json:"flag"`
+	Values   []string `json:"values,omitempty"`
+	Empty    bool     `json:"empty,omitempty"`
+	Contains bool     `json:"contains,omitempty"`
 }
 
 // Active reports whether the rule filters anything: the flag is FlagA or FlagB

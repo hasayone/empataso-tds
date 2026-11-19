@@ -13,7 +13,7 @@ import (
 // reportSortKeys maps each sort key of GET /api/report to the answer keys its value reads.
 // A key whose answer key is hidden for the viewer cannot be sorted on.
 var reportSortKeys = map[string][]string{
-	"group": {"group"}, "stream": {"stream"}, "country": {"country"}, "offer": {"offer"}, "source": {"source"},
+	"day": {"day"}, "group": {"group"}, "stream": {"stream"}, "country": {"country"}, "offer": {"offer"}, "source": {"source"},
 	"hits": {"hits"}, "uniq": {"unique"}, "bots": {"bots"}, "conv": {"conv"}, "cr": {"conv", "hits"},
 	"profit": {"profit"}, "depsum": {"depsum"}, "cost": {"cost"},
 }
@@ -82,16 +82,42 @@ type slicePager interface {
 	SliceAll(ctx context.Context, from, to time.Time, conds []store.Cond) ([]store.SliceRow, store.SliceTotals, bool, error)
 }
 
+// sliceDayPager is the optional report source that also cuts the cells by event day in a zone.
+type sliceDayPager interface {
+	SliceAllDays(ctx context.Context, from, to time.Time, conds []store.Cond, tz string) ([]store.SliceRow, store.SliceTotals, bool, error)
+}
+
+// reportZone reads day and tz of GET /api/report.
+// day=1 asks for rows cut by event day; tz is the IANA zone name that cuts the days, UTC when empty.
+// It returns the zone name when the days are asked and "" when they are not. A zone that
+// store.KeywordZone refuses writes 400 "bad tz" and ok is false.
+func reportZone(w http.ResponseWriter, r *http.Request) (tz string, ok bool) {
+	v := r.URL.Query()
+	if raw := strings.ToLower(v.Get("day")); raw != "1" && raw != "true" {
+		return "", true
+	}
+	tz = v.Get("tz")
+	if _, err := store.KeywordZone(tz); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad tz")
+		return "", false
+	}
+	if tz == "" {
+		tz = "UTC"
+	}
+	return tz, true
+}
+
 // keywordPager is the optional keyword source that pages the table on the server.
 type keywordPager interface {
 	KeywordStatsPage(ctx context.Context, from, to time.Time, conds []store.Cond, mode store.KeywordMode, q store.PageQuery) (store.KeywordPage, error)
 }
 
 // writeReportPage answers GET /api/report with one sorted page and the totals of every row.
-// from, to and conds are the checked request and q the page. A source without SliceAll
-// pages the rows of SliceFiltered and sums them. Missing stats is an empty page.
-// A query failure is written by writeStatsErr.
-func (s *Server) writeReportPage(w http.ResponseWriter, r *http.Request, from, to time.Time, conds []store.Cond, q store.PageQuery) {
+// from, to and conds are the checked request and q the page. tz is the zone of the day
+// grouping, empty for rows that are not cut by day; a source that cannot cut by day answers
+// without it. A source without SliceAll pages the rows of SliceFiltered and sums them.
+// Missing stats is an empty page. A query failure is written by writeStatsErr.
+func (s *Server) writeReportPage(w http.ResponseWriter, r *http.Request, from, to time.Time, conds []store.Cond, q store.PageQuery, tz string) {
 	if s.cfg.Stats == nil {
 		writeJSON(w, http.StatusOK, store.PageSlice(nil, store.SliceTotals{}, false, q, nil))
 		return
@@ -100,7 +126,9 @@ func (s *Server) writeReportPage(w http.ResponseWriter, r *http.Request, from, t
 	var tot store.SliceTotals
 	var truncated bool
 	var err error
-	if sp, ok := s.cfg.Stats.(slicePager); ok {
+	if dp, ok := s.cfg.Stats.(sliceDayPager); ok && tz != "" {
+		rows, tot, truncated, err = dp.SliceAllDays(r.Context(), from, to, conds, tz)
+	} else if sp, ok := s.cfg.Stats.(slicePager); ok {
 		rows, tot, truncated, err = sp.SliceAll(r.Context(), from, to, conds)
 	} else if rows, err = s.cfg.Stats.SliceFiltered(r.Context(), from, to, conds); err == nil {
 		tot = store.SumSlice(rows)

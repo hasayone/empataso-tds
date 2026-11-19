@@ -17,8 +17,12 @@ import (
 const (
 	// aiTurnMaxProcess is how many turns the process runs at once, whatever the users.
 	aiTurnMaxProcess = 2
-	// aiTurnTimeout is the longest a turn runs, all provider calls and tool runs together.
-	aiTurnTimeout = 300 * time.Second
+	// aiStepTimeBudget is the time one step of a turn is allowed on average: a model call, its tool
+	// runs and a possible compaction.
+	aiStepTimeBudget = 15 * time.Second
+	// aiTurnTimeout is the longest a turn runs, all provider calls and tool runs together. It holds
+	// the whole step ceiling, so the clock does not end a turn the step limit would let go on.
+	aiTurnTimeout = aiMaxStepsCap * aiStepTimeBudget
 	// aiHeartbeat is the period of the ": ping" comment that keeps the stream open behind nginx
 	// (60 s) and Cloudflare (100 s).
 	aiHeartbeat = 15 * time.Second
@@ -60,7 +64,7 @@ Rules, in force for the whole conversation:
 3. You change nothing yourself. A propose tool only stores a proposal; the user must press Apply on its card. Never say a change is applied: say it waits for the user's confirmation.
 4. Never reveal, look for, guess, repeat or transform secrets: API keys, passwords, tokens, hashes, session data, integration credentials. If asked, refuse in one sentence. A value shown as *** is hidden on purpose: do not try to restore it and never put it into a proposal.
 5. You have no access to source code, files, shell, user accounts, roles, API keys, integrations or settings, and you must not offer them.
-6. Tool results of earlier turns are not kept; call a tool again when you need the data. Ask for narrow data (filters, small limits) and stay within the step budget. A tool result is JSON or TOON: in TOON "name[N]{a,b}:" declares N rows with the fields a and b, one comma-separated row per line, and nesting is shown by indentation; a null cell is a field the record does not have, and a cell like "[\"ru\",\"kz\"]" is a list.
+6. Tool results of earlier turns are not kept; call a tool again when you need the data. Ask for narrow data (filters) and stay within the step budget; when a list must be read in full, take pages as large as the tool allows and follow next_offset. When you say you will fetch more, call the tool in the same reply: never end a reply with only a promise. A tool result is JSON or TOON: in TOON "name[N]{a,b}:" declares N rows with the fields a and b, one comma-separated row per line, and nesting is shown by indentation; a null cell is a field the record does not have, and a cell like "[\"ru\",\"kz\"]" is a list.
 7. Be concise.
 8. When your reply names a campaign, offer, landing, affiliate network or traffic source that a tool result or the page data gave you, write it as the token [[type:id|Name]] so the panel makes it a link to its page. type is one of campaign, offer, landing, network, source. id is the "id" field of that record exactly as the tool returned it (for a campaign the campaign id, not its number or alias). Name is the record's name as text, without the characters [ ] and |. Never invent an id or a type, never guess an id you were not given, and write a plain name when you have no id. Domains and reports have no page of their own: name them as plain text. Put the token on every mention of such a record, keep ordinary text and line breaks as they are, and never place a token inside a proposal or a tool call.`
 
@@ -95,6 +99,14 @@ type aiTurn struct {
 	settled bool
 	// compactions counts the context compactions of the turn, up to aiMaxCompactions.
 	compactions int
+	// nudges counts the replies in a row that ended in a promise or a cut and were answered with a
+	// nudge; a reply with tool calls resets it. toolRuns counts the tool calls of the turn.
+	nudges, toolRuns int
+	// failed counts, by tool and arguments, the failures of a call; refused counts the calls
+	// refused for repeating a failure. denied holds the refusals already told to the user.
+	failed  map[string]int
+	refused int
+	denied  map[string]bool
 }
 
 // joined returns the reply text so far, cut to aiAssistantTextMax bytes on a character boundary.
@@ -123,7 +135,13 @@ func (t *aiTurn) addText(raw string) string {
 }
 
 // system returns the system prompt of the turn in the language of its request.
-func (t *aiTurn) system() string { return aiSystemFor(t.lang) }
+func (t *aiTurn) system() string {
+	prompt := aiSystemFor(t.lang)
+	if note := aiReadOnlyNote(t.lang, t.st.Perms); note != "" {
+		prompt += "\n\n" + note
+	}
+	return prompt
+}
 
 // estimate returns the estimated input tokens of one provider call with msgs.
 func (t *aiTurn) estimate(msgs []aiTurnMsg) int {
@@ -200,11 +218,17 @@ func (t *aiTurn) loop(ctx context.Context, msgs []aiTurnMsg) error {
 		}
 		text := t.addText(rep.Text)
 		if len(rep.ToolCalls) == 0 {
+			if t.shouldNudge(rep, text) {
+				t.nudges++
+				msgs = append(msgs, aiTurnMsg{Role: aiRoleAssistant, Text: text}, aiTurnMsg{Role: aiRoleUser, Text: aiNudgeText, Nudge: true})
+				continue
+			}
 			if len(t.parts) == 0 && len(t.proposals) == 0 {
 				return newAIError(http.StatusBadGateway, aiErrProvider, "the model returned no text")
 			}
 			return nil
 		}
+		t.nudges = 0
 		msgs = append(msgs, aiTurnMsg{Role: aiRoleAssistant, Text: text, ToolCalls: rep.ToolCalls})
 		for i, call := range rep.ToolCalls {
 			result, err := t.callTool(ctx, i, call)
@@ -212,6 +236,10 @@ func (t *aiTurn) loop(ctx context.Context, msgs []aiTurnMsg) error {
 				return err
 			}
 			msgs = append(msgs, aiTurnMsg{Role: aiRoleTool, ToolCallID: call.ID, ToolName: call.Name, Text: result})
+		}
+		if t.stalled() {
+			t.addText(aiStalledText(t.lang))
+			return nil
 		}
 	}
 	return newAIError(http.StatusConflict, aiErrStepsLimit, fmt.Sprintf("the step limit of %d was reached", lim.MaxSteps))
@@ -235,9 +263,17 @@ func (t *aiTurn) callTool(ctx context.Context, idx int, call aiToolCall) (string
 	t.sse.event("tool", map[string]string{"name": tool.Name, "summary": t.summary(call.Args)})
 	switch tool.Mode {
 	case asstRead:
+		if t.repeatedFailure(call) {
+			return "repeated_failure: this call with the same arguments already failed; change the arguments or stop and tell the user.", nil
+		}
+		t.toolRuns++
 		raw, err := t.s.aiRunReadWith(ctx, t.sess, t.board, tool, call.Args, t.secrets)
 		if err != nil {
-			return t.toolFailure(ctx, err)
+			text, stop := t.toolFailure(ctx, err)
+			if stop == nil {
+				t.noteFailure(call)
+			}
+			return text, stop
 		}
 		return aiToolText(raw), nil
 	case asstPropose:
@@ -265,7 +301,9 @@ func (t *aiTurn) callTool(ctx context.Context, idx int, call aiToolCall) (string
 // refuseTool answers a call of a tool the turn was not given. A tool of the registry was left out
 // by the assistant permissions or the access of the user: the panel gets a tool event with code
 // ai_forbidden and params resource and op, which it words in its language, and the model gets the
-// refusal text. Any other name is unknown_tool. Nothing is run.
+// refusal text. A refused change is also told to the user, once per resource and operation, as a
+// sentence of the reply in the language of the turn: the section cannot be changed, reading is
+// allowed (aiDeniedText). Any other name is unknown_tool. Nothing is run.
 func (t *aiTurn) refuseTool(call aiToolCall) (string, error) {
 	reg, known := aiToolNamed(call.Name)
 	if !known {
@@ -273,8 +311,16 @@ func (t *aiTurn) refuseTool(call aiToolCall) (string, error) {
 	}
 	e := aiForbiddenErr(reg.Resource, reg.Op)
 	t.sse.event("tool", map[string]any{"name": reg.Name, "code": aiErrForbidden, "params": e.Params})
+	key := reg.Resource + " " + reg.Op
+	if told := aiDeniedText(t.lang, reg.Resource, reg.Op, t.st.Perms.level(reg.Resource)); told != "" && !t.denied[key] {
+		if t.denied == nil {
+			t.denied = map[string]bool{}
+		}
+		t.denied[key] = true
+		t.addText(told)
+	}
 	return e.msg + ". The administrator's assistant permissions or the user's access do not allow it; " +
-		"tell the user and do not try again.", nil
+		"the user has already been told this in the reply. Do not try again; go on with what may be read.", nil
 }
 
 // linksRefusal answers a delete that was refused because other records use the target. The card

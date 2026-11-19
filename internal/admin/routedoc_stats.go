@@ -300,19 +300,35 @@ func statsRouteDocs() map[string]routeDoc {
 	}
 }
 
+// entryCampaignEN, entryCampaignRU and entryCampaignUK say how the two journals read a campaign condition.
+const (
+	entryCampaignEN = "A condition on campaign or campaign_id (eq, in, ne, nin) matches the serving campaign and also the campaign the visitor entered through " +
+		"(origin_campaign, origin_campaign_id), so the journal of the entry campaign shows what it handed on; the access scope of the caller stays exact. " +
+		"The other routes of statistics compare the serving campaign only."
+	entryCampaignRU = "Условие по campaign или campaign_id (eq, in, ne, nin) совпадает с кампанией, обслужившей клик, и с кампанией, через которую пришёл посетитель " +
+		"(origin_campaign, origin_campaign_id): журнал входной кампании показывает то, что она передала дальше; доступ вызывающего остаётся строгим. " +
+		"Остальные маршруты статистики сравнивают только обслужившую кампанию."
+	entryCampaignUK = "Умова за campaign або campaign_id (eq, in, ne, nin) збігається з кампанією, що обслужила клік, і з кампанією, через яку прийшов відвідувач " +
+		"(origin_campaign, origin_campaign_id): журнал вхідної кампанії показує те, що вона передала далі; доступ викликаючого лишається строгим. " +
+		"Решта маршрутів статистики порівнюють лише кампанію, що обслужила."
+)
+
 // journalRouteDocs documents the click journal, conversion journal, report and field catalog.
 func journalRouteDocs() map[string]routeDoc {
 	return map[string]routeDoc{
 		"GET /api/logs": {
 			ID: "list_logs", Summary: "One page of the click journal.",
-			Description: "The answer is {total, rows}. The page size defaults to 100 and is capped at 1000.",
+			Description: "The answer is {total, rows}. The page size defaults to 100 and is capped at 1000. " +
+				"A click that one campaign handed on to another is stored under the campaign that served it. " + entryCampaignEN,
 			RU: docText{
-				Summary:     "Одна страница журнала кликов.",
-				Description: "Ответ — {total, rows}. Размер страницы по умолчанию 100, максимум 1000.",
+				Summary: "Одна страница журнала кликов.",
+				Description: "Ответ — {total, rows}. Размер страницы по умолчанию 100, максимум 1000. " +
+					"Клик, который одна кампания передала другой, записан за кампанией, что его обслужила. " + entryCampaignRU,
 			},
 			UK: docText{
-				Summary:     "Одна сторінка журналу кліків.",
-				Description: "Відповідь — {total, rows}. Розмір сторінки за замовчуванням 100, максимум 1000.",
+				Summary: "Одна сторінка журналу кліків.",
+				Description: "Відповідь — {total, rows}. Розмір сторінки за замовчуванням 100, максимум 1000. " +
+					"Клік, який одна кампанія передала іншій, записано за кампанією, що його обслужила. " + entryCampaignUK,
 			},
 			Query:    joinParams(rangeParams, filterParams, logValueParams, pageParams, sortParams),
 			Response: map[string]any{"total": 1, "rows": []any{logRowSample}},
@@ -413,16 +429,16 @@ func journalRouteDocs() map[string]routeDoc {
 		"GET /api/postbacks": {
 			ID: "list_postbacks", Summary: "One page of the conversion journal.",
 			Description: "The answer is {total, depsum, count, rows}; total is the profit sum. " +
-				"Conditions in f apply to the conversions table. The page size defaults to 200.",
+				"Conditions in f apply to the conversions table. The page size defaults to 200. " + entryCampaignEN,
 			RU: docText{
 				Summary: "Одна страница журнала конверсий.",
 				Description: "Ответ — {total, depsum, count, rows}; total — сумма прибыли. " +
-					"Условия в f применяются к таблице конверсий. Размер страницы по умолчанию 200.",
+					"Условия в f применяются к таблице конверсий. Размер страницы по умолчанию 200. " + entryCampaignRU,
 			},
 			UK: docText{
 				Summary: "Одна сторінка журналу конверсій.",
 				Description: "Відповідь — {total, depsum, count, rows}; total — сума прибутку. " +
-					"Умови в f застосовуються до таблиці конверсій. Розмір сторінки за замовчуванням 200.",
+					"Умови в f застосовуються до таблиці конверсій. Розмір сторінки за замовчуванням 200. " + entryCampaignUK,
 			},
 			Query: joinParams(rangeParams, filterParams, postbackValueParams, pageParams, sortParams),
 			Response: map[string]any{
@@ -540,7 +556,9 @@ func journalRouteDocs() map[string]routeDoc {
 				"are the sums of every row, unique being the first-step uniques; ratios such as CR are taken from these sums. " +
 				"The cost sort uses the currency with the largest total cost, named in sort_cur, and puts rows without cost in it last. " +
 				"truncated is true only above " + strconv.Itoa(store.PageMaxRows) + " visit groups: the set stops there, the totals still count every visit. " +
-				"Missing statistics give an empty answer with 200. A bad filter, page or sort is 400 and a query stopped as too heavy is 504 \"query too heavy\".",
+				"A paged request with day=1 cuts every row by event day: the row gets day (YYYY-MM-DD in tz) and counts that day alone, so a campaign appears once per day; " +
+				"totals still count the whole period, unique being the first-step uniques of the period, not summed over days. " +
+				"Missing statistics give an empty answer with 200. A bad filter, page, sort or tz is 400 and a query stopped as too heavy is 504 \"query too heavy\".",
 			RU: docText{
 				Summary: "Строки отчёта за период.",
 				Description: "Визиты и конверсии, сгруппированные по кампании, потоку, стране, офферу и источнику трафика. " +
@@ -554,7 +572,9 @@ func journalRouteDocs() map[string]routeDoc {
 					"— суммы по всем строкам, unique — уники первого шага; отношения вроде CR считаются из этих сумм. " +
 					"Сортировка по расходу идёт по валюте с наибольшим общим расходом (она в sort_cur), строки без расхода в ней — в конце. " +
 					"truncated равен true только при больше чем " + strconv.Itoa(store.PageMaxRows) + " группах визитов: набор обрывается, итоги всё равно считают все визиты. " +
-					"Без статистики ответ пустой с кодом 200. Неверный фильтр, страница или сортировка дают 400, запрос, остановленный как слишком тяжёлый, — 504 «query too heavy».",
+					"Постраничный запрос с day=1 режет каждую строку по дню события: у строки появляется day (ГГГГ-ММ-ДД в поясе tz), и она считает только этот день, поэтому кампания встречается раз в день; " +
+					"totals по-прежнему считают весь период, unique — уники первого шага за период, а не сумма по дням. " +
+					"Без статистики ответ пустой с кодом 200. Неверный фильтр, страница, сортировка или tz дают 400, запрос, остановленный как слишком тяжёлый, — 504 «query too heavy».",
 			},
 			UK: docText{
 				Summary: "Рядки звіту за період.",
@@ -569,12 +589,20 @@ func journalRouteDocs() map[string]routeDoc {
 					"— суми за всіма рядками, unique — унікальні першого кроку; відношення на кшталт CR рахуються з цих сум. " +
 					"Сортування за витратами йде за валютою з найбільшими загальними витратами (вона в sort_cur), рядки без витрат у ній — у кінці. " +
 					"truncated дорівнює true лише при понад " + strconv.Itoa(store.PageMaxRows) + " групах візитів: набір обривається, підсумки все одно рахують усі візити. " +
-					"Без статистики відповідь порожня з кодом 200. Хибний фільтр, сторінка чи сортування дають 400, запит, зупинений як надто важкий, — 504 «query too heavy».",
+					"Постраничний запит з day=1 ріже кожен рядок за днем події: у рядка з'являється day (РРРР-ММ-ДД у поясі tz), і він рахує лише цей день, тож кампанія трапляється раз на день; " +
+					"totals, як і раніше, рахують увесь період, unique — унікальні першого кроку за період, а не сума за днями. " +
+					"Без статистики відповідь порожня з кодом 200. Хибний фільтр, сторінка, сортування чи tz дають 400, запит, зупинений як надто важкий, — 504 «query too heavy».",
 			},
 			Query: joinParams(rangeParams, filterParams, []queryParam{
 				strQ("meta", "Pass 1 to get {rows, truncated} instead of the bare array; truncated is true when the rows were cut at 2000.").
 					loc("Передайте 1, чтобы получить {rows, truncated} вместо голого массива; truncated равен true, если строки обрезаны на 2000.",
 						"Передайте 1, щоб отримати {rows, truncated} замість голого масиву; truncated дорівнює true, якщо рядки обрізано на 2000."),
+				strQ("day", "Pass 1 with limit, offset or sort to cut the rows by event day: every row then has day. Default: rows are not cut by day.").
+					loc("Передайте 1 вместе с limit, offset или sort, чтобы разрезать строки по дню события: у каждой строки появится day. По умолчанию по дням строки не режутся.",
+						"Передайте 1 разом з limit, offset або sort, щоб розрізати рядки за днем події: у кожного рядка з'явиться day. За замовчуванням за днями рядки не ріжуться."),
+				strQ("tz", "IANA time zone name that cuts the days with day=1, for example Europe/Berlin. Default: UTC. An unknown zone is 400 \"bad tz\".").
+					loc("Имя часового пояса IANA, по которому режутся дни при day=1, например Europe/Berlin. По умолчанию UTC. Неизвестный пояс — 400 «bad tz».",
+						"Назва часового поясу IANA, за яким ріжуться дні при day=1, наприклад Europe/Berlin. За замовчуванням UTC. Невідомий пояс — 400 «bad tz»."),
 			}, tablePageParams(store.SliceSortKeys, store.SliceDefaultSort)),
 			Response: []any{map[string]any{
 				"group": "promo", "stream": "main", "country": "us", "offer": "o1", "source": "s1",

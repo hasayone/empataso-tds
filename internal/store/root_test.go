@@ -44,7 +44,7 @@ func TestRootColumnsStayClosedWithoutWave(t *testing.T) {
 	postbackSQL, _ := (&CH{}).postbackColumns(false, false)
 	for name, sql := range map[string]string{
 		"postbacks": postbackSQL,
-		"slice":     sliceConvSQL(&CH{}, ""),
+		"slice":     sliceConvSQL(&CH{}, "", false),
 	} {
 		for _, col := range []string{"root_cid", "origin_stream_name", "origin_keyword"} {
 			if strings.Contains(sql, col) {

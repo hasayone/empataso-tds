@@ -15,7 +15,7 @@ func TestSliceConvSQLDevice(t *testing.T) {
 		if err != nil || skip {
 			t.Fatalf("where: err=%v skip=%v", err, skip)
 		}
-		sql := sliceConvSQL(c, cvSQL)
+		sql := sliceConvSQL(c, cvSQL, false)
 		parts := strings.Split(sql, "UNION ALL")
 		if len(parts) != 2 {
 			t.Fatalf("branches=%d\n%s", len(parts), sql)

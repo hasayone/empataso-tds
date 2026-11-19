@@ -619,8 +619,10 @@ func TestSpaDepSum(t *testing.T) {
 	}
 	mustNot(t, html, "'col.depsum':'Депозит'", "column title is not Депозит")
 	mustNot(t, html, "'fld.depsum':'Депозит'", "field name is not Депозит")
-	must(t, html, "['cpc','col.cpc',1],['depsum','col.depsum',1]", "offers and networks put DepSum after CPC")
-	must(t, spaFunctionLine(html, "loadCols"), "placeDepSumAfterCpc(out)", "a saved list moves DepSum after CPC")
+	mustNot(t, html, "['depsum','col.depsum'", "tables do not list a DepSum column")
+	mustNot(t, spaFunctionLine(html, "paintMetricSum"), "col.depsum", "catalog totals do not show DepSum")
+	mustNot(t, spaFunctionLine(html, "paintPbDock"), "depsum", "the conversion dock does not show DepSum")
+	must(t, spaFunctionLine(html, "loadCols"), "placeDepSumAfterCpc(out)", "a saved list still runs the deposit placement")
 	must(t, spaFunctionLine(html, "hiddenCols"), "'depsum'", "hiding profit hides the deposit column")
 	must(t, spaFunctionLine(html, "packMetrics"), "depsum:m.depsum", "deposit is packed beside revenue")
 	mustNot(t, spaFunctionLine(html, "packMetrics"), "rev:m.rev+m.depsum", "deposit is not added into revenue")
@@ -1496,4 +1498,174 @@ func TestSPAAboutWiring(t *testing.T) {
 	must(t, html, `'about.tab':'О системе'`, "ru about tab")
 	must(t, html, `'about.tab':'Про систему'`, "uk about tab")
 	must(t, html, `'upd.block.unsigned':'Подпись включена, цель не подписана'`, "ru unsigned block text")
+}
+
+// TestSaveBusyAndFlowSkeleton checks the save button while a save is running and the empty campaign canvas.
+// The button is disabled and named as in progress, a second click does not start another save, and an error
+// hands the error to toast. The campaign page paints placeholder rows before it reads the streams.
+func TestSaveBusyAndFlowSkeleton(t *testing.T) {
+	html := spaSource()
+	save := spaFunctionLine(html, "saveAll")
+	if save == "" {
+		t.Fatal("saveAll not found")
+	}
+	must(t, save, "if(SAVE_RUN) return", "a second click does not start another save")
+	must(t, save, "SAVE_RUN=true; syncSaveBar()", "the button updates before the request")
+	must(t, save, "if(flowsDirty()&&!block){await saveFlows(); await checkerFlushPending()}", "the save request is unchanged")
+	must(t, save, "if(cronDirty())await saveCron()", "automation still saves from the same bar")
+	must(t, save, "toast(e,true)", "an error is the translated toast")
+	mustNot(t, save, "toast(e.message", "the raw answer is not the toast text")
+	must(t, save, "finally{if(pending)SAVE_RUN=false; syncSaveBar()}", "the button returns when the request ends")
+	bar := spaFunctionLine(html, "syncSaveBar")
+	must(t, bar, "saveButtonFace(SAVE_RUN, !!block&&!scope.cron, tr('Save')+'<kbd>⌘S</kbd>', tr('save.busy'))", "the button uses the in-progress face")
+	must(t, bar, "saveBtn.disabled=face.disabled", "the in-progress button is disabled")
+	must(t, bar, "saveBtn.setAttribute('aria-busy','true')", "the in-progress button is marked busy")
+	face := spaFunctionLine(html, "saveButtonFace")
+	must(t, face, `esc(busy)+'<span class="save-run" aria-hidden="true"><i></i></span>'`, "the in-progress caption keeps a visible bar")
+	must(t, html, `.savebar #saveall[aria-busy="true"]{opacity:1;cursor:progress}`, "the busy button stays visible")
+	must(t, html, `.savebar .save-run i{animation:none;width:100%;opacity:.7}`, "reduced motion keeps a still save bar")
+	for _, pair := range []string{
+		`'save.busy':'Saving…'`, `'save.busy':'Сохраняю…'`, `'save.busy':'Зберігаю…'`,
+		`'flow.loading':'Loading streams…'`, `'flow.loading':'Загрузка потоков…'`, `'flow.loading':'Завантаження потоків…'`,
+	} {
+		must(t, html, pair, pair)
+	}
+	page := spaFunctionLine(html, "flowPage")
+	waitAt := strings.Index(page, "flowPageWait(id)")
+	loadAt := strings.Index(page, "await Promise.all")
+	if waitAt < 0 || loadAt < 0 || waitAt > loadAt {
+		t.Fatal("the empty campaign canvas does not show the skeleton before the load")
+	}
+	mustNot(t, page, "catch(", "a failed load stays the router's error")
+	must(t, spaFunctionLine(html, "render"), `stateHTML(e&&e.message?errText(e):tr('ui.fail'),'err')`, "a failed load replaces the skeleton")
+	skel := spaFunctionLine(html, "flowPageWait")
+	must(t, skel, `class="frow skel-row"`, "the canvas has placeholder rows")
+	must(t, skel, `aria-busy="true"`, "the canvas is marked loading")
+	must(t, skel, `tr('flow.loading')`, "the canvas names the load")
+	mustNot(t, skel, "data-s=", "the placeholders are not streams")
+	must(t, html, `.skel-bar::after{animation:none;opacity:0}`, "reduced motion keeps the rows still")
+	listFn := spaFunctionLine(html, "flows")
+	listWait := strings.Index(listFn, "flowsListWait()")
+	listLoad := strings.Index(listFn, "await Promise.all")
+	if listWait < 0 || listLoad < 0 || listWait > listLoad {
+		t.Fatal("the campaigns list does not show the skeleton before the load")
+	}
+	if strings.Contains(listFn[:listLoad], "try{") {
+		t.Fatal("the campaigns list load is swallowed")
+	}
+	listSkel := spaFunctionLine(html, "flowsListWait")
+	must(t, listSkel, `class="skel-row"`, "the campaigns list has placeholder rows")
+	must(t, listSkel, `aria-busy="true"`, "the campaigns list is marked loading")
+	must(t, listSkel, `tr('flows.list.loading')`, "the campaigns list names the load")
+	mustNot(t, listSkel, "data-g=", "the placeholders are not campaigns")
+	for _, pair := range []string{
+		`'flows.list.loading':'Loading campaigns…'`, `'flows.list.loading':'Загрузка кампаний…'`, `'flows.list.loading':'Завантаження кампаній…'`,
+		`'table.loading':'Loading…'`, `'table.loading':'Загрузка…'`, `'table.loading':'Завантаження…'`,
+	} {
+		must(t, html, pair, pair)
+	}
+	shared := spaFunctionLine(html, "tableWait")
+	must(t, shared, `class="skel-row"`, "the shared skeleton has placeholder rows")
+	must(t, shared, `aria-busy="true"`, "the shared skeleton is marked loading")
+	must(t, shared, `tr('table.loading')`, "the shared skeleton names the load")
+	mustNot(t, shared, "data-g=", "the shared placeholders are not records")
+	hold := spaFunctionLine(html, "tableHold")
+	must(t, hold, "return tableWait()", "a missing answer is the skeleton")
+	emptyAt := strings.Index(hold, "if(!rows.length)")
+	if emptyAt < 0 {
+		t.Fatal("an empty answer has no branch")
+	}
+	mustNot(t, hold[emptyAt:], "skel-row", "an empty answer is not a skeleton")
+	for _, name := range []string{"offers", "report", "networks"} {
+		fn := spaFunctionLine(html, name)
+		showAt := strings.Index(fn, "showPageWait(")
+		loadAt := strings.Index(fn, "await ")
+		if showAt < 0 || loadAt < 0 || showAt > loadAt {
+			t.Fatalf("%s does not show the skeleton before the load", name)
+		}
+	}
+	must(t, spaFunctionLine(html, "offers"), "tr('off.empty')", "offers keep the empty state")
+	must(t, spaFunctionLine(html, "paintReport"), "tr('rep.empty')", "the report keeps the empty state")
+	must(t, html, `.skel-bar::after{animation:none;opacity:0}`, "reduced motion keeps the shared rows still")
+
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — markup checks already ran")
+	}
+	var b strings.Builder
+	b.WriteString("let failed=0; const eq=(got,want,what)=>{const g=JSON.stringify(got),w=JSON.stringify(want); if(g!==w){failed++; console.log('FAIL '+what+'\\n  got  '+g+'\\n  want '+w);}};\n")
+	b.WriteString("function esc(s){return String(s==null?'':s)} function tr(k){return k==='save.busy'?'Saving…':k} function icon(){return ''} function flowCompactClass(){return ''} let FLOW_COMPACT=false;\n")
+	b.WriteString(face)
+	b.WriteString("\n")
+	b.WriteString(skel)
+	b.WriteString("\n")
+	b.WriteString(listSkel)
+	b.WriteString("\n")
+	b.WriteString(shared)
+	b.WriteString("\n")
+	b.WriteString(hold)
+	b.WriteString("\n")
+	b.WriteString("let SAVE_RUN=false, DRAWER=null, calls=0, release=null; const toasts=[]; const btn={disabled:false, html:'', attrs:{}, setAttribute(k,v){this.attrs[k]=v}, removeAttribute(k){delete this.attrs[k]}};\n")
+	b.WriteString("function flowsDirty(){return true} function cronDirty(){return false} function saveBlock(){return ''} function markDirty(){}\n")
+	b.WriteString("let flowsImpl=()=>{calls++; return new Promise(r=>{release=r})}; function saveFlows(){return flowsImpl()} function checkerFlushPending(){return Promise.resolve()} function saveCron(){return Promise.resolve()}\n")
+	b.WriteString("function toast(e,err){toasts.push({e,err})} function syncSaveBar(){const f=saveButtonFace(SAVE_RUN,false,'Save<kbd>','Saving…'); btn.disabled=f.disabled; btn.html=f.html; if(f.busy)btn.setAttribute('aria-busy','true'); else btn.removeAttribute('aria-busy');}\n")
+	if !strings.HasPrefix(save, "function saveAll(") {
+		t.Fatal("saveAll extract did not start at the function")
+	}
+	b.WriteString("async ")
+	b.WriteString(save)
+	b.WriteString(`
+(async()=>{
+  const canvas=flowPageWait('camp-1');
+  eq(canvas.includes('skel-row'), true, 'empty canvas has skeleton rows');
+  eq(canvas.includes('aria-busy="true"'), true, 'empty canvas is busy');
+  eq(canvas.includes('data-s='), false, 'skeleton rows are not streams');
+  eq(canvas.includes('camp-1'), true, 'the open campaign id is the route');
+  const list=flowsListWait();
+  eq(list.includes('skel-row'), true, 'campaign list has skeleton rows');
+  eq(list.includes('aria-busy="true"'), true, 'campaign list is busy');
+  eq(list.includes('flows.list.loading'), true, 'campaign list names the load');
+  eq(list.includes('data-g='), false, 'skeleton rows are not campaigns');
+  eq((list.match(/skel-row/g)||[]).length>=8, true, 'several placeholder rows');
+  const wait=tableWait();
+  eq(wait.includes('skel-row'), true, 'shared skeleton has rows');
+  eq(wait.includes('aria-busy="true"'), true, 'shared skeleton is busy');
+  eq(wait.includes('table.loading'), true, 'shared skeleton names the load');
+  eq(tableHold(null,'No offers yet').includes('skel-row'), true, 'loading offers is a skeleton');
+  eq(tableHold([],'No offers yet').includes('skel-row'), false, 'empty offers is not a skeleton');
+  eq(tableHold([],'No offers yet').includes('No offers yet'), true, 'empty offers says the list is empty');
+  eq(tableHold([],'No rows').includes('skel-row'), false, 'empty report is not a skeleton');
+  const p=saveAll();
+  eq(calls, 1, 'one save request');
+  eq(SAVE_RUN, true, 'the save is in progress');
+  eq(btn.disabled, true, 'the button is disabled while saving');
+  eq(btn.html.includes('Saving…'), true, 'the button says saving');
+  eq(btn.html.includes('save-run'), true, 'the button shows progress');
+  eq(btn.attrs['aria-busy'], 'true', 'the button is marked busy');
+  saveAll();
+  eq(calls, 1, 'a second click sends nothing');
+  release();
+  await p;
+  eq(SAVE_RUN, false, 'success clears the in-progress mark');
+  eq(btn.disabled, false, 'success returns the button');
+  eq(btn.attrs['aria-busy'], undefined, 'success clears the busy mark');
+  calls=0; toasts.length=0;
+  const err=Object.assign(new Error('HTTP 500'),{status:500});
+  flowsImpl=()=>{calls++; return Promise.reject(err)};
+  await saveAll();
+  eq(calls, 1, 'the failed save was one request');
+  eq(SAVE_RUN, false, 'an error clears the in-progress mark');
+  eq(btn.disabled, false, 'an error returns the button');
+  eq(toasts[0]&&toasts[0].err, true, 'the error is an error toast');
+  eq(toasts[0]&&toasts[0].e, err, 'the toast receives the error, not the raw code');
+  if(failed){console.log(failed+' check(s) failed'); process.exit(1)}
+})();
+`)
+	f := filepath.Join(t.TempDir(), "save-busy.js")
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("save button and skeleton checks failed:\n%s", out)
+	}
 }

@@ -511,7 +511,25 @@ eq(flowTrafficOrder(trafHits,'asc'),[0,3,6,2,5,1,4],'traffic order asc: fewest f
 eq(flowTrafficOrder(trafHits,'bogus'),[0,1,2,3,4,5,6],'unknown traffic order is off');
 eq(JSON.stringify(trafHits),trafCopy,'flowTrafficOrder does not change its input');
 eq(flowTrafficOrder(null,'desc'),[],'flowTrafficOrder without hits');
-eq([flowTrafficNext(''),flowTrafficNext('desc'),flowTrafficNext('asc'),flowTrafficNext('x')],['desc','asc','','desc'],'traffic toggle cycles off, desc, asc');
+eq([flowTrafficNext(''),flowTrafficNext('asc'),flowTrafficNext('desc'),flowTrafficNext('rev-asc'),flowTrafficNext('rev-desc'),flowTrafficNext('x')],['asc','desc','rev-asc','rev-desc','','asc'],'canvas order cycles off, traffic fewest, traffic most, revenue least, revenue most');
+const rev=[0,12.5,0,null,3,12.5,-1];
+const revCopy=JSON.stringify(rev);
+eq(flowTrafficOrder(rev,''),[0,1,2,3,4,5,6],'revenue order off keeps the stored order');
+eq(flowTrafficOrder(rev,'rev-asc'),[6,0,2,3,4,1,5],'revenue asc: least first, missing is 0, ties stable');
+eq(flowTrafficOrder(rev,'rev-desc'),[1,5,4,0,2,3,6],'revenue desc: most first, zeros keep order, ties stable');
+eq(flowTrafficOrder(rev,'rev-asc'),flowTrafficOrder(rev,'rev-asc'),'revenue order stays put on a second pass');
+eq(JSON.stringify(rev),revCopy,'revenue order does not change its input');
+eq(flowTrafficOrder([0,5,0],'rev-asc'),[0,2,1],'revenue asc sorts a zero as zero, not last');
+eq(flowTrafficOrder([0,5,0],'rev-desc'),[1,0,2],'revenue desc puts the amount first and keeps the zero tie');
+eq(flowTrafficOrder([2,2,1],'rev-desc'),[0,1,2],'equal revenue keeps the stored order');
+eq(flowTrafficOrder([null,undefined,'',0,1],'rev-asc'),[0,1,2,3,4],'missing revenue sorts as 0 ahead of a positive');
+eq(flowTrafficOrder([null,undefined,'',0,1],'rev-desc'),[4,0,1,2,3],'missing revenue sorts as 0 after a positive');
+eq(flowCanvasValue({profit:4.5,hits:9},'rev-asc'),4.5,'revenue order uses the stream profit');
+eq(flowCanvasValue({hits:9},'rev-desc'),0,'missing revenue is 0');
+eq(flowCanvasValue({profit:0,hits:9},'rev-asc'),0,'zero revenue stays 0');
+eq(flowCanvasValue({profit:-2,hits:9},'rev-desc'),-2,'a negative revenue stays the shown amount');
+eq(flowCanvasValue({profit:4,hits:9},'asc'),9,'traffic order uses visits');
+eq(flowCanvasValue(null,'rev-asc'),0,'revenue order without a stream is 0');
 eq(recentRows([{ts:1},{ts:2},{ts:3}],2).length,2,'recentRows keeps n');
 eq(recentRows(null,5).length,0,'recentRows without rows');
 eq(recentRows([{ts:1},null,{ts:2}],5).length,2,'recentRows drops empties');
@@ -606,6 +624,7 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq([bad.flows.page, bad.flows.view, bad.flows.compact, bad.logs.page, bad.conversions.page, bad.domains.page], [1000, 'table', false, 100, 50, 50], 'a size out of range or a bad view falls back');
   eq(collectPageViews({ flows: { page: '12', view: 'list', compact: 1 }, logs: { page: -3 } }).flows, { sort: { k: '', dir: -1 }, q: '', state: 'all', source: '', folder: '', view: 'table', compact: false, traffic: '', page: 1000 }, 'collect falls back on bad values');
   eq(collectPageViews(applyPageViews({ flows: { traffic: 'desc' } }, def)).flows.traffic, 'desc', 'the canvas traffic order is read and collected');
+  eq(collectPageViews(applyPageViews({ flows: { traffic: 'rev-asc' } }, def)).flows.traffic, 'rev-asc', 'the canvas revenue order is read and collected');
   eq(applyPageViews({ flows: { traffic: 'up' } }, def).flows.traffic, '', 'an unknown traffic order falls back to off');
   eq(def.flows.traffic, '', 'the traffic order is off by default');
   const legacy = JSON.parse(JSON.stringify(def)); legacy.flows.page = 25; legacy.flows.view = 'grid';
@@ -833,9 +852,10 @@ eq(ruleExtras({a:undefined,b:0}, new Set()), {b:0}, 'ruleExtras skips undefined,
 // Sub ID rules.
 eq([condKeyOf('sub_id_3'), condKeyOf('sub_id_12'), condKeyOf('country'), condKeyOf('sub_id_x'), condKeyOf('')], ['sub_ids','sub_ids','country','sub_id_x',''], 'reason keys map to the Sub ID row');
 eq(subIDRows({sub_ids:{sub_id_3:{flag:1,values:['a']}, sub_id_1:{flag:2,values:['x'],empty:true}, sub_id_30:{flag:1,values:['z']}, sub_id_31:{flag:1,values:['no']}}}),
-  [{n:1,flag:2,values:['x'],empty:true},{n:3,flag:1,values:['a'],empty:false},{n:30,flag:1,values:['z'],empty:false}], 'subIDRows: ordered, 1..30 only');
+  [{n:1,flag:2,values:['x'],empty:true,contains:false},{n:3,flag:1,values:['a'],empty:false,contains:false},{n:30,flag:1,values:['z'],empty:false,contains:false}], 'subIDRows: ordered, 1..30 only');
 eq(subIDRows({}), [], 'subIDRows: none');
-eq(subIDRows({sub_ids:{sub_id_2:{flag:7}}}), [{n:2,flag:2,values:[],empty:false}], 'subIDRows: a flag that is not 1 reads as only');
+eq(subIDRows({sub_ids:{sub_id_2:{flag:7}}}), [{n:2,flag:2,values:[],empty:false,contains:false}], 'subIDRows: a flag that is not 1 reads as only');
+eq(subIDRows({sub_ids:{sub_id_4:{flag:1,values:['ab'],contains:true}}}), [{n:4,flag:1,values:['ab'],empty:false,contains:true}], 'subIDRows: contains stays true');
 eq(subIDMap([{n:2,flag:1,values:[' a ','',' b'],empty:false},{n:2,flag:2,values:['z'],empty:true},{n:0,flag:1,values:['q']},{n:31,flag:1,values:['q']},{n:30,flag:1,values:['q']}]),
   {sub_id_2:{flag:2,values:['z'],empty:true}, sub_id_30:{flag:1,values:['q']}}, 'subIDMap: last row of a number wins, out-of-range dropped');
 eq(deviceFlags(true, []), {computer:0,phone:0,tablet:0}, 'device: empty pick filters nothing');
@@ -845,6 +865,7 @@ eq(deviceMode({}), {yes:true, picked:[]}, 'device: no blocks reads as yes and em
 eq(deviceMode({computer:1,phone:0,tablet:0}), {yes:false, picked:['computer']}, 'device: one block reads as no');
 eq(deviceMode({computer:1,phone:1,tablet:0}), {yes:true, picked:['tablet']}, 'device: more blocks than allows reads as yes');
 eq(subIDMap([{n:4,flag:1,values:['q'],empty:false}]), {sub_id_4:{flag:1,values:['q']}}, 'subIDMap: empty is written only when true');
+eq(subIDMap([{n:4,flag:1,values:['ab'],contains:true},{n:5,flag:2,values:['z'],contains:false}]), {sub_id_4:{flag:1,values:['ab'],contains:true},sub_id_5:{flag:2,values:['z']}}, 'subIDMap: contains is written only when true');
 eq(subIDMap(null), {}, 'subIDMap: no rows');
 eq([subIDActive({values:['a'],empty:false}), subIDActive({values:[],empty:true}), subIDActive({values:[],empty:false}), subIDActive(null)], [true,true,false,false], 'subIDActive');
 
@@ -1392,6 +1413,65 @@ func TestSaveBarEntries(t *testing.T) {
 	}
 }
 
+// TestDchipRun checks that a save-bar chip scrolls only when its label is wider than the chip,
+// and that the label stays left-aligned. t is the test handle. It returns nothing.
+func TestDchipRun(t *testing.T) {
+	html := spaSource()
+	chip := spaBetween(html, ".savebar .dchip{", "}")
+	must(t, chip, "text-align:left", "chip text starts at the left")
+	must(t, chip, "justify-content:flex-start", "chip content starts at the left")
+	mustNot(t, chip, "text-overflow:ellipsis", "the type word is not cut by an ellipsis")
+	must(t, html, ".savebar .dchip[data-run]:hover .dchip-t", "hover scrolls only a marked chip")
+	must(t, html, ".savebar .dchip[data-run]:focus-visible .dchip-t", "keyboard focus scrolls like hover")
+	must(t, html, "@media (prefers-reduced-motion:reduce){\n    .savebar .dchip[data-run]:hover .dchip-t", "reduced motion does not scroll")
+	must(t, spaFunctionLine(html, "dirtyChipsHTML"), `class="dchip-t"`, "the label is the piece that can move")
+	must(t, spaFunctionLine(html, "syncSaveBar"), "fitDchips(q('#dchips',bar))", "chips are measured after they are drawn")
+
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the chip overflow checks")
+	}
+	var b strings.Builder
+	for _, name := range []string{"dchipOverflow", "markDchipRun"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		b.WriteString(fn)
+		b.WriteByte('\n')
+	}
+	b.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g !== w) { failed++; console.log('FAIL ' + what + '\n  got  ' + g + '\n  want ' + w); }
+};
+eq(dchipOverflow(400, 170), true, 'a long label overflows');
+eq(dchipOverflow(172, 170), true, 'two pixels over still overflows');
+eq(dchipOverflow(171, 170), false, 'one pixel is not enough to scroll');
+eq(dchipOverflow(170, 170), false, 'an exact fit stays still');
+eq(dchipOverflow(40, 170), false, 'a short label stays still');
+const style = () => ({props:{}, setProperty(k,v){this.props[k]=v}, removeProperty(k){delete this.props[k]}});
+const long = {dataset:{}, style:style()};
+markDchipRun(long, 400, 170);
+eq(long.dataset.run, '', 'a long label is marked to scroll');
+eq(long.style.props['--dchip-shift'], '-230px', 'the shift reaches the end of the label');
+const short = {dataset:{run:''}, style:style()};
+short.style.props['--dchip-shift'] = '-9px';
+markDchipRun(short, 80, 170);
+eq(short.dataset.run, undefined, 'a short label is not marked');
+eq(short.style.props['--dchip-shift'], undefined, 'a short label has no shift');
+if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
+`)
+	f := filepath.Join(t.TempDir(), "dchip-run.js")
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("chip overflow checks failed:\n%s", out)
+	}
+}
+
 // TestFilterChipDrop runs condSig and dropCond under node and checks the chip wiring: a chip removes its
 // condition from the list current at click time even after the page replaced the array or reordered it.
 func TestFilterChipDrop(t *testing.T) {
@@ -1847,6 +1927,375 @@ if (failed) process.exit(1);
 	}
 }
 
+// TestFlowDestMarks checks the stream destination markup: an expanded row names the selected
+// offer, a compact row shows a badge and the share percent, extra offers fold into +N, and a
+// stream that only has its own URL (even with offer_id in the query) gets no empty badge.
+func TestFlowDestMarks(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the stream destination marks")
+	}
+	html := spaSource()
+	if !strings.Contains(html, "${isLink?'':flowDestMarks(o, flowDestNamed(") {
+		t.Fatal("the stream row does not draw offer and landing marks")
+	}
+	if !strings.Contains(html, ":flowDestURL(o)}") {
+		t.Fatal("the stream row does not keep the destination address")
+	}
+	if !strings.Contains(spaFunctionLine(html, "flowPage"), "ensureCatalogs()") {
+		t.Fatal("the campaign page does not load offer names before drawing streams")
+	}
+	var src strings.Builder
+	src.WriteString("const esc=(s)=>String(s==null?'':s).replace(/[&<>\"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;',\"'\":'&#39;'}[c]));\n")
+	src.WriteString("const tr=k=>k; const trFill=(k,map)=>k+' '+(map&&map.n);\n")
+	src.WriteString("let OFFERS=[], LANDINGS=[];\n")
+	mark := strings.Index(html, "const FLOW_DEST_BADGES=")
+	if mark < 0 {
+		t.Fatal("FLOW_DEST_BADGES is missing")
+	}
+	line := html[mark:]
+	nl := strings.Index(line, "\n")
+	src.WriteString(line[:nl+1])
+	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowDestMarks", "flowDestURL"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAIL ' + what + '\n  got  ' + got + '\n  want ' + want); } };
+const part = (h, a, b) => { const i = h.indexOf(a); return i < 0 ? '' : h.slice(i, b ? h.indexOf(b, i) : h.length); };
+const shown = h => h.replace(/ title="[^"]*"/g, '');
+
+OFFERS = [{id:'o1', name:'Alpha'},{id:'o2', name:'Beta'},{id:'o3', name:'Gamma'},{id:'o4', name:'<Delta>'}];
+LANDINGS = [{id:'l1', name:'Land'}];
+
+let h = flowDestMarks({redirect:'http_redirect', offers:[{id:'o1', share:100}]});
+eq(shown(h).includes('>Alpha<'), true, 'the row contains the offer name');
+eq(shown(h).includes('>100%<'), true, 'the row contains the share percent');
+eq((h.match(/title="([^"]*)"/) || ['',''])[1].includes('Alpha — 100%'), true, 'the tooltip keeps the full name and the percent');
+eq(part(h, 'class="badges"').includes('class="pill"'), true, 'the row uses a badge');
+
+h = flowDestMarks({redirect:'http_redirect', offers:[{id:'o1',share:60},{id:'o2',share:40}]});
+eq(shown(h).includes('>60%<'), true, 'share 60 stays 60 percent');
+eq(shown(h).includes('>40%<'), true, 'share 40 stays 40 percent');
+eq(part(h, 'class="badges"').includes('class="pill more"'), false, 'two offers do not fold');
+
+h = flowDestMarks({redirect:'http_redirect', offers:[{id:'o1',share:1},{id:'o2',share:1},{id:'o3',share:1},{id:'o4',share:1}]});
+eq(h.includes('&lt;Delta&gt;'), true, 'offer name is escaped in the tooltip');
+eq(h.includes('<Delta>'), false, 'offer name is not raw markup');
+eq(shown(h).includes('Gamma'), false, 'an extra offer is not painted in the row');
+eq(part(h, 'class="badges"').includes('>+2<'), true, 'extra offers fold into +N');
+eq(h.includes('(0%)'), false, '+N of offers above zero is not the zero badge');
+eq((shown(h).match(/<span class="pill"/g) || []).length, 2, 'the row keeps two badges before +N');
+eq((h.match(/title="([^"]*)"/) || ['',''])[1].includes('Gamma — 25%'), true, 'a folded offer stays in the tooltip');
+
+h = flowDestMarks({redirect:'http_redirect', out:'https://click.1cclick.com/click?pid=622&offer_id=6004'});
+eq(h, '', 'a URL with offer_id and no selected offer has no badge');
+eq(h.includes('6004'), false, 'offer_id from the query is not shown');
+
+h = flowDestMarks({redirect:'http_redirect', offers:[{id:'', share:100}], out:'https://example.com'});
+eq(h, '', 'an empty offer id is not a badge');
+
+h = flowDestMarks({redirect:'http_redirect', offers:[{id:'o1', share:0},{id:'o2', share:0}]});
+eq(shown(h).includes('>50%<'), true, 'zero shares split equally and stay in the row');
+eq(h.includes('(0%)'), false, 'an equal split of empty shares is not a zero badge');
+
+h = flowDestMarks({redirect:'http_redirect', offers:[{id:'o1',share:0},{id:'o2',share:0},{id:'o3',share:100}]});
+eq(shown(h).includes('>Gamma<'), true, 'the offer that receives traffic is in the row');
+eq(shown(h).includes('>100%<'), true, 'a lone positive share is 100 percent');
+eq(shown(h).includes('Alpha'), false, 'a zero share is not in the visible row');
+eq(shown(h).includes('>0%<'), false, 'a zero percent is not in the visible row');
+eq(shown(h).includes('>+2 (0%)<'), true, 'zero shares are one +N (0%) badge');
+eq((h.match(/title="([^"]*)"/) || ['',''])[1].includes('Alpha — 0%'), true, 'a zero share is in the title');
+const zeroBadge = (h.match(/<span class="pill more" title="([^"]*)">\+2 \(0%\)<\/span>/) || ['',''])[1];
+eq(zeroBadge.includes('Alpha — 0%'), true, 'the zero badge title names Alpha');
+eq(zeroBadge.includes('Beta — 0%'), true, 'the zero badge title names Beta');
+eq(flowDestTip({redirect:'http_redirect', offers:[{id:'o1',share:0},{id:'o3',share:100}]}).includes('Alpha — 0%'), true, 'the destination tooltip lists a zero share');
+
+OFFERS = [{id:'807', name:''},{id:'1046', name:'Awintura'}];
+h = flowDestMarks({redirect:'http_redirect', offers:[{id:'807',share:50},{id:'1046',share:50}]});
+eq(h.includes('807'), false, 'a numeric id without a name is not a badge');
+eq(shown(h).includes('>Awintura<'), true, 'the catalog name is the badge');
+
+OFFERS = [{id:'o1', name:'   '}];
+h = flowDestMarks({redirect:'http_redirect', offers:[{id:'o1', share:100}]});
+eq(shown(h).includes('>o1<'), true, 'a blank name of a non-numeric id stays the id');
+eq(/<span class="nm"><\/span>/.test(h), false, 'a blank name is not an empty badge');
+
+OFFERS = [{id:'o1', name:'Alpha'}];
+LANDINGS = [{id:'l1', name:'Land'}];
+h = flowDestMarks({redirect:'http_redirect', landings:[{id:'l1', share:100}]});
+eq(shown(h).includes('>Land<'), true, 'the row shows the landing name');
+eq(shown(h).includes('>100%<'), true, 'landing badge has its share');
+
+const NOOUT = new Set();
+function outHTML(red, out){ return '<div class="out">'+String(out||'')+'</div>'; }
+OFFERS = [{id:'o1', name:'Alpha'},{id:'o3', name:'Gamma'}];
+let u = flowDestURL({redirect:'http_redirect', offers:[{id:'o1', share:50},{id:'o3', share:50}], out:'https://1wyvdy.life/casino/list?open=register'});
+eq(u, '', 'selected offers hide the saved URL');
+eq(flowDestMarks({redirect:'http_redirect', offers:[{id:'o1', share:50},{id:'o3', share:50}]}).includes('>50%<'), true, 'those offers still show their percent');
+u = flowDestURL({redirect:'http_redirect', out:'https://1wyvdy.life/casino/list?open=register'});
+eq(u.includes('https://1wyvdy.life/casino/list?open=register'), true, 'a direct URL stays the link');
+eq(flowDestMarks({redirect:'http_redirect', out:'https://1wyvdy.life/casino/list?open=register'}), '', 'a direct URL has no offer badges');
+u = flowDestURL({redirect:'http_redirect', offers:[{id:'o1',share:0},{id:'o3',share:100}], out:'https://example.com/go'});
+eq(u, '', 'a positive offer share hides the URL');
+OFFERS = [{id:'807', name:''}];
+u = flowDestURL({redirect:'http_redirect', offers:[{id:'807', share:100}], out:'https://example.com/only'});
+eq(u.includes('https://example.com/only'), true, 'a nameless numeric id leaves the link');
+
+if (failed) process.exit(1);
+`)
+	f := filepath.Join(t.TempDir(), "flowdest.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("stream destination marks failed:\n%s", out)
+	}
+}
+
+// TestFlowDestOfferStats checks the destination block: the compact row keeps one
+// stream summary and does not ask for a report, the detailed row asks for that
+// stream's report and draws one line per offer that the fold actually has, and an
+// offer label differs from a direct URL.
+func TestFlowDestOfferStats(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the stream destination stats")
+	}
+	html := spaSource()
+	render := spaFunctionLine(html, "renderFlow")
+	if render == "" {
+		t.Fatal("renderFlow missing")
+	}
+	statsAt := strings.Index(render, "${destStats}")
+	marksAt := strings.Index(render, "${isLink?'':flowDestMarks(o, flowDestNamed(")
+	if statsAt < 0 || marksAt < 0 || statsAt > marksAt {
+		t.Fatal("offer names must follow the numbers")
+	}
+	must(t, render, "flowDestTypeLabel(o)", "the action type names an offer or a landing")
+	must(t, render, ":flowDestURL(o)}", "a direct URL stays on the row")
+	mustNot(t, render, "flowDestMarks(o)}${nv", "offer names are not beside the action type")
+	must(t, html, ".canvas.compact .dest .hint.num{display:block", "the compact row still shows the summary")
+	must(t, html, ".canvas.compact .dest .olines{display:none}", "the compact row hides offer lines")
+	must(t, html, ".dest .badges .pill,.dest .oline .pill{display:inline-flex;align-items:center;gap:4px;width:14em", "the offer chip has a fixed width")
+	must(t, render, "if(!FLOW_COMPACT) queueOpenStreamOffers(g)", "the collapsed canvas does not ask for the offer breakdown")
+	must(t, render, "if(FLOW_COMPACT) stopStreamOfferQueue()", "collapsing the canvas does not start a report")
+	must(t, render, "queueOpenStreamOffers(CUR)", "opening the detailed canvas asks for the stream that was opened")
+	statsFn := spaFunctionLine(html, "flowDestStatsHTML")
+	must(t, statsFn, "flowOfferLine", "an empty offer is not a zero line")
+	must(t, statsFn, "streamHint(r.st,false)", "an offer line uses the stream hint")
+	mustNot(t, statsFn, "sp.profit", "offer numbers are not taken from the stream total")
+	mustNot(t, statsFn, "it.pct*", "a share is not used to split the stream total")
+	qsFn := spaFunctionLine(html, "flowStreamReportQS")
+	must(t, qsFn, "campaign_id", "the breakdown is filtered to the campaign")
+	must(t, qsFn, "stream", "the breakdown is filtered to the stream")
+	mustNot(t, qsFn, "limit", "one stream is not a page of the report table")
+	must(t, spaFunctionLine(html, "loadFlowStreamOffers"), "get('/api/report?'", "the breakdown is the report of that stream")
+	must(t, spaFunctionLine(html, "loadFlowStreamOffers"), "if(FLOW_COMPACT", "a compact canvas does not ask")
+	for _, line := range []string{
+		`'dest.offer':'offer'`, `'dest.landing':'landing'`,
+		`'dest.offer':'оффер'`, `'dest.landing':'лендинг'`,
+		`'dest.offer':'офер'`, `'dest.landing':'лендінг'`,
+	} {
+		if n := strings.Count(html, line); n != 1 {
+			t.Errorf("%s: %d dictionary entries, want 1", line, n)
+		}
+	}
+	var src strings.Builder
+	src.WriteString("const esc=(s)=>String(s==null?'':s);\n")
+	src.WriteString("const tr=k=>({'dest.offer':'offer','dest.landing':'landing','HTTP redirect':'HTTP redirect'}[k]||k);\n")
+	src.WriteString("const typeLabel=t=>tr(t==='http_redirect'?'HTTP redirect':(t||'—'));\n")
+	src.WriteString("function streamHint(sp){const conv=+sp.conv||0;const bit=conv>0?'<span class=\"c-rev\">'+conv+'</span>':String(conv||0);const profit=+sp.profit||0;const rev=profit>0?'<span class=\"c-rev\">'+profit+'</span>':String(profit);return (sp.bots||0)+' bots · '+bit+' · '+rev}\n")
+	src.WriteString("const zero=()=>({hits:0,unique:0,bots:0,conv:0,profit:0,cost:{}});\n")
+	src.WriteString("function add(o,r){o.hits+=r.hits||0;o.unique+=r.unique||0;o.bots+=r.bots||0;o.conv+=r.conv||0;o.profit+=+r.profit||0;return o}\n")
+	src.WriteString("let PERF=[]; let OFFERS=[]; let LANDINGS=[];\n")
+	src.WriteString("let FLOW_COMPACT=false; let RANGE={id:'today',from:'',to:''};\n")
+	src.WriteString("let STREAM_OFFERS=new Map(); let STREAM_OFFERS_WAIT=new Map(); let STREAM_OFFER_Q=[]; let STREAM_OFFER_RUN=0; let STREAM_OFFER_PAINT=0; let STREAM_OFFER_PERIOD='';\n")
+	src.WriteString("let REPORT_GETS=[]; let REPORT_BODY=[]; function reportTotals(){return {hits:0,bots:0,conv:0,profit:0,cost:{}}}\n")
+	src.WriteString("function rangeQS(){return 'from=A&to=B'}\n")
+	src.WriteString("const get=(path)=>{ REPORT_GETS.push(String(path)); return Promise.resolve(REPORT_BODY); };\n")
+	src.WriteString("let paints=0; function renderFlow(){ paints++; }\n")
+	mark := strings.Index(html, "const FLOW_DEST_BADGES=")
+	if mark < 0 {
+		t.Fatal("FLOW_DEST_BADGES is missing")
+	}
+	line := html[mark:]
+	nl := strings.Index(line, "\n")
+	src.WriteString(line[:nl+1])
+	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAIL ' + what + '\n  got  ' + got + '\n  want ' + want); } };
+const g = {id:'g1', name:'Camp'};
+const offers = {redirect:'http_redirect', offers:[{id:'o1', share:60},{id:'o2', share:40}]};
+const sp = {hits:10, bots:3, conv:10, profit:100};
+OFFERS = [{id:'o1', name:'Alpha'},{id:'o2', name:'Beta'}];
+LANDINGS = [{id:'l1', name:'Land'}];
+const row = (expanded) => flowDestStatsHTML(offers, sp, g, 'main', expanded, false) + flowDestMarks(offers, flowDestNamed(offers, g, 'main', expanded, false, sp));
+
+eq(flowDestTypeLabel(offers), 'HTTP redirect (offer)', 'an offer destination names the offer');
+eq(flowDestTypeLabel({redirect:'http_redirect', landings:[{id:'l1', share:100}]}), 'HTTP redirect (landing)', 'a landing destination names the landing');
+eq(flowDestTypeLabel({redirect:'landing', landings:[{id:'l1', share:100}]}), 'landing', 'the landing type is not named twice');
+eq(flowDestTypeLabel({redirect:'http_redirect', offers:[{id:'o1', share:50}], landings:[{id:'l1', share:100}]}), 'HTTP redirect (offer, landing)', 'both sides are named');
+eq(flowDestTypeLabel({redirect:'http_redirect', out:'https://1wyvdy.life/casino/list?open=register'}), 'HTTP redirect', 'a direct URL stays the plain type');
+eq(flowDestTypeLabel({redirect:'http_redirect', out:'https://click.example/click?offer_id=6004'}).includes('offer'), false, 'an offer id in the query is not a label');
+
+let h = row(false);
+eq((h.match(/class="hint num"/g) || []).length, 1, 'the compact row has one summary');
+eq(h.includes('olines'), false, 'the compact row has no per-offer lines');
+eq(h.includes('3 bots'), true, 'the compact summary is the stream');
+eq(h.indexOf('class="hint num"') < h.indexOf('class="badges"'), true, 'compact offer names sit under the summary');
+
+const linesOf = (html) => {
+  const a = html.indexOf('<div class="olines">');
+  if (a < 0) return '';
+  const b = html.indexOf('class="badges"', a);
+  return b > a ? html.slice(a, b) : html.slice(a);
+};
+const put = (stream, rows) => { STREAM_OFFERS.set(streamOfferKey(g, stream), foldStreamOffers(rows)); };
+
+h = row(true);
+eq((h.match(/class="hint num"/g) || []).length, 1, 'without a report the detailed row keeps one summary');
+eq(h.includes('olines'), false, 'missing offer numbers are not drawn as zeros');
+eq(h.indexOf('class="hint num"') < h.indexOf('class="badges"'), true, 'offer names still sit under the summary');
+
+put('main', [
+  {offer:'o1', country:'US', source:'a', bots:1, conv:2, profit:10},
+  {offer:'o1', country:'DE', source:'b', bots:1, conv:2, profit:5},
+  {offer:'', country:'US', source:'a', bots:9, conv:9, profit:9},
+  {offer:'o2', country:'US', source:'a', bots:4, conv:0, profit:0}
+]);
+h = row(true);
+let lines = linesOf(h);
+eq(lines.includes('class="olines"'), true, 'the detailed row has a line for the offer with revenue');
+eq((lines.match(/class="hint num"/g) || []).length, 1, 'an offer without revenue is not a second line');
+eq(lines.includes('2 bots'), true, 'country rows of one offer are summed');
+eq(lines.includes('4 bots'), false, 'bots alone do not make a line');
+eq(lines.includes('3 bots'), false, 'the stream total is not copied onto an offer');
+eq(lines.includes('9 bots'), false, 'a row with no offer is not a line');
+eq(lines.includes('class="pill"'), true, 'the offer name is the gray badge');
+eq(lines.includes('title="Alpha — 60%"'), true, 'the line title is the full name');
+eq(lines.includes('>Alpha<') && lines.indexOf('>Alpha<') < lines.indexOf('2 bots'), true, 'the offer name sits left of its numbers');
+eq(lines.includes('>60%<') && lines.indexOf('>60%<') < lines.indexOf('2 bots'), true, 'the share sits with the name');
+eq(lines.includes('Beta'), false, 'an offer without revenue is not on the line');
+eq(lines.includes('c-rev">4'), true, 'a positive conversion is green');
+eq(lines.includes('c-rev">15'), true, 'a positive revenue is green');
+const badges = h.slice(h.indexOf('class="badges"'));
+eq(badges.includes('>Beta<'), true, 'an offer without revenue stays a badge under the line');
+eq(badges.includes('>40%<'), true, 'that badge keeps its percent');
+eq(badges.includes('Alpha'), false, 'an offer already named on the line is not badged again');
+eq(badges.includes('class="pill more"'), false, 'one offer without revenue does not fold into +N');
+h = row(false);
+eq(h.includes('olines'), false, 'the compact row stays one summary when offer numbers exist');
+eq((h.match(/class="hint num"/g) || []).length, 1, 'the compact row does not repeat the offers');
+eq(h.includes('>Alpha<') && h.includes('>Beta<'), true, 'the compact row keeps both offer badges');
+
+STREAM_OFFERS = new Map();
+put('main', [
+  {offer:'o1', country:'US', source:'a', bots:1, conv:4, profit:10},
+  {offer:'o2', country:'US', source:'a', bots:1, conv:4, profit:10}
+]);
+h = row(true);
+eq(h.includes('class="badges"'), false, 'no badge row when every offer has revenue');
+eq((linesOf(h).match(/class="hint num"/g) || []).length, 2, 'both offers with revenue are lines');
+
+const soloOut = {redirect:'http_redirect', offers:[{id:'o1', share:100}]};
+STREAM_OFFERS = new Map();
+STREAM_OFFERS.set(streamOfferKey(g, 'solo'), foldStreamOffers([]));
+h = flowDestStatsHTML(soloOut, sp, g, 'solo', true, false) + flowDestMarks(soloOut, flowDestNamed(soloOut, g, 'solo', true, false, sp));
+eq(h.includes('class="pill"'), true, 'one offer beside the stream numbers is a badge');
+const soloLine = h.slice(h.indexOf('class="oline"'));
+eq(soloLine.indexOf('>Alpha<') < soloLine.indexOf('3 bots'), true, 'that badge sits left of the numbers');
+eq((h.match(/class="badges"/g) || []).length, 0, 'the same offer is not repeated under the numbers');
+h = flowDestStatsHTML(soloOut, sp, g, 'solo', false, false) + flowDestMarks(soloOut, flowDestNamed(soloOut, g, 'solo', false, false, sp));
+eq(h.includes('class="oline"'), false, 'the compact row does not move the badge onto the line');
+eq(h.includes('class="badges"'), true, 'the compact row keeps the badge under the summary');
+
+STREAM_OFFERS = new Map();
+const savedOffers = OFFERS;
+OFFERS = [{id:'o1', name:'Alpha'},{id:'o2', name:'Beta'},{id:'o3', name:'Gamma'},{id:'o4', name:'Delta'}];
+const many = {redirect:'http_redirect', offers:[{id:'o1', share:10},{id:'o2', share:30},{id:'o3', share:30},{id:'o4', share:30}]};
+STREAM_OFFERS = new Map();
+STREAM_OFFERS.set(streamOfferKey(g, 'wide'), foldStreamOffers([{offer:'o1', bots:0, conv:3, profit:9}]));
+const wide = flowDestMarks(many, flowDestNamed(many, g, 'wide', true, false));
+eq(wide.includes('Alpha'), false, 'the offer with revenue is not repeated as a badge');
+eq(wide.includes('>Beta<'), true, 'an offer without revenue is a badge');
+eq(wide.includes('>+1<'), true, 'extra offers without revenue fold into +N');
+eq((wide.match(/title="([^"]*)"/) || ['',''])[1].includes('Delta — 30%'), true, 'a folded offer keeps its full name in the title');
+OFFERS = savedOffers;
+
+STREAM_OFFERS = new Map();
+put('other', [
+  {offer:'o1', bots:1, conv:4, profit:10},
+  {offer:'o2', bots:1, conv:4, profit:10}
+]);
+h = flowDestStatsHTML(offers, sp, g, 'main', true, false);
+eq(h.includes('olines'), false, 'numbers of another stream are not used');
+
+const direct = {redirect:'http_redirect', out:'https://1wyvdy.life/casino/list?open=register'};
+h = flowDestStatsHTML(direct, sp, g, 'main', true, false) + flowDestMarks(direct);
+eq(h.includes('olines'), false, 'a direct link has no offer lines');
+eq(h.includes('class="badges"'), false, 'a direct link has no offer names');
+eq(flowDestTypeLabel(direct) !== flowDestTypeLabel(offers), true, 'the direct link label differs from the offer label');
+
+(async () => {
+  STREAM_OFFERS = new Map();
+  STREAM_OFFERS_WAIT = new Map();
+  STREAM_OFFER_Q = [];
+  STREAM_OFFER_RUN = 0;
+  STREAM_OFFER_PERIOD = '';
+  REPORT_GETS = [];
+  FLOW_COMPACT = true;
+  eq(loadFlowStreamOffers(g, 'main'), null, 'a compact canvas does not ask');
+  eq(REPORT_GETS.length, 0, 'a compact canvas sends no report');
+  queueOpenStreamOffers({id:'g1', streams:[{name:'main', out:offers}]});
+  eq(REPORT_GETS.length, 0, 'a collapsed canvas does not queue a report per stream');
+
+  FLOW_COMPACT = false;
+  REPORT_BODY = [
+    {offer:'o1', country:'US', source:'a', bots:1, conv:2, profit:3},
+    {offer:'o1', country:'DE', source:'b', bots:1, conv:1, profit:4}
+  ];
+  const asked = loadFlowStreamOffers(g, 'main');
+  eq(asked != null, true, 'opening one stream asks for its breakdown');
+  await asked;
+  eq(REPORT_GETS.length, 1, 'one stream asks once');
+  const q = decodeURIComponent(REPORT_GETS[0]);
+  eq(q.indexOf('/api/report?') === 0, true, 'the request is the report');
+  eq(q.includes('campaign_id:eq:g1'), true, 'the report is this campaign');
+  eq(q.includes('stream:eq:main'), true, 'the report is this stream');
+  eq(q.includes('meta=1'), true, 'the report is the whole slice of the stream');
+  eq(REPORT_GETS[0].includes('limit='), false, 'the stream slice is not paged');
+  await loadFlowStreamOffers(g, 'main');
+  eq(REPORT_GETS.length, 1, 'a stream already folded is not asked again');
+  h = flowDestStatsHTML(offers, sp, g, 'main', true, false);
+  lines = linesOf(h);
+  eq((lines.match(/class="hint num"/g) || []).length, 1, 'the answer draws the offer line');
+  eq(lines.includes('2 bots'), true, 'the offer line is the folded report');
+  eq(lines.includes('>Alpha<') && lines.indexOf('>Alpha<') < lines.indexOf('2 bots'), true, 'the offer name sits left of its numbers');
+  eq(lines.includes('Beta'), false, 'an offer missing from the report is not a zero line');
+  if (failed) process.exit(1);
+})().catch((e) => { console.log(e); process.exit(1); });
+`)
+	f := filepath.Join(t.TempDir(), "flowdeststats.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("stream destination stats failed:\n%s", out)
+	}
+}
+
 // TestKeywordStatsLogic runs csvTable, the keyword cell, the sparkline and the totals of the keyword
 // statistics under node: a cell that starts like a formula gets an apostrophe, a hostile keyword is
 // escaped in the cell and its tooltip, the empty keyword is captioned, and the ratio of the totals
@@ -1934,10 +2383,10 @@ eq(kwsCellText({profit: 12.5}, 'revenue', false), '12.50 $', 'the revenue column
 eq(KWS_NEEDS_CONV.has('revenue') && !KWS_NEEDS_CONV.has('profit'), true, 'revenue needs the conversions, the old profit id is gone');
 
 const colIds = me => { ME = me; return kwsCols().map(c => c.id).join(','); };
-eq(colIds(null), 'keyword,hits,uniq,conv,leads,sales,rej,cr,revenue,depsum,trend', 'a full role sees every column');
-eq(colIds({hidden: ['cost']}), 'keyword,hits,uniq,conv,leads,sales,rej,cr,revenue,depsum,trend', 'a hidden cost keeps the revenue column');
-eq(colIds({hidden: ['profit']}), 'keyword,hits,uniq,conv,leads,sales,rej,cr,trend', 'a hidden profit removes revenue and DepSum');
-eq(colIds({hidden: ['status']}), 'keyword,hits,uniq,conv,cr,revenue,depsum,trend', 'a hidden status removes leads, sales and rejected');
+eq(colIds(null), 'keyword,hits,uniq,conv,leads,sales,rej,cr,revenue,trend', 'a full role sees every column');
+eq(colIds({hidden: ['cost']}), 'keyword,hits,uniq,conv,leads,sales,rej,cr,revenue,trend', 'a hidden cost keeps the revenue column');
+eq(colIds({hidden: ['profit']}), 'keyword,hits,uniq,conv,leads,sales,rej,cr,trend', 'a hidden profit removes revenue');
+eq(colIds({hidden: ['status']}), 'keyword,hits,uniq,conv,cr,revenue,trend', 'a hidden status removes leads, sales and rejected');
 
 ME = null;
 eq(kwsCampaign(), 'promo', 'the saved campaign is used');
@@ -2391,5 +2840,156 @@ func TestSettingsTabsAndAbout(t *testing.T) {
 	}
 	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
 		t.Errorf("settings and about checks failed:\n%s", out)
+	}
+}
+
+// TestDuplicateCampaignId runs a campaign copy under node.
+// The copy's id is 9 characters from CAMPAIGN_ID_ALPHABET, never the source id with a _copy suffix.
+// Two copies get different ids. An id or alias already used, including one that is only in the loaded
+// list and one from another section, is not issued; a clash draws another id of the same length.
+// It skips when node is absent and fails with the node output when a check does not hold.
+func TestDuplicateCampaignId(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the campaign copy id checks")
+	}
+	html := spaSource()
+	body := spaFunctionLine(html, "duplicateFlow")
+	if body == "" {
+		t.Fatal("duplicateFlow not found in SPA")
+	}
+	if strings.Contains(body, "_copy") || strings.Contains(body, "uniqueName") {
+		t.Fatal("duplicateFlow still builds the id from the source id")
+	}
+	for _, part := range []string{"freshCampaignId", "ensureNums(true)", "c.board_id=boardEffectiveId()", "c.name+=' (copy)'"} {
+		if !strings.Contains(body, part) {
+			t.Errorf("duplicateFlow missing %s", part)
+		}
+	}
+	if strings.Contains(body, "ORDER_DIRTY") {
+		t.Fatal("a copy must not force a whole-list save")
+	}
+	ids := spaFunctionLine(html, "takenCampaignIds")
+	if strings.Contains(ids, "campaignRows") || strings.Contains(ids, "FLOW_PAGE") {
+		t.Fatal("taken ids must come from the loaded campaigns, not the page on screen")
+	}
+	alpha := spaConstLine(html, "const CAMPAIGN_ID_ALPHABET=")
+	q1 := strings.Index(alpha, "'")
+	q2 := strings.LastIndex(alpha, "'")
+	if alpha == "" || q1 < 0 || q2 <= q1 {
+		t.Fatal("CAMPAIGN_ID_ALPHABET not found")
+	}
+	chars := alpha[q1+1 : q2]
+	if len(chars) < 30 {
+		t.Fatalf("alphabet too short: %s", chars)
+	}
+	for _, ch := range "0O1lI" {
+		if strings.ContainsRune(chars, ch) {
+			t.Errorf("alphabet contains %q", ch)
+		}
+	}
+	var src strings.Builder
+	for _, prefix := range []string{
+		"const CAMPAIGN_ID_ALPHABET=",
+		"const CAMPAIGN_ID_LEN=",
+		"let CAMPAIGN_ID_BOARDS=",
+		"let CAMPAIGN_ID_BOARD=",
+	} {
+		line := spaConstLine(html, prefix)
+		if line == "" {
+			t.Fatalf("%s not found", prefix)
+		}
+		src.WriteString(line + "\n")
+	}
+	for _, name := range []string{"randomCampaignId", "freshCampaignId", "addCampaignIds", "boardWideOn", "takenCampaignIds", "duplicateFlow"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found", name)
+		}
+		if strings.Contains(html, "async function "+name+"(") {
+			fn = "async " + fn
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g !== w) { failed++; console.log('FAIL ' + what + '\n  got  ' + g + '\n  want ' + w); }
+};
+let plan = [];
+const realRandom = randomCampaignId;
+randomCampaignId = () => {
+  if (!plan.length) throw new Error('empty plan');
+  return plan.shift();
+};
+let GROUPS = [
+  {id:'promo', name:'Promo', aliases:['old-alias'], num:1, streams:[]},
+  {id:'other', name:'Other', aliases:['ZZZZZZZZZ'], num:2, streams:[]},
+  {id:'offpage', name:'Hidden', aliases:['pagealias'], num:3, streams:[]}
+];
+let BOARDS = {items:[{id:'main', include_all:true}]};
+let fetched = 0;
+let fetchImpl = async () => [];
+async function fetchGroupRows(opts){ return fetchImpl(opts); }
+function boardNormId(id){ const s=id==null?'':String(id).trim(); return s==='main'?'':s; }
+function boardEffectiveId(){ return ''; }
+function ensureNums(){}
+function nextNum(){ return 99; }
+function markDirty(){}
+function clone(o){ return JSON.parse(JSON.stringify(o)); }
+const gone = [];
+function go(p){ gone.push(p); }
+(async () => {
+  const abc = CAMPAIGN_ID_ALPHABET;
+  const seen = new Set();
+  for (let i = 0; i < 40; i++) {
+    const id = realRandom();
+    seen.add(id);
+    eq(id.length, 9, 'real id length');
+    eq([...id].every(ch => abc.includes(ch)), true, 'real id alphabet ' + id);
+    eq(id.includes('_'), false, 'real id has no underscore');
+  }
+  eq(seen.size > 1, true, 'two real ids differ');
+
+  plan = ['promo', 'old-alias', 'offpage', 'pagealias', 'ZZZZZZZZZ', 'abcdefghj'];
+  const src = GROUPS[0];
+  const a = await duplicateFlow(src, true);
+  eq(a.id, 'abcdefghj', 'a taken id or alias is not issued');
+  eq(a.id.length, 9, 'copy length');
+  eq(a.id.includes('_copy'), false, 'copy has no _copy');
+  eq(a.name, 'Promo (copy)', 'the name still says it is a copy');
+  eq(a.aliases, [], 'the copy keeps no aliases');
+  eq(gone, [], 'stay does not open the copy');
+  eq(fetched, 0, 'the wide main list is not fetched again');
+
+  plan = ['abcdefghj', 'mnopqrstu'];
+  const b = await duplicateFlow(src, true);
+  eq(b.id, 'mnopqrstu', 'the second copy skips the first copy id');
+  eq(a.id === b.id, false, 'two copies do not share an id');
+
+  BOARDS = {items:[{id:'main', include_all:false}, {id:'sec'}]};
+  fetchImpl = async (opts) => {
+    fetched++;
+    eq(opts.board, 'sec', 'the other section is read');
+    return [{id:'sectaken', aliases:['aliassect']}];
+  };
+  plan = ['sectaken', 'aliassect', 'bcdefghjk'];
+  const c = await duplicateFlow(src, true);
+  eq(c.id, 'bcdefghjk', 'an id from another section is not issued');
+  eq(fetched, 1, 'the other section is read once');
+  plan = ['bcdefghjk', 'cdefghjkm'];
+  const d = await duplicateFlow(src, true);
+  eq(d.id, 'cdefghjkm', 'the second copy still skips that section');
+  eq(fetched, 1, 'the other section is not read again');
+  if (failed) process.exit(1);
+})().catch(e => { console.log('FAIL ' + (e && e.stack || e)); process.exit(1); });
+`)
+	f := filepath.Join(t.TempDir(), "dup-id.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("campaign copy id checks failed:\n%s", out)
 	}
 }
