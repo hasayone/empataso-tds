@@ -696,6 +696,21 @@
   .sw-roi{border-top-color:var(--chart-roi)!important}
   .sw-cr{border-top-color:var(--chart-cr)!important}
   .cwrap{position:relative} canvas{width:100%;height:260px;display:block}
+  /* Dashboard skeleton keeps the line boxes of the real cards, the 32px chart header and the 260px plot.
+     Bars stay inline so a table cell keeps the text line-height instead of shrinking to the bar. */
+  .kpi.skel .l,.kpi.skel .v{align-items:center}
+  .kpi.skel .l{min-height:1.5em}
+  .kpi.skel .v{min-height:1.2em}
+  .dash-skel .skel-bar{display:inline-block;vertical-align:middle}
+  .dash-skel-chart .ch,.dash-skel-perf .ch{min-height:32px}
+  .dash-skel-offers .ch,.dash-skel-recent .ch{min-height:calc(14px * 1.5)}
+  .dash-skel-plot{height:260px;border-radius:var(--r-sm);background:var(--surface-3);position:relative;overflow:hidden}
+  .dash-skel-plot::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb, var(--fg) 16%, transparent),transparent);animation:skel-shine 1.3s ease-in-out infinite}
+  .dash-skel-gear{width:32px;height:32px;flex:none}
+  .dash-skel .bt{min-height:calc(12.5px * 1.5)}
+  .dash-skel .bars>div{min-height:calc(13px * 1.5)}
+  .dash-skel-empty{min-height:calc(80px + 1.5em)}
+  #dash-body[aria-busy="true"]{pointer-events:none}
   .ctip{position:absolute;top:6px;left:0;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);box-shadow:var(--shadow-2);padding:8px 10px;font-size:12px;pointer-events:none;white-space:nowrap;z-index:5}
   .ctip .t{font-weight:650;margin-bottom:4px} .ctip div{display:flex;gap:6px;align-items:center} .ctip b{margin-left:auto;padding-left:12px;font-variant-numeric:tabular-nums}
   .bds{display:grid;grid-template-columns:repeat(auto-fit,minmax(max(210px,var(--tile-floor)),1fr));gap:12px}
@@ -888,6 +903,13 @@
   tbody tr:hover td{background:var(--accent-soft)}
   tr.click{cursor:pointer}
   td.ell{max-width:240px;overflow:hidden;text-overflow:ellipsis}
+  #recent{min-width:0;max-width:100%}
+  #recent-table{display:block;min-width:0;max-width:100%;overflow:hidden}
+  #recent-table table{width:100%;table-layout:fixed}
+  #recent-table td.ell{max-width:none}
+  #recent-table th,#recent-table td{overflow:hidden;text-overflow:ellipsis}
+  #recent-table th .link{display:block;box-sizing:border-box;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+  #recent-table td.ell>*{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   th.num,td.num{text-align:right;font-variant-numeric:tabular-nums}
   td.num,.sumi b,.kpi .vn{white-space:nowrap}
   .perft th{cursor:pointer;user-select:none} .perft th.sorted{color:var(--fg)}
@@ -1097,6 +1119,22 @@
   .dest .olines .hint{flex:none;white-space:nowrap;line-height:1.25}
   .canvas.compact .flowlbl{font-size:11px;padding:1px 7px}
   .skel-bar{display:block;height:10px;max-width:100%;border-radius:999px;background:var(--surface-3);position:relative;overflow:hidden}
+  .skel-bar.bar-strip{height:32px;border-radius:var(--r-sm);flex:none}
+  .skel-bar.bar-strip.sm{width:26px;height:26px}
+  .skel-bar.bar-strip.ic{width:32px}
+  .skel-bar.bar-strip.mk{width:108px}
+  .skel-bar.bar-strip.flt{width:140px}
+  .skel-bar.bar-strip.exp{width:118px}
+  .skel-bar.bar-strip.sz{width:150px}
+  .skel-bar.bar-strip.tab{width:96px}
+  .skel-bar.bar-strip.wide{width:120px}
+  .skel-bar.bar-strip.mid{width:88px}
+  .skel-bar.bar-strip.ip{width:150px}
+  .skel-bar.bar-strip.bot{width:160px}
+  .skel-bar.bar-strip.reg{width:132px}
+  .skel-bar.bar-strip.n{width:64px;height:10px;border-radius:999px}
+  .toolbar .lft .skel-bar.find{flex:1 1 160px;width:auto;min-width:120px}
+  @media(max-width:720px){.toolbar .skel-bar.mk{width:32px}}
   .skel-bar::after{content:"";position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,color-mix(in srgb, var(--fg) 16%, transparent),transparent);animation:skel-shine 1.3s ease-in-out infinite}
   @keyframes skel-shine{to{transform:translateX(100%)}}
   .entry .skel-bar{background:color-mix(in srgb, currentColor 35%, transparent)}
@@ -1106,6 +1144,7 @@
   .canvas[aria-busy="true"] .node:hover,.canvas[aria-busy="true"] .dest:hover{border-color:var(--border-strong);box-shadow:var(--shadow-1)}
   @media (prefers-reduced-motion:reduce){
     .skel-bar::after{animation:none;opacity:0}
+    .dash-skel-plot::after{animation:none;opacity:0}
   }
   #fgrid[aria-busy="true"],.table-wait{pointer-events:none}
   .ftable tr.skel-row td,.ftable tr.skel-row th{height:34px;vertical-align:middle}
@@ -7231,6 +7270,8 @@ function networkRowHTML(n, m){
 const BDT={country:'Countries',device:'Devices',os:'OS',browser:'Browsers',domain:'Domains',org:'Providers'};
 let DASH={conds:[]}, DASH_HOLD=false;
 let DASH_PERF=null;
+/** DASH_GEN drops a summary answer that lost the race with a newer load of the same page. */
+let DASH_GEN=0;
 const DASH_CLASSIC=['country','device','os','browser','domain','org'];
 /** dashCampaignId returns the campaign the account keeps on the dashboard.
  * @returns {string} campaign id; empty for all campaigns, and for an account that may not filter by campaign
@@ -7291,6 +7332,10 @@ function dashCampaignHTML(){
 function dashCampaignBind(groups, live){
   const inp=q('#dash-camp-q');
   if(!inp) return;
+  const camp=String(dashCampaignId());
+  if(inp.dataset.dashLive==='1'&&inp.dataset.dashCamp===camp) return;
+  inp.dataset.dashLive='1';
+  inp.dataset.dashCamp=camp;
   const id=dashCampaignId(), lab=id?dashCampaignLabel(id):'';
   let items=null;
   bindPickCombo(inp, {
@@ -7554,9 +7599,15 @@ function openDashPrefs(onApply){
   names.forEach(paint);
 }
 async function dashboard(_,live,quiet){
+  const my=++DASH_GEN;
+  const still=()=>live()&&my===DASH_GEN;
   const hold=DASH_HOLD; DASH_HOLD=false;
   if(!hold) DASH={conds:[]};
-  if(!quiet) view().innerHTML=pageTableWait(tr('nav.dashboard'));
+  dashMount(live);
+  if(!quiet){
+    const body=q('#dash-body');
+    if(body){body.setAttribute('aria-busy','true'); body.setAttribute('aria-label',tr('table.loading')); body.innerHTML=dashSkelHTML(dashSkelPlan())}
+  }
   const qs=dashQS();
   const perfLoad=dashConds().length
     ?get('/api/stats/performance?'+qs,[]).then(rows=>{DASH_PERF=Array.isArray(rows)?rows:[]; return DASH_PERF})
@@ -7568,7 +7619,7 @@ async function dashboard(_,live,quiet){
     perfLoad,
     loadMoney(qs, dashCampaignId()),
   ]);
-  if(!live())return;
+  if(!still())return;
   const raw=Array.isArray(ts)?ts:[];
   const chart=annotateChart(raw);
   CH.cur=chart.cur; CH.ready=chart.ready; CH.moneyAxis=chart.moneyAxis;
@@ -7589,6 +7640,7 @@ async function dashboard(_,live,quiet){
   const gap=chart.rows.length>1?(+new Date(chart.rows[1].ts)-+new Date(chart.rows[0].ts)):0;
   const daily=gap>=20*3600000||(!gap&&HOURS>48);
   const hideM=hiddenCols(ME);
+  const skelNow=dashSkelPlan();
   const dashKpi=(id,html)=>hideM.has(id)?'':html;
   const dashRoiTxt=dashROI();
   const legs=CH_SERIES.filter(s=>!hideM.has(s.id)).map(s=>`<button type="button" class="lg lg-${s.color}${CH_HIDE.has(s.id)?' off':''}" data-series="${s.id}">${icon(s.ic)}<span class="lg-name">${tr(s.key)}</span></button>`).join('');
@@ -7614,16 +7666,18 @@ async function dashboard(_,live,quiet){
     </div>`,
     offers:`<div class="card pad" id="dash-offers" style="margin-bottom:14px">
       <div class="ch"><b>${tr('dash.offers')}</b><span class="hint" id="dash-offers-n"></span></div>
-      <div id="dash-offers-body">${tableWait()}</div>
+      <div id="dash-offers-body" class="dash-skel">${dashSkelGrid(skelNow.offerCols, skelNow.offers)}</div>
     </div>`,
     visitors:`<div class="row" style="justify-content:space-between;margin:28px 0 12px"><h2 style="margin:0">${tr('Who visits')}</h2><button type="button" class="icon" id="dash-panels" title="${tr('dash.panels')}">${icon('settings')}</button></div>
     <div class="bds" style="margin-bottom:14px">${dashDims().filter(d=>dashPanelOn(d.id)).map(d=>`<div class="card pad bd" data-bd="${esc(d.id)}"><div class="bt">${esc(d.label)}</div><div id="bd-${esc(d.id)}" class="bars"><span class="muted">…</span></div></div>`).join('')}${dashExtraDim()&&dashPanelOn('custom')?`<div class="card pad bd" data-bd="custom"><div class="bt">${esc(tr('dash.dim'))}</div><div class="fld">${dashExtraSelect(dashExtraDim())}</div><div id="bd-custom" class="bars"><span class="muted">…</span></div></div>`:''}</div>`,
-    recent:pageAllowed(ME,'logs')?`<div class="card pad" id="recent" style="margin-bottom:14px"><div class="ch"><b>${tr('dash.recent')}</b><div class="spacer"></div><a href="#/logs">${tr('dash.recent.all')}</a></div><div id="recent-table">${tableWait()}</div></div>`:''
+    recent:pageAllowed(ME,'logs')?`<div class="card pad" id="recent" style="margin-bottom:14px"><div class="ch"><b>${tr('dash.recent')}</b><div class="spacer"></div><a href="#/logs">${tr('dash.recent.all')}</a></div><div id="recent-table" class="dash-skel">${dashSkelGrid(skelNow.recentCols, skelNow.recent)}</div></div>`:''
   };
-  view().innerHTML=`
-    <div class="ph"><h1>${tr('Dashboard')}</h1><span class="sub">${periodLabel()}</span><div class="spacer"></div>${dashCampaignHTML()}<button type="button" class="icon" id="dash-refresh" title="${tr('Refresh')}" aria-label="${tr('Refresh')}">${icon('refresh')}</button><button type="button" class="icon" id="dash-prefs" title="${tr('dash.pref.title')}" aria-label="${tr('dash.pref.title')}">${icon('settings')}</button></div>
-    <div class="kpis">${dashRows('kpis').filter(r=>r.on).map(r=>kpiCards[r.id]).join('')}</div>
+  dashMount(live);
+  const dashBody=q('#dash-body');
+  const dashHTML=`<div class="kpis">${dashRows('kpis').filter(r=>r.on).map(r=>kpiCards[r.id]).join('')}</div>
     ${dashRows('blocks').filter(r=>r.on).map(r=>blockHTML[r.id]).join('')}`;
+  if(dashBody){dashBody.removeAttribute('aria-busy'); dashBody.removeAttribute('aria-label'); dashBody.innerHTML=dashHTML}
+  else view().innerHTML=dashHeadHTML()+'<div id="dash-body">'+dashHTML+'</div>';
   if(q('#chart')){ drawChart(q('#chart'),chart.rows); bindChartHover(q('#chart')); }
   qa('[data-series]',view()).forEach(b=>b.onclick=()=>{
     const id=b.dataset.series;
@@ -7637,6 +7691,12 @@ async function dashboard(_,live,quiet){
     q('#perftop').onclick=()=>{PERF_TOP=!PERF_TOP;renderPerf(groups||[])};
     q('#perfexport').onclick=e=>{e.stopPropagation(); if(MENU){closeMenu();return} menu(e.currentTarget,[{label:tr('Export CSV'),on:()=>exportPerf(groups||[])},{label:tr('Export HTML'),on:()=>{const t=perfSheet(groups||[]); downloadHTML(tr('Performance by flow and stream'), t.headers, t.rows)}}], 'end')};
   }
+  const skelNote={
+    kpis:dashRows('kpis').filter(r=>r.on&&!hideM.has(r.id)).map(r=>r.id),
+    blocks:dashRows('blocks').filter(r=>r.on).map(r=>r.id)
+  };
+  if(q('#perfwrap')) skelNote.perf=qa('tbody tr', q('#perfwrap')).length;
+  dashSkelNote(skelNote);
   const reloadDash=()=>{DASH_HOLD=true; return dashboard(null, live, true)};
   const reloadBD=()=>{
     dashDims().filter(d=>dashPanelOn(d.id)).forEach(d=>loadBreakdown(d.id));
@@ -7645,7 +7705,7 @@ async function dashboard(_,live,quiet){
     loadRecent();
     loadDashOffers();
   };
-  dashCampaignBind(groups||[], live);
+  dashSyncCampaign(groups||[], live);
   q('#dash-refresh').onclick=()=>busy(q('#dash-refresh'), reloadDash);
   q('#dash-prefs').onclick=()=>openDashPrefs(()=>{DASH_HOLD=true; dashboard(null, live, true)});
   const panelsGear=q('#dash-panels');
@@ -7665,6 +7725,273 @@ async function dashboard(_,live,quiet){
     loadBreakdown(dimSel.value, 'bd-custom');
   };
   reloadBD();
+}
+/** dashSkelUser is the account the remembered dashboard shape belongs to.
+ * @returns {string} the user id, or the login when the main administrator has no id; empty when nobody is signed in
+ */
+function dashSkelUser(){
+  if(!ME) return '';
+  const id=ME.uid||ME.user||'';
+  return id==null?'':String(id);
+}
+/** dashSkelKey is the localStorage key of one account's dashboard shape.
+ * @param {string} user account id from dashSkelUser
+ * @returns {string} key; it holds no figures and no secrets
+ */
+function dashSkelKey(user){return 'emtds-dash-skel:'+String(user||'')}
+/** dashSkelRead returns the shape remembered for the signed-in account.
+ * A missing store, a broken value, or a shape of another account is null. The shape is which blocks were on and how many rows they had.
+ * @returns {{user:string,kpis:string[],blocks:string[],perf:number,offers:number,recent:number}|null} null when this account has no shape
+ */
+function dashSkelRead(){
+  const user=dashSkelUser();
+  if(!user) return null;
+  let o=null;
+  try{o=JSON.parse(localStorage.getItem(dashSkelKey(user))||'null')}catch(e){return null}
+  if(!o||typeof o!=='object'||Array.isArray(o)||o.user!==user) return null;
+  return o;
+}
+/** dashSkelNote remembers the shape just drawn for this account. Figures are not stored. A closed store is ignored.
+ * patch carries the ids and the row counts to keep; a count left out keeps the previous one. Another account's shape is a different key.
+ * @param {{kpis?:string[],blocks?:string[],perf?:number,offers?:number,recent?:number}} patch
+ * @returns {void}
+ */
+function dashSkelNote(patch){
+  const user=dashSkelUser();
+  if(!user||!patch||typeof patch!=='object') return;
+  const prev=dashSkelRead()||{};
+  const ids=key=>{
+    const list=Array.isArray(patch[key])?patch[key]:(Array.isArray(prev[key])?prev[key]:[]);
+    const out=[], seen=new Set();
+    list.forEach(id=>{
+      if(typeof id!=='string'||!id||seen.has(id)) return;
+      seen.add(id); out.push(id);
+    });
+    return out;
+  };
+  const num=key=>{
+    if(patch[key]==null||patch[key]==='') return prev[key];
+    const x=Math.floor(Number(patch[key]));
+    if(!Number.isFinite(x)||x<0) return prev[key];
+    return x>100?100:x;
+  };
+  const shape={user, kpis:ids('kpis'), blocks:ids('blocks'), perf:num('perf'), offers:num('offers'), recent:num('recent')};
+  try{localStorage.setItem(dashSkelKey(user), JSON.stringify(shape))}catch(e){}
+}
+/** dashSkelCount clamps a remembered row count.
+ * @param {*} v candidate count
+ * @param {number} def value when v is missing or not a count
+ * @param {number} max largest count the skeleton draws
+ * @returns {number} a whole count from 0 to max
+ */
+function dashSkelCount(v, def, max){
+  if(v==null||v==='') return def;
+  const x=Math.floor(Number(v));
+  if(!Number.isFinite(x)||x<0) return def;
+  return x>max?max:x;
+}
+/** dashSkelShape picks the blocks the skeleton draws.
+ * on.kpis and on.blocks are the ids switched on now, already without a card or a block the role hides.
+ * cached is the last shape of this account, or null; it supplies row counts only. A block the account has off is not drawn, even if the cache still names it.
+ * With no memory the counts are a few rows. Offers are absent until on.blocks lists them. The chart is absent unless on.blocks lists it.
+ * @param {{kpis?:string[],blocks?:string[],panels?:number,cols?:string[],offerCols?:string[],recentCols?:string[]}} on
+ * @param {object|null} cached remembered shape, or null
+ * @returns {{kpis:string[],blocks:string[],perf:number,offers:number,recent:number,panels:number,bars:number,cols:string[],offerCols:string[],recentCols:string[]}}
+ */
+function dashSkelShape(on, cached){
+  const src=on&&typeof on==='object'?on:{};
+  const kpis=[], seenK=new Set();
+  (Array.isArray(src.kpis)?src.kpis:[]).forEach(id=>{
+    if(typeof id!=='string'||!id||seenK.has(id)) return;
+    seenK.add(id); kpis.push(id);
+  });
+  const known=['chart','perf','offers','visitors','recent'], blocks=[], seen=new Set();
+  (Array.isArray(src.blocks)?src.blocks:[]).forEach(id=>{
+    if(typeof id!=='string'||seen.has(id)||known.indexOf(id)<0) return;
+    seen.add(id); blocks.push(id);
+  });
+  const c=cached&&typeof cached==='object'?cached:null;
+  const list=a=>Array.isArray(a)&&a.length?a.slice():null;
+  return {
+    kpis, blocks,
+    perf:dashSkelCount(c&&c.perf, 6, 24),
+    offers:dashSkelCount(c&&c.offers, 6, 10),
+    recent:dashSkelCount(c&&c.recent, 6, 10),
+    panels:dashSkelCount(src.panels, dashSkelCount(c&&c.panels, 6, 8), 8),
+    bars:dashSkelCount(c&&c.bars, 6, 6),
+    cols:list(src.cols)||['name','hits','unique','bots','conv','revenue','cr'],
+    offerCols:list(src.offerCols)||['offer','hits','unique','conv','revenue'],
+    recentCols:list(src.recentCols)||['ts','campaign','os','browser','ip','out']
+  };
+}
+/** dashSkelBar is one gray strip. w is a CSS width. It returns HTML with no text. */
+function dashSkelBar(w){return '<span class="skel-bar" style="width:'+w+'"></span>'}
+/** dashSkelGrid is a table of empty strips: one header row and rows body rows, in the column count of cols.
+ * The cells use the same table padding as a loaded row, so the row stays the same height. There is no caption and no figure.
+ * @param {string[]} cols column ids, only their number is used
+ * @param {number} rows how many body rows to draw
+ * @returns {string} HTML
+ */
+function dashSkelGrid(cols, rows){
+  const widths=['46%','36px','32px','28px','40px','48px','32px','36px'];
+  const cell=(i, tag)=>{
+    const cls=i?' class="num"':'';
+    return '<'+tag+cls+'>'+dashSkelBar(widths[i]||'32px')+'</'+tag+'>';
+  };
+  const list=Array.isArray(cols)&&cols.length?cols:['name'];
+  const n=dashSkelCount(rows, 0, 24);
+  const head='<tr class="skel-row" aria-hidden="true">'+list.map((_,i)=>cell(i,'th')).join('')+'</tr>';
+  const row='<tr class="skel-row" aria-hidden="true">'+list.map((_,i)=>cell(i,'td')).join('')+'</tr>';
+  return '<div class="tw"><table class="perft"><thead>'+head+'</thead><tbody>'+(n?row.repeat(n):'')+'</tbody></table></div>';
+}
+/** dashSkelHTML draws the dashboard skeleton for a shape from dashSkelShape.
+ * A block that is not in the shape is left out, so a switched-off chart or offers block takes no space. Strips carry no labels and no figures.
+ * @param {object} shape
+ * @returns {string} HTML
+ */
+function dashSkelHTML(shape){
+  const s=shape&&typeof shape==='object'?shape:{};
+  const blocks=Array.isArray(s.blocks)?s.blocks:[];
+  const kpis=Array.isArray(s.kpis)?s.kpis:[];
+  const parts=[];
+  if(kpis.length){
+    let cards='';
+    kpis.forEach(()=>{cards+='<div class="card kpi skel" aria-hidden="true"><div class="l">'+dashSkelBar('46%')+'</div><div class="v">'+dashSkelBar('58%')+'</div></div>'});
+    parts.push('<div class="kpis">'+cards+'</div>');
+  }
+  blocks.forEach(id=>{
+    if(id==='chart'){
+      parts.push('<div class="card pad dash-skel-chart" style="margin-bottom:14px" aria-hidden="true"><div class="ch">'+dashSkelBar('132px')+'</div><div class="cwrap"><div class="dash-skel-plot"></div></div></div>');
+    }else if(id==='perf'){
+      const grid=s.perf>0?dashSkelGrid(s.cols, s.perf):'<div class="dash-skel-empty" aria-hidden="true"></div>';
+      parts.push('<div class="card pad dash-skel-perf" style="margin-bottom:14px" aria-hidden="true"><div class="ch">'+dashSkelBar('180px')+'</div>'+grid+'</div>');
+    }else if(id==='offers'){
+      const grid=s.offers>0?dashSkelGrid(s.offerCols, s.offers):'<div class="dash-skel-empty" aria-hidden="true"></div>';
+      parts.push('<div class="card pad dash-skel-offers" style="margin-bottom:14px" aria-hidden="true"><div class="ch">'+dashSkelBar('96px')+'</div>'+grid+'</div>');
+    }else if(id==='visitors'){
+      const bars=dashSkelCount(s.bars, 6, 6)||6;
+      const row='<div aria-hidden="true"><span class="k">'+dashSkelBar('70%')+'</span><span class="tr"></span><span class="n">'+dashSkelBar('28px')+'</span></div>';
+      let cards='';
+      const n=dashSkelCount(s.panels, 0, 8);
+      for(let i=0;i<n;i++) cards+='<div class="card pad bd" aria-hidden="true"><div class="bt">'+dashSkelBar('72px')+'</div><div class="bars">'+row.repeat(bars)+'</div></div>';
+      parts.push('<div class="dash-skel-vis" aria-hidden="true"><div class="row" style="justify-content:space-between;margin:28px 0 12px">'+dashSkelBar('120px')+'<span class="dash-skel-gear"></span></div><div class="bds" style="margin-bottom:14px">'+cards+'</div></div>');
+    }else if(id==='recent'){
+      const grid=s.recent>0?dashSkelGrid(s.recentCols, s.recent):'<div class="dash-skel-empty" aria-hidden="true"></div>';
+      parts.push('<div class="card pad dash-skel-recent" style="margin-bottom:14px" aria-hidden="true"><div class="ch">'+dashSkelBar('140px')+'</div>'+grid+'</div>');
+    }
+  });
+  return '<div class="dash-skel">'+parts.join('')+'</div>';
+}
+/** dashSkelPerfCols is the campaigns-table columns this account may see, in display order.
+ * @returns {string[]} name, hits, conv and CR, plus unique, bots and revenue when they are not hidden
+ */
+function dashSkelPerfCols(){
+  const hide=hiddenCols(ME);
+  const cols=['name','hits'];
+  if(!hide.has('unique')) cols.push('unique');
+  if(!hide.has('bots')) cols.push('bots');
+  cols.push('conv');
+  if(!hide.has('revenue')) cols.push('revenue');
+  cols.push('cr');
+  return cols;
+}
+/** dashSkelOfferCols is the offers-block columns this account may see.
+ * @returns {string[]} offer, hits and conv, plus unique and revenue when they are not hidden
+ */
+function dashSkelOfferCols(){
+  const hide=hiddenCols(ME);
+  const cols=['offer','hits'];
+  if(!hide.has('unique')) cols.push('unique');
+  cols.push('conv');
+  if(!hide.has('revenue')) cols.push('revenue');
+  return cols;
+}
+/** dashSkelPanels is how many "Who visits" cards the account shows now.
+ * @returns {number} the classic cards left on, plus the custom card when it is on
+ */
+function dashSkelPanels(){
+  let n=dashDims().filter(d=>d&&dashPanelOn(d.id)).length;
+  if(dashExtraDim()&&dashPanelOn('custom')) n++;
+  return n;
+}
+/** dashSkelPlan is the skeleton for the signed-in account: the blocks switched on now, without a column the role hides, and the row counts of the last visit.
+ * A cache of another account is ignored. A hidden column named by an old cache is not drawn.
+ * @returns {object} shape for dashSkelHTML
+ */
+function dashSkelPlan(){
+  const hide=hiddenCols(ME);
+  const kpis=dashRows('kpis').filter(r=>r&&r.on&&!hide.has(r.id)).map(r=>r.id);
+  const blocks=dashRows('blocks').filter(r=>r&&r.on).map(r=>r.id);
+  const recentCols=dashRows('recent').filter(r=>r&&r.on).map(r=>r.id);
+  return dashSkelShape({
+    kpis, blocks, panels:dashSkelPanels(),
+    cols:dashSkelPerfCols(), offerCols:dashSkelOfferCols(), recentCols
+  }, dashSkelRead());
+}
+/** dashHeadHTML is the summary header: the title, the period, the campaign search, refresh and the preferences gear.
+ * It stays on the page while the blocks below are still loading.
+ * @returns {string} HTML
+ */
+function dashHeadHTML(){
+  return `<div class="ph" id="dash-head"><h1>${tr('Dashboard')}</h1><span class="sub">${periodLabel()}</span><div class="spacer"></div>${dashCampaignHTML()}<button type="button" class="icon" id="dash-refresh" title="${tr('Refresh')}" aria-label="${tr('Refresh')}">${icon('refresh')}</button><button type="button" class="icon" id="dash-prefs" title="${tr('dash.pref.title')}" aria-label="${tr('dash.pref.title')}">${icon('settings')}</button></div>`;
+}
+/** dashBindHead wires the header so the search, refresh and the gear work while the summary is still loading.
+ * The campaign field is bound once per field; a later call does not add a second listener.
+ * @param {function(): boolean} live true while this dashboard load is still the one on screen
+ * @returns {void}
+ */
+function dashBindHead(live){
+  const reloadDash=()=>{DASH_HOLD=true; return dashboard(null, live, true)};
+  const btn=q('#dash-refresh');
+  if(btn) btn.onclick=()=>busy(btn, reloadDash);
+  const gear=q('#dash-prefs');
+  if(gear) gear.onclick=()=>openDashPrefs(()=>{DASH_HOLD=true; dashboard(null, live, true)});
+  const inp=q('#dash-camp-q');
+  if(!inp||inp.dataset.dashLive==='1') return;
+  ensureGroups().then(groups=>{
+    if(!live()) return;
+    dashCampaignBind(groups||[], live);
+  }).catch(()=>{});
+}
+/** dashMount makes sure the summary header is on the page and wired. It does not replace the blocks under it.
+ * @param {function(): boolean} live true while this dashboard load is still the one on screen
+ * @returns {void}
+ */
+function dashMount(live){
+  const v=view();
+  if(!v) return;
+  if(!q('#dash-head')) v.innerHTML=dashHeadHTML()+'<div id="dash-body"></div>';
+  const sub=q('#dash-head .sub');
+  if(sub) sub.textContent=periodLabel();
+  dashBindHead(live);
+}
+/** dashSyncCampaign redraws the campaign field when the kept campaign changed, and leaves it while the user is typing.
+ * @param {object[]} groups campaigns the account sees
+ * @param {function(): boolean} live true while this dashboard load is still the one on screen
+ * @returns {void}
+ */
+function dashSyncCampaign(groups, live){
+  const wantId=String(dashCampaignId());
+  const html=dashCampaignHTML();
+  const slot=q('#dash-head .dcamp');
+  if(!html){ if(slot) slot.remove(); return }
+  if(!slot){
+    const btn=q('#dash-refresh');
+    if(btn) btn.insertAdjacentHTML('beforebegin', html);
+    dashCampaignBind(groups||[], live);
+    return;
+  }
+  const inp=q('#dash-camp-q');
+  const hasX=!!q('#dash-camp-x');
+  if(inp&&inp.dataset.dashCamp===wantId&&hasX===(wantId!=='')){
+    if(inp!==document.activeElement){
+      const lab=wantId?dashCampaignLabel(wantId):'';
+      if(inp.value!==lab) inp.value=lab;
+    }
+    return;
+  }
+  slot.outerHTML=html;
+  dashCampaignBind(groups||[], live);
 }
 // recentDest is the destination caption of a click. x is a log row.
 // A landing is LP and its catalog name, a flow hop is the target campaign name, a type without
@@ -7729,7 +8056,7 @@ async function loadDashOffers(){
   const list=all.slice(0, DASH_OFFERS_N);
   const hint=q('#dash-offers-n');
   if(hint) hint.textContent=all.length>list.length?list.length+' '+tr('of')+' '+all.length:'';
-  if(!list.length){ box.innerHTML=stateHTML(tr('No traffic in this period')); return; }
+  if(!list.length){ box.innerHTML=stateHTML(tr('No traffic in this period')); if(typeof dashSkelNote==='function') dashSkelNote({offers:0}); return; }
   const hideM=hiddenCols(ME), shown=(id,html)=>hideM.has(id)?'':html;
   const head=`<th>${tr('stream.offer')}</th><th class="num">${tr('Hits')}</th>${shown('unique',`<th class="num">${tr('Unique')}</th>`)}<th class="num">${tr('Conv')}</th>${shown('revenue',`<th class="num">${tr('col.revenue')}</th>`)}`;
   const rows=list.map(o=>{
@@ -7738,6 +8065,7 @@ async function loadDashOffers(){
     return `<tr><td class="ell" title="${esc(name)}">${esc(name)}</td><td class="num">${fmt(o.hits)}</td>${shown('unique',`<td class="num">${fmt(o.unique)}</td>`)}<td class="num ${o.conv?'ok':''}">${fmt(o.conv)}</td>${shown('revenue',`<td class="num${revCls?' '+revCls:''}">${moneyText(o.profit||0,'USD',2)}</td>`)}</tr>`;
   }).join('');
   box.innerHTML=`<div class="tw"><table class="perft"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  if(typeof dashSkelNote==='function') dashSkelNote({offers:list.length});
 }
 // loadRecent fills the recent-clicks card from GET /api/logs for the dashboard period. It returns nothing.
 // The card is absent for a user without the logs section, so nothing is requested then.
@@ -7759,18 +8087,22 @@ async function loadRecent(){
   };
   if(RECENT_SORT.k) list=applySort(list, RECENT_SORT, recentVal, recentMeta).slice(0, 10);
   else list=list.slice(0, 10);
-  if(!list.length){ box.innerHTML=stateHTML(tr('no data')); return; }
+  if(!list.length){ box.innerHTML=stateHTML(tr('no data')); if(r!==null&&typeof dashSkelNote==='function') dashSkelNote({recent:0}); return; }
   const head=cols.map(c=>{
     const id=c[0];
     const sm=asSortMeta(recentMeta);
     const isDate=sm.date.has(id);
     const num=!sm.text.has(id)&&!isDate;
+    const bits=[];
+    if(num) bits.push('num');
+    if(id==='out') bits.push('ell');
     const arrow=RECENT_SORT.k===id?(RECENT_SORT.dir<0?' ↓':' ↑'):'';
     const dateAttr=isDate?' data-sort-date="1"':'';
-    return `<th${num?' class="num"':''}${dateAttr}${ariaSortAttr(RECENT_SORT, id)}><button type="button" class="link" data-sort="${id}">${esc(tr(c[1]))}${arrow}</button></th>`;
+    return `<th${bits.length?` class="${bits.join(' ')}"`:''}${dateAttr}${ariaSortAttr(RECENT_SORT, id)}><button type="button" class="link" data-sort="${id}">${esc(tr(c[1]))}${arrow}</button></th>`;
   }).join('');
   box.innerHTML=`<table><thead><tr>${head}</tr></thead><tbody>${list.map(x=>recentRowHTML(x, cols.map(c=>c[0]))).join('')}</tbody></table>`;
   bindSort(box, RECENT_SORT, ()=>loadRecent());
+  if(typeof dashSkelNote==='function') dashSkelNote({recent:list.length});
 }
 // loadBreakdown fills one breakdown card. dim is the field name.
 // boxId, when set, is the element id of the custom card. It returns nothing.
@@ -13364,19 +13696,152 @@ function flowsListReady(){
   if(!grid||grid.getAttribute('aria-busy')==='true') return false;
   return !!(q('table',grid)||grid.classList.contains('fgrid')||q('.state',grid));
 }
+/** barStrip is one skeleton control of the same height as the button or field it stands in for.
+ * cls picks the width: ic and sm are icon buttons, mk is Create, find is the search field, flt is a filter,
+ * sz is the page size, exp is Export, n is the short counter. A strip is not a control and has no label.
+ * @param {string} cls width class
+ * @returns {string} HTML
+ */
+function barStrip(cls){
+  return `<span class="skel-bar bar-strip${cls?' '+cls:''}" aria-hidden="true"></span>`;
+}
+/** headStrips is the right side of a page heading while that page is still loading.
+ * opts.views is the table/cards pair, opts.tabs is how many tab buttons the heading already has,
+ * opts.groups is the groups button, opts.gear is the column gear. A flag that is off draws nothing.
+ * @param {{views?:boolean,tabs?:number,groups?:boolean,gear?:boolean}} opts
+ * @returns {string} HTML
+ */
+function headStrips(opts){
+  opts=opts||{};
+  let s='<div class="spacer"></div>';
+  if(opts.views) s+=`<span class="vseg" aria-hidden="true">${barStrip('ic')}${barStrip('ic')}</span>`;
+  const tabs=+opts.tabs||0;
+  for(let i=0;i<tabs;i++) s+=barStrip('tab');
+  if(opts.groups) s+=barStrip('ic');
+  if(opts.gear) s+=barStrip('ic');
+  return s;
+}
+/** listBarWait is the toolbar row while a list is still loading.
+ * opts.create, opts.filters and opts.refresh are the controls that page already has. opts.extra is markup for one more strip.
+ * opts.search is on unless it is false. opts.id is the toolbar id.
+ * @param {{create?:boolean,filters?:number,search?:boolean,refresh?:boolean,extra?:string,id?:string}} opts
+ * @returns {string} HTML
+ */
+function listBarWait(opts){
+  opts=opts||{};
+  const lft=[];
+  if(opts.create) lft.push(barStrip('mk'));
+  if(opts.search!==false) lft.push(barStrip('find'));
+  if(opts.extra) lft.push(opts.extra);
+  const rgt=[];
+  const n=+opts.filters||0;
+  for(let i=0;i<n;i++) rgt.push(barStrip('flt'));
+  if(opts.refresh!==false) rgt.push(barStrip('ic'));
+  const id=opts.id?` id="${opts.id}"`:'';
+  return `<div class="toolbar bar-fit"${id} aria-hidden="true"><div class="lft">${lft.join('')}</div><div class="rgt">${rgt.join('')}</div></div>`;
+}
+/** dockWait is the fixed bottom panel while a list is still loading.
+ * Pager buttons, the page size and export are strips of the control height. The counter is a short strip.
+ * @returns {string} HTML
+ */
+function dockWait(){
+  const pager=barStrip('sm')+barStrip('sm')+barStrip('sz')+barStrip('n');
+  return `<div class="flowdock" aria-hidden="true"><div class="flowsum"></div><div class="flowpage"><div class="flowpager">${pager}</div><div class="spacer"></div>${barStrip('exp')}</div></div>`;
+}
+/** numberPagerWait is a numbered pager while the report is still loading.
+ * The four page buttons and the page size are strips. The counter is a short strip. id is the element id when the page has two pagers.
+ * @param {string} [id]
+ * @returns {string} HTML
+ */
+function numberPagerWait(id){
+  const ident=id?` id="${id}"`:'';
+  return `<div class="flowpager"${ident} aria-hidden="true">${barStrip('sm').repeat(4)}${barStrip('sz')}${barStrip('n')}</div>`;
+}
 /** flowsListWait is the campaigns list while the rows are still loading.
- * The rows are empty bars in the table palette. They are not campaigns.
+ * The toolbar and the bottom panel stay in their rows as strips. The rows are empty bars. They are not campaigns.
  * @returns {string} HTML; the loaded list replaces it
  */
 function flowsListWait(){
   const bar=w=>`<span class="skel-bar" style="width:${w}"></span>`;
   const row=`<tr class="skel-row" aria-hidden="true"><td class="pick">${bar('14px')}</td><td>${bar('22%')}</td><td>${bar('46%')}</td><td class="num">${bar('28px')}</td><td class="num">${bar('36px')}</td><td class="num">${bar('32px')}</td><td class="num">${bar('40px')}</td><td class="num">${bar('28px')}</td></tr>`;
   const head=`<tr class="skel-row" aria-hidden="true"><th class="pick">${bar('14px')}</th><th>${bar('52px')}</th><th>${bar('88px')}</th><th class="num">${bar('36px')}</th><th class="num">${bar('40px')}</th><th class="num">${bar('36px')}</th><th class="num">${bar('44px')}</th><th class="num">${bar('32px')}</th></tr>`;
-  return `<div class="ph"><h1>${esc(tr('flows.title'))}</h1><span class="sub">${esc(tr('flows.list.loading'))}</span></div>
+  return `<div class="ph"><h1>${esc(tr('flows.title'))}</h1><span class="sub">${esc(tr('flows.list.loading'))}</span>${headStrips({views:true,groups:sectionAllowed(ME,'groups'),gear:true})}</div>
+    ${listBarWait({id:'fbar',create:canCreate(ME,'campaigns'),filters:3})}
     <div id="fgrid" aria-busy="true" aria-label="${esc(tr('flows.list.loading'))}">
       <p class="skel-note">${esc(tr('flows.list.loading'))}</p>
       <div class="tw"><table class="ftable"><thead>${head}</thead><tbody>${row.repeat(8)}</tbody></table></div>
-    </div>`;
+    </div>
+    ${dockWait()}`;
+}
+/** offersListWait is the offers list while the rows are still loading: the toolbar and the dock as strips.
+ * @returns {string} HTML
+ */
+function offersListWait(){
+  return `<div class="ph"><h1>${esc(tr('off.title'))}</h1><span class="sub">${esc(periodLabel())}</span>${headStrips({groups:sectionAllowed(ME,'groups'),gear:true})}</div>
+    ${listBarWait({create:canCreate(ME,'offers'),filters:2})}
+    <div id="offers-grid" aria-busy="true" aria-label="${esc(tr('table.loading'))}">${tableWait()}</div>
+    ${dockWait()}`;
+}
+/** networksListWait is the networks list while the rows are still loading: the toolbar and the dock as strips.
+ * @returns {string} HTML
+ */
+function networksListWait(){
+  return `<div class="ph"><h1>${esc(tr('nav.networks'))}</h1><span class="sub">${esc(periodLabel())}</span>${headStrips({groups:sectionAllowed(ME,'groups'),gear:true})}</div>
+    ${listBarWait({create:canCreate(ME,'networks'),filters:1})}
+    <div id="networks-grid" aria-busy="true" aria-label="${esc(tr('table.loading'))}">${tableWait()}</div>
+    ${dockWait()}`;
+}
+/** landingsListWait is the landings list while the rows are still loading. Landings have a toolbar and no bottom panel.
+ * @returns {string} HTML
+ */
+function landingsListWait(){
+  return `<div class="ph"><h1>${esc(tr('land.title'))}</h1>${headStrips({groups:sectionAllowed(ME,'groups'),gear:true})}</div>
+    ${listBarWait({create:canCreate(ME,'landings'),filters:1})}
+    <div id="landings-grid" aria-busy="true" aria-label="${esc(tr('table.loading'))}">${tableWait()}</div>`;
+}
+/** domainsListWait is the domains list while the rows are still loading: the toolbar and the pager row as strips, without an export button.
+ * @returns {string} HTML
+ */
+function domainsListWait(){
+  const extra=meIsAdmin()?barStrip('reg'):'';
+  const pager=`<div class="row wrap" id="dompage" style="margin-top:10px;gap:8px;align-items:center" aria-hidden="true">${barStrip('sm')}${barStrip('sm')}${barStrip('sz')}${barStrip('n')}</div>`;
+  return `<div class="ph"><h1>${esc(tr('dom.title'))}</h1>${headStrips({groups:sectionAllowed(ME,'groups'),gear:true})}</div>
+    ${listBarWait({create:canCreate(ME,'domains'),filters:1,extra:extra})}
+    <div id="domains-grid" aria-busy="true" aria-label="${esc(tr('table.loading'))}">${tableWait()}</div>
+    ${pager}`;
+}
+/** reportListWait is the report while the rows are still loading: the filter row and both pagers as strips. The report has no dock.
+ * @returns {string} HTML
+ */
+function reportListWait(){
+  const tools=`<div class="toolbar" aria-hidden="true"><div class="lft">${barStrip('wide')}</div><div class="rgt">${barStrip('ic')}${barStrip('ic')}</div></div>`;
+  return `<div class="ph"><h1>${esc(tr('rep.title'))}</h1><span class="sub">${esc(periodLabel())}</span>${headStrips({gear:true})}</div>
+    ${tools}
+    ${numberPagerWait('reppage-top')}
+    <div class="tw" id="rep-tw" aria-busy="true">${tableWait()}</div>
+    ${numberPagerWait('reppage')}`;
+}
+/** logsListWait is the log while the rows are still loading.
+ * The traffic tab keeps the filter row and the dock. The other tabs keep the heading and the refresh strip.
+ * @returns {string} HTML
+ */
+function logsListWait(){
+  const traffic=LOG_TAB==='traffic';
+  const lft=traffic?barStrip('wide')+barStrip('ip'):'';
+  const rgt=(traffic?barStrip('bot')+barStrip('mid'):'')+barStrip('ic');
+  const dock=traffic?dockWait():'';
+  return `<div class="ph"><h1>${esc(tr('Logs'))}</h1><span class="sub">${esc(periodLabel())}</span>${headStrips({tabs:3,gear:true})}</div>
+    <div class="toolbar" aria-hidden="true"><div class="lft">${lft}</div><div class="rgt">${rgt}</div></div>
+    <div id="logwrap" aria-busy="true" aria-label="${esc(tr('table.loading'))}">${tableWait()}</div>
+    ${dock}`;
+}
+/** automationWait is the automation page while its cards are still loading.
+ * The arrange control is a strip in the heading. The page has no table and no bottom panel.
+ * @returns {string} HTML
+ */
+function automationWait(){
+  return `<div class="ph"><h1>${esc(tr('Automation'))}</h1><span class="sub">${esc(tr('the cron service'))}</span>${headStrips({gear:true})}</div>
+    <div id="jobs" aria-busy="true" aria-label="${esc(tr('table.loading'))}"></div>`;
 }
 /** flows opens the campaigns list, or one campaign when arg is its id.
  * arg is the route id. live is false after the router has moved on.
@@ -13389,7 +13854,7 @@ async function flows(arg,live){
   if(arg)return flowPage(arg,live);
   if(!flowsListReady()){
     const v=view();
-    if(v) v.innerHTML=flowsListWait();
+    if(v){document.body.classList.add('has-flowdock'); v.innerHTML=flowsListWait()}
   }
   const loaded=await Promise.all([ensureGroups(true),loadPerf(),loadMoney(),ensureDomains(),get('/api/traffic-sources',[])]);
   FLOW_SOURCES=Array.isArray(loaded[4])?loaded[4]:[];
@@ -18466,7 +18931,13 @@ function logQS(){
   return qs;
 }
 async function logs(arg, live){
-  showPageWait(tr('nav.logs'), '#logwrap');
+  if(!tableShown('#logwrap')){
+    const v=view();
+    if(v){
+      document.body.classList.toggle('has-pager', LOG_TAB==='traffic');
+      v.innerHTML=logsListWait();
+    }
+  }
   const hold=LOG_HOLD; LOG_HOLD=false;
   LOG_PAGE_I=0;
   await Promise.all([ensureCatalogs(), ensureGroups().catch(()=>[])]);
@@ -19819,7 +20290,7 @@ function cronJobDisabled(job, st){
 const getPath=(o,p)=>p.split('.').reduce((a,k)=>a==null?a:a[k],o);
 function setPath(o,p,v){const ks=p.split('.'),last=ks.pop();const t=ks.reduce((a,k)=>a[k],o);t[last]=v}
 async function automation(_,live){
-  if(!CRONST)view().innerHTML=pageTableWait(tr('nav.automation'));
+  if(!CRONST)view().innerHTML=automationWait();
   const st=await call('GET','/api/cron'); if(!live())return;
   CRONST=st;
   if(CRON===null||!cronDirty()){CRON=st.config;CRON_SAVED=JSON.stringify(CRON)}
@@ -21106,16 +21577,20 @@ function paintUsersTable(rows){
  */
 async function usersPage(){
   const host=q('#profile-body'); if(!host) return;
-  host.innerHTML=`<div class="row wrap" style="margin-bottom:14px"><button type="button" class="primary" id="users-new">${esc(tr('users.new'))}</button></div><div id="users-table">${tableWait()}</div>
-    <div class="row wrap" style="margin:28px 0 14px"><h2 style="margin:0">${esc(tr('roles.title'))}</h2><div class="spacer"></div><button type="button" id="roles-reload">${esc(tr('roles.reload'))}</button><button type="button" class="primary" id="roles-new">${esc(tr('roles.new'))}</button></div><div id="roles-table">${tableWait()}</div>`;
-  q('#users-new').onclick=openUserCreate;
-  q('#roles-new').onclick=()=>openRoleEditor(null);
-  q('#roles-reload').onclick=reloadRoles;
+  host.innerHTML=`<div class="row wrap" id="users-bar" style="margin-bottom:14px" aria-hidden="true">${barStrip('wide')}</div><div id="users-table">${tableWait()}</div>
+    <div class="row wrap" id="roles-bar" style="margin:28px 0 14px"><h2 style="margin:0">${esc(tr('roles.title'))}</h2><div class="spacer"></div><span aria-hidden="true">${barStrip('wide')}${barStrip('wide')}</span></div><div id="roles-table">${tableWait()}</div>`;
   const [rolesErr, usersRes]=await Promise.all([
     loadRoles(),
     call('GET','/api/users').then(rows=>({rows}), e=>({err:e})),
   ]);
   if(!q('#users-table')) return;
+  const usersBar=q('#users-bar');
+  if(usersBar){usersBar.removeAttribute('aria-hidden'); usersBar.innerHTML=`<button type="button" class="primary" id="users-new">${esc(tr('users.new'))}</button>`}
+  const rolesBar=q('#roles-bar');
+  if(rolesBar) rolesBar.innerHTML=`<h2 style="margin:0">${esc(tr('roles.title'))}</h2><div class="spacer"></div><button type="button" id="roles-reload">${esc(tr('roles.reload'))}</button><button type="button" class="primary" id="roles-new">${esc(tr('roles.new'))}</button>`;
+  q('#users-new').onclick=openUserCreate;
+  q('#roles-new').onclick=()=>openRoleEditor(null);
+  q('#roles-reload').onclick=reloadRoles;
   paintRolesTable(ROLES, rolesErr);
   if(usersRes.err){
     q('#users-table').innerHTML=stateHTML(errText(usersRes.err)||tr('ui.fail'),'err');
@@ -22516,7 +22991,10 @@ async function openLandingFile(id, path, onSaved){
 // The first argument is unused. live is false once this render is no longer current.
 // A failed catalog read shows an empty table. It does not return a value.
 async function landings(arg,live){
-  showPageWait(tr('nav.landings'), '#landings-grid');
+  if(!tableShown('#landings-grid')){
+    const v=view();
+    if(v) v.innerHTML=landingsListWait();
+  }
   const rows=await ensureLandings(true);
   if(!live()) return;
   const fileCounts=new Map();
@@ -22784,7 +23262,10 @@ async function landings(arg,live){
 }
 let NET_SORT={k:'',dir:-1}, NET_PAGE=50, NET_PAGE_I=0;
 async function networks(arg,live){
-  showPageWait(tr('nav.networks'), '#networks-grid');
+  if(!tableShown('#networks-grid')){
+    const v=view();
+    if(v){document.body.classList.add('has-flowdock'); v.innerHTML=networksListWait()}
+  }
   const [rows,offers,tplRows]=await Promise.all([get('/api/affiliate-networks',[]), get('/api/offers',[]), get('/api/affiliate-network-templates',[]), loadMoney()]);
   if(!live()) return;
   NETS=Array.isArray(rows)?rows:[];
@@ -23126,7 +23607,10 @@ const OFFER_MACROS=['{subid}','{root_subid}','{country}','{keyword}',...Array.fr
 const OFFER_CURRENCIES=['USD','EUR','GBP','RUB','UAH'];
 let OFFER_AGAIN=false, OFF_PAGE=50, OFF_PAGE_I=0;
 async function offers(arg,live){
-  showPageWait(tr('off.title'), '#offers-grid');
+  if(!tableShown('#offers-grid')){
+    const v=view();
+    if(v){document.body.classList.add('has-flowdock'); v.innerHTML=offersListWait()}
+  }
   const [rows,nets]=await Promise.all([get('/api/offers',[]), get('/api/affiliate-networks',[]), loadMoney()]);
   if(!live()) return;
   OFFERS=Array.isArray(rows)?rows:[];
@@ -23831,7 +24315,10 @@ async function registerDomainModal(labels, acct){
   sync();
 }
 async function domains(_,live){
-  showPageWait(tr('nav.domains'), '#domains-grid');
+  if(!tableShown('#domains-grid')){
+    const v=view();
+    if(v) v.innerHTML=domainsListWait();
+  }
   const admin=meIsAdmin();
   CF_INFO=null;
   const [,ncAcct]=await Promise.all([ensureDomains(), admin?get('/api/registrars/namecheap',null):null, ensureGroups(), cfInfo()]);
@@ -24060,7 +24547,10 @@ async function loadReport(live){
   paintReport(live);
 }
 async function report(_,live){
-  showPageWait(tr('rep.title'), '#rep-tw');
+  if(!tableShown('#rep-tw')){
+    const v=view();
+    if(v) v.innerHTML=reportListWait();
+  }
   REP_HOLD=false;
   REP_PAGE_I=0;
   const my=++REP_GEN;

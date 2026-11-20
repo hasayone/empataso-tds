@@ -1578,7 +1578,7 @@ func TestSaveBusyAndFlowSkeleton(t *testing.T) {
 	mustNot(t, hold[emptyAt:], "skel-row", "an empty answer is not a skeleton")
 	for _, name := range []string{"offers", "report", "networks"} {
 		fn := spaFunctionLine(html, name)
-		showAt := strings.Index(fn, "showPageWait(")
+		showAt := strings.Index(fn, "ListWait()")
 		loadAt := strings.Index(fn, "await ")
 		if showAt < 0 || loadAt < 0 || showAt > loadAt {
 			t.Fatalf("%s does not show the skeleton before the load", name)
@@ -1595,12 +1595,21 @@ func TestSaveBusyAndFlowSkeleton(t *testing.T) {
 	var b strings.Builder
 	b.WriteString("let failed=0; const eq=(got,want,what)=>{const g=JSON.stringify(got),w=JSON.stringify(want); if(g!==w){failed++; console.log('FAIL '+what+'\\n  got  '+g+'\\n  want '+w);}};\n")
 	b.WriteString("function esc(s){return String(s==null?'':s)} function tr(k){return k==='save.busy'?'Saving…':k} function icon(){return ''} function flowCompactClass(){return ''} let FLOW_COMPACT=false;\n")
+	b.WriteString("function canCreate(){return true} function sectionAllowed(){return true} let ME=null;\n")
 	b.WriteString(face)
 	b.WriteString("\n")
 	b.WriteString(skel)
 	b.WriteString("\n")
 	b.WriteString(listSkel)
 	b.WriteString("\n")
+	for _, name := range []string{"barStrip", "headStrips", "listBarWait", "dockWait"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found", name)
+		}
+		b.WriteString(fn)
+		b.WriteString("\n")
+	}
 	b.WriteString(shared)
 	b.WriteString("\n")
 	b.WriteString(hold)
@@ -1627,6 +1636,10 @@ func TestSaveBusyAndFlowSkeleton(t *testing.T) {
   eq(list.includes('flows.list.loading'), true, 'campaign list names the load');
   eq(list.includes('data-g='), false, 'skeleton rows are not campaigns');
   eq((list.match(/skel-row/g)||[]).length>=8, true, 'several placeholder rows');
+  eq(list.includes('id="fbar"'), true, 'campaign skeleton keeps the toolbar row');
+  eq(list.includes('class="flowdock"'), true, 'campaign skeleton keeps the bottom panel');
+  eq(list.includes('<button'), false, 'campaign skeleton controls are strips, not buttons');
+  eq(list.includes('bar-strip n'), true, 'the counter is a short strip');
   const wait=tableWait();
   eq(wait.includes('skel-row'), true, 'shared skeleton has rows');
   eq(wait.includes('aria-busy="true"'), true, 'shared skeleton is busy');
@@ -1668,4 +1681,66 @@ func TestSaveBusyAndFlowSkeleton(t *testing.T) {
 	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
 		t.Errorf("save button and skeleton checks failed:\n%s", out)
 	}
+}
+
+// TestListChromeSkeleton checks that a list keeps its own toolbar and bottom panel as strips while it loads.
+// Pages that have no bottom panel do not gain one, and the strips are not buttons.
+func TestListChromeSkeleton(t *testing.T) {
+	html := spaSource()
+	flows := spaFunctionLine(html, "flowsListWait")
+	must(t, flows, `id:'fbar'`, "campaigns skeleton keeps the toolbar id")
+	must(t, flows, "dockWait()", "campaigns skeleton keeps the bottom panel")
+	mustNot(t, flows, "<button", "campaign skeleton controls are strips")
+	for _, name := range []string{"offersListWait", "networksListWait"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s missing", name)
+		}
+		must(t, fn, "listBarWait(", name+" keeps the toolbar")
+		must(t, fn, "dockWait()", name+" keeps the bottom panel")
+		mustNot(t, fn, "<button", name+" controls are strips")
+	}
+	land := spaFunctionLine(html, "landingsListWait")
+	must(t, land, "listBarWait(", "landings keep the toolbar")
+	mustNot(t, land, "dockWait()", "landings have no bottom panel")
+	mustNot(t, land, "<button", "landing controls are strips")
+	dom := spaFunctionLine(html, "domainsListWait")
+	must(t, dom, `id="dompage"`, "domains keep the pager row")
+	must(t, dom, "listBarWait(", "domains keep the toolbar")
+	mustNot(t, dom, "dockWait()", "domains have no export dock")
+	rep := spaFunctionLine(html, "reportListWait")
+	must(t, rep, `class="toolbar"`, "the report keeps its filter row")
+	must(t, rep, "numberPagerWait(", "the report keeps both pagers")
+	mustNot(t, rep, "dockWait()", "the report has no dock")
+	logs := spaFunctionLine(html, "logsListWait")
+	must(t, logs, `class="toolbar"`, "the log keeps its filter row")
+	must(t, logs, "dockWait()", "the traffic log keeps the bottom panel")
+	mustNot(t, logs, "<button", "log controls are strips")
+	auto := spaFunctionLine(html, "automationWait")
+	must(t, auto, "headStrips(", "automation keeps the heading control")
+	mustNot(t, auto, "table-wait", "automation is not a table skeleton")
+	mustNot(t, auto, "<button", "the automation control is a strip")
+	for _, pair := range []struct{ name, call string }{
+		{"offers", "offersListWait()"},
+		{"networks", "networksListWait()"},
+		{"landings", "landingsListWait()"},
+		{"domains", "domainsListWait()"},
+		{"report", "reportListWait()"},
+		{"logs", "logsListWait()"},
+	} {
+		fn := spaFunctionLine(html, pair.name)
+		showAt := strings.Index(fn, pair.call)
+		loadAt := strings.Index(fn, "await ")
+		if showAt < 0 || loadAt < 0 || showAt > loadAt {
+			t.Fatalf("%s does not show the skeleton before the load", pair.name)
+		}
+	}
+	page := spaFunctionLine(html, "automation")
+	if strings.Index(page, "automationWait()") < 0 || strings.Index(page, "automationWait()") > strings.Index(page, "await ") {
+		t.Fatal("automation skeleton is late")
+	}
+	mustNot(t, page, "pageTableWait(", "automation does not use the full-page table skeleton")
+	users := spaFunctionLine(html, "usersPage")
+	must(t, users, "barStrip(", "users keep the button row as strips while loading")
+	must(t, users, `id="users-new"`, "the users button returns after the load")
 }
