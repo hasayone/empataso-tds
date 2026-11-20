@@ -27,8 +27,10 @@ type FileGroups struct {
 	cache []config.Group
 	// gen is the counter Save increments. stamp.gen is the value it had
 	// when the cache was filled, so the key is file mtime, size and generation.
-	gen   uint64
-	stamp struct {
+	gen uint64
+	// onSave runs after every successful Save; see OnSave.
+	onSave func()
+	stamp  struct {
 		mod  time.Time
 		size int64
 		gen  uint64
@@ -92,6 +94,19 @@ func (f *FileGroups) Save(_ context.Context, groups []config.Group) error {
 	if err != nil {
 		return err
 	}
+	if err := f.write(b); err != nil {
+		return err
+	}
+	if f.onSave != nil {
+		f.onSave()
+	}
+	return nil
+}
+
+// write replaces the groups file with b through a temporary file and drops the list cache.
+// b is the encoded document. It returns an error when the temporary file cannot be written
+// or renamed into place.
+func (f *FileGroups) write(b []byte) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	tmp := f.path + ".tmp"
@@ -105,6 +120,12 @@ func (f *FileGroups) Save(_ context.Context, groups []config.Group) error {
 	f.gen++
 	return nil
 }
+
+// OnSave sets the function Save calls after the file is in place and the lock is released.
+// It is how the engine process, which holds its own copy of the campaigns, learns about the
+// write in the same request instead of at its next timer tick. fn must not call Save.
+// A nil fn removes the hook. Call it before the store is shared between goroutines.
+func (f *FileGroups) OnSave(fn func()) { f.onSave = fn }
 
 // FileLists — a ListsStore backed by a directory of .dat files (IP lists, wap operators,
 // signatures). Names are strictly validated — no path traversal allowed.

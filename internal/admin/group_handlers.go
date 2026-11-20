@@ -61,7 +61,7 @@ const maxGroupBody = 8 << 20
 // handleGroupsSave replaces the campaign list with the JSON array in the body.
 // The body is the full list. A missing store is 503. A body over maxGroupsBody is 413,
 // another bad body is 400. Validation and save errors are written by commitGroups.
-// Success writes 200 {"status":"saved"}.
+// Success writes 200 {"status":"saved"}, with "relinked" as in handleGroupPut.
 func (s *Server) handleGroupsSave(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Groups == nil {
 		writeErr(w, http.StatusServiceUnavailable, "groups store unavailable")
@@ -80,10 +80,22 @@ func (s *Server) handleGroupsSave(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "groups error")
 		return
 	}
-	if !s.commitGroups(w, r, v, stored, body, groupWrite{fromSave: true}) {
+	var relinked []config.Group
+	if !s.commitGroups(w, r, v, stored, body, groupWrite{fromSave: true, relinked: &relinked}) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	writeJSON(w, http.StatusOK, savedBody(relinked))
+}
+
+// savedBody is the 200 answer of a campaign save: {"status":"saved"}.
+// relinked holds the campaigns whose destinations were moved off the old tracker by this save;
+// they are listed under "relinked" so the panel shows what is stored. The key is absent when none moved.
+func savedBody(relinked []config.Group) map[string]any {
+	body := map[string]any{"status": "saved"}
+	if len(relinked) > 0 {
+		body["relinked"] = relinked
+	}
+	return body
 }
 
 // handleGroupPut replaces one campaign or appends it, then saves the full list.
@@ -91,7 +103,8 @@ func (s *Server) handleGroupsSave(w http.ResponseWriter, r *http.Request) {
 // A body id that differs from the path renames the stored campaign (renameGroupPut);
 // an assistant write with a different id is 400 "id mismatch". A missing store is 503.
 // A body over maxGroupBody is 413, another bad body is 400. Other errors match commitGroups.
-// Success writes 200 {"status":"saved"}.
+// Success writes 200 {"status":"saved"}, with "relinked" when a new campaign had destinations on the
+// old tracker moved to campaigns of this panel (see savedBody).
 func (s *Server) handleGroupPut(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Groups == nil {
 		writeErr(w, http.StatusServiceUnavailable, "groups store unavailable")
@@ -134,10 +147,11 @@ func (s *Server) handleGroupPut(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if !s.commitGroups(w, r, v, stored, replaceGroup(stored, body), groupWrite{exp: exp, id: id}) {
+	var relinked []config.Group
+	if !s.commitGroups(w, r, v, stored, replaceGroup(stored, body), groupWrite{exp: exp, id: id, relinked: &relinked}) {
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]string{"status": "saved"})
+	writeJSON(w, http.StatusOK, savedBody(relinked))
 }
 
 // writeBodyErr answers a request body that could not be decoded.
@@ -356,6 +370,9 @@ type groupWrite struct {
 	// body). When set, commitGroups refuses an empty body that would silently delete stored
 	// campaigns: the caller must DELETE /api/groups/{id} one by one instead.
 	fromSave bool
+	// relinked, when set, receives the campaigns whose destinations saveGroups moved from the old
+	// tracker to a campaign of this panel (see relinkNewCampaigns), so the caller can report them.
+	relinked *[]config.Group
 }
 
 // saveGroups checks and saves the candidate campaign list; every campaign write ends here.
@@ -367,7 +384,16 @@ type groupWrite struct {
 // It returns 0 and "" after the save, otherwise the HTTP status and message:
 // 400 for a refused change (409 ai_conflict for a restore whose link is gone), 500 for a store failure,
 // and the answer of an OnBefore refusal.
+// A campaign added by this write, such as a copy, whose destination is still a link of the old tracker
+// is sent to that campaign in this panel first (relinkNewCampaigns). A restore and an assistant write
+// keep their destinations as given.
 func (s *Server) saveGroups(ctx context.Context, v viewer, stored, groups []config.Group, gw groupWrite) (int, string) {
+	if !gw.restore && gw.exp == nil {
+		rows := relinkNewCampaigns(v, stored, groups, s.keitaroCreds().host())
+		if gw.relinked != nil {
+			*gw.relinked = append(*gw.relinked, rows...)
+		}
+	}
 	cat := s.loadLinkCatalog(ctx, groups)
 	if msg := validateGroupLinks(v, stored, groups, cat); msg != "" {
 		if gw.restore {

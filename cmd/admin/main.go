@@ -198,7 +198,9 @@ func printHash(password string) int {
 // EMTDS_* variable. log receives one line per directory in use.
 func applyDataFiles(cfg *admin.Config, groupsFile string, log *slog.Logger) {
 	f := groupsFile
-	cfg.Groups = admin.NewFileGroups(f)
+	groups := admin.NewFileGroups(f)
+	groups.OnSave(admin.EngineReloader(cfg.EngineURL, log))
+	cfg.Groups = groups
 	log.Info("groups file", "path", f)
 	dir := filepath.Dir(f)
 	cfg.Offers = admin.NewJSONStore[config.Offer](getenv("EMTDS_OFFERS_FILE", filepath.Join(dir, "offers.json")))

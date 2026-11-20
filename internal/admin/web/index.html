@@ -13395,6 +13395,22 @@ function settleMovedLinks(from, to){
     }
   }
 }
+/** adoptRelinked shows in the open list what the server stored for a new campaign whose destinations pointed at a
+ * campaign link of the old tracker: the server sends them to the same campaign here ("relinked" in the answer).
+ * Without this the editor would keep the old address and a later save would write it back.
+ * @param {{relinked?:Array<{id:string,redirect?:string,out?:string,streams?:object[]}>}|null} reply answer of PUT /api/groups or PUT /api/groups/{id}
+ * @returns {void}
+ */
+function adoptRelinked(reply){
+  for(const r of (reply&&reply.relinked)||[]){
+    const g=GROUPS.find(x=>x.id===r.id);
+    if(!g) continue;
+    g.redirect=r.redirect||'';
+    g.out=r.out||'';
+    g.streams=r.streams||[];
+    SNAP.set(g,{id:g.id,json:groupJSON(g)});
+  }
+}
 /** FLOW_POINT_MAX is the most changed campaigns a save writes one by one; more go as one PUT of the whole list. */
 const FLOW_POINT_MAX=20;
 /** FLOW_WHOLE_MAX is the largest list sent whole: a longer one would pass the request body limit, so it is always saved one by one. */
@@ -13426,9 +13442,10 @@ async function saveFlows(){
     DELETED.delete(id);
   }
   const put=async(g,path)=>{
-    await call('PUT','/api/groups/'+encodeURIComponent(path),g);
+    const reply=await call('PUT','/api/groups/'+encodeURIComponent(path),g);
     DIRTY.delete(g);
     SNAP.set(g,{id:g.id,json:groupJSON(g)});
+    adoptRelinked(reply);
   };
   for(const g of [...DIRTY]){
     const prev=SNAP.get(g);
@@ -13437,7 +13454,7 @@ async function saveFlows(){
     settleMovedLinks(prev.id,g.id);
   }
   if(DIRTY.size>FLOW_POINT_MAX&&GROUPS.length<=FLOW_WHOLE_MAX){
-    await call('PUT','/api/groups',GROUPS);
+    adoptRelinked(await call('PUT','/api/groups',GROUPS));
     snapshotGroups();
     return;
   }

@@ -364,20 +364,26 @@ func campaignCoreDocs() map[string]routeDoc {
 			Description: "Replaces the campaign with this id, or adds it when it is new. " +
 				"A different id in the body renames the stored campaign in one write: its place, section, owner and number stay, " +
 				"and campaign links of other campaigns follow the new id. Clicks already logged keep the old id. " +
-				"A taken id answers 409; an id with spaces, /, ? or # answers 400; renaming a missing campaign answers 404.",
+				"A taken id answers 409; an id with spaces, /, ? or # answers 400; renaming a missing campaign answers 404. " +
+				"A new campaign, such as a copy, whose default or stream (without offers and landings) still sends the click to a campaign link of the old Keitaro tracker " +
+				"is saved with that destination as a link to the campaign of the same key here; the answer then also lists those campaigns under \"relinked\".",
 			RU: docText{
 				Summary: "Сохранить одну кампанию.",
 				Description: "Заменяет кампанию с этим id или добавляет её, если такой ещё нет. " +
 					"Другой id в теле переименовывает сохранённую кампанию одной записью: место, раздел, владелец и номер сохраняются, " +
 					"ссылки других кампаний на неё переходят на новый id. Уже записанные клики остаются под старым id. " +
-					"Занятый id — 409, id с пробелом, /, ? или # — 400, переименование несуществующей кампании — 404.",
+					"Занятый id — 409, id с пробелом, /, ? или # — 400, переименование несуществующей кампании — 404. " +
+					"Новая кампания, например копия, у которой умолчание или поток (без офферов и лендингов) всё ещё ведёт клик на ссылку кампании старого трекера Keitaro, " +
+					"сохраняется с этим адресом как ссылкой на кампанию с тем же ключом здесь; тогда в ответе эти кампании перечислены ещё и в \"relinked\".",
 			},
 			UK: docText{
 				Summary: "Зберегти одну кампанію.",
 				Description: "Замінює кампанію з цим id або додає її, якщо такої ще немає. " +
 					"Інший id у тілі перейменовує збережену кампанію одним записом: місце, розділ, власник і номер зберігаються, " +
 					"посилання інших кампаній на неї переходять на новий id. Уже записані кліки лишаються під старим id. " +
-					"Зайнятий id — 409, id із пробілом, /, ? або # — 400, перейменування неіснуючої кампанії — 404.",
+					"Зайнятий id — 409, id із пробілом, /, ? або # — 400, перейменування неіснуючої кампанії — 404. " +
+					"Нова кампанія, наприклад копія, у якої типове значення або потік (без офферів і лендингів) досі веде клік на посилання кампанії старого трекера Keitaro, " +
+					"зберігається з цією адресою як посиланням на кампанію з тим самим ключем тут; тоді у відповіді ці кампанії перелічено ще й у \"relinked\".",
 			},
 			Body: objectBody("Campaign record. Key fields: id, name, status (boolean), aliases, redirect, uniq_method (legacy ip or cookie), " +
 				"uniq_by (ip or ip_ua), uniq_cookie (boolean), uniq_seconds, weight (boolean), streams (list of streams with name, on, rules and out)."),

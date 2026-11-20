@@ -208,8 +208,10 @@ func main() {
 	// Hot-reload of the groups config, like the .dat lists and signatures:
 	// edits saved in the admin panel go live within the reload interval
 	// instead of waiting for a restart.
+	var groupsWatch *groupsWatcher
 	if groups != nil {
-		go newGroupsWatcher(groupsFile, groups, lists, seps, log, known).watch(ctx, reload)
+		groupsWatch = newGroupsWatcher(groupsFile, groups, lists, seps, log, known)
+		go groupsWatch.watch(ctx, reload)
 	}
 	// EMTDS_API_KEY stays in the process environment. An empty key file means
 	// only that env key can open ?api=; both empty rejects ?api=, as an empty
@@ -231,7 +233,8 @@ func main() {
 	lands := newLandingServer(landingsDir(config.Env("EMTDS_LANDINGS_DIR"), groupsFile), config.Env("EMTDS_PHP_URL"), func(id string) (config.Landing, bool) {
 		return landings.Get(id)
 	}, log)
-	go reloadCatalogs(ctx, reload, offers, landings, sources, networks, s2s, domains)
+	books := []interface{ Reload() error }{offers, landings, sources, networks, s2s, domains}
+	go reloadCatalogs(ctx, reload, books...)
 
 	// realip: trust XFF/CF only from configured proxies (spoofing protection).
 	realIP, err := server.NewRealIP(trustedProxies())
@@ -287,6 +290,7 @@ func main() {
 	mux.HandleFunc("/internal/notices", serveNotices(notices))
 	mux.HandleFunc("/internal/metrics", serveMetrics(collectMetrics))
 	mux.HandleFunc("/internal/version", versionHandler())
+	mux.HandleFunc("/internal/reload", reloadHandler(groupsWatch, books...))
 	mux.HandleFunc("/l/", d.serveLandingAsset)
 	mux.HandleFunc("/healthz", healthzHandler(logs))
 	mux.HandleFunc("/", d.root)

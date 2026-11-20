@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"os"
+	"sync"
 	"time"
 
 	"github.com/hasayone/empataso-tds/internal/config"
@@ -31,13 +32,34 @@ type groupsWatcher struct {
 	seps   *seplist.Set
 	log    *slog.Logger
 
+	// mu serialises reload: the ticker and POST /internal/reload both call it,
+	// and it owns stamp and loaded.
+	mu     sync.Mutex
 	stamp  fileStamp
 	loaded map[string]bool // ip_list names already present in lists
 }
 
+// fileStamp is the fingerprint of a watched file: modification time and size,
+// plus the file identity when the stat carried it.
 type fileStamp struct {
 	mod  time.Time
 	size int64
+	// info lets a file replaced by rename count as changed even when the
+	// replacement has the same size and a timestamp the file system rounded
+	// to the same tick. It is nil for a stamp built by hand.
+	info os.FileInfo
+}
+
+// same reports whether o fingerprints the file that st fingerprinted.
+// o is the newer stamp. It does not return an error.
+func (st fileStamp) same(o fileStamp) bool {
+	if !st.mod.Equal(o.mod) || st.size != o.size {
+		return false
+	}
+	if st.info == nil || o.info == nil {
+		return true
+	}
+	return os.SameFile(st.info, o.info)
 }
 
 // newGroupsWatcher builds a watcher for an already-loaded config. known is the
@@ -59,11 +81,13 @@ func newGroupsWatcher(path string, groups *config.Groups, lists *ipindex.Set, se
 // config untouched: serving the previous rules is always better than serving
 // none, and the admin can be mid-write.
 func (w *groupsWatcher) reload() (bool, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	st, err := statFile(w.path)
 	if err != nil {
 		return false, err
 	}
-	if st.mod.Equal(w.stamp.mod) && st.size == w.stamp.size {
+	if w.stamp.same(*st) {
 		return false, nil
 	}
 	fresh, err := config.LoadGroups(w.path)
@@ -120,5 +144,5 @@ func statFile(path string) (*fileStamp, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &fileStamp{mod: fi.ModTime(), size: fi.Size()}, nil
+	return &fileStamp{mod: fi.ModTime(), size: fi.Size(), info: fi}, nil
 }
