@@ -13111,21 +13111,31 @@ function flowDestWantsReport(expanded, isLink, out){
   if(!expanded||isLink) return false;
   return flowDestItems(out).some(it=>it.kind==='offer'&&it.pct>0);
 }
-/** stopStreamOfferQueue drops reports that have not started.
+/** flowCanvasOpen tells whether the canvas of the current campaign is the page on screen.
+ * An answer that arrives after the user went to the list or another page must not draw the campaign over it.
+ * @returns {boolean} true when the address is the flows page with the id of CUR and its canvas is drawn
+ */
+function flowCanvasOpen(){
+  const r=route();
+  return r.page==='flows'&&!!r.arg&&!!CUR&&String(CUR.id)===String(r.arg)&&!!q('#canvas');
+}
+/** stopStreamOfferQueue drops reports that have not started and the redraw that waits for the arrived ones.
  * A report already in flight may finish and is kept. Nothing new starts while the canvas is compact.
  * @returns {void}
  */
 function stopStreamOfferQueue(){
   STREAM_OFFER_Q=[];
+  STREAM_OFFER_PAINT++;
 }
 /** scheduleStreamOfferPaint redraws the canvas once after the reports that just arrived.
  * A compact canvas is left as it is: the fold is already stored for the next time the row is opened.
+ * Nothing is drawn once the campaign is no longer the open page.
  * @returns {void}
  */
 function scheduleStreamOfferPaint(){
   const n=++STREAM_OFFER_PAINT;
   setTimeout(()=>{
-    if(n!==STREAM_OFFER_PAINT||FLOW_COMPACT) return;
+    if(n!==STREAM_OFFER_PAINT||FLOW_COMPACT||!flowCanvasOpen()) return;
     renderFlow();
   }, 40);
 }
@@ -15548,7 +15558,7 @@ function paintTester(){
     if(!TV.ip){toast(tr('tester.needip'),true);q('#tv_ip').focus();return}
     try{
       SIM=await call('POST','/api/simulate',{groups:simGroups(GROUPS, CUR&&CUR.id),group:CUR.id,visitor:{ip:TV.ip,useragent:UAS[TV.ua],referer:TV.referer,lang:TV.lang,key:TV.key,query:TV.query,country:TV.country,repeat:TV.repeat}});
-      renderFlow();
+      if(flowCanvasOpen()) renderFlow();
     }catch(e){toast(e.message,true)}
   };
   q('#tv_run').onclick=run;

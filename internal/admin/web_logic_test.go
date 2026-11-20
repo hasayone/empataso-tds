@@ -2135,6 +2135,7 @@ func TestFlowDestOfferStats(t *testing.T) {
 	src.WriteString("function rangeQS(){return 'from=A&to=B'}\n")
 	src.WriteString("const get=(path)=>{ REPORT_GETS.push(String(path)); return Promise.resolve(REPORT_BODY); };\n")
 	src.WriteString("let paints=0; function renderFlow(){ paints++; }\n")
+	src.WriteString("let CUR=null; const route=()=>({page:'dashboard',arg:''}); const q=()=>null;\n")
 	mark := strings.Index(html, "const FLOW_DEST_BADGES=")
 	if mark < 0 {
 		t.Fatal("FLOW_DEST_BADGES is missing")
@@ -2142,7 +2143,7 @@ func TestFlowDestOfferStats(t *testing.T) {
 	line := html[mark:]
 	nl := strings.Index(line, "\n")
 	src.WriteString(line[:nl+1])
-	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed"} {
+	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "flowCanvasOpen", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -2368,6 +2369,78 @@ if (failed) process.exit(1);
 	}
 	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
 		t.Errorf("flow back link failed:\n%s", out)
+	}
+}
+
+// TestFlowBackStaysOnList checks that a late answer cannot put the campaign back on screen after the user
+// went from #/flows/{id} to #/flows (the back link and the menu item share this path). The redraw that
+// waits for a per-stream report runs only while the campaign canvas is the page on screen, leaving the
+// campaign cancels a redraw that is already waiting, and the address is never written by it. Under node the
+// timers are run by hand against an open campaign and against the list. t is the test handle; node absent
+// skips the run.
+func TestFlowBackStaysOnList(t *testing.T) {
+	html := spaSource()
+	paint := spaFunctionLine(html, "scheduleStreamOfferPaint")
+	must(t, paint, "!flowCanvasOpen()", "the redraw checks that the campaign is still the page")
+	must(t, spaFunctionLine(html, "stopStreamOfferQueue"), "STREAM_OFFER_PAINT++", "leaving cancels a redraw that waits")
+	must(t, spaFunctionLine(html, "render"), "if(page!=='flows'||!arg) stopStreamOfferQueue();", "the list drops the reports of the campaign")
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the back to list run")
+	}
+	var src strings.Builder
+	src.WriteString("let FLOW_COMPACT=false; let STREAM_OFFER_Q=[]; let STREAM_OFFER_PAINT=0; let CUR=null;\n")
+	src.WriteString("const location={hash:'#/flows/g1'}; let canvas=true; let paints=0; let timers=[];\n")
+	src.WriteString("const q=sel=>sel==='#canvas'&&canvas?{}:null;\n")
+	src.WriteString("const setTimeout=fn=>{timers.push(fn)};\n")
+	src.WriteString("function renderFlow(){ paints++; }\n")
+	src.WriteString("function route(){const h=location.hash.replace(/^#\\/?/,''), i=h.indexOf('/');return {page:i<0?h:h.slice(0,i), arg:i<0?'':h.slice(i+1)}}\n")
+	for _, name := range []string{"flowCanvasOpen", "stopStreamOfferQueue", "scheduleStreamOfferPaint"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAIL ' + what + '\n  got  ' + got + '\n  want ' + want); } };
+const fire = () => { const run = timers; timers = []; run.forEach(f => f()); };
+CUR = {id: 'g1'};
+
+scheduleStreamOfferPaint();
+fire();
+eq(paints, 1, 'an answer on the open campaign redraws it');
+
+scheduleStreamOfferPaint();
+location.hash = '#/flows'; canvas = false;
+fire();
+eq(paints, 1, 'an answer after the move to the list does not draw the campaign');
+eq(location.hash, '#/flows', 'the address stays on the list');
+
+location.hash = '#/flows/g1'; canvas = true;
+scheduleStreamOfferPaint();
+stopStreamOfferQueue();
+fire();
+eq(paints, 1, 'leaving the campaign cancels the waiting redraw');
+
+scheduleStreamOfferPaint();
+location.hash = '#/flows/g2';
+fire();
+eq(paints, 1, 'another campaign address does not draw this one');
+
+location.hash = '#/flows'; canvas = true;
+scheduleStreamOfferPaint();
+fire();
+eq(paints, 1, 'a stale canvas under the list address is not drawn');
+if (failed) process.exit(1);
+`)
+	f := filepath.Join(t.TempDir(), "flowbacklist.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("flow back to list failed:\n%s", out)
 	}
 }
 
