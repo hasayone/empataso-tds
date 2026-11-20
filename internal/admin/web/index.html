@@ -1106,18 +1106,19 @@
   .canvas.compact .dest{padding:5px 10px;gap:2px}
   .canvas.compact .dest .meta{flex-wrap:nowrap;min-width:0}
   .canvas.compact .dest .meta>.pill{flex:none}
-  .canvas.compact .dest .badges .pill{height:18px;padding:0 7px;font-size:11px}
+  .canvas.compact .dest .badges .pill,.canvas.compact .dest .oline .pill{height:18px;padding:0 7px;font-size:11px}
   .canvas.compact .dest:has(.badges) .out,.canvas.compact .dest:has(.badges) .vl{display:none}
   .canvas.compact .dest .out{-webkit-line-clamp:1}
   .canvas.compact .dest .vl div:nth-child(n+2){display:none}
   .canvas.compact .dest .hint{display:none}
   .canvas.compact .dest .hint.num{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .canvas.compact .dest .olines{display:none}
-  .canvas:not(.compact) .dest:has(.olines)>.hint.num{display:none}
+  .dest:has(.olines)>.hint.num{display:none}
   .dest .olines{display:flex;flex-direction:column;gap:1px;min-width:0}
   .dest .olines .oline{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%;line-height:1.25}
   .dest .olines .oline .pill{flex:0 1 14em;width:auto;min-width:5.5em}
   .dest .olines .hint{flex:none;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.25}
+  .dest .olines .oline .skel-bar{width:7.5em;height:8px;margin:0}
   .canvas.compact .flowlbl{font-size:11px;padding:1px 7px}
   .skel-bar{display:block;height:10px;max-width:100%;border-radius:999px;background:var(--surface-3);position:relative;overflow:hidden}
   .skel-bar.bar-strip{height:32px;border-radius:var(--r-sm);flex:none}
@@ -13060,17 +13061,14 @@ function foldStreamOffers(rows){
   });
   return by;
 }
-/** flowOfferLine is the offer line, or null when the offer has neither conversions nor revenue.
- * st is the folded bots, conversions and revenue. Bots alone do not make a line:
- * that offer stays a badge. A missing row is not a zero.
+/** flowOfferLine is the bots, conversions and revenue drawn on one offer row.
+ * st is the folded counts. A missing row, bots alone, and an offer with neither
+ * conversions nor revenue are zeros. The stream total is not read here.
  * @param {{bots:number,conv:number,profit:number}|undefined} st
- * @returns {{bots:number,conv:number,profit:number}|null}
+ * @returns {{bots:number,conv:number,profit:number}}
  */
 function flowOfferLine(st){
-  if(!st) return null;
-  const bots=+st.bots||0, conv=+st.conv||0, profit=+st.profit||0;
-  if(!conv&&!profit) return null;
-  return {bots, conv, profit};
+  return {bots:st?(+st.bots||0):0, conv:st?(+st.conv||0):0, profit:st?(+st.profit||0):0};
 }
 /** flowStreamOfferMap reads the fold already loaded for this stream.
  * g is the campaign, stream its name. A stream that has not been asked is null.
@@ -13101,7 +13099,7 @@ function flowStreamReportQS(g, stream){
 }
 /** flowDestWantsReport is true when a detailed row should ask for its offer breakdown.
  * expanded is the detailed canvas. isLink is a hand-off to another campaign.
- * A compact row, a link, a direct URL and a landing with no offer do not ask.
+ * A compact card, a link, a direct URL and a landing with no offer do not ask.
  * @param {boolean} expanded true on the detailed canvas
  * @param {boolean} isLink true when the stream sends the visitor to another campaign
  * @param {object|null} out stream output
@@ -13127,20 +13125,26 @@ function stopStreamOfferQueue(){
   STREAM_OFFER_Q=[];
   STREAM_OFFER_PAINT++;
 }
-/** scheduleStreamOfferPaint redraws the canvas once after the reports that just arrived.
- * A compact canvas is left as it is: the fold is already stored for the next time the row is opened.
- * Nothing is drawn once the campaign is no longer the open page.
+/** scheduleStreamOfferPaint redraws the detailed canvas after a stream report arrived.
+ * A redraw that is already waiting is left in place: a later report must not drop it,
+ * or the rows stay at zeros until every stream has answered. The waiting redraw reads
+ * every fold stored by the time it runs. A compact card is left as it is: its line is
+ * the stream total, and the fold is kept for the next time the row is opened. Nothing
+ * is drawn once the campaign is no longer the open page.
  * @returns {void}
  */
 function scheduleStreamOfferPaint(){
-  const n=++STREAM_OFFER_PAINT;
+  if(scheduleStreamOfferPaint.waiting) return;
+  scheduleStreamOfferPaint.waiting=true;
+  const n=STREAM_OFFER_PAINT;
   setTimeout(()=>{
+    scheduleStreamOfferPaint.waiting=false;
     if(n!==STREAM_OFFER_PAINT||FLOW_COMPACT||!flowCanvasOpen()) return;
     renderFlow();
   }, 40);
 }
 /** loadFlowStreamOffers reads one stream's report and folds it to the offer.
- * g is the campaign, stream its name. A compact canvas, a stream already loaded and a stream
+ * g is the campaign, stream its name. A compact card, a stream already loaded and a stream
  * already in flight do not ask. The report page's own filters are not changed.
  * @param {object} g campaign
  * @param {string} stream stream name
@@ -13176,31 +13180,97 @@ function pumpStreamOffers(){
   }
 }
 /** queueStreamOffers adds one stream to the report queue.
- * g is the campaign, stream its name. A compact canvas does not queue it.
+ * g is the campaign, stream its name. first is true when this stream is on screen
+ * or was just expanded: it goes ahead of streams that are still collapsed or off screen.
+ * A compact card does not queue it. A stream already stored or already in flight is not asked again.
+ * While a batch is open the caller starts the two reports after the whole screen is ordered.
  * @param {object} g campaign
  * @param {string} stream stream name
+ * @param {boolean} [first] put this stream at the head of the queue
  * @returns {void}
  */
-function queueStreamOffers(g, stream){
+function queueStreamOffers(g, stream, first){
   if(FLOW_COMPACT||!g||stream==null||String(stream)==='') return;
   streamOffersFresh();
   const key=streamOfferKey(g, stream);
   if(STREAM_OFFERS.has(key)||STREAM_OFFERS_WAIT.has(key)) return;
-  if(STREAM_OFFER_Q.some(x=>x.key===key)) return;
-  STREAM_OFFER_Q.push({key, g, stream:String(stream)});
-  pumpStreamOffers();
+  const job={key, g, stream:String(stream)};
+  const at=STREAM_OFFER_Q.findIndex(x=>x.key===key);
+  if(at>=0){
+    if(!first||at===0) return;
+    STREAM_OFFER_Q.splice(at, 1);
+    STREAM_OFFER_Q.unshift(job);
+    return;
+  }
+  if(first) STREAM_OFFER_Q.unshift(job);
+  else STREAM_OFFER_Q.push(job);
+  if(!queueStreamOffers.batch) pumpStreamOffers();
 }
-/** queueOpenStreamOffers queues a report for each stream of the campaign that sends to an offer.
- * g is the campaign. A compact canvas queues nothing.
+/** streamsOnScreen lists the offer streams whose row is inside the window, top to bottom.
+ * g is the campaign. A link, a direct URL and a landing with no offer are left out.
+ * A row that is off screen is left out, so its report does not start.
  * @param {object} g campaign
+ * @returns {string[]} stream names
+ */
+function streamsOnScreen(g){
+  const canvas=q('#canvas');
+  if(!canvas||!g) return [];
+  const viewH=window.innerHeight||document.documentElement.clientHeight||0;
+  const viewW=window.innerWidth||document.documentElement.clientWidth||0;
+  const names=[];
+  qa('.srow', canvas).forEach(row=>{
+    const r=row.getBoundingClientRect();
+    if(r.bottom<=0||r.top>=viewH||r.right<=0||r.left>=viewW) return;
+    const s=(g.streams||[])[+row.dataset.s];
+    if(!s||s.name==null||String(s.name)==='') return;
+    const o=s.out||{};
+    if(!flowDestWantsReport(true, o.redirect==='group', o)) return;
+    names.push(String(s.name));
+  });
+  return names;
+}
+/** watchStreamOfferScreen asks for the streams that have come into view.
+ * Scroll and resize are enough. A collapsed card does not ask, and its total
+ * comes from the campaign report, so it does not wait on this queue.
+ * The listener is installed once.
  * @returns {void}
  */
-function queueOpenStreamOffers(g){
+function watchStreamOfferScreen(){
+  if(watchStreamOfferScreen.bound) return;
+  watchStreamOfferScreen.bound=true;
+  const kick=()=>{
+    if(watchStreamOfferScreen.timer) return;
+    watchStreamOfferScreen.timer=setTimeout(()=>{
+      watchStreamOfferScreen.timer=0;
+      if(FLOW_COMPACT||!flowCanvasOpen()) return;
+      queueOpenStreamOffers(CUR);
+    }, 80);
+  };
+  window.addEventListener('scroll', kick, true);
+  window.addEventListener('resize', kick);
+}
+/** queueOpenStreamOffers queues reports for the streams on screen, ahead of the rest.
+ * g is the campaign. names, when passed, is that list instead of the rows on screen.
+ * A compact card queues nothing: its line is the stream total. Streams that are
+ * collapsed or off screen are taken out of the queue until they are opened or scrolled
+ * into view. Two reports run at a time. A stream already stored is not asked again.
+ * @param {object} g campaign
+ * @param {string[]} [names] stream names to ask for first
+ * @returns {void}
+ */
+function queueOpenStreamOffers(g, names){
   if(FLOW_COMPACT||!g) return;
-  (g.streams||[]).forEach(s=>{
-    const o=s&&s.out||{};
-    if(flowDestWantsReport(true, o.redirect==='group', o)) queueStreamOffers(g, s.name);
-  });
+  streamOffersFresh();
+  const on=Array.isArray(names)?names.map(s=>String(s)):streamsOnScreen(g);
+  const keep=new Set(on.map(n=>streamOfferKey(g, n)));
+  STREAM_OFFER_Q=STREAM_OFFER_Q.filter(job=>keep.has(job.key));
+  queueStreamOffers.batch=true;
+  try{
+    for(let i=on.length-1;i>=0;i--) queueStreamOffers(g, on[i], true);
+  }finally{
+    queueStreamOffers.batch=false;
+  }
+  pumpStreamOffers();
 }
 /** streamOffersReady is true when at least one stream of the campaign already has a fold.
  * g is the campaign. The detailed row can be drawn from that fold without waiting.
@@ -13212,68 +13282,58 @@ function streamOffersReady(g){
   return (g.streams||[]).some(s=>STREAM_OFFERS.has(streamOfferKey(g, s&&s.name)));
 }
 /** flowDestStatsHTML is the numbers under a stream's action type.
- * expanded is the detailed canvas. isLink is a hand-off to another campaign.
- * The compact row, a link and a direct URL keep one line for the whole stream.
- * The detailed row adds one short line per offer with a share above zero whose
- * folded report has conversions or revenue: the name and the share on the left,
- * the numbers on the right, the full name in the title. An offer with neither
- * stays a badge. An offer the report does not name is not given a zero line, and
- * the stream total is not split by share. The stream line stays in the markup so
- * the compact canvas can show it without asking again.
+ * expanded is false on the collapsed card, which keeps one stream total.
+ * isLink is a hand-off to another campaign. A link, a direct URL and a landing
+ * with no offer keep one line for the whole stream. Each offer with a share above
+ * zero is a row from the first paint: the badge on the left, bots, conversions
+ * and revenue on the right. Until this stream's report is stored, that right side
+ * is a short loading bar, not zeros. A stored fold fills the same row, including
+ * an offer the report does not name and an offer with only bots, and a real zero
+ * stays a zero. The stream total is not copied onto an offer and is not split
+ * by share. It stays in the markup above the rows and is hidden while the rows
+ * are shown, so a destination with no offer row can still show it. The collapsed
+ * card is only that stream total, with zeros until the total is known, and never
+ * a row per offer. Zero shares are not rows here.
  * @param {object} o stream output
  * @param {object} sp stream totals
  * @param {object} g campaign
  * @param {string} stream stream name
- * @param {boolean} expanded true on the detailed canvas
+ * @param {boolean} expanded false on the collapsed card
  * @param {boolean} isLink true when the stream sends the visitor to another campaign
- * @returns {string} HTML, '' when the stream has no visits
+ * @returns {string} HTML, '' when the stream has no visits and no offer row
  */
 function flowDestStatsHTML(o, sp, g, stream, expanded, isLink){
   const one=sp&&sp.hits?`<div class="hint num">${streamHint(sp,!!isLink)}</div>`:'';
-  if(!flowDestWantsReport(expanded, isLink, o)) return one;
+  if(isLink) return one;
+  const positive=flowDestItems(o).filter(it=>it.kind==='offer'&&it.pct>0);
+  if(!expanded) return positive.length?`<div class="hint num">${streamHint(sp&&sp.hits?sp:{bots:0,conv:0,profit:0},false)}</div>`:one;
+  if(!positive.length) return one;
   const folded=flowStreamOfferMap(g, stream);
-  if(!folded) return one;
-  const lines=[];
-  flowDestItems(o).forEach(it=>{
-    if(it.kind!=='offer'||!(it.pct>0)) return;
+  const ol=`<div class="olines">${positive.map(it=>{
+    const badge=flowDestOfferBadge(it);
+    if(!folded) return `<div class="oline">${badge}<span class="hint num" aria-busy="true"><i class="skel-bar bar-strip n" role="status" aria-label="${esc(tr('table.loading'))}"></i></span></div>`;
     const st=flowOfferLine(folded.get(String(it.id)));
-    if(st) lines.push({it, st});
-  });
-  if(!lines.length){
-    const positive=flowDestItems(o).filter(it=>it.kind==='offer'&&it.pct>0);
-    if(positive.length===1&&one) return one+`<div class="olines"><div class="oline">${flowDestOfferBadge(positive[0])}${one}</div></div>`;
-    return one;
-  }
-  const ol=`<div class="olines">${lines.map(r=>`<div class="oline">${flowDestOfferBadge(r.it)}<span class="hint num">${streamHint(r.st,false)}</span></div>`).join('')}</div>`;
+    return `<div class="oline">${badge}<span class="hint num">${streamHint(st,false)}</span></div>`;
+  }).join('')}</div>`;
   return one+ol;
 }
-/** flowDestNamed lists the offers already written on the left of a detailed line.
- * o is the stream output, g the campaign, stream its name. expanded is the detailed
- * canvas. isLink is a hand-off to another campaign. sp is the stream totals. A compact
- * row names nothing here, so its badges stay. An offer with conversions or revenue
- * is included. One offer and a stream line, with no per-offer rows, is included too,
- * because that chip sits beside the stream numbers. An offer with neither stays a badge.
+/** flowDestNamed lists the offers already written on the left of a detailed offer row.
+ * o is the stream output. isLink is a hand-off to another campaign. expanded is
+ * false on the collapsed card, which has no offer row, so every offer stays in the
+ * badge row with +N (0%). On the detailed row an offer with a share above zero is
+ * named, so that chip is not badged again, and zero shares stay +N (0%) under the
+ * rows. g, stream and sp are kept so the canvas call does not change.
  * @param {object} o stream output
  * @param {object} g campaign
  * @param {string} stream stream name
- * @param {boolean} expanded true on the detailed canvas
+ * @param {boolean} expanded false on the collapsed card
  * @param {boolean} isLink true when the stream sends the visitor to another campaign
  * @param {object} [sp] stream totals
  * @returns {string[]} offer ids
  */
 function flowDestNamed(o, g, stream, expanded, isLink, sp){
-  if(!flowDestWantsReport(expanded, isLink, o)) return [];
-  const folded=flowStreamOfferMap(g, stream);
-  if(!folded) return [];
-  const positive=[];
-  const ids=[];
-  flowDestItems(o).forEach(it=>{
-    if(it.kind!=='offer'||!(it.pct>0)) return;
-    positive.push(it);
-    if(flowOfferLine(folded.get(String(it.id)))) ids.push(String(it.id));
-  });
-  if(!ids.length&&positive.length===1&&sp&&sp.hits) ids.push(String(positive[0].id));
-  return ids;
+  if(isLink||!expanded) return [];
+  return flowDestItems(o).filter(it=>it.kind==='offer'&&it.pct>0).map(it=>String(it.id));
 }
 const linkTargets=(g)=>{const t=new Set();if(g.redirect==='group'&&g.out)t.add(g.out.trim());(g.streams||[]).forEach(s=>{if((s.out||{}).redirect==='group'&&s.out.out)t.add(s.out.out.trim())});return [...t]};
 const groupById=(id)=>(GROUPS||[]).find(g=>g.id===id||(g.aliases||[]).includes(id))||null;
@@ -15165,7 +15225,7 @@ function renderFlow(){
     statusLabel.addEventListener('mouseleave',()=>{const line=q('#pagehover'); if(line) line.textContent=''});
   }
   q('#copylink').onclick=()=>copyText(url,q('#copylink'));
-  const cb=q('#compact'); if(cb) cb.onclick=()=>{FLOW_COMPACT=!FLOW_COMPACT; touchPageViews(); const cv=q('#canvas'); if(cv) cv.classList.toggle('compact',FLOW_COMPACT); cb.title=tr(FLOW_COMPACT?'flow.expanded':'flow.compact'); cb.setAttribute('aria-pressed',String(FLOW_COMPACT)); if(FLOW_COMPACT) stopStreamOfferQueue(); else { queueOpenStreamOffers(CUR); if(streamOffersReady(CUR)) renderFlow(); } drawWires();};
+  const cb=q('#compact'); if(cb) cb.onclick=()=>{FLOW_COMPACT=!FLOW_COMPACT; touchPageViews(); const cv=q('#canvas'); if(cv) cv.classList.toggle('compact',FLOW_COMPACT); cb.title=tr(FLOW_COMPACT?'flow.expanded':'flow.compact'); cb.setAttribute('aria-pressed',String(FLOW_COMPACT)); if(FLOW_COMPACT) stopStreamOfferQueue(); else queueOpenStreamOffers(CUR); renderFlow(); drawWires();};
   const tb=q('#ftraffic'); if(tb) tb.onclick=toggleFlowTraffic;
   q('#switch').onclick=e=>{
     e.stopPropagation();
@@ -15219,6 +15279,7 @@ function renderFlow(){
   });
   if(flowEdit) bindSort(q('#canvas'),g);
   paintTester();
+  watchStreamOfferScreen();
   if(!FLOW_COMPACT) queueOpenStreamOffers(g);
   drawWires();
   checkerBlock(g);

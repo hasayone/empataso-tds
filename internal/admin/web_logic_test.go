@@ -2073,10 +2073,9 @@ if (failed) process.exit(1);
 	}
 }
 
-// TestFlowDestOfferStats checks the destination block: the compact row keeps one
-// stream summary and does not ask for a report, the detailed row asks for that
-// stream's report and draws one line per offer that the fold actually has, and an
-// offer label differs from a direct URL.
+// TestFlowDestOfferStats checks the destination block: the collapsed card is one stream
+// total and a row of badges, the detailed row is one line per offer before the report
+// and after it, a direct URL stays one stream summary, and an offer label differs from a direct URL.
 func TestFlowDestOfferStats(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -2095,15 +2094,22 @@ func TestFlowDestOfferStats(t *testing.T) {
 	must(t, render, "flowDestTypeLabel(o)", "the action type names an offer or a landing")
 	must(t, render, ":flowDestURL(o)}", "a direct URL stays on the row")
 	mustNot(t, render, "flowDestMarks(o)}${nv", "offer names are not beside the action type")
-	must(t, html, ".canvas.compact .dest .hint.num{display:block", "the compact row still shows the summary")
-	must(t, html, ".canvas.compact .dest .olines{display:none}", "the compact row hides offer lines")
+	must(t, html, ".canvas.compact .dest .hint.num{display:block", "a compact destination shows the stream total")
+	must(t, html, ".canvas.compact .dest .olines{display:none}", "the collapsed card hides per-offer rows")
+	must(t, html, ".dest:has(.olines)>.hint.num{display:none}", "the detailed row does not put the stream total above the offer lines")
+	mustNot(t, html, ".canvas.compact .dest:has(.olines)>.hint.num{display:none}", "the collapsed total stays visible")
 	must(t, html, ".dest .badges .pill,.dest .oline .pill{display:inline-flex;align-items:center;gap:4px;width:14em", "the offer chip has a fixed width")
 	must(t, render, "if(!FLOW_COMPACT) queueOpenStreamOffers(g)", "the collapsed canvas does not ask for the offer breakdown")
 	must(t, render, "if(FLOW_COMPACT) stopStreamOfferQueue()", "collapsing the canvas does not start a report")
+	must(t, render, "renderFlow(); drawWires();", "collapsing redraws the badge row")
 	must(t, render, "queueOpenStreamOffers(CUR)", "opening the detailed canvas asks for the stream that was opened")
 	statsFn := spaFunctionLine(html, "flowDestStatsHTML")
-	must(t, statsFn, "flowOfferLine", "an empty offer is not a zero line")
-	must(t, statsFn, "streamHint(r.st,false)", "an offer line uses the stream hint")
+	must(t, statsFn, "flowOfferLine", "an offer row uses the folded counts")
+	must(t, statsFn, "if(!folded)", "a report that is not stored yet is not drawn as zeros")
+	must(t, statsFn, "skel-bar", "before the report the offer metrics are a short loading bar")
+	must(t, statsFn, "table.loading", "the loading bar is named with the translated word")
+	must(t, statsFn, "streamHint(st,false)", "an offer line uses the stream hint")
+	mustNot(t, statsFn, "if(!folded) return one", "the first paint does not wait for the report to lay out the line")
 	mustNot(t, statsFn, "sp.profit", "offer numbers are not taken from the stream total")
 	mustNot(t, statsFn, "it.pct*", "a share is not used to split the stream total")
 	qsFn := spaFunctionLine(html, "flowStreamReportQS")
@@ -2112,6 +2118,12 @@ func TestFlowDestOfferStats(t *testing.T) {
 	mustNot(t, qsFn, "limit", "one stream is not a page of the report table")
 	must(t, spaFunctionLine(html, "loadFlowStreamOffers"), "get('/api/report?'", "the breakdown is the report of that stream")
 	must(t, spaFunctionLine(html, "loadFlowStreamOffers"), "if(FLOW_COMPACT", "a compact canvas does not ask")
+	must(t, spaFunctionLine(html, "scheduleStreamOfferPaint"), "FLOW_COMPACT", "a collapsed card is not redrawn by the offer report")
+	must(t, spaFunctionLine(html, "pumpStreamOffers"), "FLOW_COMPACT", "the queue stops on the collapsed card")
+	must(t, spaFunctionLine(html, "queueOpenStreamOffers"), "if(FLOW_COMPACT", "the collapsed card does not queue its streams")
+	must(t, spaFunctionLine(html, "queueStreamOffers"), "STREAM_OFFER_Q.unshift", "a stream on screen or just expanded goes ahead of the queue")
+	must(t, spaFunctionLine(html, "queueOpenStreamOffers"), "streamsOnScreen", "streams off screen are not all asked up front")
+	must(t, render, "watchStreamOfferScreen()", "scrolling a stream into view asks for it")
 	for _, line := range []string{
 		`'dest.offer':'offer'`, `'dest.landing':'landing'`,
 		`'dest.offer':'оффер'`, `'dest.landing':'лендинг'`,
@@ -2143,7 +2155,7 @@ func TestFlowDestOfferStats(t *testing.T) {
 	line := html[mark:]
 	nl := strings.Index(line, "\n")
 	src.WriteString(line[:nl+1])
-	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "flowCanvasOpen", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed"} {
+	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "flowCanvasOpen", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "streamsOnScreen", "watchStreamOfferScreen", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -2167,12 +2179,6 @@ eq(flowDestTypeLabel({redirect:'http_redirect', offers:[{id:'o1', share:50}], la
 eq(flowDestTypeLabel({redirect:'http_redirect', out:'https://1wyvdy.life/casino/list?open=register'}), 'HTTP redirect', 'a direct URL stays the plain type');
 eq(flowDestTypeLabel({redirect:'http_redirect', out:'https://click.example/click?offer_id=6004'}).includes('offer'), false, 'an offer id in the query is not a label');
 
-let h = row(false);
-eq((h.match(/class="hint num"/g) || []).length, 1, 'the compact row has one summary');
-eq(h.includes('olines'), false, 'the compact row has no per-offer lines');
-eq(h.includes('3 bots'), true, 'the compact summary is the stream');
-eq(h.indexOf('class="hint num"') < h.indexOf('class="badges"'), true, 'compact offer names sit under the summary');
-
 const linesOf = (html) => {
   const a = html.indexOf('<div class="olines">');
   if (a < 0) return '';
@@ -2181,10 +2187,55 @@ const linesOf = (html) => {
 };
 const put = (stream, rows) => { STREAM_OFFERS.set(streamOfferKey(g, stream), foldStreamOffers(rows)); };
 
+let h = row(false);
+eq(h.includes('olines'), false, 'the collapsed card has no offer row');
+eq(h.includes('3 bots'), true, 'the collapsed line is the stream total');
+eq(h.indexOf('3 bots') < h.indexOf('class="badges"'), true, 'the stream total sits above the badges');
+const compactBadges = h.slice(h.indexOf('class="badges"'));
+eq(compactBadges.includes('>Alpha<') && compactBadges.indexOf('>Alpha<') < compactBadges.indexOf('>Beta<'), true, 'offers with a share sit in one badge row');
+eq(compactBadges.includes('bots'), false, 'the badge row has no per-offer numbers');
+
 h = row(true);
-eq((h.match(/class="hint num"/g) || []).length, 1, 'without a report the detailed row keeps one summary');
-eq(h.includes('olines'), false, 'missing offer numbers are not drawn as zeros');
-eq(h.indexOf('class="hint num"') < h.indexOf('class="badges"'), true, 'offer names still sit under the summary');
+let lines = linesOf(h);
+eq(lines.includes('skel-bar'), true, 'before the answer the row shows that the numbers are loading');
+eq(lines.includes('table.loading'), true, 'the loading bar carries the translated name');
+eq(lines.includes('0 bots'), false, 'before the answer an offer row does not draw zeros');
+eq(lines.includes('0 conv'), false, 'before the answer there is no 0 conv');
+eq(/0\s*конв/.test(lines), false, 'before the answer there is no 0 конв.');
+eq(lines.includes('>Alpha<') && lines.indexOf('>Alpha<') < lines.indexOf('skel-bar'), true, 'before the answer the first badge is left of the loading bar');
+eq(lines.includes('>Beta<') && lines.indexOf('>Beta<') < lines.indexOf('skel-bar', lines.indexOf('>Beta<')), true, 'before the answer the second offer is already a row');
+eq(lines.includes('3 bots'), false, 'before the answer the stream total is not copied onto the offers');
+eq(h.includes('class="badges"'), false, 'both offers stay on rows, not under the summary');
+
+const savedEarly = OFFERS;
+OFFERS = [{id:'o1', name:'Alpha'},{id:'o2', name:'Beta'},{id:'o3', name:'Gamma'},{id:'o4', name:'Delta'},{id:'o5', name:'Epsilon'}];
+const earlyOut = {redirect:'http_redirect', offers:[{id:'o1', share:100},{id:'o2', share:0},{id:'o3', share:0},{id:'o4', share:0},{id:'o5', share:0}]};
+h = flowDestStatsHTML(earlyOut, sp, g, 'early', true, false) + flowDestMarks(earlyOut, flowDestNamed(earlyOut, g, 'early', true, false, sp));
+eq(h.includes('class="oline"'), true, 'before the report one offer is already one row');
+const early = h.slice(h.indexOf('class="oline"'), h.indexOf('class="badges"'));
+eq(early.includes('skel-bar'), true, 'before the answer that row shows a loading bar');
+eq(early.includes('0 bots'), false, 'before the answer that row does not draw zeros');
+eq(/0\s*конв/.test(early), false, 'before the answer that row has no 0 конв.');
+eq(early.indexOf('>Alpha<') < early.indexOf('skel-bar'), true, 'before the answer the badge sits left of the loading bar');
+eq(early.includes('>100%<'), true, 'the share stays on the badge');
+eq(early.includes('(0%)'), false, 'zero shares are not on the numbers row');
+const earlyBadges = h.slice(h.indexOf('class="badges"'));
+eq(earlyBadges.includes('>+4 (0%)<'), true, 'zero shares stay under the line before the report');
+eq(earlyBadges.includes('Alpha'), false, 'the offer on the line is not badged again');
+eq((h.match(/class="hint num"/g) || []).length, 2, 'the stream summary stays in the markup and on the line');
+h = flowDestStatsHTML(earlyOut, sp, g, 'early', false, false) + flowDestMarks(earlyOut, flowDestNamed(earlyOut, g, 'early', false, false, sp));
+eq(h.includes('olines'), false, 'the collapsed card is not a row per offer');
+eq(h.includes('3 bots'), true, 'the collapsed line is the stream total');
+eq(h.indexOf('3 bots') < h.indexOf('class="badges"'), true, 'the total sits above the badges');
+const collapsedBadges = h.slice(h.indexOf('class="badges"'));
+eq(collapsedBadges.includes('>Alpha<') && collapsedBadges.includes('>+4 (0%)<'), true, 'the offer and the zero shares share the badge row');
+eq(collapsedBadges.indexOf('>Alpha<') < collapsedBadges.indexOf('>+4 (0%)<'), true, 'zero shares sit in the badge row, not on their own line');
+eq(collapsedBadges.includes('bots'), false, 'the collapsed badges have no conversions of their own');
+const quiet = flowDestStatsHTML(offers, {hits:0,bots:0,conv:0,profit:0}, g, 'quiet', false, false) + flowDestMarks(offers, flowDestNamed(offers, g, 'quiet', false, false));
+eq(quiet.includes('0 bots'), true, 'before the total the collapsed line is zeros');
+eq(quiet.includes('olines'), false, 'badges are already a row before the total');
+eq(quiet.indexOf('0 bots') < quiet.indexOf('>Alpha<'), true, 'the zero total stays above the badges');
+OFFERS = savedEarly;
 
 put('main', [
   {offer:'o1', country:'US', source:'a', bots:1, conv:2, profit:10},
@@ -2193,29 +2244,31 @@ put('main', [
   {offer:'o2', country:'US', source:'a', bots:4, conv:0, profit:0}
 ]);
 h = row(true);
-let lines = linesOf(h);
-eq(lines.includes('class="olines"'), true, 'the detailed row has a line for the offer with revenue');
-eq((lines.match(/class="hint num"/g) || []).length, 1, 'an offer without revenue is not a second line');
+lines = linesOf(h);
+eq(lines.includes('class="olines"'), true, 'the detailed row has a line for every offer that receives traffic');
+eq((lines.match(/class="hint num"/g) || []).length, 2, 'an offer with only bots stays on its own row');
 eq(lines.includes('2 bots'), true, 'country rows of one offer are summed');
-eq(lines.includes('4 bots'), false, 'bots alone do not make a line');
+eq(lines.includes('skel-bar'), false, 'a report already stored does not show the loading bar');
+eq(lines.includes('0 bots'), false, 'an expand with the report already stored does not draw zeros');
+eq(lines.includes('4 bots'), true, 'bots alone stay on the offer row');
 eq(lines.includes('3 bots'), false, 'the stream total is not copied onto an offer');
 eq(lines.includes('9 bots'), false, 'a row with no offer is not a line');
 eq(lines.includes('class="pill"'), true, 'the offer name is the gray badge');
 eq(lines.includes('title="Alpha — 60%"'), true, 'the line title is the full name');
 eq(lines.includes('>Alpha<') && lines.indexOf('>Alpha<') < lines.indexOf('2 bots'), true, 'the offer name sits left of its numbers');
 eq(lines.includes('>60%<') && lines.indexOf('>60%<') < lines.indexOf('2 bots'), true, 'the share sits with the name');
-eq(lines.includes('Beta'), false, 'an offer without revenue is not on the line');
+eq(lines.includes('>Beta<') && lines.indexOf('>Beta<') < lines.indexOf('4 bots'), true, 'the second offer stays left of its numbers');
 eq(lines.includes('c-rev">4'), true, 'a positive conversion is green');
 eq(lines.includes('c-rev">15'), true, 'a positive revenue is green');
-const badges = h.slice(h.indexOf('class="badges"'));
-eq(badges.includes('>Beta<'), true, 'an offer without revenue stays a badge under the line');
-eq(badges.includes('>40%<'), true, 'that badge keeps its percent');
-eq(badges.includes('Alpha'), false, 'an offer already named on the line is not badged again');
-eq(badges.includes('class="pill more"'), false, 'one offer without revenue does not fold into +N');
+eq(h.includes('class="badges"'), false, 'offers that receive traffic are not badged under the row');
 h = row(false);
-eq(h.includes('olines'), false, 'the compact row stays one summary when offer numbers exist');
-eq((h.match(/class="hint num"/g) || []).length, 1, 'the compact row does not repeat the offers');
-eq(h.includes('>Alpha<') && h.includes('>Beta<'), true, 'the compact row keeps both offer badges');
+eq(h.includes('olines'), false, 'after the report the collapsed card is still one total');
+eq(h.includes('3 bots'), true, 'the collapsed total stays the stream, not an offer');
+eq(h.includes('2 bots'), false, 'an offer count is not written on the collapsed card');
+eq(h.includes('4 bots'), false, 'the second offer is not given its own line');
+const afterBadges = h.slice(h.indexOf('class="badges"'));
+eq(afterBadges.includes('>Alpha<') && afterBadges.includes('>Beta<'), true, 'the badges stay in one row after the report');
+eq(afterBadges.includes('bots'), false, 'the report does not move numbers onto the badges');
 
 STREAM_OFFERS = new Map();
 put('main', [
@@ -2230,13 +2283,15 @@ const soloOut = {redirect:'http_redirect', offers:[{id:'o1', share:100}]};
 STREAM_OFFERS = new Map();
 STREAM_OFFERS.set(streamOfferKey(g, 'solo'), foldStreamOffers([]));
 h = flowDestStatsHTML(soloOut, sp, g, 'solo', true, false) + flowDestMarks(soloOut, flowDestNamed(soloOut, g, 'solo', true, false, sp));
-eq(h.includes('class="pill"'), true, 'one offer beside the stream numbers is a badge');
+eq(h.includes('class="pill"'), true, 'one offer on the row is a badge');
 const soloLine = h.slice(h.indexOf('class="oline"'));
-eq(soloLine.indexOf('>Alpha<') < soloLine.indexOf('3 bots'), true, 'that badge sits left of the numbers');
+eq(soloLine.indexOf('>Alpha<') < soloLine.indexOf('0 bots'), true, 'that badge sits left of zeros');
+eq(soloLine.includes('3 bots'), false, 'an empty fold does not copy the stream total');
 eq((h.match(/class="badges"/g) || []).length, 0, 'the same offer is not repeated under the numbers');
 h = flowDestStatsHTML(soloOut, sp, g, 'solo', false, false) + flowDestMarks(soloOut, flowDestNamed(soloOut, g, 'solo', false, false, sp));
-eq(h.includes('class="oline"'), false, 'the compact row does not move the badge onto the line');
-eq(h.includes('class="badges"'), true, 'the compact row keeps the badge under the summary');
+eq(h.includes('olines'), false, 'the collapsed card does not open an offer row');
+eq(h.includes('3 bots'), true, 'one offer still shows the stream total');
+eq(h.slice(h.indexOf('class="badges"')).includes('>Alpha<'), true, 'that offer is a badge under the total');
 
 STREAM_OFFERS = new Map();
 const savedOffers = OFFERS;
@@ -2245,10 +2300,7 @@ const many = {redirect:'http_redirect', offers:[{id:'o1', share:10},{id:'o2', sh
 STREAM_OFFERS = new Map();
 STREAM_OFFERS.set(streamOfferKey(g, 'wide'), foldStreamOffers([{offer:'o1', bots:0, conv:3, profit:9}]));
 const wide = flowDestMarks(many, flowDestNamed(many, g, 'wide', true, false));
-eq(wide.includes('Alpha'), false, 'the offer with revenue is not repeated as a badge');
-eq(wide.includes('>Beta<'), true, 'an offer without revenue is a badge');
-eq(wide.includes('>+1<'), true, 'extra offers without revenue fold into +N');
-eq((wide.match(/title="([^"]*)"/) || ['',''])[1].includes('Delta — 30%'), true, 'a folded offer keeps its full name in the title');
+eq(wide, '', 'every offer that receives traffic is on a line, not under it');
 OFFERS = savedOffers;
 
 STREAM_OFFERS = new Map();
@@ -2257,7 +2309,12 @@ put('other', [
   {offer:'o2', bots:1, conv:4, profit:10}
 ]);
 h = flowDestStatsHTML(offers, sp, g, 'main', true, false);
-eq(h.includes('olines'), false, 'numbers of another stream are not used');
+lines = linesOf(h);
+eq(lines.includes('1 bots'), false, 'numbers of another stream are not used');
+eq(lines.includes('skel-bar'), true, 'without this fold the row shows a loading bar');
+eq(lines.includes('0 bots'), false, 'without this fold the row does not draw zeros');
+eq(/0\s*конв/.test(lines), false, 'without this fold there is no 0 конв.');
+eq(lines.includes('>Alpha<') && lines.indexOf('>Alpha<') < lines.indexOf('skel-bar'), true, 'without this fold the badge stays left of the loading bar');
 
 const direct = {redirect:'http_redirect', out:'https://1wyvdy.life/casino/list?open=register'};
 h = flowDestStatsHTML(direct, sp, g, 'main', true, false) + flowDestMarks(direct);
@@ -2277,6 +2334,9 @@ eq(flowDestTypeLabel(direct) !== flowDestTypeLabel(offers), true, 'the direct li
   eq(REPORT_GETS.length, 0, 'a compact canvas sends no report');
   queueOpenStreamOffers({id:'g1', streams:[{name:'main', out:offers}]});
   eq(REPORT_GETS.length, 0, 'a collapsed canvas does not queue a report per stream');
+  h = row(false);
+  eq(h.includes('olines'), false, 'the collapsed card stays one total and a badge row');
+  eq(h.slice(h.indexOf('class="badges"')).includes('>Alpha<'), true, 'the badges do not wait for the report');
 
   FLOW_COMPACT = false;
   REPORT_BODY = [
@@ -2285,6 +2345,12 @@ eq(flowDestTypeLabel(direct) !== flowDestTypeLabel(offers), true, 'the direct li
   ];
   const asked = loadFlowStreamOffers(g, 'main');
   eq(asked != null, true, 'opening one stream asks for its breakdown');
+  h = flowDestStatsHTML(offers, sp, g, 'main', true, false);
+  lines = linesOf(h);
+  eq(lines.includes('skel-bar'), true, 'while the answer is still out the row shows a loading bar');
+  eq(lines.includes('0 bots'), false, 'while the answer is still out there is no zero line');
+  eq(lines.includes('0 conv'), false, 'while the answer is still out there is no 0 conv');
+  eq(/0\s*конв/.test(lines), false, 'while the answer is still out there is no 0 конв.');
   await asked;
   eq(REPORT_GETS.length, 1, 'one stream asks once');
   const q = decodeURIComponent(REPORT_GETS[0]);
@@ -2297,10 +2363,36 @@ eq(flowDestTypeLabel(direct) !== flowDestTypeLabel(offers), true, 'the direct li
   eq(REPORT_GETS.length, 1, 'a stream already folded is not asked again');
   h = flowDestStatsHTML(offers, sp, g, 'main', true, false);
   lines = linesOf(h);
-  eq((lines.match(/class="hint num"/g) || []).length, 1, 'the answer draws the offer line');
+  eq((lines.match(/class="hint num"/g) || []).length, 2, 'both offers stay on a row after the report');
+  eq(lines.includes('skel-bar'), false, 'after the answer the loading bar is gone');
   eq(lines.includes('2 bots'), true, 'the offer line is the folded report');
   eq(lines.includes('>Alpha<') && lines.indexOf('>Alpha<') < lines.indexOf('2 bots'), true, 'the offer name sits left of its numbers');
-  eq(lines.includes('Beta'), false, 'an offer missing from the report is not a zero line');
+  eq(lines.includes('>Beta<') && lines.indexOf('>Beta<') < lines.indexOf('0 bots', lines.indexOf('>Beta<')), true, 'an offer missing from the report stays on a row of zeros');
+
+  STREAM_OFFER_RUN = 2;
+  STREAM_OFFER_Q = [];
+  STREAM_OFFERS_WAIT = new Map();
+  queueStreamOffers(g, 'off-a');
+  queueStreamOffers(g, 'off-b');
+  queueStreamOffers(g, 'off-c');
+  queueOpenStreamOffers(g, ['zarbet']);
+  eq(STREAM_OFFER_Q.map(x => x.stream).join(','), 'zarbet', 'expanding puts this stream ahead of the collapsed queue');
+  eq(REPORT_GETS.length, 1, 'a full pair of reports does not take the expanded stream as a third');
+  const stored = REPORT_GETS.length;
+  STREAM_OFFERS.set(streamOfferKey(g, 'zarbet'), foldStreamOffers([]));
+  queueStreamOffers(g, 'zarbet', true);
+  eq(REPORT_GETS.length, stored, 'opening a stream already stored does not ask again');
+
+  STREAM_OFFER_RUN = 0;
+  STREAM_OFFER_Q = [];
+  STREAM_OFFERS = new Map();
+  STREAM_OFFERS_WAIT = new Map();
+  REPORT_GETS = [];
+  queueOpenStreamOffers(g, ['top', 'mid', 'bottom']);
+  eq(REPORT_GETS.length, 2, 'only two reports run at once');
+  eq(decodeURIComponent(REPORT_GETS[0]).includes('stream:eq:top'), true, 'the first stream on screen starts first');
+  eq(decodeURIComponent(REPORT_GETS[1]).includes('stream:eq:mid'), true, 'the next stream on screen is the other running report');
+  eq(STREAM_OFFER_Q.map(x => x.stream).join(','), 'bottom', 'the rest of the screen waits behind those two');
   if (failed) process.exit(1);
 })().catch((e) => { console.log(e); process.exit(1); });
 `)
@@ -2413,26 +2505,33 @@ fire();
 eq(paints, 1, 'an answer on the open campaign redraws it');
 
 scheduleStreamOfferPaint();
+const queued = timers.length;
+scheduleStreamOfferPaint();
+eq(timers.length, queued, 'a later answer does not drop the redraw that is already waiting');
+fire();
+eq(paints, 2, 'the waiting redraw still runs and fills the rows');
+
+scheduleStreamOfferPaint();
 location.hash = '#/flows'; canvas = false;
 fire();
-eq(paints, 1, 'an answer after the move to the list does not draw the campaign');
+eq(paints, 2, 'an answer after the move to the list does not draw the campaign');
 eq(location.hash, '#/flows', 'the address stays on the list');
 
 location.hash = '#/flows/g1'; canvas = true;
 scheduleStreamOfferPaint();
 stopStreamOfferQueue();
 fire();
-eq(paints, 1, 'leaving the campaign cancels the waiting redraw');
+eq(paints, 2, 'leaving the campaign cancels the waiting redraw');
 
 scheduleStreamOfferPaint();
 location.hash = '#/flows/g2';
 fire();
-eq(paints, 1, 'another campaign address does not draw this one');
+eq(paints, 2, 'another campaign address does not draw this one');
 
 location.hash = '#/flows'; canvas = true;
 scheduleStreamOfferPaint();
 fire();
-eq(paints, 1, 'a stale canvas under the list address is not drawn');
+eq(paints, 2, 'a stale canvas under the list address is not drawn');
 if (failed) process.exit(1);
 `)
 	f := filepath.Join(t.TempDir(), "flowbacklist.js")
