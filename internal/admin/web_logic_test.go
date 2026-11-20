@@ -2312,6 +2312,82 @@ eq(flowDestTypeLabel(direct) !== flowDestTypeLabel(offers), true, 'the direct li
 	}
 }
 
+// TestFlowBackToList checks the "Campaigns" back link of an open campaign. Both back links carry
+// data-flows-back and the document click handler marks only a plain click on them; the list then
+// reuses the campaigns in memory once, while the menu item (no mark) and an unloaded list still read
+// them. Leaving the campaign drops the queued per-stream reports. Under node the mark and the take
+// are run against GROUPS loaded and not loaded. t is the test handle; node absent skips the run.
+func TestFlowBackToList(t *testing.T) {
+	html := spaSource()
+	if n := strings.Count(html, `href="#/flows" style="height:32px" data-flows-back>`); n != 2 {
+		t.Errorf("%d back links carry data-flows-back, want 2 (the page and its placeholder)", n)
+	}
+	must(t, html, "e.target.closest('a[data-flows-back]')) flowsBackMark()", "a click on the back link marks the list")
+	must(t, html, "e.button===0&&!(e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)", "only a plain click is marked")
+	flows := spaFunctionLine(html, "flows")
+	must(t, flows, "const keep=flowsTakeKeep();", "the list asks once whether to keep the campaigns")
+	must(t, flows, "ensureGroups(!keep)", "a kept list is not read again")
+	mustNot(t, flows, "ensureGroups(true),loadPerf(),loadMoney(),ensureDomains(),get('/api/traffic-sources',[])]);\n  FLOW_SOURCES", "the list read has no unconditional refresh")
+	must(t, html, "ensureGroups(true),loadPerf(true)", "the refresh button still reads the campaigns")
+	render := spaFunctionLine(html, "render")
+	must(t, render, "if(page!=='flows'||!arg) stopStreamOfferQueue();", "leaving a campaign drops the queued reports")
+	must(t, render, "if(page!=='flows') FLOWS_KEEP=false;", "another page forgets the mark")
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the back link run")
+	}
+	var src strings.Builder
+	src.WriteString("let GROUPS=null;\n")
+	src.WriteString(spaBetween(html, "let FLOWS_KEEP=false;", "\n") + "\n")
+	for _, name := range []string{"flowsBackMark", "flowsTakeKeep"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAIL ' + what + '\n  got  ' + got + '\n  want ' + want); } };
+eq(flowsTakeKeep(), false, 'the menu item sets no mark');
+flowsBackMark();
+eq(flowsTakeKeep(), false, 'nothing loaded: the list reads the campaigns once as usual');
+GROUPS = [{id: 'a'}];
+eq(flowsTakeKeep(), false, 'loaded campaigns without a click are read again');
+flowsBackMark();
+eq(flowsTakeKeep(), true, 'the back link keeps the loaded campaigns');
+eq(flowsTakeKeep(), false, 'the mark is used once');
+flowsBackMark();
+GROUPS = null;
+eq(flowsTakeKeep(), false, 'campaigns dropped after the click are read again');
+if (failed) process.exit(1);
+`)
+	f := filepath.Join(t.TempDir(), "flowback.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("flow back link failed:\n%s", out)
+	}
+}
+
+// TestFlowOfferLineFits checks that an offer line cannot leave its destination card: the chip shrinks
+// to a floor and cuts the name with an ellipsis while the percent stays, the numbers keep their width
+// and are cut only when the whole card is narrower than the numbers, the destination column is wide enough for both, and the trunk line of
+// the canvas keeps 12px from the block edge and from the stream node at every width. t is the test handle.
+func TestFlowOfferLineFits(t *testing.T) {
+	html := spaSource()
+	must(t, html, ".dest .olines .oline{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%;line-height:1.25}", "the line stays on one row inside the card")
+	must(t, html, ".dest .olines .oline .pill{flex:0 1 14em;width:auto;min-width:5.5em}", "the chip shrinks instead of pushing the numbers out")
+	must(t, html, ".dest .badges .pill .nm,.dest .oline .pill .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}", "the offer name is cut with an ellipsis")
+	must(t, html, ".dest .badges .pill .pct,.dest .oline .pill .pct{flex:none}", "the percent is not cut")
+	must(t, html, ".dest .olines .hint{flex:none;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.25}", "the numbers keep their width, the chip gives way first, and a last resort cut stays inside the card")
+	must(t, html, "grid-template-columns:64px minmax(280px,1fr) 120px minmax(300px,.85fr)", "the destination column holds the chip floor and the numbers")
+	must(t, html, ".frow{grid-template-columns:56px minmax(240px,1fr) 84px minmax(280px,.8fr)}", "the medium grid keeps the trunk gap and the card width")
+	must(t, html, ".frow{grid-template-columns:54px minmax(0,1fr);row-gap:8px}", "the narrow grid keeps the trunk gap")
+	must(t, html, ".entry{margin-left:12px}", "the entry does not touch the canvas edge on a narrow screen")
+}
+
 // TestKeywordStatsLogic runs csvTable, the keyword cell, the sparkline and the totals of the keyword
 // statistics under node: a cell that starts like a formula gets an apostrophe, a hostile keyword is
 // escaped in the cell and its tooltip, the empty keyword is captioned, and the ratio of the totals
@@ -2784,6 +2860,21 @@ aboutPage = async () => { opened.push('about'); };
   yes(!/evil|\$\(|curl|abcdef0 def/.test(BODY.innerHTML), 'a command that is not of the expected shape is not drawn');
   yes(BODY.innerHTML.includes('<code>' + U + ' --check</code>') && BODY.innerHTML.includes('<code>' + U + ' --rollback</code>'), 'the valid commands are still drawn');
   yes(!BODY.innerHTML.includes('--schema-ok'), 'no --schema-ok line without a valid --to command');
+
+  const gitErr = 'fatal: repository \'https://github.com/owner/repo.git/\' not found';
+  for (const [state, repo] of [['repo_not_found', 'https://github.com/owner/repo.git'], ['repo_paused', 'https://github.com/hasayone/empataso-tds.git'], ['repo_paused', '']]) {
+    const lost = base(); lost.agent.repo = repo; lost.repo_state = state; lost.can_apply = false; lost.apply_block = state;
+    lost.check = {at: '2026-11-17T01:00:00Z', ahead: 0, current: {commit: sha}, target: {}, commits: [], error: gitErr};
+    answers = {'/api/update': lost, '/api/version': verOK, '/api/system': sysOK};
+    await aboutPage();
+    const h = BODY.innerHTML;
+    yes(h.includes('id="upd-repo-note"') && h.includes('upd.block.' + state), state + ' ' + (repo || 'unset') + ': the calm text');
+    yes(!h.includes('fatal') && !h.includes('not found') && !h.includes('upd.target.error') && !h.includes('upd.target.none'), state + ': no git error and no "latest version"');
+    yes(h.includes('<code>sudo /usr/local/lib/emtds/update.sh --install --repo &lt;URL&gt;</code>'), state + ': the command that sets another repository');
+    yes(repo ? h.includes('<td>' + repo + '</td>') : h.includes('upd.repo.unset'), state + ': the address row stays');
+    yes(/id="upd-apply-btn"[^>]* disabled/.test(h) && !h.includes('id="upd-apply-why"'), state + ': the update button is blocked without a second reason line');
+    yes(h.includes('id="upd-check-btn"'), state + ': a new check may be asked for');
+  }
 
   const dev = base(); dev.build = {version: 'dev', commit: ''}; dev.agent.repo = 'ftp://x';
   answers = {'/api/update': dev, '/api/version': {admin: dev.build}, '/api/system': sysOK};

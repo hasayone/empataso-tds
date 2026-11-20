@@ -72,7 +72,8 @@ Rules, in force for the whole conversation:
 //
 // It holds who asks (sess, uid), where (chatID, board), with what (model, st, prov, tools) and
 // what has come out so far: the reply parts, the proposal ids and the provider usage. The stream
-// sse is shared with the heartbeat; every other field is used by the turn goroutine only.
+// sse is shared with the heartbeat; every other field is used by the turn goroutine only. persona
+// is the block of the three administrator documents, read once when the turn starts.
 type aiTurn struct {
 	s         *Server
 	sess      security.Session
@@ -86,6 +87,7 @@ type aiTurn struct {
 	tools     map[string]aiTool
 	specs     []aiToolSpec
 	secrets   []string
+	persona   string
 	sse       *aiSSE
 	msgID     string
 	parts     []string
@@ -136,9 +138,10 @@ func (t *aiTurn) addText(raw string) string {
 	return text
 }
 
-// system returns the system prompt of the turn in the language of its request.
+// system returns the system prompt of the turn in the language of its request, with the
+// administrator documents in it.
 func (t *aiTurn) system() string {
-	prompt := aiSystemFor(t.lang)
+	prompt := aiSystemWith(t.lang, t.persona)
 	if note := aiReadOnlyNote(t.lang, t.st.Perms); note != "" {
 		prompt += "\n\n" + note
 	}

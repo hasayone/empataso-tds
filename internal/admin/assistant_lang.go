@@ -28,10 +28,22 @@ func aiLangOf(raw string) string {
 	return aiLangDefault
 }
 
-// aiSystemFor returns the system prompt of a turn in lang: the fixed prompt, then the language
-// instruction of the table. lang must be a key of aiLangPrompt (aiLangOf makes sure of it).
+// aiSystemFor returns the system prompt of a turn in lang without the administrator documents:
+// the fixed prompt, then the language instruction of the table.
 func aiSystemFor(lang string) string {
-	return aiSystemPrompt + "\n\nLanguage: " + aiLangPrompt[aiLangOf(lang)]
+	return aiSystemWith(lang, "")
+}
+
+// aiSystemWith returns the system prompt of a turn in lang: the fixed prompt, the persona block
+// (the administrator documents, see aiPersonaBlock; none when persona is empty), then the language
+// instruction of the table, which stays the last. lang must be a key of aiLangPrompt (aiLangOf
+// makes sure of it).
+func aiSystemWith(lang, persona string) string {
+	prompt := aiSystemPrompt
+	if persona != "" {
+		prompt += "\n\n" + persona
+	}
+	return prompt + "\n\nLanguage: " + aiLangPrompt[aiLangOf(lang)]
 }
 
 // aiLangTexts holds the texts of the errors a turn reports to the user, by code and language.

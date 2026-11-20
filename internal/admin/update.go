@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -25,6 +26,20 @@ const updateAgentMaxAge = 10 * time.Minute
 
 // updateCheckFreshAge is the maximum age of check.json for the check to be considered fresh.
 const updateCheckFreshAge = 24 * time.Hour
+
+// updateFetchFailed is the check.json error update.sh writes when git fetch of the update source fails.
+const updateFetchFailed = "git fetch не удался"
+
+// Repository states of GET /api/update (repo_state); the same codes refuse an apply while the source cannot be read.
+const (
+	// updateRepoPaused: no repository is set, or the product repository is not public.
+	updateRepoPaused = "repo_paused"
+	// updateRepoNotFound: another repository is set and git cannot read it (deleted or no longer public).
+	updateRepoNotFound = "repo_not_found"
+)
+
+// productRepoRe matches the product repository in every address form update.sh accepts.
+var productRepoRe = regexp.MustCompile(`(?i)^(?:https://github\.com/|ssh://git@github\.com/|git@github\.com:)hasayone/empataso-tds(?:\.git)?/?$`)
 
 // updateHTTPClient is used by fetchEngineVersion. Timeout is 2 s; redirects are not
 // followed — a 3xx response is returned as-is and treated as a bad response by the caller.
@@ -165,12 +180,37 @@ type updateView struct {
 	RequestPending bool             `json:"request_pending"`
 	KeitaroBusy    bool             `json:"keitaro_busy"`
 	// CheckStale is true when check.json was made for another build than the running one.
-	CheckStale bool   `json:"check_stale"`
-	CanApply   bool   `json:"can_apply"`
-	ApplyBlock string `json:"apply_block,omitempty"`
-	CanRollback    bool             `json:"can_rollback"`
-	RollbackBlock  string           `json:"rollback_block,omitempty"`
-	CLI            []string         `json:"cli"`
+	CheckStale bool `json:"check_stale"`
+	// RepoState is updateRepoPaused or updateRepoNotFound while the updater cannot read its source, otherwise empty.
+	RepoState     string   `json:"repo_state,omitempty"`
+	CanApply      bool     `json:"can_apply"`
+	ApplyBlock    string   `json:"apply_block,omitempty"`
+	CanRollback   bool     `json:"can_rollback"`
+	RollbackBlock string   `json:"rollback_block,omitempty"`
+	CLI           []string `json:"cli"`
+}
+
+// updateRepoState tells why the updater cannot read its update source.
+//
+// Parameters: agent is agent.json and check is check.json, each nil when absent.
+// Returns updateRepoPaused when the agent has no repository, or when the fetch failed and the repository
+// is the product one; updateRepoNotFound when the fetch of another repository failed; "" otherwise,
+// including a check made for another build. It does not return an error.
+func updateRepoState(agent *cron.AgentFile, check *cron.CheckFile) string {
+	if agent == nil {
+		return ""
+	}
+	repo := strings.TrimSpace(agent.Repo)
+	if repo == "" {
+		return updateRepoPaused
+	}
+	if check == nil || check.Error != updateFetchFailed || checkForOtherBuild(check) {
+		return ""
+	}
+	if productRepoRe.MatchString(repo) {
+		return updateRepoPaused
+	}
+	return updateRepoNotFound
 }
 
 // updateSnapshot holds the shared runtime state used by precondition checks
@@ -231,6 +271,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 
 	out.KeitaroBusy = s.ktJob.busyOrWriting()
 	out.CheckStale = checkForOtherBuild(out.Check)
+	out.RepoState = updateRepoState(out.Agent, out.Check)
 
 	snap := updateSnapshot{
 		Now:            now,
@@ -277,6 +318,9 @@ func (s *Server) computeApplyBlock(snap updateSnapshot) string {
 	}
 	if checkForOtherBuild(snap.Check) {
 		return "check_stale"
+	}
+	if rs := updateRepoState(snap.Agent, snap.Check); rs != "" {
+		return rs
 	}
 	if runningCommitIsTarget(snap.Check) {
 		return "no_update"

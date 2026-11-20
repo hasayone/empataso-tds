@@ -57,6 +57,7 @@ type aiLimitMax struct {
 // could not be used. LimitCeilings and LimitMax are the bounds the panel shows next to the limits.
 // Perms is the stored preset with the effective level of every resource in its resources, whatever
 // the preset; PermResources lists those resources in panel order with the highest level of each.
+// Docs holds the three assistant documents (soul, memory, expertise) and their size limit max_bytes.
 // UserBudgetUSD and GroupBudgetUSD are the USD budgets by account id and by role id (no entry: no
 // budget); BudgetAccounts lists the accounts a budget can be set for and BudgetGroups the groups
 // (roles), empty while there is no role besides the administrator.
@@ -88,6 +89,7 @@ type aiSettingsView struct {
 	LimitMax        aiLimitMax           `json:"limit_max"`
 	Perms           aiPerms              `json:"perms"`
 	PermResources   []aiPermResource     `json:"perm_resources"`
+	Docs            aiDocsView           `json:"docs"`
 }
 
 // aiPricedModels returns the models the settings view prices: allowed_models and the
@@ -116,6 +118,7 @@ func (s *Server) aiSettingsView(st aiSettings, loadErr error, sess security.Sess
 		LimitMax:      aiLimitMax{Tokens: aiTokensCap, USD: aiUSDCap},
 		Perms:         aiPerms{Preset: st.Perms.Preset, Resources: st.Perms.levels()},
 		PermResources: aiPermResources,
+		Docs:          s.aiDocsViewOf(),
 	}
 	if loadErr != nil {
 		v.Error = loadErr.Error()
@@ -179,7 +182,9 @@ func (s *Server) handleAISettingsGet(w http.ResponseWriter, r *http.Request) {
 // handleAISettingsPut saves the settings to ai.json with mode 0600.
 // The merge and the write happen under s.ai.mu, so two saves cannot interleave; a damaged
 // file is replaced by the merge over the defaults. Answers: 400 ai_bad_request (params field and
-// reason) for bad JSON, a bad field or an unknown provider; 400 ai_bad_model (params model and
+// reason) for bad JSON, a bad field, an unknown provider or a document over aiDocMaxBytes (field
+// docs.<name>, reason too_long); the documents of the body go to files of the assistant directory
+// after ai.json (503 when there is no such directory, checked before anything is written); 400 ai_bad_model (params model and
 // reason: not_allowed outside allowed_models, no_catalog without a catalog of the provider,
 // unknown outside it, no_tools for a model known to lack tool support); the catalog is checked
 // only for the models the save adds to the stored ones or all of them after a change of the
@@ -201,6 +206,11 @@ func (s *Server) handleAISettingsPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusServiceUnavailable, "ai settings unavailable")
 		return
 	}
+	docs := body.Docs.byKey()
+	if err := aiDocsCheck(docs); err != nil {
+		aiWriteErr(w, err)
+		return
+	}
 	s.ai.mu.Lock()
 	defer s.ai.mu.Unlock()
 	cur, loadErr := s.aiLoad()
@@ -220,7 +230,15 @@ func (s *Server) handleAISettingsPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	if len(docs) > 0 && s.cfg.AIDir == "" {
+		writeErr(w, http.StatusServiceUnavailable, "ai settings unavailable")
+		return
+	}
 	if err := s.aiSave(next); err != nil {
+		writeErr(w, http.StatusInternalServerError, "save error")
+		return
+	}
+	if err := s.aiDocsWrite(docs); err != nil {
 		writeErr(w, http.StatusInternalServerError, "save error")
 		return
 	}

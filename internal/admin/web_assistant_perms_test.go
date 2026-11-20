@@ -9,7 +9,7 @@ func TestAssistantWidgetPerms(t *testing.T) {
 	panel := assistantFn(html, "aiPanel")
 	must(t, panel, `<select id="ai-perm-preset">`, "the preset select")
 	must(t, panel, `<div id="ai-perm-grid"></div>`, "the level table")
-	must(t, panel, "perms:perm});", "the save sends the permissions")
+	must(t, panel, "perms:perm,docs});", "the save sends the permissions")
 	must(t, assistantFn(html, "aiSettingsBody"), "if(perms) body.perms=perms;", "the body carries perms only when they differ")
 	must(t, html, "ai_forbidden:'ai.chat.err.ai_forbidden'", "ai_forbidden has a text")
 	must(t, assistantFn(html, "aiOnEvent"), "d.code?' — '+aiErrText(d.code,'',d.params)", "a refused tool is worded in the step log")

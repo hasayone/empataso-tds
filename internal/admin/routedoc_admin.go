@@ -918,6 +918,8 @@ func updateRouteDocs() map[string]routeDoc {
 				"updater and are null when missing or damaged. can_apply and can_rollback tell whether a button may be " +
 				"used, with the reason in apply_block and rollback_block. check_stale is true when check was made for another " +
 				"build than the running one; such a check offers no update (apply_block check_stale) until a new check. " +
+				"repo_state is repo_paused when no repository is set or the product repository is not public, and repo_not_found " +
+				"when another repository cannot be read; the same code is in apply_block, and the field is absent otherwise. " +
 				"keitaro_busy is true while a Keitaro job runs. " +
 				"cli lists the matching commands for the server shell. The update itself is started only from a browser session.",
 			RU: docOf("Состояние обновления и можно ли начать обновление или откат.",
@@ -925,6 +927,8 @@ func updateRouteDocs() map[string]routeDoc {
 					"равны null, если файла нет или он повреждён. can_apply и can_rollback говорят, можно ли нажать кнопку, "+
 					"причина — в apply_block и rollback_block. check_stale равен true, если check сделан для другой сборки, "+
 					"чем запущенная; такая проверка не предлагает обновление (apply_block check_stale) до новой проверки. "+
+					"repo_state равен repo_paused, если репозиторий не указан или репозиторий продукта не публичный, и repo_not_found, "+
+					"если другой репозиторий не читается; тот же код стоит в apply_block, иначе поля нет. "+
 					"keitaro_busy равен true, пока идёт задача Keitaro. "+
 					"cli — подходящие команды для консоли сервера. Само обновление запускается только из сессии браузера."),
 			UK: docOf("Стан оновлення та чи можна почати оновлення або відкіт.",
@@ -932,6 +936,8 @@ func updateRouteDocs() map[string]routeDoc {
 					"дорівнюють null, якщо файлу немає або він пошкоджений. can_apply і can_rollback кажуть, чи можна натиснути кнопку, "+
 					"причина — в apply_block і rollback_block. check_stale дорівнює true, якщо check зроблено для іншої збірки, "+
 					"ніж запущена; така перевірка не пропонує оновлення (apply_block check_stale) до нової перевірки. "+
+					"repo_state дорівнює repo_paused, якщо репозиторій не вказано або репозиторій продукту не публічний, і repo_not_found, "+
+					"якщо інший репозиторій не читається; той самий код стоїть в apply_block, інакше поля немає. "+
 					"keitaro_busy дорівнює true, поки йде завдання Keitaro. "+
 					"cli — відповідні команди для консолі сервера. Саме оновлення запускається лише із сесії браузера."),
 			Response: map[string]any{
@@ -980,13 +986,13 @@ func updateRouteDocs() map[string]routeDoc {
 		"POST /api/update/apply": cookieDoc("apply_update",
 			docOf("Ask the updater to install the checked update.",
 				"Body target (the commit of the check) and confirm (its first 7 characters). 202 with the request id. "+
-					"409 with the reason code when an update cannot start now, for example no_update, check_stale, keitaro_running or request_pending."),
+					"409 with the reason code when an update cannot start now, for example no_update, check_stale, repo_paused, repo_not_found, keitaro_running or request_pending."),
 			docOf("Запрос установки проверенного обновления.",
 				"Тело: target (коммит проверки) и confirm (его первые 7 символов). 202 с id запроса. "+
-					"409 с кодом причины, если обновление сейчас начать нельзя, например no_update, check_stale, keitaro_running или request_pending."),
+					"409 с кодом причины, если обновление сейчас начать нельзя, например no_update, check_stale, repo_paused, repo_not_found, keitaro_running или request_pending."),
 			docOf("Запит установлення перевіреного оновлення.",
 				"Тіло: target (коміт перевірки) і confirm (його перші 7 символів). 202 з id запиту. "+
-					"409 з кодом причини, якщо оновлення зараз почати не можна, наприклад no_update, check_stale, keitaro_running або request_pending.")),
+					"409 з кодом причини, якщо оновлення зараз почати не можна, наприклад no_update, check_stale, repo_paused, repo_not_found, keitaro_running або request_pending.")),
 		"POST /api/update/rollback": cookieDoc("rollback_update",
 			docOf("Ask the updater to return to the previous version.",
 				"Body confirm equal to rollback. 202 with the request id; 409 with the reason code when a rollback cannot start now."),

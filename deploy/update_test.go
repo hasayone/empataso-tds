@@ -108,6 +108,18 @@ func TestUpdateRequiredSubstrings(t *testing.T) {
 	}
 }
 
+// TestUpdateFetchErrorText проверяет, что check.json при сбое git fetch несёт ту строку,
+// по которой админка (updateFetchFailed) показывает спокойный текст вместо ошибки git.
+func TestUpdateFetchErrorText(t *testing.T) {
+	data, err := os.ReadFile("update.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `write_check_json "$cur_sha" "" "" "" 0 false "" "[]" "" "git fetch не удался"`) {
+		t.Error("check.json при сбое fetch больше не пишет error «git fetch не удался»")
+	}
+}
+
 // TestUpdateHelpExits проверяет, что --help выходит с кодом 0 и описывает команды.
 func TestUpdateHelpExits(t *testing.T) {
 	bash := requireBash(t)

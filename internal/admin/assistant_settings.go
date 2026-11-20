@@ -304,7 +304,8 @@ func aiCleanKey(field, prov, key string) (string, error) {
 // aiSettingsPut is the body of PUT /api/ai/settings. A nil field is left as stored.
 // Keys maps a provider to a new key; an empty or masked value keeps the stored key and
 // ClearKeys removes keys. Prices replaces the whole map of administrator prices and Perms the
-// assistant permissions.
+// assistant permissions. Docs carries the texts of the assistant documents; they live in files of
+// the assistant directory and not in ai.json.
 type aiSettingsPut struct {
 	Enabled         *bool               `json:"enabled"`
 	Provider        *string             `json:"provider"`
@@ -323,6 +324,7 @@ type aiSettingsPut struct {
 	GroupBudgetUSD  *map[string]float64 `json:"group_budget_usd"`
 	Prices          *map[string]aiPrice `json:"prices"`
 	Perms           *aiPerms            `json:"perms"`
+	Docs            *aiDocsPut          `json:"docs"`
 }
 
 // aiDailyPut is one daily limit of a PUT body. Set is true when the field is in the body;

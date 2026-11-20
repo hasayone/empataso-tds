@@ -10,7 +10,7 @@ import (
 // errors land in the Connection block and a refused save opens the block of its field.
 func TestSPAAIIntegrationBlocks(t *testing.T) {
 	html := spaSource()
-	must(t, html, "const AI_TABS=['conn','models','prices','perm','usage'], AI_TAB_KEY='emtds-ai-tab';", "the five blocks in order, the limits sit folded under the prices")
+	must(t, html, "const AI_TABS=['conn','models','prices','perm','docs','usage'], AI_TAB_KEY='emtds-ai-tab';", "the six blocks in order, the limits sit folded under the prices")
 	panel := dictBetween(t, html, "async function aiPanel(host,live){", "\n}\n")
 	must(t, panel, `<div class="vseg intabs mt" role="tablist">`, "the tabs reuse the integration tab bar")
 	must(t, panel, `data-aitab="${t}" aria-controls="ai-pane-${t}"`, "a tab names its panel")
@@ -31,6 +31,7 @@ func TestSPAAIIntegrationBlocks(t *testing.T) {
 		"models": {`<div id="ai-models"></div>`, "{id:'ai-cat-status',"},
 		"prices": {`<div id="ai-prices"></div>`, `id="ai-prices-none"`, "{id:'ai-unknown',", `<details class="sec aipr-lim" id="ai-limits">`, "${limits}"},
 		"perm":   {`id="ai-perm-preset"`, `<div id="ai-perm-grid"></div>`},
+		"docs":   {"${AI_DOCS.map(d=>", `data-aidoc="${d[0]}"`, `id="ai-doc-n-${d[0]}"`, "tr('ai.set.docs.hint')"},
 		"usage":  {"aiUseCardsHTML(cur)", "tr('ai.set.usage.none')", `<div class="g2" id="ai-daily">${dailyLimits}</div>`, "tr('ai.set.limits.day.hint')", "{id:'ai-nolimit-warn',"},
 	} {
 		body := pane(id)
@@ -50,7 +51,9 @@ func TestSPAAIIntegrationBlocks(t *testing.T) {
 	} {
 		must(t, panel, needle, "tab behaviour")
 	}
-	for _, k := range []string{"ai.set.tab.conn", "ai.set.tab.models", "ai.set.tab.prices", "ai.set.limits", "ai.set.tab.perm", "ai.set.tab.usage", "ai.set.prices.none"} {
+	for _, k := range []string{"ai.set.tab.conn", "ai.set.tab.models", "ai.set.tab.prices", "ai.set.limits", "ai.set.tab.perm", "ai.set.tab.usage", "ai.set.prices.none",
+		"ai.set.tab.docs", "ai.set.docs.hint", "ai.set.doc.soul", "ai.set.doc.soul.hint", "ai.set.doc.memory", "ai.set.doc.memory.hint",
+		"ai.set.doc.expertise", "ai.set.doc.expertise.hint", "ai.set.doc.size", "ai.set.doc.size.over"} {
 		for _, lang := range []string{"en", "ru", "uk"} {
 			if !trKeyDefined(html, lang, k) {
 				t.Errorf("%q missing for lang %q", k, lang)
@@ -65,6 +68,7 @@ eq(aiSettingsTab('ai_bad_request', 'prices'), 'prices', 'a price');
 eq(aiSettingsTab('ai_bad_limit', 'max_steps'), 'prices', 'a per-turn limit is in the folded block of the prices');
 eq(aiSettingsTab('ai_bad_limit', 'daily_usd'), 'usage', 'a daily limit sits under the usage cards');
 eq(aiSettingsTab('ai_bad_request', 'perms'), 'perm', 'the permissions');
+eq(aiSettingsTab('ai_bad_request', 'docs.memory'), 'docs', 'a document that is too long');
 eq(aiSettingsTab('internal', ''), '', 'no field stays where it is');
 `)
 }

@@ -70,7 +70,7 @@ func (s *Server) aiNewTurn(ctx context.Context, sess security.Session, uid, chat
 		return nil, err
 	}
 	t := &aiTurn{s: s, sess: sess, uid: uid, chatID: chatID, board: in.board, lang: in.lang, model: in.model, st: st, prov: in.prov,
-		secrets: in.secrets, msgID: msgID, tools: map[string]aiTool{}}
+		secrets: in.secrets, persona: s.aiPersonaBlock(in.secrets), msgID: msgID, tools: map[string]aiTool{}}
 	t.priced, t.isPriced = s.aiPriceOf(st, in.model)
 	tools := s.aiToolsFor(ctx, sess, in.board, st.Perms)
 	for _, tool := range tools {

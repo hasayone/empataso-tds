@@ -435,7 +435,7 @@ func TestSPAAIIntegration(t *testing.T) {
 		"call('POST','/api/ai/test',{provider,key:typed[provider]||''})",
 		"call('PUT','/api/ai/settings',{clear_keys:[provider]})",
 		"call('PUT','/api/ai/settings',body)",
-		"aiModelPicker(q('#ai-models',host),pick)", "aiSettingsBody(cur,{enabled:q('#ai-enabled',host).checked,provider,models:list,model:pick.defId,prices:overrides,keys:typed,limits,perms:perm})",
+		"aiModelPicker(q('#ai-models',host),pick)", "aiSettingsBody(cur,{enabled:q('#ai-enabled',host).checked,provider,models:list,model:pick.defId,prices:overrides,keys:typed,limits,perms:perm,docs})",
 		"Object.keys(typed).forEach(p=>delete typed[p]);", "q('#ai-key',host).value='';",
 		"cur.usage_today", "cur.default_prices", "cur.prices",
 		"trFill('ai.set.price.unknown'", "aiUseCardsHTML(cur)", `{id:'ai-nolimit-warn',hidden:true}`,
@@ -672,7 +672,8 @@ func TestSPAAIIntegrationSavesOnlyChanges(t *testing.T) {
 	for _, gone := range []string{"body.provider", "body.allowed_models", "ai.set.err.limit"} {
 		mustNot(t, panel, gone, "the body is built by aiSettingsBody: "+gone)
 	}
-	assistantNode(t, []string{"aiLimitBounds", "aiLimitValue", "aiSameList", "aiPriceRows", "aiPriceOverrides", "aiSettingsBody"}, aiLimitPrelude(t, html)+`
+	assistantNode(t, []string{"aiLimitBounds", "aiLimitValue", "aiSameList", "aiPriceRows", "aiPriceOverrides", "aiSettingsBody", "aiDocsBody"}, aiLimitPrelude(t, html)+`
+const AI_DOCS = [['soul'], ['memory'], ['expertise']];
 const cur = Object.assign({}, cur0, {enabled:true, provider:'openrouter', model:'a/b', allowed_models:['a/b', 'c/d'], keys:{openrouter:{has_key:true, mask:'sk-1'}, openai:{has_key:true, mask:'sk-2'}}, prices:{'a/b':{input_per_m:1, output_per_m:2}}});
 const form = over => {
   const limits = {};
@@ -718,6 +719,12 @@ for (const [k, v] of [['max_steps', {raw:'', none:true}], ['max_steps', {raw:'21
 eq(aiSettingsBody(cur, form({keys:{openrouter:'sk-1', openai:''}})).body, {keys:{openrouter:'sk-1'}}, 'only a typed key goes');
 eq(aiSettingsBody(cur, form({keys:{openai:''}})).body, {}, 'an empty key goes nowhere');
 eq(aiSettingsBody({}, {enabled:false, provider:'', models:[], model:'', prices:{}, keys:{}, limits:{}}).bad, 'max_output_tokens', 'a form with no limits is refused, not sent');
+const docsCur = Object.assign({}, cur, {docs:{soul:'S', memory:'M', expertise:'E', max_bytes:8192}});
+eq(aiSettingsBody(docsCur, form({docs:{soul:'S', memory:'M', expertise:'E'}})).body, {}, 'documents equal to the saved ones are not sent');
+eq(aiSettingsBody(docsCur, form({docs:{soul:'S', memory:'M2', expertise:'E'}})).body, {docs:{memory:'M2'}}, 'only the changed document goes');
+eq(aiSettingsBody(docsCur, form({docs:{soul:'', memory:'M', expertise:'E'}})).body, {docs:{soul:''}}, 'an emptied document goes as an empty text');
+eq(aiSettingsBody(cur, form()).body, {}, 'a form without documents sends none');
+eq(aiDocsBody({}, {soul:'x'}), {soul:'x'}, 'a payload with no docs reads as empty saved texts');
 `)
 }
 

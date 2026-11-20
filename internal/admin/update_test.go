@@ -138,12 +138,16 @@ const validCommit = "aabbccdd11223344556677889900aabbccdd1122"
 // anotherCommit is a second valid commit, different from validCommit.
 const anotherCommit = "1122334455667788990011223344556677889900"
 
-// freshAgent returns an AgentFile that is fresh, has Inbox and Signing set.
+// testRepo is the update source the test agents report: the product repository.
+const testRepo = "https://github.com/hasayone/empataso-tds.git"
+
+// freshAgent returns an AgentFile that is fresh, has Inbox and Signing set and reports testRepo.
 func freshAgent() cron.AgentFile {
 	return cron.AgentFile{
 		Schema:        1,
 		At:            time.Now(),
 		ScriptVersion: "1.0",
+		Repo:          testRepo,
 		Channel:       "main",
 		Signing:       true,
 		DockerOK:      true,
@@ -686,7 +690,7 @@ func TestUpdateApply409Codes(t *testing.T) {
 	}
 
 	// Signing off (agent.Signing=false) is not a block: the next condition, no_update, answers.
-	writeAgentFile(t, dir, cron.AgentFile{Schema: 1, At: time.Now(), Inbox: true, Signing: false})
+	writeAgentFile(t, dir, cron.AgentFile{Schema: 1, At: time.Now(), Repo: testRepo, Inbox: true, Signing: false})
 	code, body = callJSON(t, c, http.MethodPost, srv.URL+"/api/update/apply", csrf,
 		`{"target":"`+anotherCommit+`","confirm":"`+anotherCommit[:7]+`"}`)
 	if code != http.StatusConflict || strings.Contains(string(body), "unsigned") || !strings.Contains(string(body), "no_update") {
@@ -882,7 +886,7 @@ func TestUpdateCheckRateLimited(t *testing.T) {
 	s, srv := newUpdateServer(t, dir, inboxDir)
 	c, csrf := loginAdmin(t, srv.URL)
 
-	writeAgentFile(t, dir, cron.AgentFile{Schema: 1, At: time.Now(), Inbox: true})
+	writeAgentFile(t, dir, cron.AgentFile{Schema: 1, At: time.Now(), Repo: testRepo, Inbox: true})
 
 	// Seed the in-memory rate limit to simulate a recent check.
 	s.updateCheckMu.Lock()
@@ -905,7 +909,7 @@ func TestUpdateCheckWaitFromLastRun(t *testing.T) {
 	inboxDir := t.TempDir()
 	_, srv := newUpdateServer(t, dir, inboxDir)
 	c, csrf := loginAdmin(t, srv.URL)
-	writeAgentFile(t, dir, cron.AgentFile{Schema: 1, At: time.Now(), Inbox: true})
+	writeAgentFile(t, dir, cron.AgentFile{Schema: 1, At: time.Now(), Repo: testRepo, Inbox: true})
 	check := freshCheck()
 	check.At = time.Now().Add(-2 * time.Minute)
 	writeCheckFile(t, dir, check)
@@ -1247,6 +1251,116 @@ func TestUpdateWithoutSigningPolicy(t *testing.T) {
 		`{"target":"`+anotherCommit+`","confirm":"`+anotherCommit[:7]+`"}`)
 	if code != http.StatusConflict || !strings.Contains(string(body), "unsigned") {
 		t.Fatalf("apply of an unsigned target with signing on: %d %s", code, body)
+	}
+}
+
+// fetchFailedCheck returns the check.json update.sh writes for the running build when git fetch fails,
+// made an hour ago so that a new check is outside the rate limit window.
+func fetchFailedCheck() cron.CheckFile {
+	return cron.CheckFile{
+		Schema:  1,
+		At:      time.Now().Add(-time.Hour),
+		Channel: "main",
+		Current: cron.CheckRef{Commit: validCommit},
+		Error:   updateFetchFailed,
+	}
+}
+
+// TestUpdateRepoState covers every answer of updateRepoState.
+func TestUpdateRepoState(t *testing.T) {
+	restore := config.SetBuildForTest(config.BuildInfo{Version: "v1.0.0", Commit: validCommit, Channel: "main"})
+	defer restore()
+	failed := fetchFailedCheck()
+	other := freshCheck()
+	other.Error = "нет тега"
+	stale := fetchFailedCheck()
+	stale.Current.Commit = anotherCommit
+	agent := func(repo string) *cron.AgentFile { return &cron.AgentFile{Repo: repo} }
+	cases := []struct {
+		name  string
+		agent *cron.AgentFile
+		check *cron.CheckFile
+		want  string
+	}{
+		{"no agent", nil, &failed, ""},
+		{"repo not set", agent(""), nil, updateRepoPaused},
+		{"repo blank", agent("  "), &failed, updateRepoPaused},
+		{"product https", agent(testRepo), &failed, updateRepoPaused},
+		{"product without .git", agent("https://github.com/hasayone/empataso-tds"), &failed, updateRepoPaused},
+		{"product ssh", agent("git@github.com:hasayone/empataso-tds.git"), &failed, updateRepoPaused},
+		{"another repo", agent("https://github.com/someone/fork.git"), &failed, updateRepoNotFound},
+		{"lookalike repo", agent("https://github.com/hasayone/empataso-tds-fork.git"), &failed, updateRepoNotFound},
+		{"fetch ok", agent(testRepo), func() *cron.CheckFile { c := freshCheck(); return &c }(), ""},
+		{"other check error", agent("https://github.com/someone/fork.git"), &other, ""},
+		{"check of another build", agent(testRepo), &stale, ""},
+		{"no check", agent(testRepo), nil, ""},
+	}
+	for _, tc := range cases {
+		if got := updateRepoState(tc.agent, tc.check); got != tc.want {
+			t.Errorf("%s: %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestUpdateRepoUnreadable verifies both calm states of an unreadable update source: the product repository that is
+// not public and another repository that is gone. GET /api/update names the state and blocks the button with it, the
+// raw git error stays only in check.error, POST /api/update/apply is refused with the same code and writes no request,
+// a run already in progress is left as it is, and a new check may still be asked for.
+func TestUpdateRepoUnreadable(t *testing.T) {
+	for _, tc := range []struct{ repo, want string }{
+		{testRepo, updateRepoPaused},
+		{"https://github.com/someone/fork.git", updateRepoNotFound},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			dir := t.TempDir()
+			inboxDir := t.TempDir()
+			_, srv := newUpdateServer(t, dir, inboxDir)
+			c, csrf := loginAdmin(t, srv.URL)
+			restore := config.SetBuildForTest(config.BuildInfo{Version: "v1.0.0", Commit: validCommit, Channel: "main"})
+			defer restore()
+
+			ag := freshAgent()
+			ag.Repo = tc.repo
+			writeAgentFile(t, dir, ag)
+			writeCheckFile(t, dir, fetchFailedCheck())
+
+			v := getUpdate(t, c, srv.URL)
+			if v.RepoState != tc.want || v.CanApply || v.ApplyBlock != tc.want {
+				t.Fatalf("GET /api/update: repo_state %q, apply %v %q; want %q", v.RepoState, v.CanApply, v.ApplyBlock, tc.want)
+			}
+			code, body := callJSON(t, c, http.MethodPost, srv.URL+"/api/update/apply", csrf,
+				`{"target":"`+anotherCommit+`","confirm":"`+anotherCommit[:7]+`"}`)
+			if code != http.StatusConflict || !strings.Contains(string(body), tc.want) {
+				t.Fatalf("apply: %d %s", code, body)
+			}
+			if _, err := os.Stat(filepath.Join(inboxDir, cron.UpdateRequestFile)); !os.IsNotExist(err) {
+				t.Fatalf("a refused apply left a request: %v", err)
+			}
+
+			running := cron.StateFile{Schema: 1, ID: "aaaa1111bbbb2222", Action: "apply", Result: cron.StateRunning}
+			if err := cron.WriteUpdateJSON(filepath.Join(dir, cron.UpdateStateFile), running); err != nil {
+				t.Fatal(err)
+			}
+			code, body = callJSON(t, c, http.MethodPost, srv.URL+"/api/update/apply", csrf,
+				`{"target":"`+anotherCommit+`","confirm":"`+anotherCommit[:7]+`"}`)
+			if code != http.StatusConflict || !strings.Contains(string(body), tc.want) {
+				t.Fatalf("apply during a run: %d %s", code, body)
+			}
+			if v := getUpdate(t, c, srv.URL); v.State == nil || v.State.Result != cron.StateRunning || v.State.FinishedAt != nil {
+				t.Fatalf("the running state was touched: %+v", v.State)
+			}
+			if _, err := os.Stat(filepath.Join(inboxDir, cron.UpdateRequestFile)); !os.IsNotExist(err) {
+				t.Fatalf("a refused apply during a run left a request: %v", err)
+			}
+			if err := os.Remove(filepath.Join(dir, cron.UpdateStateFile)); err != nil {
+				t.Fatal(err)
+			}
+
+			code, body = callJSON(t, c, http.MethodPost, srv.URL+"/api/update/check", csrf, "{}")
+			if code != http.StatusAccepted {
+				t.Fatalf("check with an unreadable repository: %d %s", code, body)
+			}
+		})
 	}
 }
 

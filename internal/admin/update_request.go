@@ -136,6 +136,9 @@ func (s *Server) applyPreconditions(snap updateSnapshot, target, confirm string)
 	if checkForOtherBuild(snap.Check) {
 		return "check_stale"
 	}
+	if rs := updateRepoState(snap.Agent, snap.Check); rs != "" {
+		return rs
+	}
 	if snap.Check == nil || !snap.Check.Fresh(snap.Now, updateCheckFreshAge) || snap.Check.Error != "" || snap.Check.Ahead == 0 {
 		return "no_update"
 	}

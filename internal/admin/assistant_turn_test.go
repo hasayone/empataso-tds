@@ -354,7 +354,7 @@ func TestAssistantTurnFullFlowAnthropic(t *testing.T) {
 		t.Fatalf("provider calls %d", stub.calls())
 	}
 	first := aiBodyMap(t, stub.req(0))
-	if first["model"] != "m2" || first["system"] != aiSystemFor("en") {
+	if first["model"] != "m2" || first["system"] != e.systemFor("en") {
 		t.Fatalf("first call model %v", first["model"])
 	}
 	user := string(stub.req(0).Body)
@@ -1263,6 +1263,12 @@ func TestAssistantTurnPersistFallsBackToStatusOnly(t *testing.T) {
 	}
 }
 
+// systemFor returns the system prompt a turn in lang gets while the assistant documents are as
+// they are on disk now.
+func (e *turnEnv) systemFor(lang string) string {
+	return aiSystemWith(lang, e.s.aiPersonaBlock(e.s.processSecrets()))
+}
+
 // aiSystemOf returns the system prompt of the first request the provider stub got.
 func aiSystemOf(t *testing.T, stub *aiStub) string {
 	t.Helper()
@@ -1297,7 +1303,7 @@ func TestAssistantTurnLangSetsTheInstruction(t *testing.T) {
 			if lastEvent(t, events).name != "done" {
 				t.Fatalf("events %v", eventNames(events))
 			}
-			if got, want := aiSystemOf(t, stub), aiSystemFor(c.want); got != want {
+			if got, want := aiSystemOf(t, stub), e.systemFor(c.want); got != want {
 				t.Fatalf("system prompt\n%s\nwant the %s one", got, c.want)
 			}
 			if !strings.HasSuffix(aiSystemOf(t, stub), aiLangPrompt[c.want]) {
@@ -1325,7 +1331,7 @@ func TestAssistantTurnLangFollowsTheCurrentRequest(t *testing.T) {
 	for i, lang := range []string{"ru", "uk"} {
 		var req map[string]any
 		_ = json.Unmarshal(stub.req(i).Body, &req)
-		if req["system"] != aiSystemFor(lang) {
+		if req["system"] != e.systemFor(lang) {
 			t.Errorf("turn %d: the system prompt is not the %s one", i+1, lang)
 		}
 	}
