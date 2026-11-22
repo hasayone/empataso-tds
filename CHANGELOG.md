@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Motion: the summary chart, the «Who visits» bars and the summary cards draw in when the page opens or the period changes. Keyword sparklines and the keyword trend do the same when their series is new; settings sections ease in once. Hover, the legend, a resize, Refresh and reduced motion stay on the finished frame.
 - Appearance: a custom accent at the bottom of the Appearance card. The chosen colour is written to the same `emtds-accent` key and paints the same accent the admin already uses; the ready-made colours stay. On a wide screen the «Statistics» heading and its two cards sit in the empty columns of the Interface row; a narrow screen keeps Interface above Statistics.
 - Board composition: the block «Partner groups» lists the group labels already stored on affiliate networks (the `group` field), with the same checkbox and search as offer and landing groups. A checked group is saved with the rest of the composition and stays on the section. Network names stay in the search under that block.
 - Conversion alerts: each new conversion still uses the card template, and `[PROFIT]` is that conversion's payout. The once-a-day message is a short report of the period sum and the campaigns, streams, countries, devices and keywords that make it up, in the language of the recipient's profile (`ru`, `en` or `uk`). It is not the line "Profit for today".
@@ -128,6 +129,7 @@ otes field (up to 10000 characters) saved with the offer; the engine ignores it.
 
 ### Fixed
 
+- Stream offers and landings: a finger on the reorder handle moves the row and writes the same order as a mouse drop. The page still scrolls until the finger is on that handle; the share field, the catalog select and Remove still click. One row still has no handle.
 - Bot signatures: «Run now» runs the `bot_signatures` job, and a download that fails is an error on the card instead of «waiting» and zero signatures. Success is recorded only when the parsed rules are in the file the engine loads; an empty download is not a success and does not create a file. Each source keeps its own file under `bot_sources`, filled with its rules on a successful download. A source that fails leaves that file as it was.
 - Groups window: the first save of the open name, including the same letters in another case, closes the editor and does not report that the name is already taken. A second click does not send another rename. An empty name and a name of a different group are still refused.
 - Offers search: `stop` still matches `stop`, `STOP` and `Stop`. A name that contains the query as typed is listed first, in name order, so «stop - A - FuegoCasino - AR - cap 40 - 25$» is on the first page instead of after the uppercase `STOP` rows. With an empty query the column sort is unchanged.

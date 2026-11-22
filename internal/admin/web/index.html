@@ -838,6 +838,7 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   .sw-roi{border-top-color:var(--chart-roi)!important}
   .sw-cr{border-top-color:var(--chart-cr)!important}
   .cwrap{position:relative} canvas{width:100%;height:260px;display:block}
+  canvas#chart{touch-action:pan-y}
   /* Dashboard skeleton keeps the line boxes of the real cards, the 32px chart header and the 260px plot.
      Bars stay inline so a table cell keeps the text line-height instead of shrinking to the bar. */
   .kpi.skel .l,.kpi.skel .v{align-items:center}
@@ -4127,7 +4128,7 @@ function toggleTheme(){
 }
 function themeChanged(){
   qa('[data-theme-btn]').forEach(b=>{b.innerHTML=icon(isDark()?'sun':'moon');b.title=isDark()?tr('Light theme'):tr('Dark theme')});
-  if(q('#chart'))drawChart(q('#chart'),CH.pts);
+  if(q('#chart')){chartMotionStop(); drawChart(q('#chart'),CH.pts);}
   drawWires();
   CODE_EDITORS.forEach(e=>e.setTheme());
 }
@@ -8011,6 +8012,8 @@ let PSORT={k:'conv',d:-1};
 let PERF_TOP=true, PERF_FOLD=true;
 const PERF_TOP_N=10;
 let CH={pts:[],x:[],cur:'',ready:false}, CH_HIDE=new Set(['cr','roi']);
+let CH_REVEAL=1, CH_ANIME=null, CH_RUN=0, CH_PLAY_KEY='';
+let BD_BAR_SIG=new Map(), SPARK_D=new Map(), SPARK_ANIME=[], KWT_N=0;
 const CH_SERIES=[
   {id:'total',key:'col.clicks',sw:'',axis:'n',color:'clicks',dash:[],ic:'click'},
   {id:'unique',key:'col.uniq',sw:'sw-uniq',axis:'n',color:'uniq',dash:[4,3],ic:'user'},
@@ -8203,6 +8206,7 @@ async function dashboard(_,live,quiet){
     ensureGroups().catch(()=>[]),
     perfLoad,
     loadMoney(qs, dashCampaignId()),
+    ensureAnime().catch(()=>null),
   ]);
   if(!still())return;
   const raw=Array.isArray(ts)?ts:[];
@@ -8263,11 +8267,17 @@ async function dashboard(_,live,quiet){
     ${dashRows('blocks').filter(r=>r.on).map(r=>blockHTML[r.id]).join('')}`;
   if(dashBody){dashBody.removeAttribute('aria-busy'); dashBody.removeAttribute('aria-label'); dashBody.innerHTML=dashHTML}
   else view().innerHTML=dashHeadHTML()+'<div id="dash-body">'+dashHTML+'</div>';
-  if(q('#chart')){ drawChart(q('#chart'),chart.rows); bindChartHover(q('#chart')); }
+  if(!quiet) motionIn(dashMotionEls(), 0);
+  if(q('#chart')){
+    bindChartHover(q('#chart'));
+    if(quiet){chartMotionStop(); CH_PLAY_KEY=chartSeriesKey(chart.rows); drawChart(q('#chart'), chart.rows)}
+    else chartPlay(q('#chart'), chart.rows, my);
+  }
   qa('[data-series]',view()).forEach(b=>b.onclick=()=>{
     const id=b.dataset.series;
     if(CH_HIDE.has(id)) CH_HIDE.delete(id); else CH_HIDE.add(id);
     b.classList.toggle('off', CH_HIDE.has(id));
+    chartMotionStop();
     drawChart(q('#chart'), CH.pts);
   });
   if(q('#perfwrap')){
@@ -8718,6 +8728,7 @@ async function loadBreakdown(dim, boxId){
     const label=dim==='device'?deviceLabel(key):dim==='country'?countryLabel(key, uiLang()):named?key:idLabel(dim, key);
     return `<div><span class="k" title="${esc(label)}">${dim==='country'?`<span class="flag">${flag(key)}</span>`:''}${esc(label)}</span><span class="tr"><i style="width:${Math.max(2,Math.round(x.count/max*100))}%"></i></span><span class="n">${fmt(x.count)}</span></div>`;
   }).join('');
+  barsPlay(box, (boxId||dim)+'\n'+rows.map(x=>String(x.key)+'\t'+String(x.count)).join('\n'));
 }
 // Performance rows folded into config order: flow → its streams, the fallback
 // ("-": no stream matched) last, then flows that exist only in the data.
@@ -8891,6 +8902,211 @@ function perfSheet(groups){
   return {headers, rows};
 }
 
+/** motionReduced reports whether the visitor asked for less motion.
+ * @returns {boolean} true when prefers-reduced-motion matches
+ */
+function motionReduced(){
+  return typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion:reduce)').matches;
+}
+/** motionIn eases elements up from 6px and in from transparent. The stylesheet already shows the finished frame, so a missing library does not leave a blank block.
+ * @param {Element[]} els elements to move; rows of a table are not passed in
+ * @param {number} stagger milliseconds between elements; 0 moves them together
+ * @returns {void}
+ */
+function motionIn(els, stagger){
+  const list=(els||[]).filter(Boolean);
+  if(!list.length||motionReduced()) return;
+  const show=()=>list.forEach(el=>{el.style.opacity=''; el.style.transform=''});
+  list.forEach(el=>{el.style.opacity='0'; el.style.transform='translateY(6px)'});
+  const run=()=>{
+    if(typeof anime!=='function'){show(); return}
+    anime({
+      targets:list,
+      opacity:[0,1],
+      translateY:[6,0],
+      duration:280,
+      easing:'easeOutCubic',
+      delay:stagger?anime.stagger(stagger):0,
+      complete:show
+    });
+  };
+  if(typeof anime==='function') run();
+  else ensureAnime().then(run).catch(show);
+}
+/** dashMotionEls lists the summary tiles and the block cards, not the rows inside the cards.
+ * @returns {Element[]} tiles and cards on the summary
+ */
+function dashMotionEls(){
+  const root=q('#dash-body');
+  if(!root) return [];
+  const els=[];
+  Array.from(root.children).forEach(ch=>{
+    if(ch.classList.contains('kpis')) qa('.kpi', ch).forEach(el=>els.push(el));
+    else if(ch.classList.contains('card')) els.push(ch);
+    else if(ch.classList.contains('bds')) Array.from(ch.children).forEach(el=>{if(el.classList.contains('card')) els.push(el)});
+  });
+  return els;
+}
+/** chartMotionStop ends a running chart tween and leaves the reveal on the finished frame.
+ * @returns {void}
+ */
+function chartMotionStop(){
+  CH_RUN++;
+  if(CH_ANIME){CH_ANIME.pause(); CH_ANIME=null}
+  const mid=CH_REVEAL<1;
+  CH_REVEAL=1;
+  const cv=q('#chart');
+  if(mid&&cv&&cv.isConnected) drawChart(cv, CH.pts);
+}
+/** chartSeriesKey names a chart series by its timestamps and numbers. Legend visibility is not part of the key.
+ * @param {object[]} pts chart points
+ * @returns {string} key; empty when the period has no points
+ */
+function chartSeriesKey(pts){
+  return (pts||[]).map(p=>{
+    const nums=CH_SERIES.map(s=>{
+      const v=p[s.id];
+      return v==null||Number.isNaN(+v)?'':String(+v);
+    }).join(',');
+    return String(p&&p.ts)+'|'+nums;
+  }).join(';');
+}
+/** chartPlay reveals strokes and fills once when the summary opens on a new series. drawChart itself does not start it.
+ * @param {HTMLCanvasElement} cv chart canvas
+ * @param {object[]} pts points for the period; a null field stays a gap
+ * @param {number} gen dashboard generation that owns this draw
+ * @returns {void}
+ */
+function chartPlay(cv, pts, gen){
+  chartMotionStop();
+  if(!cv) return;
+  const rows=pts||[];
+  const key=chartSeriesKey(rows);
+  const play=rows.length>1&&key!==CH_PLAY_KEY&&!motionReduced()&&typeof anime==='function';
+  CH_PLAY_KEY=key;
+  if(!play){
+    CH_REVEAL=1;
+    drawChart(cv, rows);
+    return;
+  }
+  const run=CH_RUN;
+  CH_REVEAL=0;
+  drawChart(cv, rows);
+  const state={t:0};
+  CH_ANIME=anime({
+    targets:state,
+    t:1,
+    duration:480,
+    easing:'easeOutCubic',
+    update(){
+      if(run!==CH_RUN) return;
+      if(gen!==DASH_GEN||!cv.isConnected){
+        if(CH_ANIME){CH_ANIME.pause(); CH_ANIME=null}
+        return;
+      }
+      CH_REVEAL=state.t>=1?1:state.t;
+      drawChart(cv, rows);
+    },
+    complete(){
+      if(run!==CH_RUN) return;
+      CH_REVEAL=1;
+      CH_ANIME=null;
+      if(gen===DASH_GEN&&cv.isConnected) drawChart(cv, rows);
+    }
+  });
+}
+/** barsPlay grows breakdown bars from zero to the widths already computed for them. The same counters keep the finished width.
+ * @param {Element} box breakdown container
+ * @param {string} sig counters of this box
+ * @returns {void}
+ */
+function barsPlay(box, sig){
+  if(!box) return;
+  const same=BD_BAR_SIG.get(box.id)===sig;
+  BD_BAR_SIG.set(box.id, sig);
+  if(same||motionReduced()||typeof anime!=='function') return;
+  qa('i', box).forEach(el=>{
+    const to=parseFloat(el.style.width);
+    if(!(to>0)) return;
+    el.style.width='0%';
+    anime({targets:el, width:['0%', to+'%'], duration:480, easing:'easeOutCubic'});
+  });
+}
+/** sparkPlay draws a keyword spark from its path length down to a solid stroke when that path is new. A circle is left as drawn. The same path after a sort stays solid.
+ * @param {Element} root table root
+ * @param {boolean} [again] true on the retry after the library has loaded
+ * @returns {void}
+ */
+function sparkPlay(root, again){
+  if(!root) return;
+  SPARK_ANIME.forEach(a=>{try{a.pause()}catch(e){}});
+  SPARK_ANIME=[];
+  const paths=qa('.kws-spark path', root);
+  if(!paths.length) return;
+  if(motionReduced()) return;
+  if(typeof anime!=='function'){
+    if(again) return;
+    ensureAnime().then(()=>{if(root.isConnected) sparkPlay(root, true)}).catch(()=>{});
+    return;
+  }
+  paths.forEach(path=>{
+    const btn=path.closest('[data-kwtrend]');
+    const key=btn?btn.getAttribute('data-kwtrend')||'':'';
+    const d=path.getAttribute('d')||'';
+    if(SPARK_D.get(key)===d) return;
+    SPARK_D.set(key, d);
+    const len=path.getTotalLength();
+    if(!(len>0)) return;
+    path.style.strokeDasharray=String(len);
+    path.style.strokeDashoffset=String(len);
+    SPARK_ANIME.push(anime({targets:path, strokeDashoffset:[len, 0], duration:480, easing:'easeOutCubic'}));
+  });
+}
+/** trendReveal clips the trend line and its area from the left. Grid lines and day labels stay outside the clip. A single point has no line and is not tweened.
+ * @param {SVGSVGElement} svg trend chart
+ * @returns {object|null} the running tween, or null when the frame stays finished
+ */
+function trendReveal(svg){
+  if(!svg||motionReduced()||typeof anime!=='function') return null;
+  const line=q('.l', svg), area=q('.a', svg);
+  if(!line&&!area) return null;
+  const vb=svg.viewBox&&svg.viewBox.baseVal;
+  const w=vb&&vb.width?vb.width:0, h=vb&&vb.height?vb.height:0;
+  if(!(w>0)||!(h>0)) return null;
+  const ns='http://www.w3.org/2000/svg';
+  const defs=document.createElementNS(ns, 'defs');
+  const cp=document.createElementNS(ns, 'clipPath');
+  const id='kwtclip'+String(++KWT_N);
+  cp.setAttribute('id', id);
+  const rect=document.createElementNS(ns, 'rect');
+  rect.setAttribute('x', '0');
+  rect.setAttribute('y', '0');
+  rect.setAttribute('width', '0');
+  rect.setAttribute('height', String(h));
+  cp.appendChild(rect);
+  defs.appendChild(cp);
+  svg.insertBefore(defs, svg.firstChild);
+  const g=document.createElementNS(ns, 'g');
+  g.setAttribute('clip-path', 'url(#'+id+')');
+  const mark=line||area;
+  mark.parentNode.insertBefore(g, mark);
+  if(area) g.appendChild(area);
+  if(line) g.appendChild(line);
+  const state={t:0};
+  let run=null;
+  run=anime({
+    targets:state,
+    t:1,
+    duration:480,
+    easing:'easeOutCubic',
+    update(){
+      if(!svg.isConnected){if(run) run.pause(); return}
+      rect.setAttribute('width', String(w*(state.t>1?1:state.t)));
+    }
+  });
+  return run;
+}
+
 // Counts on the left axis. Percents (CR, ROI) on their own 0..100 scale, drawn
 // without labels while any count line is visible, labelled with % when only
 // percent lines are on. Money on the right only with one currency. A point's ROI
@@ -9002,11 +9218,19 @@ function drawChart(cv,pts,hover){
     if(!started) return;
     g.lineTo(x(lastI),baseY);g.lineTo(x(firstI),baseY);g.closePath();g.fillStyle=grd;g.fill();
   };
+  const reveal=CH_REVEAL<1?CH_REVEAL:1;
+  if(reveal<1){
+    g.save();
+    g.beginPath();
+    g.rect(L-2,T-2,Math.max(0,(w+4)*reveal),h+4);
+    g.clip();
+  }
   vis.forEach(s=>{
     const y=yOf(scaleOf(s));
     if(s.axis==='n'||s.axis==='m') fillUnder(s.id,y,c[s.color],y(0));
     stroke(s.id,y,c[s.color],s.dash);
   });
+  if(reveal<1) g.restore();
   if(hover!=null&&pts[hover]){
     const X=x(hover);g.strokeStyle=c.grid;g.lineWidth=1;g.setLineDash([]);g.beginPath();g.moveTo(X,T);g.lineTo(X,T+h);g.stroke();
     vis.forEach(s=>{
@@ -9036,6 +9260,7 @@ function chartTip(p){
 function bindChartHover(cv){
   const tip=q('#ctip'); if(!cv||!tip)return;
   cv.onmousemove=e=>{
+    chartMotionStop();
     const pts=CH.pts; if(!pts.length)return;
     const r=cv.getBoundingClientRect(), mx=e.clientX-r.left;
     let i=0,best=1e9; CH.x.forEach((X,j)=>{const d=Math.abs(X-mx);if(d<best){best=d;i=j}});
@@ -9044,7 +9269,7 @@ function bindChartHover(cv){
     tip.innerHTML=chartTip(p);
     tip.style.left=Math.max(0,Math.min(CH.x[i]+12,r.width-tip.offsetWidth-4))+'px';
   };
-  cv.onmouseleave=()=>{tip.hidden=true;drawChart(cv,CH.pts)};
+  cv.onmouseleave=()=>{chartMotionStop(); tip.hidden=true;drawChart(cv,CH.pts)};
 }
 
 /* ==================================================================
@@ -17461,6 +17686,17 @@ function ensureAce(){
   ACE_LOAD.catch(()=>{ACE_LOAD=null});
   return ACE_LOAD;
 }
+let ANIME_LOAD=null;
+/** ensureAnime loads anime.js once per page. A failed load clears the promise so a later try can run; the caller then draws the finished frame.
+ * @returns {Promise<void>} resolves when the global anime function is ready; rejects when the script does not load
+ */
+function ensureAnime(){
+  if(typeof anime==='function') return Promise.resolve();
+  if(ANIME_LOAD) return ANIME_LOAD;
+  ANIME_LOAD=loadScript('/assets/anime/anime.min.js');
+  ANIME_LOAD.catch(()=>{ANIME_LOAD=null});
+  return ANIME_LOAD;
+}
 
 /* ---------- DATE PICKER (vendored air-datepicker, /assets/air-datepicker/) ---------- */
 const DP_SRC='/assets/air-datepicker/air-datepicker.js?v=3.6.0';
@@ -17936,6 +18172,63 @@ function reorderShare(list, from, over, after){
   return out;
 }
 /**
+ * shareDropAfter reports whether clientY is in the lower half of a row.
+ * top and height are that row's box in CSS pixels. clientY is the pointer.
+ * It returns true when the drop lands after the row. The same half is used for a mouse drop and a finger drop.
+ * @param {number} top
+ * @param {number} height
+ * @param {number} clientY
+ * @returns {boolean}
+ */
+function shareDropAfter(top, height, clientY){
+  return clientY>top+height/2;
+}
+/**
+ * shareHitIndex is the row under clientY, skipping the dragged index.
+ * rects are {top, height} in the same order as the list. from is the dragged index.
+ * It returns -1 when the point hits no other row.
+ * @param {{top:number,height:number}[]} rects
+ * @param {number} from
+ * @param {number} clientY
+ * @returns {number}
+ */
+function shareHitIndex(rects, from, clientY){
+  if(!rects) return -1;
+  for(let i=0;i<rects.length;i++){
+    if(i===from) continue;
+    const r=rects[i];
+    if(!r||clientY<r.top||clientY>r.top+r.height) continue;
+    return i;
+  }
+  return -1;
+}
+/**
+ * shareGestureOrder is the order after a mouse drop or a finger drop at clientY.
+ * list is the current order. from is the dragged index. rects match list and are not read from a second field.
+ * A point in the lower half lands after that row. It returns a new array and does not change list.
+ * @param {Array} list
+ * @param {number} from
+ * @param {{top:number,height:number}[]} rects
+ * @param {number} clientY
+ * @returns {Array}
+ */
+function shareGestureOrder(list, from, rects, clientY){
+  const over=shareHitIndex(rects, from, clientY);
+  if(over<0) return list.slice();
+  return reorderShare(list, from, over, shareDropAfter(rects[over].top, rects[over].height, clientY));
+}
+/**
+ * shareScrollLock reports whether this pointer may stop the page from scrolling.
+ * onHandle is true when the pointer went down on the drag handle. moved is true after the finger has shifted.
+ * The handle takes the scroll at once. A drag that starts on the row itself waits for that shift, so a vertical flick still scrolls.
+ * @param {boolean} onHandle
+ * @param {boolean} moved
+ * @returns {boolean}
+ */
+function shareScrollLock(onHandle, moved){
+  return !!onHandle || !!moved;
+}
+/**
  * syncShareSort gives every row of a share list a drag handle while the list has more than one row, and takes the handles away when one row is left.
  * It also marks the list block as sortable, which opens the handle column of the grid.
  * @param {Element} box rows container of one list
@@ -17964,7 +18257,9 @@ function syncShareSort(box){
 }
 /**
  * bindShareSort makes the rows of a share list draggable by their handle and movable with the arrow keys on the handle.
- * A drop or a key press writes the new row order into the stream (collectStream reads the rows in screen order) and marks the form changed.
+ * A mouse drop and a finger on the same handle both commit with shareGestureOrder, so the screen order is one.
+ * The page scroll stays until the finger is on that handle. The share field, the catalog select and Remove are not handles, so they still click and the page still scrolls from them.
+ * A drop, a finger lift or a key press writes the new row order into the stream (collectStream reads the rows in screen order) and marks the form changed.
  * A list with one row has no handle and nothing to drag.
  * @param {Element} box rows container of one list
  * @returns {void}
@@ -17973,6 +18268,14 @@ function bindShareSort(box){
   syncShareSort(box);
   const rows=()=>[...box.querySelectorAll('.share-row')];
   const clear=()=>rows().forEach(r=>r.classList.remove('drop-before','drop-after','drag-src'));
+  const commit=next=>{
+    const list=rows();
+    if(next.length!==list.length||next.some((r,i)=>r!==list[i])){
+      next.forEach(r=>box.append(r));
+      collectStream();
+      changed(box);
+    }
+  };
   const place=(row, over, after)=>{
     const list=rows();
     reorderShare(list, list.indexOf(row), list.indexOf(over), after).forEach(r=>box.append(r));
@@ -17986,8 +18289,56 @@ function bindShareSort(box){
       row.ondragstart=row.ondragend=row.ondragover=row.ondragleave=row.ondrop=null;
       return;
     }
-    grip.onpointerdown=()=>{row.draggable=true};
+    grip.onpointerdown=e=>{
+      if(e.button) return;
+      const onHandle=!!(e.target&&e.target.closest&&e.target.closest('.share-grip'));
+      if(!onHandle) return;
+      if(e.pointerType==='mouse'){ row.draggable=true; return; }
+      if(shareScrollLock(onHandle, false)) e.preventDefault();
+      row.draggable=false;
+      const pid=e.pointerId, x0=e.clientX, y0=e.clientY;
+      try{ grip.setPointerCapture(pid); }catch(err){}
+      const list0=rows(), from=list0.indexOf(row);
+      const rects=list0.map(r=>{const b=r.getBoundingClientRect(); return {top:b.top,height:b.height};});
+      SHARE_DRAG=row;
+      row.classList.add('drag-src');
+      row.style.position='relative';
+      row.style.zIndex='5';
+      document.body.classList.add('share-dragging');
+      let done=false;
+      const move=ev=>{
+        if(done||ev.pointerId!==pid) return;
+        const moved=Math.abs(ev.clientX-x0)>=8||Math.abs(ev.clientY-y0)>=8;
+        if(shareScrollLock(onHandle, moved)&&ev.cancelable) ev.preventDefault();
+        row.style.transform=`translateY(${ev.clientY-y0}px)`;
+        clear();
+        row.classList.add('drag-src');
+        const over=shareHitIndex(rects, from, ev.clientY);
+        if(over<0) return;
+        const after=shareDropAfter(rects[over].top, rects[over].height, ev.clientY);
+        list0[over].classList.toggle('drop-after', after);
+        list0[over].classList.toggle('drop-before', !after);
+      };
+      const end=ev=>{
+        if(done||ev.pointerId!==pid) return;
+        done=true;
+        window.removeEventListener('pointermove', move);
+        window.removeEventListener('pointerup', end);
+        window.removeEventListener('pointercancel', end);
+        try{ grip.releasePointerCapture(pid); }catch(err){}
+        row.style.transform=row.style.zIndex=row.style.position='';
+        document.body.classList.remove('share-dragging');
+        const next=ev.type==='pointercancel'?list0.slice():shareGestureOrder(list0, from, rects, ev.clientY);
+        SHARE_DRAG=null;
+        clear();
+        commit(next);
+      };
+      window.addEventListener('pointermove', move, {passive:false});
+      window.addEventListener('pointerup', end);
+      window.addEventListener('pointercancel', end);
+    };
     grip.onpointerup=grip.onpointercancel=()=>{row.draggable=false};
+    grip.oncontextmenu=e=>e.preventDefault();
     grip.onkeydown=e=>{
       const step=e.key==='ArrowUp'?-1:e.key==='ArrowDown'?1:0;
       const list=rows(), target=step&&list[list.indexOf(row)+step];
@@ -18013,7 +18364,7 @@ function bindShareSort(box){
     row.ondragover=e=>{
       if(!SHARE_DRAG||SHARE_DRAG===row||SHARE_DRAG.parentElement!==box) return;
       e.preventDefault();
-      const box2=row.getBoundingClientRect(), after=e.clientY>box2.top+box2.height/2;
+      const box2=row.getBoundingClientRect(), after=shareDropAfter(box2.top, box2.height, e.clientY);
       row.classList.toggle('drop-after', after);
       row.classList.toggle('drop-before', !after);
     };
@@ -18021,9 +18372,12 @@ function bindShareSort(box){
     row.ondrop=e=>{
       if(!SHARE_DRAG||SHARE_DRAG===row||SHARE_DRAG.parentElement!==box) return;
       e.preventDefault();
-      const drag=SHARE_DRAG, after=row.classList.contains('drop-after');
+      const drag=SHARE_DRAG;
+      const list=rows();
+      const rects=list.map(r=>{const b=r.getBoundingClientRect(); return {top:b.top,height:b.height};});
+      const next=shareGestureOrder(list, list.indexOf(drag), rects, e.clientY);
       clear();
-      place(drag, row, after);
+      commit(next);
     };
   });
 }
@@ -20997,13 +21351,17 @@ function openKwTrend(key, opener){
     const px=geo.xs[i]*(r.width/(svg.viewBox.baseVal.width||1)), tw=tip.offsetWidth;
     tip.style.left=Math.max(0, px+12+tw>r.width?px-12-tw:px+12)+'px';
   };
-  const drawPlot=()=>{
+  let kwtAnime=null;
+  const drawPlot=reveal=>{
+    if(kwtAnime){kwtAnime.pause(); kwtAnime=null}
     const W=Math.max(260, Math.round(plot.clientWidth||640)), H=W<480?220:280;
     const out=kwsTrendSVG(pts, metric, W, H);
     geo=out.geo; chart.innerHTML=out.svg; hideTip();
     const svg=q('svg',chart);
     svg.onpointermove=pointAt; svg.onpointerdown=pointAt; svg.onpointerleave=hideTip;
+    if(reveal===true) kwtAnime=trendReveal(svg);
   };
+  const onKwtResize=()=>drawPlot(false);
   const paint=()=>{
     pts=kwsTrendPoints(days, s, metric);
     qa('[data-kwt-m]',m).forEach(b=>{const on=b.dataset.kwtM===metric; b.classList.toggle('on',on); b.setAttribute('aria-pressed',on?'true':'false')});
@@ -21017,7 +21375,7 @@ function openKwTrend(key, opener){
       if('from' in p){ p.from=kwsDayText(p.from,true); p.to=kwsDayText(p.to,true); p.n=fmt(p.n) }
       return `<li>${esc(trFill(b.k,p))}</li>`;
     }).join('')+`<li>${esc(trFill('kws.tr.b.filters',{list:filters}))}</li>`;
-    drawPlot();
+    drawPlot(true);
   };
   const cols=metrics.map(id=>({id, pts:kwsTrendPoints(days, s, id)}));
   q('#kwt-table',m).innerHTML=`<thead><tr><th>${esc(tr('kws.tr.day'))}</th>${cols.map(c=>`<th class="num">${esc(kwsTrendLabel(c.id))}</th>`).join('')}</tr></thead>`
@@ -21028,7 +21386,7 @@ function openKwTrend(key, opener){
     KWS_TREND_DLG=null;
     sc.remove(); m.remove();
     document.removeEventListener('keydown', onKey, true);
-    window.removeEventListener('resize', drawPlot);
+    window.removeEventListener('resize', onKwtResize);
     window.removeEventListener('hashchange', dlg.close);
     if(opener&&opener.isConnected) opener.focus();
   }};
@@ -21037,7 +21395,7 @@ function openKwTrend(key, opener){
   q('[data-kwt-x]',m).onclick=dlg.close;
   qa('[data-kwt-m]',m).forEach(b=>b.onclick=()=>{ if(metric!==b.dataset.kwtM){ metric=b.dataset.kwtM; paint() } });
   document.addEventListener('keydown', onKey, true);
-  window.addEventListener('resize', drawPlot);
+  window.addEventListener('resize', onKwtResize);
   window.addEventListener('hashchange', dlg.close);
   KWS_TREND_DLG=dlg;
   document.body.append(sc, m);
@@ -21119,6 +21477,7 @@ function paintKwStats(){
   paintServerPager(q('#kwspage',wrap), Object.assign({prefix:'kwsp-'}, pager));
   bindSort(wrap, KWS_SORT, ()=>{KWS_PAGE_I=0; loadKwStats(true)});
   qa('[data-kwtrend]',wrap).forEach(b=>b.onclick=()=>openKwTrend(b.dataset.kwtrend, b));
+  sparkPlay(wrap);
 }
 /** kwsAbort cancels the statistics and trend requests in flight, so the server stops the query and frees its slot.
  * render calls it on every page change; a cancelled request shows no error.
@@ -21148,6 +21507,7 @@ async function loadKwStats(pageOnly){
     KWS_DATA=null; KWS_TREND=new Map(); KWS_TREND_DAYS=[];
   }
   let r;
+  const animeP=ensureAnime().catch(()=>null);
   try{ r=await call('GET','/api/keywords/stats?'+kwsPageQS(), undefined, opts); }
   catch(e){
     if((e&&e.name==='AbortError')||my!==KWS_GEN||!q('#kws-wrap')) return;
@@ -21169,6 +21529,8 @@ async function loadKwStats(pageOnly){
   KWS_TREND=kwsTrendMap(t);
   KWS_TREND_DAYS=Array.isArray(t&&t.days)?t.days.map(String):[];
   KWS_TREND_READY=!!(t&&t.conv_ready);
+  await animeP;
+  if(my!==KWS_GEN||!q('#kws-wrap')) return;
   paintKwStats();
 }
 /** keywordStats draws the statistics tab: campaign choice, keyword search, filters, the table and the explanation.
@@ -24051,6 +24413,7 @@ function settings(){
     </div></section>
     </div></div>
     ${botsSec}`;
+  motionIn(qa('.setsec', host), 40);
   const clang=q('#clang'); if(clang) clang.onchange=()=>applyLang(clang.value);
   let coLogoDraft=UI.company.logo||'';
   const coPreview=q('#co-preview');
@@ -30394,7 +30757,7 @@ document.addEventListener('keydown',e=>{
     if(DRAWER) closeDrawer();
   }
 });
-let resizeT; window.addEventListener('resize',()=>{drawWires();fitNav();placeRange();clearTimeout(resizeT);resizeT=setTimeout(()=>{if(q('#chart'))drawChart(q('#chart'),CH.pts);fitNav();placeRange();if(q('#flowsum'))syncFlowWidths()},120)});
+let resizeT; window.addEventListener('resize',()=>{drawWires();fitNav();placeRange();clearTimeout(resizeT);resizeT=setTimeout(()=>{if(q('#chart')){chartMotionStop();drawChart(q('#chart'),CH.pts)}fitNav();placeRange();if(q('#flowsum'))syncFlowWidths()},120)});
 if(window.matchMedia)matchMedia('(prefers-color-scheme: dark)').addEventListener('change',()=>{if(!document.documentElement.getAttribute('data-theme'))themeChanged()});
 // Last line of defence against losing edits by closing the tab.
 window.addEventListener('beforeunload',e=>{if(anyDirty()){e.preventDefault();e.returnValue=''}});

@@ -96,7 +96,13 @@ func TestShareSortWiring(t *testing.T) {
 	must(t, sortFn, "collectStream();", "the new order goes into the stream")
 	must(t, sortFn, "changed(box);", "the form is marked changed")
 	must(t, sortFn, "e.key==='ArrowUp'?-1:e.key==='ArrowDown'?1:0", "the handle can be moved with the keys")
-	must(t, sortFn, "grip.onpointerdown=()=>{row.draggable=true};", "a row is draggable only from its handle")
+	must(t, sortFn, "if(e.pointerType==='mouse'){ row.draggable=true; return; }", "a mouse press still arms the desktop drag from the handle")
+	must(t, sortFn, "if(!onHandle) return;", "a press off the handle does not start a drag")
+	must(t, sortFn, "shareScrollLock(onHandle, false)", "the handle takes the page scroll as soon as the finger is on it")
+	must(t, sortFn, "Math.abs(ev.clientX-x0)>=8||Math.abs(ev.clientY-y0)>=8", "a shift is what lets a row without a handle take the scroll")
+	if n := strings.Count(sortFn, "shareGestureOrder("); n != 2 {
+		t.Errorf("mouse drop and finger drop call shareGestureOrder %d times, want 2", n)
+	}
 	must(t, sortFn, "SHARE_DRAG.parentElement!==box", "a row is dropped only inside its own list")
 	collect := spaFunctionLine(html, "collectStream")
 	must(t, collect, "offers:q('#offer-rows',d)?[...qa('.offer-row',d)].map(row=>readShare(row,'data-oshare','data-oid')).filter(r=>r.id):[]", "the offers are read in screen order")
@@ -113,5 +119,55 @@ func TestShareSortWiring(t *testing.T) {
 	}
 	if n := strings.Count(html, "'share.move':"); n != 3 {
 		t.Errorf("share.move is translated %d times, want 3", n)
+	}
+	must(t, html, ".share-grip{display:grid;place-items:center;height:32px;color:var(--subtle);cursor:grab;border-radius:6px;touch-action:none}", "only the handle opts out of scrolling")
+	mustNot(t, html, ".share-row{touch-action:none", "a share row does not block the page scroll")
+}
+
+// TestShareSortTouch checks that a finger drop writes the same order as a mouse drop.
+// Both go through shareGestureOrder: the second row released on the upper half of the first moves in front of it,
+// for offers and for landings. A finger on the handle takes the scroll at once; a row with no handle waits for a shift.
+func TestShareSortTouch(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the share touch checks")
+	}
+	html := spaSource()
+	var src strings.Builder
+	src.WriteString("let failed = 0;\nconst ok = (c, w) => { if (!c) { failed++; console.log('FAIL ' + w); } };\nconst eq = (a, b, w) => ok(JSON.stringify(a) === JSON.stringify(b), w + ': got ' + JSON.stringify(a) + ', want ' + JSON.stringify(b));\nconst ids = list => list.map(x => x.id);\n")
+	for _, name := range []string{"reorderShare", "shareDropAfter", "shareHitIndex", "shareGestureOrder", "shareScrollLock"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+eq([shareScrollLock(true, false), shareScrollLock(false, false), shareScrollLock(false, true)], [true, false, true], 'the handle takes the scroll, a bare row waits for a shift');
+for (const kind of ['offers', 'landings']) {
+  const a = {id: kind + '1'}, b = {id: kind + '2'}, c = {id: kind + '3'};
+  const rects = [{top:0,height:40},{top:50,height:40},{top:100,height:40}];
+  const mouse = shareGestureOrder([a, b, c], 1, rects, 12);
+  const touch = shareGestureOrder([a, b, c], 1, rects, 12);
+  eq(ids(touch), ids(mouse), kind + ': a finger drop matches the mouse drop');
+  eq(ids(touch), [kind + '2', kind + '1', kind + '3'], kind + ': the second row moves in front of the first');
+  eq(ids(shareGestureOrder([a, b, c], 1, rects, 36)), ids(shareGestureOrder([a, b, c], 1, rects, 36)), kind + ': the lower half agrees with itself');
+  eq(ids(shareGestureOrder([a, b, c], 1, rects, 36)), [kind + '1', kind + '2', kind + '3'], kind + ': the lower half of the first leaves the second in place');
+  eq(ids(shareGestureOrder([a, b, c], 0, rects, 130)), [kind + '2', kind + '3', kind + '1'], kind + ': the first row goes after the last');
+  eq(ids(shareGestureOrder([a, b], 0, [{top:0,height:40},{top:50,height:40}], 10)), [kind + '1', kind + '2'], kind + ': a point on the dragged row changes nothing');
+  eq(ids(shareGestureOrder([a, b, c], 1, rects, 45)), [kind + '1', kind + '2', kind + '3'], kind + ': a gap is not a drop');
+  const src = [a, b, c];
+  shareGestureOrder(src, 1, rects, 12);
+  eq(ids(src), [kind + '1', kind + '2', kind + '3'], kind + ': the source order is not changed');
+}
+if (failed) process.exit(1);
+`)
+	dir := t.TempDir()
+	file := filepath.Join(dir, "share-touch.js")
+	if err := os.WriteFile(file, []byte(src.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, file).CombinedOutput(); err != nil {
+		t.Fatalf("node: %v\n%s", err, out)
 	}
 }
