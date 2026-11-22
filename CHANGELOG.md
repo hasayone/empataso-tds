@@ -129,6 +129,7 @@ otes field (up to 10000 characters) saved with the offer; the engine ignores it.
 
 ### Fixed
 
+- Engine and admin exit after three missed local health probes in a row, so Docker restarts the container. The engine probe is `GET /healthz` on port 8080 and the admin probe is `GET /api/health` on port 8090. A single miss and the start window do not stop the process, and a dead ClickHouse or Redis does not, because those probes only check that the process answers. Cron is not in this loop.
 - Stream offers and landings: a finger on the reorder handle moves the row and writes the same order as a mouse drop. The page still scrolls until the finger is on that handle; the share field, the catalog select and Remove still click. One row still has no handle.
 - Bot signatures: «Run now» runs the `bot_signatures` job, and a download that fails is an error on the card instead of «waiting» and zero signatures. Success is recorded only when the parsed rules are in the file the engine loads; an empty download is not a success and does not create a file. Each source keeps its own file under `bot_sources`, filled with its rules on a successful download. A source that fails leaves that file as it was.
 - Groups window: the first save of the open name, including the same letters in another case, closes the editor and does not report that the name is already taken. A second click does not send another rename. An empty name and a name of a different group are still refused.
