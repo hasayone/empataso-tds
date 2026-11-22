@@ -64,10 +64,10 @@ func TestToolsGeoStateOffersDBIPCity(t *testing.T) {
 		t.Fatalf("state %+v", st)
 	}
 	city := st.Databases[0]
-	if city.Kind != geo.KindCity || city.Source != cron.GeoSourceMaxMind || !city.NeedsKey || city.FreeAlt != cron.GeoSourceDBIP {
-		t.Fatalf("city row %+v", city)
+	if city.Kind != geo.KindCity || city.Source != cron.GeoSourceDBIP || !city.Ready || city.NeedsKey {
+		t.Fatalf("city row %+v, want DB-IP City Lite filled in automatically", city)
 	}
-	if dbip := st.Databases[1]; !dbip.Ready || dbip.FreeAlt != "" {
+	if dbip := st.Databases[1]; !dbip.Ready {
 		t.Fatalf("dbip row %+v", dbip)
 	}
 
@@ -79,6 +79,37 @@ func TestToolsGeoStateOffersDBIPCity(t *testing.T) {
 	}
 }
 
+// TestToolsGeoStateShowsCityGuard checks that the last check of the city database
+// by the cron service reaches the panel, and that the field is absent before any.
+func TestToolsGeoStateShowsCityGuard(t *testing.T) {
+	base, cronFile := geoToolsServer(t)
+	admin, _ := boardLogin(t, base, "admin", "p@ss")
+	read := func() geoToolsState {
+		resp, raw := boardGet(t, admin, base+"/api/tools/geo", "")
+		var st geoToolsState
+		if resp.StatusCode != http.StatusOK || json.Unmarshal(raw, &st) != nil {
+			t.Fatalf("geo state %d %s", resp.StatusCode, raw)
+		}
+		return st
+	}
+	if st := read(); st.CityGuard != nil {
+		t.Fatalf("no cron status yet, guard %+v", st.CityGuard)
+	}
+	next := time.Now().Add(time.Minute).UTC().Truncate(time.Second)
+	status := cron.Status{Heartbeat: time.Now(), GeoCity: &cron.GeoCityState{Running: false, Error: "download.db-ip.com: HTTP 503", NextTry: next}}
+	b, err := json.Marshal(status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cron.StatusPath(cronFile), b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	st := read()
+	if st.CityGuard == nil || st.CityGuard.Error != "download.db-ip.com: HTTP 503" || !st.CityGuard.NextTry.Equal(next) || !st.Alive {
+		t.Fatalf("guard %+v alive=%v", st.CityGuard, st.Alive)
+	}
+}
+
 func TestToolsGeoDownload(t *testing.T) {
 	base, cronFile := geoToolsServer(t)
 	admin, csrf := boardLogin(t, base, "admin", "p@ss")
@@ -87,8 +118,11 @@ func TestToolsGeoDownload(t *testing.T) {
 		return resp.StatusCode, string(raw)
 	}
 
-	if code, raw := post(map[string]string{"kind": "city"}); code != http.StatusConflict || !strings.Contains(raw, geoReasonNeedsKey) {
-		t.Fatalf("keyless MaxMind city: %d %s", code, raw)
+	if code, raw := post(map[string]string{"kind": "asn"}); code != http.StatusConflict || !strings.Contains(raw, geoReasonNeedsKey) {
+		t.Fatalf("keyless MaxMind asn: %d %s", code, raw)
+	}
+	if code, raw := post(map[string]string{"kind": "city"}); code != http.StatusAccepted {
+		t.Fatalf("a keyless city source is downloaded from DB-IP, got %d %s", code, raw)
 	}
 	if code, _ := post(map[string]string{"kind": "zip"}); code != http.StatusBadRequest {
 		t.Fatalf("bad kind: %d", code)
@@ -109,7 +143,7 @@ func TestToolsGeoDownload(t *testing.T) {
 		}
 	}
 	trigger, err := os.ReadFile(cron.TriggerPath(cronFile))
-	if err != nil || strings.TrimSpace(string(trigger)) != cron.JobGeoDB {
+	if jobs := strings.Fields(string(trigger)); err != nil || len(jobs) == 0 || jobs[len(jobs)-1] != cron.JobGeoDB {
 		t.Fatalf("trigger %q %v", trigger, err)
 	}
 	if code, _ := post(map[string]string{"kind": "dbip_asn"}); code != http.StatusAccepted {

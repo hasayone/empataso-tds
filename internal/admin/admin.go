@@ -660,7 +660,7 @@ func (s *Server) currentHash() string { return s.current().hash }
 func (s *Server) Handler() http.Handler {
 	s.routes, s.public = nil, nil
 	mux := http.NewServeMux()
-	s.handlePublic(mux, "GET /api/health", func(w http.ResponseWriter, r *http.Request) { writeJSON(w, 200, map[string]string{"status": "ok"}) })
+	s.handlePublic(mux, "GET /api/health", s.handleHealth)
 	s.handlePublic(mux, "GET /healthz", s.handleHealthz)
 	s.handlePublic(mux, "GET /api/setup", s.handleSetupGet)
 	s.handlePublic(mux, "POST /api/setup", s.handleSetupPost)

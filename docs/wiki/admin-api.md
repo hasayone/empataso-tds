@@ -605,7 +605,7 @@ nginx менять не нужно: в `deploy/nginx/emtds.conf` (по IP) и `e
 
 История проверок: `GET /api/tools/lookups` (раздел `tools`) — страница `{rows, total, owner, users}`, сначала новые; `offset`, `limit` (по умолчанию 20, до 200). Строка — `ts`, `uid`, `login`, `ip`, `country`, `city`, `asn`, `org`, `proxy`, `lists`. Пользователь видит только свои проверки, чужой `user` — `403`. Владелец (администратор из окружения, вошедший по куке) видит все, получает `users` для фильтра и может передать `user`. `DELETE /api/tools/lookups[?user=]` — только владелец по куке, ответ `{"deleted": n}`; остальным, включая API-ключи и ADMIN-пользователей из `users.json`, `403`. История лежит в `<EMTDS_DATA_DIR>/lookup-history.json` (права `0600`, атомарная запись): не больше 2000 проверок и 90 дней, старые уходят первыми. Проверки ИИ-помощника через `GET /api/lookup` тоже попадают в историю. Id автора: `root` у владельца, `apikey:<id>` у ключа, иначе id пользователя.
 
-Гео-базы и скачивание: `GET /api/tools/geo` и `POST /api/tools/geo/download` — [гео-базы](geo-databases.md#скачать-из-инструментов).
+Гео-базы и скачивание: `GET /api/tools/geo` и `POST /api/tools/geo/download` — [гео-базы](geo-databases.md#инструменты-состояние-и-обновить-сейчас).
 
 `POST /api/simulate` (тот же раздел) в ответе тоже кладёт `proxy` в `visitor`. Правила потока, включая `proxy` и `ip_version`, проверяются. Детекция ботов не запускается.
 

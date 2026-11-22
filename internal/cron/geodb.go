@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
 	"github.com/oschwald/maxminddb-golang"
 )
 
@@ -24,6 +25,11 @@ const (
 	dbipMaxBytes = 256 << 20
 	// dbipTimeout bounds one DB-IP ASN download together with unpacking it.
 	dbipTimeout = 3 * time.Minute
+	// dbipCityMaxBytes caps a DB-IP City Lite download and the database unpacked
+	// from it; the file is about ten times the size of the ASN one.
+	dbipCityMaxBytes = 768 << 20
+	// dbipCityTimeout bounds one DB-IP City Lite download together with unpacking it.
+	dbipCityTimeout = 15 * time.Minute
 	// maxMindHost is the host that serves MaxMind databases and needs a license key.
 	maxMindHost = "download.maxmind.com"
 )
@@ -40,19 +46,63 @@ func (r *Runner) geoTarget(kind string) (path, env string) {
 	return r.paths.CityDB, "EMTDS_GEO_DB"
 }
 
+// isDBIP reports whether src downloads from DB-IP: every dbip_asn source and
+// any other source on the DB-IP host, such as City Lite. Those are held to the
+// DB-IP host, a size cap and a deadline.
+func isDBIP(src GeoSource) bool {
+	return src.Kind == KindDBIPASN || hostOf(cleanURL(src.URL)) == DBIPASNHost
+}
+
+// withCityFallback returns the sources of a geo_db run. A MaxMind city source
+// without a key cannot download, so when no other city source can, the city
+// sources become one DB-IP City Lite source, at the place of the first of them.
+// It returns sources itself when the runner has no city database path, there is
+// no city source, or one of them can download. The argument is not modified.
+func (r *Runner) withCityFallback(sources []GeoSource) []GeoSource {
+	if r.paths.CityDB == "" {
+		return sources
+	}
+	hasCity := false
+	for _, s := range sources {
+		if s.Kind != KindCity {
+			continue
+		}
+		if geoSourceReady(s) {
+			return sources
+		}
+		hasCity = true
+	}
+	if !hasCity {
+		return sources
+	}
+	out := make([]GeoSource, 0, len(sources))
+	placed := false
+	for _, s := range sources {
+		switch {
+		case s.Kind != KindCity:
+			out = append(out, s)
+		case !placed:
+			out, placed = append(out, r.dbipCitySource()), true
+		}
+	}
+	return out
+}
+
 // runGeoDB refreshes every source in cfg. ctx cancels the downloads.
 // The string is one "kind: result" per source that finished or was skipped,
 // joined with "; ". A source that fails is skipped, its error is joined into
 // the returned error, and later sources still run. A MaxMind source with no
 // account id and no license key is skipped with a message, not an error:
-// the default config lists them before anyone has a key.
+// the default config lists them before anyone has a key. The city one is the
+// exception: DB-IP City Lite is downloaded in its place, see withCityFallback.
 func (r *Runner) runGeoDB(ctx context.Context, cfg GeoDB) (string, error) {
-	if len(cfg.Sources) == 0 {
+	sources := r.withCityFallback(cfg.Sources)
+	if len(sources) == 0 {
 		return "no sources configured", nil
 	}
 	var done []string
 	var errs []error
-	for _, src := range cfg.Sources {
+	for _, src := range sources {
 		if src.User == "" && src.Password == "" && hostOf(cleanURL(src.URL)) == maxMindHost {
 			done = append(done, src.Kind+": skipped, no MaxMind license key")
 			continue
@@ -77,20 +127,30 @@ func (r *Runner) runGeoDB(ctx context.Context, cfg GeoDB) (string, error) {
 // The engine notices the new file on its reload interval.
 //
 // A URL with {YYYY-MM} is tried with the current month first and, on a 404,
-// with the previous one. A dbip_asn source is held to the DB-IP host (also for
-// redirects), a smaller size cap and a three minute deadline. Any failure
-// leaves the file at target as it was.
+// with the previous one. A DB-IP source (see isDBIP) is held to the DB-IP host
+// (also for redirects), a size cap and a deadline, both larger for City Lite.
+// Any failure leaves the file at target as it was.
 // ctx cancels the download, src is the source and target the installed file.
 // It returns a short result text, or an error that names the host or the
 // problem with the file, never a URL with a key.
 func (r *Runner) updateGeo(ctx context.Context, src GeoSource, target string) (string, error) {
 	limit := int64(maxGeoBytes)
-	if src.Kind == KindDBIPASN {
+	if isDBIP(src) {
+		timeout := dbipTimeout
 		limit = r.dbipLimit
+		if src.Kind == KindCity {
+			limit, timeout = r.dbipCityLimit, dbipCityTimeout
+		}
 		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, dbipTimeout)
+		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
+	return r.fetchGeo(ctx, src, target, limit)
+}
+
+// fetchGeo downloads src and installs it at target, see updateGeo. limit caps
+// the response and the unpacked database. ctx already carries the deadline.
+func (r *Runner) fetchGeo(ctx context.Context, src GeoSource, target string, limit int64) (string, error) {
 	dl, err := r.downloadGeo(ctx, src, target, limit)
 	if statusOf(err) == http.StatusNotModified {
 		return "not modified since " + dl.seen.LastModified, nil
@@ -99,12 +159,7 @@ func (r *Runner) updateGeo(ctx context.Context, src GeoSource, target string) (s
 		return "", err
 	}
 	defer dl.body.Close()
-	tmp, typ, built, err := r.stageGeo(dl.body, src.Kind, target, limit)
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(tmp)
-	return r.installGeo(src.Kind, target, tmp, typ, built, dl)
+	return r.installGeo(src.Kind, target, dl, limit)
 }
 
 // geoDownload is an answered download: the response body and headers, the URL
@@ -120,21 +175,21 @@ type geoDownload struct {
 // and moving on to the next only after a 404.
 // Ask only for what changed: the databases are tens of megabytes and come out a
 // few times a week at most, so If-Modified-Since is sent only when the target
-// exists and the last download was from the same URL.
+// is a database that works and the last download was from the same URL.
 // limit caps the response size. The caller closes dl.body when err is nil.
 // A 304 is returned as an error with that status, with dl.seen filled in.
 func (r *Runner) downloadGeo(ctx context.Context, src GeoSource, target string, limit int64) (dl geoDownload, err error) {
 	r.state(func(st *Status) { dl.seen = st.GeoSeen[src.Kind] })
-	_, statErr := os.Stat(target)
+	usable := geoFileUsable(target, src.Kind)
 	user, pass := src.Credentials()
 	req := fetchRequest{User: user, Pass: pass, Limit: limit}
-	if src.Kind == KindDBIPASN {
+	if isDBIP(src) {
 		req.Allow = r.dbipAllowed
 	}
 	urls := geoURLs(src.URL, r.now())
 	for i, u := range urls {
 		req.URL, req.Header = u, nil
-		if statErr == nil && dl.seen.URL == u && dl.seen.LastModified != "" {
+		if usable && dl.seen.URL == u && dl.seen.LastModified != "" {
 			req.Header = map[string]string{"If-Modified-Since": dl.seen.LastModified}
 		}
 		dl.url = u
@@ -147,45 +202,61 @@ func (r *Runner) downloadGeo(ctx context.Context, src GeoSource, target string, 
 	return dl, err
 }
 
-// stageGeo unpacks body into a temporary file next to target and checks it
-// with checkGeoDB for the given kind. limit caps the unpacked size.
-// It returns the temporary file's path, which the caller removes, and the
-// database type and build epoch. On any error the temporary file is already gone.
-func (r *Runner) stageGeo(body io.Reader, kind, target string, limit int64) (tmp, typ string, built int, err error) {
-	f, err := os.CreateTemp(filepath.Dir(target), "."+filepath.Base(target)+".dl*")
+// geoFileBuilt opens the file at path and returns the build time of the
+// database in it, when it is a database that fits a slot of the given kind.
+// It is the quick check made before trusting what is installed; checkGeoDB is
+// the full one made on a download. The error says the file is missing, does
+// not open or holds a database of another type.
+func geoFileBuilt(path, kind string) (time.Time, error) {
+	db, err := maxminddb.Open(path)
 	if err != nil {
-		return "", "", 0, err
+		return time.Time{}, err
 	}
-	err = unpackMMDB(body, f, limit)
-	if cerr := f.Close(); err == nil {
-		err = cerr
+	defer db.Close()
+	if !kindMatches(kind, db.Metadata.DatabaseType) {
+		return time.Time{}, fmt.Errorf("the file holds a %q database, not a %s one", db.Metadata.DatabaseType, kind)
 	}
-	if err == nil {
-		typ, built, err = r.checkGeoDB(f.Name(), kind)
-	}
-	if err != nil {
-		os.Remove(f.Name())
-		return "", "", 0, err
-	}
-	return f.Name(), typ, built, nil
+	return time.Unix(int64(db.Metadata.BuildEpoch), 0).UTC(), nil
 }
 
-// installGeo puts the checked database at tmp in place of target. When the
-// installed build is the one downloaded, the file is left alone. The download
-// is remembered either way, so the next run can ask for changes only.
-// It returns the result text, or the error of the permission change or rename.
-func (r *Runner) installGeo(kind, target, tmp, typ string, built int, dl geoDownload) (string, error) {
+// geoFileUsable reports whether geoFileBuilt accepts the file at path.
+func geoFileUsable(path, kind string) bool {
+	_, err := geoFileBuilt(path, kind)
+	return err == nil
+}
+
+// installGeo unpacks the download into a temporary file next to target, checks
+// it with checkGeoDB and only then replaces target with it, atomically. A file
+// that is not a working database of the kind never replaces anything. When the
+// target already works and its build is the one downloaded, it is left alone.
+// The download is remembered either way, so the next run can ask for changes only.
+// limit caps the unpacked size. It returns the result text, or the error of the
+// unpacking, the check or the replacement.
+func (r *Runner) installGeo(kind, target string, dl geoDownload, limit int64) (string, error) {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return "", err
+	}
 	var have int
 	r.state(func(st *Status) { have = st.GeoBuilt[kind] })
-	if _, err := os.Stat(target); err == nil && have == built {
-		r.rememberGeo(kind, dl)
+	var typ string
+	var built int
+	replaced, err := atomicfile.WriteFrom(target, 0o644,
+		func(w io.Writer) error { return unpackMMDB(dl.body, w, limit) },
+		func(tmp string) (err error) {
+			if typ, built, err = r.checkGeoDB(tmp, kind); err != nil {
+				return err
+			}
+			if have == built && geoFileUsable(target, kind) {
+				return atomicfile.ErrKeep
+			}
+			return nil
+		})
+	if err != nil {
+		return "", err
+	}
+	r.rememberGeo(kind, dl)
+	if !replaced {
 		return typ + " is up to date", nil
-	}
-	if err := os.Chmod(tmp, 0o644); err != nil {
-		return "", err
-	}
-	if err := os.Rename(tmp, target); err != nil {
-		return "", err
 	}
 	r.state(func(st *Status) {
 		if st.GeoBuilt == nil {
@@ -193,7 +264,6 @@ func (r *Runner) installGeo(kind, target, tmp, typ string, built int, dl geoDown
 		}
 		st.GeoBuilt[kind] = built
 	})
-	r.rememberGeo(kind, dl)
 	return typ + " updated", nil
 }
 
@@ -206,6 +276,7 @@ func (r *Runner) rememberGeo(kind string, dl geoDownload) {
 		st.GeoSeen[kind] = GeoSeen{URL: dl.url, LastModified: dl.header.Get("Last-Modified")}
 	})
 }
+
 // checkGeoDB opens the database at path and decides whether it may replace the
 // installed one. It must open, pass the library's structural check, have the
 // type kindMatches expects for kind and, for dbip_asn, name an

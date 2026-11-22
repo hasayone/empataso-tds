@@ -1,9 +1,44 @@
 package store
 
 import (
+	"context"
+	"reflect"
 	"strings"
 	"testing"
+	"time"
 )
+
+// TestGroupStatusJoinsOnlyConvertedClicks keeps the joined click side to the
+// clicks that have a conversion in the window. Imported clicks each carry their
+// own cid, so a year of them in one hash table broke the analytics memory limit
+// and the facts answer failed: the campaign table and the dashboard cards then
+// showed zeros. The placeholders must match the arguments in their order.
+func TestGroupStatusJoinsOnlyConvertedClicks(t *testing.T) {
+	q := groupStatusSQL(" AND country = ?", false)
+	sub := q[strings.Index(q, "INNER JOIN"):strings.Index(q, ") AS e ON")]
+	if !strings.Contains(sub, "AND country = ?\n\t\t\t\tAND cid IN (SELECT cid FROM conversions WHERE ts >= ? AND ts < ?)") {
+		t.Fatalf("click side is not limited to converted cids:\n%s", q)
+	}
+	conn := &fakeConn{results: []*fakeRows{{data: [][]any{{"alloffers", "lead", uint64(2), 1.5, 0.0, 0.0}}}}}
+	c := readyClient()
+	c.conn = conn
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	to := from.AddDate(1, 0, 0)
+	got, err := c.groupStatus(context.Background(), from, to, " AND country = ?", []any{"DE"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(conn.queries[0], "?"); n != len(conn.args[0]) {
+		t.Fatalf("%d placeholders, %d args", n, len(conn.args[0]))
+	}
+	want := []any{from, to, "DE", from, to, from, to}
+	if !reflect.DeepEqual(conn.args[0], want) {
+		t.Fatalf("args %#v, want %#v", conn.args[0], want)
+	}
+	if len(got) != 1 || got[0].GroupID != "alloffers" || got[0].N != 2 || got[0].Profit != 1.5 {
+		t.Fatalf("rows %+v", got)
+	}
+}
 
 // TestStatusFactsSQLAlias keeps the folded status from being named status.
 // ClickHouse substitutes a SELECT alias for the column of the same name, so

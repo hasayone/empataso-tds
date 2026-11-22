@@ -71,6 +71,8 @@ type Status struct {
 	Spool *SpoolState `json:"event_spool,omitempty"`
 	// BotSigs is the bot signature database after the last run; nil until the first one.
 	BotSigs *BotSigState `json:"bot_signatures,omitempty"`
+	// GeoCity is the last check of the city database by the guard; nil until the first one.
+	GeoCity *GeoCityState `json:"geo_city,omitempty"`
 
 	// Version and Commit are the build metadata of the running binary.
 	// Written on every save so the updater can read them via -probe.
@@ -152,6 +154,14 @@ type Runner struct {
 	dbipLimit   int64               // size cap of a dbip_asn download and of its unpacked database
 	probeIP     net.IP              // address every downloaded ASN database must be able to answer for
 
+	// City database guard, see geoensure.go.
+	dbipCityLimit int64     // size cap of a DB-IP City Lite download and of its unpacked database
+	dbipCityURL   string    // URL template of the database the guard installs
+	cityGuard     bool      // the guard is on (WatchCityDB)
+	cityNext      time.Time // next guard check (under mu)
+	cityBusy      bool      // a guard check is running (under mu)
+	cityFails     int       // failed downloads of a missing database in a row (under mu)
+
 	cfgErr string // the config problem last reported (Tick runs on one goroutine)
 
 	mu              sync.Mutex
@@ -189,6 +199,9 @@ func New(paths Paths, pb PostbackSource, log *slog.Logger) *Runner {
 		j.Running = false
 		st.Jobs[k] = j
 	}
+	if st.GeoCity != nil {
+		st.GeoCity.Running = false
+	}
 	return &Runner{
 		paths: paths, log: log, pb: pb,
 		http:           &http.Client{Timeout: 5 * time.Minute},
@@ -199,6 +212,8 @@ func New(paths Paths, pb PostbackSource, log *slog.Logger) *Runner {
 		disk:           DiskFree,
 		dbipAllowed:    dbipURLAllowed,
 		dbipLimit:      dbipMaxBytes,
+		dbipCityLimit:  dbipCityMaxBytes,
+		dbipCityURL:    DBIPCityURL,
 		probeIP:        net.IPv4(8, 8, 8, 8),
 		st:             st,
 		running:        map[string]bool{},
@@ -273,6 +288,8 @@ func (r *Runner) Tick(ctx context.Context) {
 			r.cfgErr = msg
 			r.log.Error("cron: config not usable, nothing runs until it is fixed", "err", err)
 		}
+		// The country database does not depend on the config: it is still kept.
+		r.maybeGuardCityDB(ctx, Config{})
 		r.heartbeat()
 		return
 	}
@@ -342,6 +359,7 @@ func (r *Runner) Tick(ctx context.Context) {
 	if requested[JobTelegramTest] {
 		r.start(ctx, cfg, JobTelegramTest, convSummaryFollow)
 	}
+	r.maybeGuardCityDB(ctx, cfg)
 	r.maybeCheckRedis(ctx, cfg.Telegram)
 	r.maybeCheckLoss(ctx, cfg.Telegram)
 	r.maybeCheckUpdates(ctx, cfg.Telegram)

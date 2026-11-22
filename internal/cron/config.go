@@ -560,10 +560,10 @@ func Load(path string) (Config, error) {
 }
 
 // Credentials returns the user and password to send with a download of s.
-// A dbip_asn source gets none, whatever the source holds: DB-IP is public, and
-// a license key must never reach it. This is the only place that decides.
+// A DB-IP source (see isDBIP) gets none, whatever the source holds: DB-IP is
+// public, and a license key must never reach it. This is the only place that decides.
 func (s GeoSource) Credentials() (user, password string) {
-	if s.Kind == KindDBIPASN {
+	if isDBIP(s) {
 		return "", ""
 	}
 	return s.User, s.Password

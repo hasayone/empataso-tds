@@ -356,7 +356,7 @@ func TestGeoDBFormats(t *testing.T) {
 		if err != nil || msg != "city: GeoLite2-City is up to date" || !after.ModTime().Equal(before.ModTime()) {
 			t.Errorf("%s: second run: %q, %v", name, msg, err)
 		}
-		left, _ := filepath.Glob(filepath.Join(e.dir, ".city.mmdb.dl*"))
+		left, _ := filepath.Glob(filepath.Join(e.dir, ".city.mmdb.tmp*"))
 		if len(left) != 0 {
 			t.Errorf("%s: temp files left behind: %v", name, left)
 		}

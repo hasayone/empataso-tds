@@ -85,16 +85,23 @@ func TestSearchFieldsShareThePause(t *testing.T) {
 	must(t, html, "const PICK_DEBOUNCE_MS=SEARCH_WAIT_MS;", "comboboxes wait the same")
 	for fn, needle := range map[string]string{
 		"bindCatalogBar":  "bindSearch(qi, v=>{CAT_Q[kind]=v; paintTable()})",
-		"flowsPage":       "bindSearch(q('#fq'),",
+		"flows":           "bindSearch(q('#fq'),",
 		"aiMountPanel":    "bindSearch(q('#ai-q',p),",
 		"aiModelPicker":   "bindSearch(search,",
-		"offerMacroNode":  "bindSearch(find,",
-		"openGroupsModal": "bindSearch(search,",
+		"macroPickNode":   "bindSearch(find,",
+		"openGroupWindow": "bindSearch(search,",
 	} {
-		if src := spaFunctionLine(html, fn); src != "" {
-			must(t, src, needle, fn+" searches through bindSearch")
+		src := spaFunctionLine(html, fn)
+		if src == "" {
+			t.Fatalf("%s not found in SPA", fn)
 		}
+		must(t, src, needle, fn+" searches through bindSearch")
 	}
+	offerMacros := spaFunctionLine(html, "offerMacroNode")
+	if offerMacros == "" {
+		t.Fatal("offerMacroNode not found in SPA")
+	}
+	must(t, offerMacros, "return macroPickNode(", "the offer macro picker uses the shared search")
 	must(t, html, "bindSearch(q('#col-find',m),", "the column search")
 	must(t, html, "KWS_SEARCH=bindSearch(q('#kws-q'),", "the keyword search")
 	must(t, html, "bindSearch(input, paint);", "the board icon search")

@@ -7,28 +7,32 @@ func geoToolRouteDocs() map[string]routeDoc {
 			ID: "get_tools_geo", Summary: "Geo databases: what is loaded and how each one is downloaded.",
 			Description: "Lists the city, MaxMind ASN and DB-IP ASN databases with their state (loaded, type, build date, file) and " +
 				"the source that fills each in the cron configuration: source (maxmind, dbip or custom), ready (a geo_db run downloads it), " +
-				"needs_key (only MaxMind sources without a license key) and free_alt (dbip: the city database can come from DB-IP City Lite, CC BY 4.0, no account). " +
+				"and needs_key (only MaxMind sources without a license key; never for the city database, which the cron service takes from DB-IP City Lite, CC BY 4.0, no account, when it has no key). " +
+				"city_guard is the last check of the city database by the cron service: present, built, running, error and next_try. The service downloads a missing city database by itself, whatever geo_db is set to, so no call is needed. " +
 				"job is the last geo_db run of the cron service, alive whether the service answers, can_download whether the caller may call POST /api/tools/geo/download.",
 			RU: docText{
 				Summary: "Гео-базы: что загружено и откуда каждая скачивается.",
 				Description: "Список баз города, ASN MaxMind и ASN DB-IP с состоянием (загружена, тип, дата сборки, файл) и " +
 					"источником в настройках cron: source (maxmind, dbip или custom), ready (запуск geo_db её скачает), " +
-					"needs_key (только источники MaxMind без лицензионного ключа) и free_alt (dbip: базу города можно взять из DB-IP City Lite, CC BY 4.0, без аккаунта). " +
+					"и needs_key (только источники MaxMind без лицензионного ключа; для базы города никогда: без ключа служба cron берёт DB-IP City Lite, CC BY 4.0, без аккаунта). " +
+					"city_guard — последняя проверка базы города службой cron: present, built, running, error и next_try. Недостающую базу города служба скачивает сама, независимо от настроек geo_db, вызов не нужен. " +
 					"job — последний запуск geo_db службы cron, alive — отвечает ли служба, can_download — может ли вызывающий вызвать POST /api/tools/geo/download.",
 			},
 			UK: docText{
 				Summary: "Гео-бази: що завантажено і звідки кожна завантажується.",
 				Description: "Список баз міста, ASN MaxMind та ASN DB-IP зі станом (завантажена, тип, дата збирання, файл) і " +
 					"джерелом у налаштуваннях cron: source (maxmind, dbip або custom), ready (запуск geo_db її завантажить), " +
-					"needs_key (лише джерела MaxMind без ліцензійного ключа) і free_alt (dbip: базу міста можна взяти з DB-IP City Lite, CC BY 4.0, без облікового запису). " +
+					"і needs_key (лише джерела MaxMind без ліцензійного ключа; для бази міста ніколи: без ключа служба cron бере DB-IP City Lite, CC BY 4.0, без облікового запису). " +
+					"city_guard — остання перевірка бази міста службою cron: present, built, running, error і next_try. Відсутню базу міста служба завантажує сама, незалежно від налаштувань geo_db, виклик не потрібен. " +
 					"job — останній запуск geo_db служби cron, alive — чи відповідає служба, can_download — чи може викликаючий викликати POST /api/tools/geo/download.",
 			},
 			Response: map[string]any{
 				"databases": []any{map[string]any{
 					"kind": "city", "path": "/var/lib/emtds/geo/city.mmdb", "type": "", "built": "0001-01-01T00:00:00Z", "loaded": false,
-					"source": "maxmind", "ready": false, "needs_key": true, "free_alt": "dbip",
+					"source": "dbip", "ready": true, "needs_key": false,
 				}},
 				"can_download": true, "cron": true, "alive": true,
+				"city_guard": map[string]any{"checked_at": "2026-11-22T21:00:00Z", "present": false, "running": true},
 				"job": map[string]any{"last_run": "2026-11-16T10:20:00Z", "ok": true, "message": "dbip_asn: DBIP-ASN-Lite (compat=GeoLite2-ASN) updated",
 					"duration_ms": 5200, "next_run": "2026-11-19T10:20:00Z", "running": false},
 			},

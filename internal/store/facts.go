@@ -251,8 +251,11 @@ func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, 
 // where is empty or an events filter that starts with " AND ".
 // dep selects sum(c.depsum) and sum(c.dep2sum); a closed wave uses typed zeros
 // and does not name the columns. The aggregate is aliased gid: group_id in where must stay
-// the events column. Placeholders are from, to, the where args, then from, to.
-// It does not fail.
+// the events column. The joined side keeps only clicks with a conversion in the
+// window: every imported click has its own cid, and a hash table of all of them
+// for a year outgrows the analytics memory limit, which fails the whole facts answer.
+// Placeholders are from, to, the where args, from, to of the conversion cids,
+// then from, to. It does not fail.
 func groupStatusSQL(where string, dep bool) string {
 	return `SELECT e.gid, ` + foldedStatusSQL("c.status") + ` AS status, count(), sum(c.profit), ` + sumDep(dep, "c.depsum") + `, ` + sumDep(dep, "c.dep2sum") + `
 		FROM conversions AS c FINAL
@@ -260,6 +263,7 @@ func groupStatusSQL(where string, dep bool) string {
 			SELECT cid, any(group_id) AS gid
 			FROM events
 			WHERE ts >= ? AND ts < ? AND cid != ''` + where + `
+				AND cid IN (SELECT cid FROM conversions WHERE ts >= ? AND ts < ?)
 			GROUP BY cid
 		) AS e ON e.cid = c.cid
 		WHERE c.ts >= ? AND c.ts < ?` + voidedConfirmedSQL("c.cid", "c.status") + `
@@ -270,8 +274,9 @@ func groupStatusSQL(where string, dep bool) string {
 // where is empty or from buildWhere on events. wargs are its placeholders.
 // It returns an error when the query or a scan fails.
 func (c *CH) groupStatus(ctx context.Context, from, to time.Time, where string, wargs []any) ([]StatusFact, error) {
-	evArgs := append([]any{from, to}, wargs...)
-	rows, err := c.conn.Query(ctx, groupStatusSQL(where, c.depsumConv), append(evArgs, from, to)...)
+	args := append([]any{from, to}, wargs...)
+	args = append(args, from, to, from, to)
+	rows, err := c.conn.Query(ctx, groupStatusSQL(where, c.depsumConv), args...)
 	if err != nil {
 		return nil, err
 	}

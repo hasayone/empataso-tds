@@ -25,6 +25,7 @@ eq(layoutPick('huge'), 'box', 'an unknown value is the container');
 eq(currentLayout(), 'box', 'a fresh browser shows the container');
 applyLayout('wide');
 eq(STORE['emtds-layout'], 'wide', 'the full width is saved');
+eq(viewTouches, 1, 'the full width schedules the account view');
 eq(ROOT.attrs['data-layout'], 'wide', 'the root gets the full width at once');
 eq(resized, 1, 'the page lays out again');
 eq(currentLayout(), 'wide', 'the saved choice reads back');
@@ -36,6 +37,7 @@ eq(card.includes('id="layout-card"'), true, 'the card has its id');
 eq(card.includes('data-layout-pick="wide" class="on" aria-checked="true"'), true, 'the card marks the saved choice');
 applyLayout('nope');
 eq(STORE['emtds-layout'], 'box', 'an unknown pick saves the container');
+eq(viewTouches, 2, 'the container schedules the account view');
 eq('data-layout' in ROOT.attrs, false, 'the container drops the root attribute');
 eq(BTN.map(b => b.on), [true, false], 'the container button is marked');
 if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
@@ -55,6 +57,8 @@ const HINT = {textContent: ''};
 const qa = sel => (sel === '[data-layout-pick]' ? BTN : []);
 const q = sel => (sel === '[data-layout-hint]' ? HINT : null);
 let resized = 0;
+let viewTouches = 0;
+function touchPageViews(){ viewTouches++; }
 class Event { constructor(t) { this.type = t; } }
 const window = {dispatchEvent: e => { if (e.type === 'resize') resized++; }};
 const tr = s => s;
@@ -137,6 +141,8 @@ const localStorage = {getItem: k => (k in STORE ? STORE[k] : null), setItem: (k,
 const ROOT = {attrs: {}, getAttribute(k) { return k in this.attrs ? this.attrs[k] : null; }, setAttribute(k, v) { this.attrs[k] = String(v); }, removeAttribute(k) { delete this.attrs[k]; }};
 const document = {documentElement: ROOT};
 let painted = 0; const themeChanged = () => { painted++; };
+let viewTouches = 0;
+function touchPageViews(){ viewTouches++; }
 const ACCENT_KEY='emtds-accent';
 `)
 	b.WriteString(spaBetween(html, "const ACCENTS=", "\nfunction isDark(") + "\n")
@@ -166,11 +172,13 @@ eq('data-accent' in ROOT.attrs, false, 'violet drops the root attribute');
 STORE['emtds-accent'] = 'neon';
 eq(currentAccent(), 'violet', 'an unknown stored accent reads as violet');
 eq(painted, 3, 'each pick repaints the theme');
+eq(viewTouches, 3, 'each accent pick schedules the account view');
 STORE['emtds-accent'] = '#3366cc';
 delete ROOT.attrs['data-accent'];
 eq(currentAccent(), 'custom', 'a stored hex is the custom accent');
 applyAccent('blue');
 eq(STORE['emtds-accent'], 'blue', 'a preset replaces the custom colour');
+eq(viewTouches, 4, 'a preset after a custom colour schedules the account view');
 if (failed) process.exit(1);
 `)
 	f := filepath.Join(t.TempDir(), "accent.js")

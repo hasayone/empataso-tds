@@ -78,6 +78,13 @@ func main() {
 	runner.WatchLoss(loss)
 	log.Info("event loss alert on", "dir", loss.Dir, "recover_after", loss.RecoverAfter.String())
 
+	// Without the country database every click has an empty country: this process
+	// checks it at start and every few minutes and downloads it when it is missing.
+	if paths.CityDB != "" {
+		runner.WatchCityDB()
+		log.Info("city database guard on", "path", paths.CityDB)
+	}
+
 	bi := config.Build()
 	log.Info("cron started", "config", paths.Config, "data", paths.DataDir, "version", bi.Version, "commit", bi.Commit)
 	runner.Run(ctx, 5*time.Second)

@@ -23,26 +23,28 @@ const (
 )
 
 // geoToolsDB is one geo database row of the Tools page: what is loaded and how
-// the cron config fills its slot. FreeAlt names the free source the panel may
-// offer instead of a key ("dbip" for the city slot), or is empty.
+// the cron config fills its slot. The city slot is always ready: the cron
+// service downloads DB-IP City Lite for it when no source with a key is set.
 type geoToolsDB struct {
 	geo.Info
 	Source   string `json:"source"`
 	Ready    bool   `json:"ready"`
 	NeedsKey bool   `json:"needs_key"`
-	FreeAlt  string `json:"free_alt,omitempty"`
 }
 
 // geoToolsState is the answer of GET /api/tools/geo.
 // Cron is true when the admin knows the cron config, Alive when the cron service
-// wrote a heartbeat recently. Job is the last geo_db run. CanDownload tells the
+// wrote a heartbeat recently. Job is the last geo_db run. CityGuard is the last
+// check of the city database by the cron service, which downloads it by itself
+// when it is missing; it is absent until the first check. CanDownload tells the
 // panel whether the caller may start a download.
 type geoToolsState struct {
-	Databases   []geoToolsDB   `json:"databases"`
-	CanDownload bool           `json:"can_download"`
-	Cron        bool           `json:"cron"`
-	Alive       bool           `json:"alive"`
-	Job         cron.JobStatus `json:"job"`
+	Databases   []geoToolsDB       `json:"databases"`
+	CanDownload bool               `json:"can_download"`
+	Cron        bool               `json:"cron"`
+	Alive       bool               `json:"alive"`
+	Job         cron.JobStatus     `json:"job"`
+	CityGuard   *cron.GeoCityState `json:"city_guard,omitempty"`
 }
 
 // geoReloader is the part of geo.DB that re-reads changed files at once.
@@ -68,6 +70,7 @@ func (s *Server) handleToolsGeo(w http.ResponseWriter, r *http.Request) {
 		if status, err := cron.ReadStatus(cron.StatusPath(s.cfg.CronFile)); err == nil {
 			st.Alive = time.Since(status.Heartbeat) < cronAliveWindow
 			st.Job = status.Jobs[cron.JobGeoDB]
+			st.CityGuard = status.GeoCity
 		}
 	}
 	slots := map[string]cron.GeoSlot{}
@@ -77,11 +80,7 @@ func (s *Server) handleToolsGeo(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Geo != nil {
 		for _, in := range s.cfg.Geo.Databases() {
 			slot := slots[in.Kind]
-			row := geoToolsDB{Info: in, Source: slot.Source, Ready: slot.Ready, NeedsKey: slot.NeedsKey}
-			if in.Kind == geo.KindCity && !slot.Ready {
-				row.FreeAlt = cron.GeoSourceDBIP
-			}
-			st.Databases = append(st.Databases, row)
+			st.Databases = append(st.Databases, geoToolsDB{Info: in, Source: slot.Source, Ready: slot.Ready, NeedsKey: slot.NeedsKey})
 		}
 	}
 	writeJSON(w, http.StatusOK, st)
@@ -114,7 +113,9 @@ func (s *Server) geoTargetOf(kind string) string {
 // handleToolsGeoDownload asks the cron service to run geo_db now for one database.
 // The body is {"kind": "city"|"asn"|"dbip_asn", "source": ""|"dbip"}. Source dbip
 // is for the city database only: the keyless MaxMind city source in cron.json is
-// replaced by DB-IP City Lite before the run. The run itself is the geo_db job,
+// replaced by DB-IP City Lite before the run; without it the run downloads the same
+// file for a keyless city source, so the city database never needs this call: the
+// cron service fetches it by itself when it is missing. The run itself is the geo_db job,
 // the same one the schedule starts; the engine and the admin pick the new file up
 // on their reload interval.
 //

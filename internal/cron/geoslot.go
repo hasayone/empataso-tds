@@ -22,7 +22,9 @@ var ErrGeoCitySourceSet = errors.New("a working city source is already configure
 // Kind is KindCity, KindASN or KindDBIPASN. Source is the class of the first
 // source that can download, or of the first source at all, or "" when no source
 // has this kind. Ready is true when a geo_db run downloads something for the slot.
-// NeedsKey is true when the slot has only MaxMind sources without a key.
+// NeedsKey is true when the slot has only MaxMind sources without a key. The
+// city slot never needs one: a run downloads DB-IP City Lite for it then, and
+// the slot reports the dbip source.
 type GeoSlot struct {
 	Kind     string `json:"kind"`
 	Source   string `json:"source"`
@@ -64,6 +66,10 @@ func (c Config) GeoSlots() []GeoSlot {
 			if slot.Source == "" {
 				slot.Source, slot.NeedsKey = geoSourceClass(s), true
 			}
+		}
+		if kind == KindCity && slot.NeedsKey {
+			// A MaxMind city source without a key is downloaded from DB-IP instead.
+			slot.Source, slot.Ready, slot.NeedsKey = GeoSourceDBIP, true, false
 		}
 		out = append(out, slot)
 	}

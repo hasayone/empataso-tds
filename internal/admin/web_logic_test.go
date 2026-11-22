@@ -1957,6 +1957,7 @@ if (failed) process.exit(1);
 // TestFlowDestMarks checks the stream destination markup: an expanded row names the selected
 // offer, a compact row shows a badge and the share percent, extra offers fold into +N, and a
 // stream that only has its own URL (even with offer_id in the query) gets no empty badge.
+// Catalog rows in the fixture are switched on: a missing status is a stopped offer and paints the red badge.
 func TestFlowDestMarks(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -1983,7 +1984,7 @@ func TestFlowDestMarks(t *testing.T) {
 	line := html[mark:]
 	nl := strings.Index(line, "\n")
 	src.WriteString(line[:nl+1])
-	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowDestMarks", "flowDestURL"} {
+	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowOfferStopped", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowDestMarks", "flowDestURL"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -1996,7 +1997,7 @@ const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAI
 const part = (h, a, b) => { const i = h.indexOf(a); return i < 0 ? '' : h.slice(i, b ? h.indexOf(b, i) : h.length); };
 const shown = h => h.replace(/ title="[^"]*"/g, '');
 
-OFFERS = [{id:'o1', name:'Alpha'},{id:'o2', name:'Beta'},{id:'o3', name:'Gamma'},{id:'o4', name:'<Delta>'}];
+OFFERS = [{id:'o1', name:'Alpha', status:true},{id:'o2', name:'Beta', status:true},{id:'o3', name:'Gamma', status:true},{id:'o4', name:'<Delta>', status:true}];
 LANDINGS = [{id:'l1', name:'Land'}];
 
 let h = flowDestMarks({redirect:'http_redirect', offers:[{id:'o1', share:100}]});
@@ -2042,17 +2043,17 @@ eq(zeroBadge.includes('Alpha — 0%'), true, 'the zero badge title names Alpha')
 eq(zeroBadge.includes('Beta — 0%'), true, 'the zero badge title names Beta');
 eq(flowDestTip({redirect:'http_redirect', offers:[{id:'o1',share:0},{id:'o3',share:100}]}).includes('Alpha — 0%'), true, 'the destination tooltip lists a zero share');
 
-OFFERS = [{id:'807', name:''},{id:'1046', name:'Awintura'}];
+OFFERS = [{id:'807', name:'', status:true},{id:'1046', name:'Awintura', status:true}];
 h = flowDestMarks({redirect:'http_redirect', offers:[{id:'807',share:50},{id:'1046',share:50}]});
 eq(h.includes('807'), false, 'a numeric id without a name is not a badge');
 eq(shown(h).includes('>Awintura<'), true, 'the catalog name is the badge');
 
-OFFERS = [{id:'o1', name:'   '}];
+OFFERS = [{id:'o1', name:'   ', status:true}];
 h = flowDestMarks({redirect:'http_redirect', offers:[{id:'o1', share:100}]});
 eq(shown(h).includes('>o1<'), true, 'a blank name of a non-numeric id stays the id');
 eq(/<span class="nm"><\/span>/.test(h), false, 'a blank name is not an empty badge');
 
-OFFERS = [{id:'o1', name:'Alpha'}];
+OFFERS = [{id:'o1', name:'Alpha', status:true}];
 LANDINGS = [{id:'l1', name:'Land'}];
 h = flowDestMarks({redirect:'http_redirect', landings:[{id:'l1', share:100}]});
 eq(shown(h).includes('>Land<'), true, 'the row shows the landing name');
@@ -2060,7 +2061,7 @@ eq(shown(h).includes('>100%<'), true, 'landing badge has its share');
 
 const NOOUT = new Set();
 function outHTML(red, out){ return '<div class="out">'+String(out||'')+'</div>'; }
-OFFERS = [{id:'o1', name:'Alpha'},{id:'o3', name:'Gamma'}];
+OFFERS = [{id:'o1', name:'Alpha', status:true},{id:'o3', name:'Gamma', status:true}];
 let u = flowDestURL({redirect:'http_redirect', offers:[{id:'o1', share:50},{id:'o3', share:50}], out:'https://1wyvdy.life/casino/list?open=register'});
 eq(u, '', 'selected offers hide the saved URL');
 eq(flowDestMarks({redirect:'http_redirect', offers:[{id:'o1', share:50},{id:'o3', share:50}]}).includes('>50%<'), true, 'those offers still show their percent');
@@ -2069,7 +2070,7 @@ eq(u.includes('https://1wyvdy.life/casino/list?open=register'), true, 'a direct 
 eq(flowDestMarks({redirect:'http_redirect', out:'https://1wyvdy.life/casino/list?open=register'}), '', 'a direct URL has no offer badges');
 u = flowDestURL({redirect:'http_redirect', offers:[{id:'o1',share:0},{id:'o3',share:100}], out:'https://example.com/go'});
 eq(u, '', 'a positive offer share hides the URL');
-OFFERS = [{id:'807', name:''}];
+OFFERS = [{id:'807', name:'', status:true}];
 u = flowDestURL({redirect:'http_redirect', offers:[{id:'807', share:100}], out:'https://example.com/only'});
 eq(u.includes('https://example.com/only'), true, 'a nameless numeric id leaves the link');
 
@@ -2087,6 +2088,7 @@ if (failed) process.exit(1);
 // TestFlowDestOfferStats checks the destination block: the collapsed card is one stream
 // total and a row of badges, the detailed row is one line per offer before the report
 // and after it, a direct URL stays one stream summary, and an offer label differs from a direct URL.
+// Catalog rows in the fixture are switched on, so the badge stays gray and the title is the name and the percent.
 func TestFlowDestOfferStats(t *testing.T) {
 	node, err := exec.LookPath("node")
 	if err != nil {
@@ -2166,7 +2168,7 @@ func TestFlowDestOfferStats(t *testing.T) {
 	line := html[mark:]
 	nl := strings.Index(line, "\n")
 	src.WriteString(line[:nl+1])
-	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "flowCanvasOpen", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "streamsOnScreen", "watchStreamOfferScreen", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed"} {
+	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowOfferStopped", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowOfferMark", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "flowCanvasOpen", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "streamsOnScreen", "watchStreamOfferScreen", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -2179,7 +2181,7 @@ const eq = (got, want, what) => { if (got !== want) { failed++; console.log('FAI
 const g = {id:'g1', name:'Camp'};
 const offers = {redirect:'http_redirect', offers:[{id:'o1', share:60},{id:'o2', share:40}]};
 const sp = {hits:10, bots:3, conv:10, profit:100};
-OFFERS = [{id:'o1', name:'Alpha'},{id:'o2', name:'Beta'}];
+OFFERS = [{id:'o1', name:'Alpha', status:true},{id:'o2', name:'Beta', status:true}];
 LANDINGS = [{id:'l1', name:'Land'}];
 const row = (expanded) => flowDestStatsHTML(offers, sp, g, 'main', expanded, false) + flowDestMarks(offers, flowDestNamed(offers, g, 'main', expanded, false, sp));
 
@@ -2219,7 +2221,7 @@ eq(lines.includes('3 bots'), false, 'before the answer the stream total is not c
 eq(h.includes('class="badges"'), false, 'both offers stay on rows, not under the summary');
 
 const savedEarly = OFFERS;
-OFFERS = [{id:'o1', name:'Alpha'},{id:'o2', name:'Beta'},{id:'o3', name:'Gamma'},{id:'o4', name:'Delta'},{id:'o5', name:'Epsilon'}];
+OFFERS = [{id:'o1', name:'Alpha', status:true},{id:'o2', name:'Beta', status:true},{id:'o3', name:'Gamma', status:true},{id:'o4', name:'Delta', status:true},{id:'o5', name:'Epsilon', status:true}];
 const earlyOut = {redirect:'http_redirect', offers:[{id:'o1', share:100},{id:'o2', share:0},{id:'o3', share:0},{id:'o4', share:0},{id:'o5', share:0}]};
 h = flowDestStatsHTML(earlyOut, sp, g, 'early', true, false) + flowDestMarks(earlyOut, flowDestNamed(earlyOut, g, 'early', true, false, sp));
 eq(h.includes('class="oline"'), true, 'before the report one offer is already one row');
@@ -2306,7 +2308,7 @@ eq(h.slice(h.indexOf('class="badges"')).includes('>Alpha<'), true, 'that offer i
 
 STREAM_OFFERS = new Map();
 const savedOffers = OFFERS;
-OFFERS = [{id:'o1', name:'Alpha'},{id:'o2', name:'Beta'},{id:'o3', name:'Gamma'},{id:'o4', name:'Delta'}];
+OFFERS = [{id:'o1', name:'Alpha', status:true},{id:'o2', name:'Beta', status:true},{id:'o3', name:'Gamma', status:true},{id:'o4', name:'Delta', status:true}];
 const many = {redirect:'http_redirect', offers:[{id:'o1', share:10},{id:'o2', share:30},{id:'o3', share:30},{id:'o4', share:30}]};
 STREAM_OFFERS = new Map();
 STREAM_OFFERS.set(streamOfferKey(g, 'wide'), foldStreamOffers([{offer:'o1', bots:0, conv:3, profit:9}]));

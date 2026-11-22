@@ -5,17 +5,19 @@ import (
 	"testing"
 )
 
-// TestGeoSlotsDefault checks that a fresh config asks for a MaxMind key for city
-// and asn and is ready for the DB-IP ASN database.
+// TestGeoSlotsDefault checks that a fresh config asks for a MaxMind key for asn
+// only, takes the city database from DB-IP City Lite without one and is ready
+// for the DB-IP ASN database.
 func TestGeoSlotsDefault(t *testing.T) {
 	slots := Default().GeoSlots()
 	if len(slots) != 3 || slots[0].Kind != KindCity || slots[1].Kind != KindASN || slots[2].Kind != KindDBIPASN {
 		t.Fatalf("slots %+v", slots)
 	}
-	for _, s := range slots[:2] {
-		if s.Ready || !s.NeedsKey || s.Source != GeoSourceMaxMind {
-			t.Fatalf("%s: %+v, want a MaxMind slot that needs a key", s.Kind, s)
-		}
+	if c := slots[0]; !c.Ready || c.NeedsKey || c.Source != GeoSourceDBIP {
+		t.Fatalf("city: %+v, want DB-IP City Lite in place of the keyless MaxMind source", c)
+	}
+	if s := slots[1]; s.Ready || !s.NeedsKey || s.Source != GeoSourceMaxMind {
+		t.Fatalf("asn: %+v, want a MaxMind slot that needs a key", s)
 	}
 	if d := slots[2]; !d.Ready || d.NeedsKey || d.Source != GeoSourceDBIP {
 		t.Fatalf("dbip_asn: %+v", d)

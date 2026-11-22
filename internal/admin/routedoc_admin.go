@@ -247,12 +247,17 @@ func publicRouteDocs() map[string]routeDoc {
 		"GET /api/health": {
 			ID: "get_api_health", Summary: "Check that the admin answers.",
 			Description: "Needs no key. Answers 200 with status ok while the admin process is up; it does not check " +
-				"ClickHouse or Redis.",
+				"ClickHouse or Redis. geo.city says whether the country and city database is loaded (loaded) and when it was built " +
+				"(built, UTC); the status stays 200 without it, because the cron service downloads a missing database by itself.",
 			RU: docOf("Проверка, что админка отвечает.",
-				"Ключ не нужен. Отвечает 200 и status ok, пока процесс админки жив; ClickHouse и Redis не проверяет."),
+				"Ключ не нужен. Отвечает 200 и status ok, пока процесс админки жив; ClickHouse и Redis не проверяет. "+
+					"geo.city показывает, загружена ли база страны и города (loaded) и когда она собрана (built, UTC); "+
+					"без неё статус остаётся 200, потому что недостающую базу служба cron скачивает сама."),
 			UK: docOf("Перевірка, що адмінка відповідає.",
-				"Ключ не потрібен. Відповідає 200 і status ok, поки процес адмінки живий; ClickHouse і Redis не перевіряє."),
-			Response: map[string]string{"status": "ok"},
+				"Ключ не потрібен. Відповідає 200 і status ok, поки процес адмінки живий; ClickHouse і Redis не перевіряє. "+
+					"geo.city показує, чи завантажена база країни та міста (loaded) і коли її зібрано (built, UTC); "+
+					"без неї статус залишається 200, бо відсутню базу служба cron завантажує сама."),
+			Response: map[string]any{"status": "ok", "geo": map[string]any{"city": map[string]any{"loaded": true, "built": "2026-11-01T00:00:00Z"}}},
 		},
 		"GET /healthz": {
 			ID: "get_healthz", Summary: "Liveness probe that tells which service and host answered.",
