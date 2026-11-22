@@ -212,6 +212,66 @@ func TestMeLangSavesAdminProfile(t *testing.T) {
 	}
 }
 
+// TestMeTzSavesProfile checks that the chosen time zone is stored on the account, not in views.
+// The environment administrator writes admin.json. A users.json account writes that user's prefs and keeps the language.
+func TestMeTzSavesProfile(t *testing.T) {
+	s, c, csrf, base := usersHTTP(t)
+	dir := t.TempDir()
+	s.cfg.PasswordFile = filepath.Join(dir, "admin.hash")
+	if err := os.WriteFile(s.cfg.PasswordFile, []byte("hash"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, raw := userJSON(t, c, http.MethodPut, base+"/api/me/tz", csrf, `{"tz":"UTC"}`)
+	if code != http.StatusOK {
+		t.Fatalf("save %d %s", code, raw)
+	}
+	code, raw = userJSON(t, c, http.MethodGet, base+"/api/me", csrf, "")
+	if code != http.StatusOK {
+		t.Fatalf("me %d %s", code, raw)
+	}
+	var me meResponse
+	if err := json.Unmarshal(raw, &me); err != nil {
+		t.Fatal(err)
+	}
+	if me.Prefs.TZ != "UTC" {
+		t.Fatalf("prefs.tz %q", me.Prefs.TZ)
+	}
+	prof, err := os.ReadFile(filepath.Join(dir, "admin.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(prof), `"tz":"UTC"`) {
+		t.Fatalf("admin profile: %s", prof)
+	}
+	code, _ = userJSON(t, c, http.MethodPut, base+"/api/me/tz", csrf, `{"tz":"Not/AZone"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("bad tz want 400, got %d", code)
+	}
+
+	code, raw = userJSON(t, c, http.MethodPost, base+"/api/users", csrf, `{"login":"zone","password":"secret1","type":"USER","enabled":true,"prefs":{"lang":"uk"}}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create %d %s", code, raw)
+	}
+	var u security.User
+	if err := json.Unmarshal(raw, &u); err != nil {
+		t.Fatal(err)
+	}
+	jar, _ := cookiejar.New(nil)
+	uc := &http.Client{Jar: jar}
+	_, ucsrf := login(t, uc, base, "zone", "secret1")
+	code, raw = userJSON(t, uc, http.MethodPut, base+"/api/me/tz", ucsrf, `{"tz":"Europe/Berlin"}`)
+	if code != http.StatusOK {
+		t.Fatalf("user tz %d %s", code, raw)
+	}
+	disk, err := os.ReadFile(s.cfg.UsersFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(disk), "Europe/Berlin") || !strings.Contains(string(disk), `"lang"`) {
+		t.Fatal("users.json lost the time zone or the language")
+	}
+}
+
 func TestUsersLastAdminGuards(t *testing.T) {
 	_, c, csrf, base := usersHTTP(t)
 

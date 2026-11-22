@@ -75,6 +75,7 @@ var cookieOnlyRoutes = map[string]bool{
 	"POST /api/logout":               true,
 	"GET /api/me":                    true,
 	"PUT /api/me/lang":               true,
+	"PUT /api/me/tz":                 true,
 	"GET /api/me/views":              true,
 	"PUT /api/me/views":              true,
 	"POST /api/password":             true,

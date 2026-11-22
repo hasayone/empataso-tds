@@ -91,7 +91,7 @@ type routeRule struct {
 // cookieRoutes lists the routes closed to Api-Key sessions: sessions, accounts,
 // keys, roles, integration secrets, domain connection and update write actions.
 var cookieRoutes = append([]string{
-	"POST /api/logout", "GET /api/me", "PUT /api/me/lang", "GET /api/me/views", "PUT /api/me/views", "POST /api/password",
+	"POST /api/logout", "GET /api/me", "PUT /api/me/lang", "PUT /api/me/tz", "GET /api/me/views", "PUT /api/me/views", "POST /api/password",
 	"GET /api/api-keys", "POST /api/api-keys", "POST /api/api-keys/{id}/rotate",
 	"PUT /api/api-keys/{id}", "DELETE /api/api-keys/{id}",
 	"GET /api/users", "POST /api/users", "GET /api/users/{id}", "PUT /api/users/{id}",
@@ -202,6 +202,7 @@ func addCoreRoutes(m map[string]routeRule, open func() routeRule, rule func(sect
 	m["POST /api/logout"] = open()
 	m["GET /api/me"] = open()
 	m["PUT /api/me/lang"] = open()
+	m["PUT /api/me/tz"] = open()
 	m["GET /api/me/views"] = open()
 	m["PUT /api/me/views"] = open()
 	m["POST /api/password"] = open()

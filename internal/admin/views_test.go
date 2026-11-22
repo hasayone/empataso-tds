@@ -56,6 +56,26 @@ func viewsGet(t *testing.T, c *http.Client, base, csrf string) (int, map[string]
 	return resp.StatusCode, got
 }
 
+func withoutRev(got map[string]json.RawMessage) map[string]json.RawMessage {
+	out := make(map[string]json.RawMessage, len(got))
+	for k, v := range got {
+		if k == "rev" {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+func viewsRevOf(t *testing.T, got map[string]json.RawMessage) int64 {
+	t.Helper()
+	var n int64
+	if err := json.Unmarshal(got["rev"], &n); err != nil {
+		t.Fatalf("rev: %v %s", err, got["rev"])
+	}
+	return n
+}
+
 func viewsPut(t *testing.T, c *http.Client, base, csrf string, body any) (int, map[string]json.RawMessage) {
 	t.Helper()
 	resp := csrfDo(t, c, http.MethodPut, base+"/api/me/views", csrf, body)
@@ -127,7 +147,7 @@ func TestViewsTwoUsersIsolated(t *testing.T) {
 	_, bobCSRF := login(t, bobC, base, "bob", "secret1")
 
 	code, got := viewsGet(t, bobC, base, bobCSRF)
-	if code != http.StatusOK || len(got) != 0 {
+	if code != http.StatusOK || len(withoutRev(got)) != 0 {
 		t.Fatalf("bob must not see admin views: %d %+v", code, got)
 	}
 
@@ -242,7 +262,7 @@ func TestViewsUnknownPageDropped(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("PUT: %d", code)
 	}
-	if len(got) != 1 || string(got["flows"]) == "" {
+	if _, ok := got["secret"]; ok || string(got["range"]) != "" || string(got["flows"]) == "" {
 		t.Fatalf("expected only flows: %+v", got)
 	}
 }
@@ -311,7 +331,7 @@ func TestViewsAccountTablesStored(t *testing.T) {
 	_, carolCSRF := login(t, carolC, base, "carol", "secret1")
 
 	code, got = viewsGet(t, carolC, base, carolCSRF)
-	if code != http.StatusOK || len(got) != 0 {
+	if code != http.StatusOK || len(withoutRev(got)) != 0 {
 		t.Fatalf("carol must start empty: %d %+v", code, got)
 	}
 	code, _ = viewsPut(t, carolC, base, carolCSRF, map[string]any{
@@ -378,52 +398,64 @@ func TestViewsCorruptFileNotOverwritten(t *testing.T) {
 	}
 }
 
-func TestViewsPageKeyRemovedOnPartialPut(t *testing.T) {
+func TestViewsPartialPutKeepsOtherPages(t *testing.T) {
 	_, base := viewsServer(t, filepath.Join(t.TempDir(), "views.json"))
 	c, csrf := authedClient(t, base)
 
-	code, _ := viewsPut(t, c, base, csrf, map[string]any{
+	code, got := viewsPut(t, c, base, csrf, map[string]any{
+		"rev":   0,
 		"range": map[string]string{"id": "today"},
 		"flows": map[string]string{"q": "keep"},
 	})
 	if code != http.StatusOK {
 		t.Fatalf("initial PUT: %d", code)
 	}
+	rev := viewsRevOf(t, got)
+	if rev != 1 || string(got["range"]) == "" {
+		t.Fatalf("first save: %+v", got)
+	}
 
-	code, got := viewsPut(t, c, base, csrf, map[string]any{
-		"flows": map[string]string{"q": "keep"},
+	code, got = viewsPut(t, c, base, csrf, map[string]any{
+		"rev":   rev,
+		"flows": map[string]string{"q": "next"},
 	})
 	if code != http.StatusOK {
 		t.Fatalf("partial PUT: %d", code)
 	}
-	if _, ok := got["range"]; ok {
-		t.Fatalf("range must be removed: %+v", got)
+	if !strings.Contains(string(got["range"]), "today") {
+		t.Fatalf("range must stay: %+v", got)
 	}
-	if string(got["flows"]) == "" {
-		t.Fatalf("flows must remain: %+v", got)
+	if !strings.Contains(string(got["flows"]), "next") {
+		t.Fatalf("flows must be replaced: %+v", got)
+	}
+	if viewsRevOf(t, got) != 2 {
+		t.Fatalf("rev: %+v", got["rev"])
 	}
 }
 
-func TestViewsEmptyPutDeletesUser(t *testing.T) {
+func TestViewsEmptyPutKeepsUser(t *testing.T) {
 	viewsPath := filepath.Join(t.TempDir(), "views.json")
 	_, base := viewsServer(t, viewsPath)
 	c, csrf := authedClient(t, base)
 
-	code, _ := viewsPut(t, c, base, csrf, map[string]any{"flows": map[string]string{"q": "x"}})
+	code, got := viewsPut(t, c, base, csrf, map[string]any{"flows": map[string]string{"q": "x"}})
 	if code != http.StatusOK {
 		t.Fatalf("PUT: %d", code)
 	}
-	code, got := viewsPut(t, c, base, csrf, map[string]any{})
-	if code != http.StatusOK || len(got) != 0 {
-		t.Fatalf("empty PUT: %d %+v", code, got)
+	rev := viewsRevOf(t, got)
+	code, got = viewsPut(t, c, base, csrf, map[string]any{"rev": rev})
+	if code != http.StatusOK || string(got["flows"]) == "" {
+		t.Fatalf("empty PUT must keep flows: %d %+v", code, got)
 	}
-	code, got = viewsGet(t, c, base, csrf)
-	if code != http.StatusOK || len(got) != 0 {
-		t.Fatalf("GET after delete: %d %+v", code, got)
+	if viewsRevOf(t, got) != rev {
+		t.Fatalf("empty PUT must not bump rev: %s", got["rev"])
 	}
-	disk, _ := os.ReadFile(viewsPath)
-	if strings.Contains(string(disk), "env:admin") {
-		t.Fatalf("user entry must be gone: %s", disk)
+	disk, err := os.ReadFile(viewsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(disk), "env:admin") || !strings.Contains(string(disk), `"q"`) {
+		t.Fatalf("user entry must stay: %s", disk)
 	}
 }
 
@@ -464,5 +496,173 @@ func TestViewsBadJSONBody(t *testing.T) {
 	code, _ := userJSON(t, c, http.MethodPut, base+"/api/me/views", csrf, `"array"`)
 	if code != http.StatusBadRequest {
 		t.Fatalf("non-object body: want 400, got %d", code)
+	}
+}
+
+func TestViewsFileMode(t *testing.T) {
+	viewsPath := filepath.Join(t.TempDir(), "views.json")
+	_, base := viewsServer(t, viewsPath)
+	c, csrf := authedClient(t, base)
+	code, _ := viewsPut(t, c, base, csrf, map[string]any{"flows": map[string]string{"q": "x"}})
+	if code != http.StatusOK {
+		t.Fatalf("PUT: %d", code)
+	}
+	info, err := os.Stat(viewsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("views mode %o, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestViewsStaleRevConflict(t *testing.T) {
+	viewsPath := filepath.Join(t.TempDir(), "views.json")
+	_, base := viewsServer(t, viewsPath)
+	c, csrf := authedClient(t, base)
+	code, got := viewsPut(t, c, base, csrf, map[string]any{
+		"rev":   0,
+		"flows": map[string]string{"q": "first"},
+	})
+	if code != http.StatusOK || viewsRevOf(t, got) != 1 {
+		t.Fatalf("first PUT: %d %+v", code, got)
+	}
+	before, err := os.ReadFile(viewsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, _ = viewsPut(t, c, base, csrf, map[string]any{
+		"rev":   0,
+		"flows": map[string]string{"q": "stale"},
+	})
+	if code != http.StatusConflict {
+		t.Fatalf("stale rev: want 409, got %d", code)
+	}
+	after, err := os.ReadFile(viewsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("stale put changed the file")
+	}
+	code, got = viewsGet(t, c, base, csrf)
+	if code != http.StatusOK || !strings.Contains(string(got["flows"]), "first") || viewsRevOf(t, got) != 1 {
+		t.Fatalf("stored views: %d %+v", code, got)
+	}
+}
+
+func TestViewsOwnerMustBeSession(t *testing.T) {
+	viewsPath := filepath.Join(t.TempDir(), "views.json")
+	_, base := viewsServer(t, viewsPath)
+	c, csrf := authedClient(t, base)
+	code, _ := viewsPut(t, c, base, csrf, map[string]any{
+		"rev":   0,
+		"owner": "someone-else",
+		"flows": map[string]string{"q": "nope"},
+	})
+	if code != http.StatusForbidden {
+		t.Fatalf("foreign owner: want 403, got %d", code)
+	}
+	if _, err := os.Stat(viewsPath); !os.IsNotExist(err) {
+		t.Fatalf("foreign owner must not create the file: %v", err)
+	}
+	code, got := viewsPut(t, c, base, csrf, map[string]any{
+		"rev":   0,
+		"owner": "env:admin",
+		"flows": map[string]string{"q": "mine"},
+	})
+	if code != http.StatusOK || !strings.Contains(string(got["flows"]), "mine") {
+		t.Fatalf("own key: %d %+v", code, got)
+	}
+}
+
+func TestViewsUIPageKeepsAccent(t *testing.T) {
+	_, base := viewsServer(t, filepath.Join(t.TempDir(), "views.json"))
+	c, csrf := authedClient(t, base)
+	code, got := viewsPut(t, c, base, csrf, map[string]any{
+		"rev":   0,
+		"flows": map[string]string{"q": "stay"},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("flows PUT: %d", code)
+	}
+	code, got = viewsPut(t, c, base, csrf, map[string]any{
+		"rev": viewsRevOf(t, got),
+		"ui": map[string]any{
+			"theme": "dark", "accent": "#112233", "layout": "wide",
+			"menu":      map[string]any{"order": []string{"flows"}, "hidden": map[string]bool{"logs": true}},
+			"cols":      map[string]any{"flows\nname": map[string]int{"name": 180}},
+			"dock":      map[string]int{"x": 12, "y": 40},
+			"assistant": "docs",
+			"token":     "sekret", "password": "sekret-pw", "lang": "ru", "tz": "UTC", "board": "main",
+		},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("ui PUT: %d", code)
+	}
+	raw := string(got["ui"])
+	for _, want := range []string{`"theme":"dark"`, `"accent":"#112233"`, `"layout":"wide"`, `"assistant":"docs"`, `"x":12`, "flows"} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("ui missing %s: %s", want, raw)
+		}
+	}
+	for _, banned := range []string{"sekret", `"lang"`, `"tz"`, `"board"`, "token", "password"} {
+		if strings.Contains(raw, banned) {
+			t.Fatalf("ui kept %s: %s", banned, raw)
+		}
+	}
+	if !strings.Contains(string(got["flows"]), "stay") {
+		t.Fatalf("flows page lost: %+v", got)
+	}
+	code, got = viewsGet(t, c, base, csrf)
+	if code != http.StatusOK || !strings.Contains(string(got["ui"]), `"#112233"`) || !strings.Contains(string(got["flows"]), "stay") {
+		t.Fatalf("GET ui: %d %+v", code, got)
+	}
+}
+
+func TestViewsDeleteUserDropsKey(t *testing.T) {
+	viewsPath := filepath.Join(t.TempDir(), "views.json")
+	_, base := viewsServer(t, viewsPath)
+	adminC, adminCSRF := authedClient(t, base)
+	code, raw := userJSON(t, adminC, http.MethodPost, base+"/api/users", adminCSRF,
+		`{"login":"dave","password":"secret1","type":"USER","enabled":true,"access":{"sections":["dashboard"],"grants":{}}}`)
+	if code != http.StatusCreated {
+		t.Fatalf("create dave: %d %s", code, raw)
+	}
+	var dave security.User
+	if err := json.Unmarshal(raw, &dave); err != nil {
+		t.Fatal(err)
+	}
+	jar, _ := cookiejar.New(nil)
+	daveC := &http.Client{Jar: jar}
+	_, daveCSRF := login(t, daveC, base, "dave", "secret1")
+	code, _ = viewsPut(t, daveC, base, daveCSRF, map[string]any{
+		"owner": dave.ID,
+		"flows": map[string]string{"q": "dave-only"},
+	})
+	if code != http.StatusOK {
+		t.Fatalf("dave PUT: %d", code)
+	}
+	code, got := viewsPut(t, adminC, base, adminCSRF, map[string]any{"flows": map[string]string{"q": "admin"}})
+	if code != http.StatusOK {
+		t.Fatalf("admin PUT: %d", code)
+	}
+	code, _ = userJSON(t, adminC, http.MethodDelete, base+"/api/users/"+dave.ID, adminCSRF, "")
+	if code != http.StatusNoContent {
+		t.Fatalf("delete dave: %d", code)
+	}
+	disk, err := os.ReadFile(viewsPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(disk), dave.ID) || strings.Contains(string(disk), "dave-only") {
+		t.Fatalf("deleted user still in views: %s", disk)
+	}
+	if !strings.Contains(string(disk), "env:admin") || !strings.Contains(string(disk), "admin") {
+		t.Fatalf("admin views lost: %s", disk)
+	}
+	code, got = viewsGet(t, adminC, base, adminCSRF)
+	if code != http.StatusOK || !strings.Contains(string(got["flows"]), "admin") {
+		t.Fatalf("admin GET: %d %+v", code, got)
 	}
 }

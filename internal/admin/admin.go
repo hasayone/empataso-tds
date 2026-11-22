@@ -668,6 +668,7 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "POST /api/logout", http.HandlerFunc(s.handleLogout))
 	s.handle(mux, "GET /api/me", http.HandlerFunc(s.handleMe))
 	s.handle(mux, "PUT /api/me/lang", http.HandlerFunc(s.handleMeLang))
+	s.handle(mux, "PUT /api/me/tz", http.HandlerFunc(s.handleMeTZ))
 	s.handle(mux, "GET /api/me/views", http.HandlerFunc(s.handleViewsGet))
 	s.handle(mux, "PUT /api/me/views", http.HandlerFunc(s.handleViewsPut))
 	s.handle(mux, "POST /api/password", http.HandlerFunc(s.handlePassword))

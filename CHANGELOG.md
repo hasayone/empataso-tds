@@ -8,6 +8,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Appearance: a custom accent at the bottom of the Appearance card. The chosen colour is written to the same `emtds-accent` key and paints the same accent the admin already uses; the ready-made colours stay. On a wide screen the «Statistics» heading and its two cards sit in the empty columns of the Interface row; a narrow screen keeps Interface above Statistics.
 - Board composition: the block «Partner groups» lists the group labels already stored on affiliate networks (the `group` field), with the same checkbox and search as offer and landing groups. A checked group is saved with the rest of the composition and stays on the section. Network names stay in the search under that block.
 - Conversion alerts: each new conversion still uses the card template, and `[PROFIT]` is that conversion's payout. The once-a-day message is a short report of the period sum and the campaigns, streams, countries, devices and keywords that make it up, in the language of the recipient's profile (`ru`, `en` or `uk`). It is not the line "Profit for today".
 - Conversion alerts: the period time zone is chosen from the same searchable list as the profile timezone, not typed in. The saved value is still `conversions.timezone`.
@@ -83,6 +84,7 @@ otes field (up to 10000 characters) saved with the offer; the engine ignores it.
 
 ### Changed
 
+- Account views. `PUT /api/me/views` writes only the pages it was sent: a missing page stays, and an empty body does not remove the account. The answer carries `rev`; a stale `rev` is 409 and the file is left as it was. The theme, the accent (including a custom colour), the content width, the menu, the column widths, the transfer window and the assistant tab are stored on the account in the `ui` page. Until the account answers, the browser cache is what is on screen; after that the account wins. The language and the time zone stay on the profile (`users.json` or `admin.json`). Choosing a time zone is saved with `PUT /api/me/tz`. Deleting an account removes its views.
 - The deposit column is labelled depSum in the tables, the column picker and the ru/en/uk translations. The postback parameter stays depsum. Revenue is unchanged.
 - Landing files and a local offer landing share one Ace editor (line numbers, HTML, CSS, JS and PHP colours, the admin surface and accent). The saved value is the plain text of the editor. The offer «Action» field stays a plain textarea.
 - Offer dialog, first tab: the on/off switch sits at the bottom, after the name, the group, the network and the URL. The same checkbox (`ostatus`) still writes `status`, the field the router reads.

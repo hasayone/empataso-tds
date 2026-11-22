@@ -248,6 +248,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		if lang := s.adminLang(); lang != "" {
 			out.Prefs.Lang = lang
 		}
+		if tz := s.adminTZ(); tz != "" {
+			out.Prefs.TZ = tz
+		}
 	}
 	if boards, meta, err := s.visibleBoardItems(r.Context(), sess); err == nil {
 		out.Boards = boards

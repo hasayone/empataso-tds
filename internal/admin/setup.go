@@ -24,6 +24,8 @@ type adminProfile struct {
 	Email string `json:"email"`
 	// Lang is the panel language of the environment administrator: ru, en or uk.
 	Lang string `json:"lang,omitempty"`
+	// TZ is the statistics time zone of the environment administrator, an IANA name.
+	TZ string `json:"tz,omitempty"`
 }
 
 // setupView is the body of GET /api/setup.
@@ -185,6 +187,89 @@ func (s *Server) handleMeLang(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"lang": lang})
+}
+
+// adminTZ is the statistics time zone stored on the environment administrator profile.
+// A missing file, a broken file and a zone time.LoadLocation rejects are empty.
+// It does not fail.
+func (s *Server) adminTZ() string {
+	path, err := adminProfilePath(s.cfg.PasswordFile)
+	if err != nil {
+		return ""
+	}
+	prof, err := readAdminProfile(path)
+	if err != nil {
+		return ""
+	}
+	tz := strings.TrimSpace(prof.TZ)
+	if tz == "" {
+		return ""
+	}
+	if _, err := time.LoadLocation(tz); err != nil {
+		return ""
+	}
+	return tz
+}
+
+// writeAdminTZ stores tz on the environment administrator profile.
+// tz is an IANA name the caller already checked. Login, email and language stay.
+// A missing password file and a write error are returned.
+func (s *Server) writeAdminTZ(tz string) error {
+	path, err := adminProfilePath(s.cfg.PasswordFile)
+	if err != nil {
+		return err
+	}
+	prof, err := readAdminProfile(path)
+	if err != nil {
+		return err
+	}
+	prof.TZ = tz
+	raw, err := json.Marshal(prof)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, append(raw, '\n'), 0o600)
+}
+
+// handleMeTZ saves the statistics time zone of the signed-in account.
+// The body is tz, an IANA name. The environment administrator writes it on
+// the admin profile. A users.json account writes that account's prefs and keeps
+// the language. A bad zone is 400. A missing password file for the environment
+// administrator is 503. User-store errors use the users statuses.
+func (s *Server) handleMeTZ(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		TZ string `json:"tz"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	tz := strings.TrimSpace(body.TZ)
+	if _, err := time.LoadLocation(tz); err != nil || tz == "" {
+		writeErr(w, http.StatusBadRequest, "invalid timezone")
+		return
+	}
+	sess := sessionFrom(r.Context())
+	if sess.UID != "" {
+		if _, err := s.updateUser(sess.UID, func(u *security.User) error {
+			merged := mergePrefs(u.Prefs, security.Prefs{TZ: tz})
+			if err := validatePrefs(merged); err != nil {
+				return err
+			}
+			u.Prefs = merged
+			return nil
+		}); err != nil {
+			writeUserUpdateErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"tz": tz})
+		return
+	}
+	if err := s.writeAdminTZ(tz); err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "profile is not stored")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"tz": tz})
 }
 
 // handleSetupGet tells the panel whether the first-run form is still open.

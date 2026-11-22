@@ -663,6 +663,17 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq(pageViewsPull('c', 'a', 'c'), 'skip', 'a server copy equal to the local one needs no apply while the last sent differs');
   eq(pageViewsPull('', '', JSON.stringify(collectPageViews(def))), 'apply', 'a server copy against an empty last sent is applied');
   eq(Object.keys(collectPageViews(def)).sort(), ['conversions', 'dashboard', 'domains', 'flows', 'keyword_stats', 'keywords', 'landings', 'logs', 'networks', 'offers', 'range', 'report', 'roles', 'sources', 'users'], 'the body holds exactly the stored pages');
+  eq(pageViewUI({accent:'#AABBCC', token:'sekret', theme:'dark', layout:'wide', assistant:'docs', lang:'ru', tz:'UTC', board:'main', dock:{x:10,y:20}, menu:{order:['flows','flows'], hidden:{logs:true}}, cols:{'flows\nname':{name:180, tiny:2}}}),
+    {theme:'dark', accent:'#aabbcc', layout:'wide', menu:{order:['flows'], hidden:{logs:true}}, cols:{'flows\nname':{name:180}}, dock:{x:10, y:20}, assistant:'docs'},
+    'ui keeps the theme, the accent, the width, the menu, the column widths, the dock and the assistant tab');
+  eq(pageViewUI({lang:'ru', tz:'UTC', token:'x'}), null, 'ui does not keep the language, the zone or a token');
+  const localPages={flows:{q:'a'}, dashboard:{psort:{k:'conv', d:-1}}};
+  const serverPages={flows:{q:'b'}, dashboard:{psort:{k:'conv', d:-1}}, logs:{tab:'traffic'}};
+  eq(pageViewsPutBody(localPages, serverPages, 3, 'uid-1').flows, {q:'a'}, 'a put sends the page that changed');
+  eq(pageViewsPutBody(localPages, serverPages, 3, 'uid-1').logs, undefined, 'a put leaves out a page that did not change');
+  eq([pageViewsPutBody(localPages, serverPages, 3, 'uid-1').rev, pageViewsPutBody(localPages, serverPages, 3, 'uid-1').owner], [3, 'uid-1'], 'a put carries the revision and the owner');
+  eq(pageViewsOverlay(localPages, serverPages).flows, {q:'a'}, 'a conflict keeps this tab page');
+  eq(pageViewsOverlay(localPages, serverPages).logs.tab, 'traffic', 'a conflict keeps the other page from the server');
 }
 {
   const def = defaultPageViewState();

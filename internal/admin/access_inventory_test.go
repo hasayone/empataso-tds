@@ -232,6 +232,7 @@ var writeRouteGuard = map[string]string{
 	"POST /api/password":                        "own password",
 	"PUT /api/me/views":                         "own sort and filter state, never expanded",
 	"PUT /api/me/lang":                          "own panel language, no template",
+	"PUT /api/me/tz":                            "own statistics timezone, no template",
 	"PUT /api/groups":                           "validateGroupMacros, validateGroupParams",
 	"PUT /api/groups/{id}":                      "validateGroupMacros, validateGroupParams",
 	"DELETE /api/groups/{id}":                   "removes a campaign",

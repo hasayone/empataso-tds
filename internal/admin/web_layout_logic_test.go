@@ -166,6 +166,11 @@ eq('data-accent' in ROOT.attrs, false, 'violet drops the root attribute');
 STORE['emtds-accent'] = 'neon';
 eq(currentAccent(), 'violet', 'an unknown stored accent reads as violet');
 eq(painted, 3, 'each pick repaints the theme');
+STORE['emtds-accent'] = '#3366cc';
+delete ROOT.attrs['data-accent'];
+eq(currentAccent(), 'custom', 'a stored hex is the custom accent');
+applyAccent('blue');
+eq(STORE['emtds-accent'], 'blue', 'a preset replaces the custom colour');
 if (failed) process.exit(1);
 `)
 	f := filepath.Join(t.TempDir(), "accent.js")

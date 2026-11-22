@@ -51,6 +51,7 @@ func boardsAllFrom(ctx context.Context) bool {
 // to the user default there, so the panel can still load the account and the section list.
 var boardFreeRoutes = map[string]bool{
 	"GET /api/me": true, "POST /api/logout": true, "POST /api/password": true,
+	"PUT /api/me/lang": true, "PUT /api/me/tz": true,
 	"GET /api/me/views": true, "PUT /api/me/views": true, "GET /api/boards": true,
 	"GET /api/ui": true, "GET /api/log-fields": true,
 }

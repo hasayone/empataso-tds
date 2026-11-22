@@ -206,13 +206,22 @@ func (s *Server) updateUser(id string, fn func(*security.User) error) (security.
 	return u.Public(), nil
 }
 
-// deleteUser removes one user and persists users.json.
+// deleteUser removes one user from users.json and that user's key from views.json.
+// id is the users.json id. The views file is updated under viewsMu while userMu
+// is held. A damaged views file is left unchanged and the user stays.
+// It returns the users-store error, or the views read or write error.
 func (s *Server) deleteUser(id string) error {
 	if !s.usersEnabled() {
 		return errUsersUnavailable
 	}
 	s.userMu.Lock()
 	defer s.userMu.Unlock()
+	if _, ok := s.users.Get(id); !ok {
+		return security.ErrUserNotFound
+	}
+	if err := s.dropUserViews(id); err != nil {
+		return err
+	}
 	if err := s.users.Remove(id); err != nil {
 		return err
 	}

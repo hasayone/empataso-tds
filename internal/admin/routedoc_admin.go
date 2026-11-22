@@ -364,11 +364,11 @@ func sessionRouteDocs() map[string]routeDoc {
 					"uniq_max_seconds — стеля вікна унікальності в Redis (EMTDS_UNIQ_MAX_SECONDS, за замовчуванням доба).")),
 		"GET /api/me/views": cookieDoc("get_my_views",
 			docOf("Get the saved page views of the account.",
-				"Returns an object with one saved view per page key, or an empty object."),
+				"Returns an object with rev and one saved view per page key. rev is 0 when the account has not stored a view."),
 			docOf("Сохранённые виды страниц аккаунта.",
-				"Возвращает объект с одним сохранённым видом на ключ страницы или пустой объект."),
+				"Возвращает объект с rev и одним сохранённым видом на ключ страницы. rev равен 0, пока аккаунт ничего не сохранял."),
 			docOf("Збережені вигляди сторінок акаунта.",
-				"Повертає об'єкт з одним збереженим виглядом на ключ сторінки або порожній об'єкт.")),
+				"Повертає об'єкт з rev і одним збереженим виглядом на ключ сторінки. rev дорівнює 0, поки акаунт нічого не зберігав.")),
 		"PUT /api/me/lang": cookieDoc("put_my_lang",
 			docOf("Save the panel language of this account.",
 				"lang is ru, en or uk. The environment administrator stores it on the admin profile. "+
@@ -383,16 +383,39 @@ func sessionRouteDocs() map[string]routeDoc {
 				"properties": map[string]any{"lang": map[string]any{"type": "string"}}},
 				map[string]string{"lang": "ru"}, http.StatusBadRequest, http.StatusServiceUnavailable).
 			withResponse(map[string]string{"lang": "ru"}),
+		"PUT /api/me/tz": cookieDoc("put_my_tz",
+			docOf("Save the statistics time zone of this account.",
+				"tz is an IANA name. The environment administrator stores it on the admin profile. "+
+					"A users.json account stores it in that account and keeps the language."),
+			docOf("Часовой пояс статистики этого аккаунта.",
+				"tz — имя IANA. Администратор окружения пишет его в свой профиль. "+
+					"Аккаунт из users.json пишет его в свой профиль и сохраняет язык."),
+			docOf("Часовий пояс статистики цього акаунта.",
+				"tz — ім'я IANA. Адміністратор оточення записує його у свій профіль. "+
+					"Акаунт з users.json записує його у свій профіль і зберігає мову.")).
+			withBody(map[string]any{"type": "object", "required": []any{"tz"},
+				"properties": map[string]any{"tz": map[string]any{"type": "string"}}},
+				map[string]string{"tz": "UTC"}, http.StatusBadRequest, http.StatusServiceUnavailable).
+			withResponse(map[string]string{"tz": "UTC"}),
 		"PUT /api/me/views": cookieDoc("put_my_views",
-			docOf("Replace the saved page views of the account.",
-				"The body is an object of views by page key; other keys are dropped and an empty object removes all views. "+
-					"413 for a body over 64 KiB, 503 when the views file is not set."),
-			docOf("Замена сохранённых видов страниц аккаунта.",
-				"Тело — объект видов по ключам страниц; прочие ключи отбрасываются, пустой объект удаляет все виды. "+
-					"413 для тела больше 64 КиБ, 503, если файл видов не задан."),
-			docOf("Заміна збережених виглядів сторінок акаунта.",
-				"Тіло — об'єкт виглядів за ключами сторінок; інші ключі відкидаються, порожній об'єкт видаляє всі вигляди. "+
-					"413 для тіла понад 64 КіБ, 503, якщо файл виглядів не заданий.")),
+			docOf("Save the page views of the account.",
+				"The body is an object of views by page key, plus rev and an optional owner. "+
+					"A sent page replaces only that page; pages left out stay, and an empty body does not remove the account. "+
+					"Other keys are dropped. rev must be the revision from GET; a stale rev is 409 and the file is not written. "+
+					"owner, when sent, must be this session's key. 413 for a body over 64 KiB, 503 when the views file is not set."),
+			docOf("Сохранение видов страниц аккаунта.",
+				"Тело — объект видов по ключам страниц, плюс rev и необязательный owner. "+
+					"Присланная страница заменяет только себя; пропущенные остаются, пустое тело аккаунт не удаляет. "+
+					"Прочие ключи отбрасываются. rev — ревизия из GET; старая ревизия даёт 409, файл не пишется. "+
+					"owner, если он передан, должен быть ключом этой сессии. 413 для тела больше 64 КиБ, 503, если файл видов не задан."),
+			docOf("Збереження виглядів сторінок акаунта.",
+				"Тіло — об'єкт виглядів за ключами сторінок, плюс rev і необов'язковий owner. "+
+					"Надіслана сторінка замінює лише себе; пропущені лишаються, порожнє тіло акаунт не видаляє. "+
+					"Інші ключі відкидаються. rev — ревізія з GET; стара ревізія дає 409, файл не пишеться. "+
+					"owner, якщо його передано, має бути ключем цієї сесії. 413 для тіла понад 64 КіБ, 503, якщо файл виглядів не заданий.")).
+			withBody(map[string]any{"type": "object"},
+				map[string]any{"rev": 1, "owner": "u_example", "flows": map[string]any{"q": "promo"}},
+				http.StatusBadRequest, http.StatusConflict, http.StatusRequestEntityTooLarge, http.StatusServiceUnavailable),
 		"POST /api/password": cookieDoc("change_password",
 			docOf("Change the password of the signed-in account.",
 				"Body old and new (6 or more characters). The old password is checked, other sessions end and a fresh "+

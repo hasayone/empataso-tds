@@ -140,7 +140,8 @@ func (s *Server) purgeStores(ctx context.Context, manifest ktimport.Manifest) (k
 //
 // imported is true for keitaro_id strings from the manifest. Disabled users without a
 // hash and without a role are removed; other accounts keep login but lose keitaro_id.
-// It returns how many users were removed. An error means users.json could not be saved.
+// It returns how many users were removed. An error means users.json or that user's
+// views could not be saved. A damaged views file is left unchanged.
 func (s *Server) purgeUsers(imported func(string) bool) (int, error) {
 	if !s.usersEnabled() || imported == nil {
 		return 0, nil
@@ -158,6 +159,9 @@ func (s *Server) purgeUsers(imported func(string) bool) (int, error) {
 			continue
 		}
 		if !u.Enabled && u.Hash == "" && u.RoleID == "" {
+			if err := s.dropUserViews(pub.ID); err != nil {
+				return removed, err
+			}
 			if err := s.users.Remove(pub.ID); err != nil {
 				return removed, err
 			}

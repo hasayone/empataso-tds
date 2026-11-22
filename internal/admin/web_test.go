@@ -2133,6 +2133,7 @@ func TestColumnResize(t *testing.T) {
 	must(t, html, "const COLW_KEY='emtds-colw'", "widths stay in emtds-colw")
 	write := spaFunctionLine(html, "colWidthWrite")
 	mustNot(t, write, "/api/ui", "column widths are not saved to the shared UI")
+	must(t, write, "touchPageViews()", "column widths are saved with the account")
 	apply := spaFunctionLine(html, "colApplySaved")
 	must(t, apply, "colWidthRead()", "a redraw puts the stored width back")
 	watch := spaFunctionLine(html, "colWatch")
@@ -2293,6 +2294,14 @@ func TestAppearanceAccents(t *testing.T) {
 	must(t, html, `localStorage.getItem('emtds-accent')`, "remembered accent")
 	must(t, html, `data-accent-pick`, "accent swatch")
 	must(t, html, `function applyAccent(`, "applyAccent")
+	must(t, html, `function emtdsPaintAccent(`, "custom accent paints the same triples")
+	must(t, html, `id="accent-own"`, "custom colour swatch under the presets")
+	must(t, html, `function applyCustomAccent(`, "custom colour uses the accent key")
+	must(t, html, `class="set-slot"`, "interface and statistics share a slot")
+	must(t, html, `class="set-stats-h"`, "statistics heading")
+	for _, key := range []string{"accent.custom':'Your colour'", "accent.custom':'Свой цвет'", "accent.custom':'Свій колір'"} {
+		must(t, html, key, "custom accent label "+key)
+	}
 	must(t, html, `rgb(var(--acc-l))`, "light accent from the RGB triple")
 	must(t, html, `tbody tr:hover td{background:var(--accent-soft)}`, "row hover uses the accent")
 	mustNot(t, html, `tbody tr:hover td{background:var(--surface-2)}`, "surface row hover")
