@@ -8,8 +8,16 @@ import (
 )
 
 var macroRE = regexp.MustCompile(`\{[a-zA-Z0-9_]+\}`)
+
+const (
+	// clickIDMacro — метка emtds для идентификатора клика, ею заменяются макрос {subid} и старая [CID].
+	clickIDMacro = "[SUBID]"
+	// legacyClickIDMacro — прежнее имя метки идентификатора клика; движок её ещё раскрывает, импорт её не пишет.
+	legacyClickIDMacro = "[CID]"
+)
+
 var macroMap = map[string]string{
-	"{subid}":    "[CID]",
+	"{subid}":    clickIDMacro,
 	"{country}":  "[COUNTRY]",
 	"{keyword}":  "[KEY]",
 	"{sub_id_1}": "[PAR-1]",

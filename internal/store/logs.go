@@ -349,6 +349,9 @@ func eventColumns(c *CH, originEvents bool) []string {
 	if c.costCols {
 		cols = append(cols, columnsOf("events", waveCost)...)
 	}
+	if c.revCols {
+		cols = append(cols, columnsOf("events", waveRev)...)
+	}
 	if c.extEvents {
 		cols = append(cols, columnsOf("events", waveExt)...)
 	}
@@ -477,6 +480,8 @@ func eventWaveValue(e logbuf.Event, col string) any {
 		return e.CostCents
 	case "cost_cur":
 		return e.CostCur
+	case "revenue":
+		return e.Revenue
 	case "site":
 		return e.Site
 	case "ad_campaign_id":

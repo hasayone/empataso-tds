@@ -208,7 +208,7 @@ Snapshot as of 2026-11-15. For details: `docs/USAGE.md`, `TODO.md`, `docs/wiki/R
   a slow ClickHouse no longer blinds the buffer at the rate of having no buffer
   at all; shutdown has one owner and two sequential budgets, and a full batch
   queue is its own loss cause, `Losses.Queue` (#19). The fetch cache is bounded
-  by bytes and sweeps expired entries — its keys carry `[IP]`/`[CID]`/`[PAR-n]`,
+  by bytes and sweeps expired entries — its keys carry `[IP]`/`[SUBID]`/`[PAR-n]` (`[CID]` expands the same way),
   so it grew by one entry per visitor forever (#24). The HTTP client has a real
   transport with an outbound ceiling; `net/http` defaults to 2 idle connections
   per host and no cap at all on simultaneous ones (#16). Separation lists are

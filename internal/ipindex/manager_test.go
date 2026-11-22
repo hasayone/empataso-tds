@@ -1,6 +1,8 @@
 package ipindex
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -14,6 +16,68 @@ func writeDat(t *testing.T, dir, name, content string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// TestLoadCreatesMissingAndKeepsExisting checks that a missing list file is
+// created empty and loads with no error, and that a file already on disk is
+// not rewritten.
+func TestLoadCreatesMissingAndKeepsExisting(t *testing.T) {
+	root := t.TempDir()
+	dir := filepath.Join(root, "data")
+	var warns bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&warns, &slog.HandlerOptions{Level: slog.LevelWarn}))
+
+	s := NewSet(dir, log)
+	s.Load("ip_new")
+	if warns.Len() != 0 {
+		t.Fatalf("missing list warned: %s", warns.String())
+	}
+	p := filepath.Join(dir, "ip_new.dat")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("empty list was not created: %v", err)
+	}
+	if len(b) != 0 {
+		t.Fatalf("new list = %q, want empty", b)
+	}
+	if fi, err := os.Stat(p); err != nil || fi.Mode().Perm() != 0o644 {
+		t.Fatalf("list mode = %v, %v, want 0644", fi, err)
+	}
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o755 {
+		t.Fatalf("data dir mode = %v, %v, want 0755", fi, err)
+	}
+	idx, err := LoadFile(p)
+	if err != nil {
+		t.Fatalf("empty list did not read: %v", err)
+	}
+	if idx.Len() != 0 {
+		t.Fatalf("empty list len = %d", idx.Len())
+	}
+	if _, ok := s.Lookup("ip_new", mustAddr("1.2.3.4")); ok {
+		t.Error("an empty list must not match")
+	}
+
+	const kept = "10.0.0.0/8\n# later\n"
+	writeDat(t, dir, "ip_keep", kept)
+	s.Load("ip_keep", "ip_new")
+	if got, err := os.ReadFile(filepath.Join(dir, "ip_keep.dat")); err != nil || string(got) != kept {
+		t.Fatalf("existing list = %q, %v, want %q", got, err, kept)
+	}
+	if _, ok := s.Lookup("ip_keep", mustAddr("10.1.2.3")); !ok {
+		t.Error("existing list must still match")
+	}
+	if got, err := os.ReadFile(p); err != nil || len(got) != 0 {
+		t.Fatalf("second load rewrote the empty list: %q, %v", got, err)
+	}
+
+	again := NewSet(dir, log)
+	again.Load("ip_keep")
+	if got, err := os.ReadFile(filepath.Join(dir, "ip_keep.dat")); err != nil || string(got) != kept {
+		t.Fatalf("restart rewrote the list: %q, %v", got, err)
+	}
+	if warns.Len() != 0 {
+		t.Fatalf("reload warned: %s", warns.String())
+	}
 }
 
 func TestSetLoadAndLookup(t *testing.T) {

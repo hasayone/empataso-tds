@@ -457,7 +457,7 @@ func TestOldUsersWithoutRolesBehaveAsBefore(t *testing.T) {
 	if err := json.NewDecoder(resp.Body).Decode(&me); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(me.Pages, []string{"report"}) || !reflect.DeepEqual(me.Hidden, []string{"depsum", "profit"}) || me.Role != nil {
+	if !reflect.DeepEqual(me.Pages, []string{"report"}) || !reflect.DeepEqual(me.Hidden, []string{"dep2sum", "depsum", "profit"}) || me.Role != nil {
 		t.Fatalf("me %+v", me)
 	}
 	if got := s.accessOf(mustGetUser(t, s, "u1")); !reflect.DeepEqual(got.Sections, []string{"report"}) {

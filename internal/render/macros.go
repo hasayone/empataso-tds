@@ -30,7 +30,7 @@ type MacroDeps struct {
 	Operator  string   // [OPERATOR]
 	Domain    string   // [DOMAIN]
 	UserAgent string   // [USERAGENT]
-	CID       string   // [CID] and {subid}
+	CID       string   // [SUBID], [CID] (the old name of [SUBID]) and {subid}
 	RootCID   string   // {root_subid}; empty when the current click is the chain root
 	Origin    string   // {origin} — signed first-entry campaign token, url-encoded when expanded
 	Pars      []string // [PAR-1]..[PAR-5]
@@ -154,6 +154,7 @@ func (d MacroDeps) scalars() []scalarMacro {
 		{"[OPERATOR]", d.Operator},
 		{"[DOMAIN]", d.Domain},
 		{"[USERAGENT]", d.UserAgent},
+		{"[SUBID]", d.CID},
 		{"[CID]", d.CID},
 	}
 	for i := 0; i < 5; i++ {

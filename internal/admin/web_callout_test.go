@@ -67,8 +67,8 @@ func TestSPACallout(t *testing.T) {
 	} {
 		must(t, html, needle, "status line is a callout")
 	}
-	must(t, html, ".callout code{font-family:var(--mono);font-size:12px;padding:1px 5px;border-radius:5px;background:var(--surface-3)}", "code in a callout reads a theme token")
-	mustNot(t, spaBetween(html, ".callout code{", "}"), "rgba(", "code in a callout has no fixed colour")
+	must(t, html, "  code{padding:1px 6px;border-radius:5px;background:var(--surface-3);color:var(--fg);font-size:12px}", "code in a callout is the shared chip on a theme token")
+	mustNot(t, html, ".callout code{", "a callout has no code style of its own")
 	if n := strings.Count(html, "--surface-3:"); n != 3 {
 		t.Errorf("token --surface-3 is defined %d times, want 3 (light, dark, system dark)", n)
 	}

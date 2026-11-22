@@ -99,3 +99,19 @@ func TestStoredSubsKeepsTwelve(t *testing.T) {
 		t.Fatalf("%q", out)
 	}
 }
+
+// TestClickIDsSkipOfferOutsideCountry checks that an offer whose countries leave out the click country is not
+// named as the offer of the click, and is named again for a click from its country.
+func TestClickIDsSkipOfferOutsideCountry(t *testing.T) {
+	cat := router.Catalogs{Offers: map[string]config.Offer{
+		"o1": {ID: "o1", URL: "https://o.example/a", Status: true, NetworkID: "net", Countries: []string{"pl"}},
+	}, Country: "de"}
+	s := &config.Stream{Out: config.Output{Offers: []config.ShareRef{{ID: "o1", Share: 1}}}}
+	if offer, _, _ := clickIDs(s, cat, "https://o.example/a", false); offer != "" {
+		t.Fatalf("de click: offer %q, want none", offer)
+	}
+	cat.Country = "pl"
+	if offer, _, network := clickIDs(s, cat, "https://o.example/a", false); offer != "o1" || network != "net" {
+		t.Fatalf("pl click: offer %q network %q", offer, network)
+	}
+}

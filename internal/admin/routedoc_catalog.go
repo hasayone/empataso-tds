@@ -182,22 +182,32 @@ var catalogDocs = []catalogDoc{
 	{
 		base: "/api/offers", one: "offer", many: "offers",
 		body: "Offer record. Key fields: id, name, url, status (boolean), network_id, group, " +
-			"countries (lowercase ISO codes), payout_model (cpa or cpc), payout, payout_currency.",
+			"countries (lowercase ISO codes), payout_model (cpa or cpc), payout, payout_currency, payout_param (boolean), " +
+			"values (list of {name, value}: the engine puts the encoded value in place of {offer_value:name} in url), notes (text), " +
+			"upsell (boolean: a later sale of the same click with a new tid is another sale), conv_cap (boolean), conv_cap_limit (number N: with conv_cap on, the offer leaves the rotation until midnight in cap_tz once it has N leads and sales; an empty cap_tz is the UTC day; the number stays when the switch is off) and conv_cap_offer_id (kept so a save does not drop an old value; the engine uses fallback_id), conv_total (boolean), conv_total_limit (number N: with conv_total on, the offer leaves the rotation once it has N leads and sales over all time; a rejected conversion is not counted; the number stays when the switch is off) and conv_total_offer_id (kept the same way), cap_tz (IANA time zone of the daily limit; empty means the UTC day) and fallback_id (one alternative: a stopped offer and an offer whose limit is used up send the click there and it is counted there; empty means the offer is skipped; a loop ends). action is empty, 404, text, html or none: empty keeps the URL redirect; 404 answers 404; text and html show action_body as text/plain and text/html and are refused when the body is empty; none does not redirect and does not replace the page. An unknown action is refused on save and, if already stored, stays a URL redirect.",
 		bodyRU: "Запись оффера. Ключевые поля: id, name, url, status (логическое), network_id, group, " +
-			"countries (коды ISO в нижнем регистре), payout_model (cpa или cpc), payout, payout_currency.",
+			"countries (коды ISO в нижнем регистре), payout_model (cpa или cpc), payout, payout_currency, payout_param (логическое), " +
+			"values (список {name, value}: движок подставляет закодированное значение вместо {offer_value:name} в url), notes (текст), " +
+			"upsell (логическое: повторная продажа того же клика с новым tid — ещё одна продажа), conv_cap (логическое), conv_cap_limit (число N: при включённом conv_cap оффер выходит из ротации до полуночи cap_tz, когда набрал N лидов и продаж; пустой cap_tz — сутки UTC; выключенный лимит число хранит) и conv_cap_offer_id (хранится, чтобы сохранение не стёрло старое значение; движок берёт fallback_id), conv_total (логическое), conv_total_limit (число N: при включённом conv_total оффер выходит из ротации, когда набрал N лидов и продаж за всё время; отказ не считается; выключенный лимит число хранит) и conv_total_offer_id (хранится так же), cap_tz (часовой пояс IANA суточного лимита; пусто — сутки UTC) и fallback_id (один альтернативный оффер: остановленный оффер и оффер с исчерпанным лимитом отдают клик туда, и клик считается там; пусто — оффер пропускается; цикл обрывается). action — пусто, 404, text, html или none: пусто оставляет редирект по URL; 404 отвечает 404; text и html отдают action_body как text/plain и text/html и не сохраняются с пустым телом; none не редиректит и не подменяет страницу. Неизвестный action на сохранении отклоняется, а уже записанный на клике остаётся редиректом.",
 		bodyUK: "Запис офера. Ключові поля: id, name, url, status (логічне), network_id, group, " +
-			"countries (коди ISO в нижньому регістрі), payout_model (cpa або cpc), payout, payout_currency.",
+			"countries (коди ISO в нижньому регістрі), payout_model (cpa або cpc), payout, payout_currency, payout_param (логічне), " +
+			"values (список {name, value}: рушій підставляє закодоване значення замість {offer_value:name} в url), notes (текст), " +
+			"upsell (логічне: повторний продаж того самого кліку з новим tid — ще один продаж), conv_cap (логічне), conv_cap_limit (число N: при ввімкненому conv_cap офер виходить із ротації до півночі cap_tz, коли набрав N лідів і продажів; порожній cap_tz — доба UTC; вимкнений ліміт число зберігає) і conv_cap_offer_id (зберігається, щоб збереження не стерло старе значення; рушій бере fallback_id), conv_total (логічне), conv_total_limit (число N: при ввімкненому conv_total офер виходить із ротації, коли набрав N лідів і продажів за весь час; відмова не рахується; вимкнений ліміт число зберігає) і conv_total_offer_id (зберігається так само), cap_tz (часовий пояс IANA добового ліміту; порожньо — доба UTC) і fallback_id (один альтернативний офер: зупинений офер і офер з вичерпаним лімітом віддають клік туди, і клік рахується там; порожньо — офер пропускається; цикл обривається). action — порожньо, 404, text, html або none: порожньо лишає редирект за URL; 404 відповідає 404; text і html віддають action_body як text/plain і text/html і не зберігаються з порожнім тілом; none не редиректить і не підміняє сторінку. Невідомий action при збереженні відхиляється, а вже записаний на кліку лишається редиректом.",
 		ru: catalogNoun{"оффер", "офферы", "офферов"},
 		uk: catalogNoun{"офер", "офери", "оферів"},
 		example: map[string]any{
 			"id": "o1", "name": "Spring promo", "url": "https://example.com/offer", "status": true,
 			"network_id": "n1", "group": "Spring", "countries": []any{"us", "de"},
 			"payout_model": "cpa", "payout": 12.5, "payout_currency": "USD",
+			"values": []any{map[string]any{"name": "promo", "value": "spring"}}, "notes": "Weekend traffic only",
+			"conv_cap": true, "conv_cap_limit": 100,
 		},
 		record: map[string]any{
 			"id": "o1", "name": "Spring promo", "url": "https://example.com/offer", "status": true,
 			"network_id": "n1", "group": "Spring", "countries": []any{"us", "de"},
 			"payout_model": "cpa", "payout": 12.5, "payout_currency": "USD",
+			"values": []any{map[string]any{"name": "promo", "value": "spring"}}, "notes": "Weekend traffic only",
+			"conv_cap": true, "conv_cap_limit": 100,
 		},
 	},
 	{

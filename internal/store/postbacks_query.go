@@ -406,6 +406,8 @@ func postbackExtPtr(p *PostbackRow, col string) any {
 		return &p.OriginKeyword
 	case "depsum":
 		return &p.DepSum
+	case "dep2sum":
+		return &p.Dep2Sum
 	default:
 		return new(string)
 	}

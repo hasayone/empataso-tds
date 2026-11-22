@@ -252,6 +252,7 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 		deps.Roll = func(n int) int { return roll }
 	}
 	cats := s.simCatalogs(r.Context(), req, s.viewerFrom(r.Context()))
+	cats.Country = vi.Country
 
 	var path []simStep
 	for hop := 0; ; hop++ {

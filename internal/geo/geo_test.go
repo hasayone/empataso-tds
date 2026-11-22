@@ -130,8 +130,16 @@ func TestASNOnly(t *testing.T) {
 }
 
 func TestOpenErrors(t *testing.T) {
-	if _, err := OpenWith(Paths{City: filepath.Join(t.TempDir(), "nope.mmdb")}, nil); err == nil {
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "geo", "nope.mmdb")
+	if _, err := OpenWith(Paths{City: missing}, nil); err == nil {
 		t.Error("a missing City database with nothing else must be an error")
+	}
+	if _, err := os.Stat(missing); !os.IsNotExist(err) {
+		t.Error("a missing city database must not be created")
+	}
+	if fi, err := os.Stat(filepath.Dir(missing)); err != nil || !fi.IsDir() {
+		t.Error("the geo directory must exist when the database does not")
 	}
 	bad := filepath.Join(t.TempDir(), "bad.mmdb")
 	if err := os.WriteFile(bad, []byte("not a database"), 0o644); err != nil {

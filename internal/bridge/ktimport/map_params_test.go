@@ -38,7 +38,7 @@ func TestCampaignRenamedSubs(t *testing.T) {
 		t.Fatal("campaign missing")
 	}
 	got := g.Streams[0].Out.Out
-	for _, want := range []string{"{sub_id_1}", "{sub_id_2}", "[KEY]", "[CID]", "[PAR-2]", "{crid}", "{other}"} {
+	for _, want := range []string{"{sub_id_1}", "{sub_id_2}", "[KEY]", "[SUBID]", "[PAR-2]", "{crid}", "{other}"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("stream %q missing %s", got, want)
 		}

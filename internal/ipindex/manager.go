@@ -2,6 +2,7 @@ package ipindex
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
@@ -9,6 +10,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/hasayone/empataso-tds/internal/atomicfile"
 )
 
 // Set manages a collection of named IP lists (blacklist, ip_google, wap, …).
@@ -45,12 +48,22 @@ func NewSet(dir string, log *slog.Logger) *Set {
 }
 
 // Load performs the initial load of the listed lists.
-// A missing or corrupt individual file does not fail the whole set: for such a
-// list an empty index is created and the error is logged (the "fail open"
-// behavior is safer for the hot path than crashing the engine).
+// A missing file is created empty (the text format this package reads: no
+// addresses, so nobody is blocked and nobody is marked a bot) and then read.
+// A file that is already there is not rewritten. A corrupt file or a directory
+// that cannot be created does not fail the whole set: for such a list an empty
+// index is kept in memory and the error is logged (fail open is safer on the
+// hot path than crashing the engine).
 func (s *Set) Load(names ...string) {
 	for _, name := range names {
 		idx, st, err := s.read(name)
+		if err != nil && errors.Is(err, os.ErrNotExist) {
+			if cerr := s.ensureEmpty(name); cerr != nil {
+				err = cerr
+			} else {
+				idx, st, err = s.read(name)
+			}
+		}
 		if err != nil {
 			s.log.Warn("ipindex: list not loaded", "name", name, "err", err)
 			idx = &Index{}
@@ -165,6 +178,19 @@ func (s *Set) Watch(ctx context.Context, interval time.Duration) {
 
 func (s *Set) path(name string) string {
 	return filepath.Join(s.dir, name+".dat")
+}
+
+// ensureEmpty creates name.dat when it is missing.
+// The directory is created at 0o755 and the file at 0o644, the modes the
+// process already uses for data files. name is the list name, not a path.
+// It returns nil when the empty file is in place or a file was already there,
+// which it leaves untouched. A directory or publish failure is returned.
+func (s *Set) ensureEmpty(name string) error {
+	if err := os.MkdirAll(s.dir, 0o755); err != nil {
+		return err
+	}
+	_, err := atomicfile.CreateIfAbsent(s.path(name), nil, 0o644)
+	return err
 }
 
 func (s *Set) statOf(name string) (*stamp, error) {

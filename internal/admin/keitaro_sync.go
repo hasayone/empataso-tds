@@ -47,6 +47,8 @@ type keitaroSyncPassResult struct {
 	Skipped     int
 	// Campaigns is how many new Keitaro campaigns the pass imported.
 	Campaigns int
+	// Updated is how many campaigns already imported the pass changed.
+	Updated int
 }
 
 // keitaroSyncFinishIn updates persisted sync state after a pass.
@@ -161,6 +163,18 @@ type keitaroSyncFile struct {
 	CampaignsPausedUntil time.Time `json:"campaigns_paused_until,omitzero"`
 	// CampaignsError is the reason of the current pause.
 	CampaignsError string `json:"campaigns_error,omitempty"`
+	// LastUpdated is how many campaigns already imported the last pass changed.
+	LastUpdated int `json:"last_updated"`
+	// UpdateCursor is the largest Keitaro campaign id the refresh step handled; the next pass continues above it.
+	UpdateCursor int `json:"update_cursor,omitempty"`
+	// CampaignsGone counts imported campaigns missing in Keitaro; they stay here untouched.
+	CampaignsGone int `json:"campaigns_gone,omitempty"`
+	// UpdateFailed are the Keitaro ids of campaigns whose refreshed form failed the save checks.
+	UpdateFailed []int `json:"update_failed,omitempty"`
+	// UpdatePausedUntil holds the refresh step back after a tracker or store failure; zero means no pause.
+	UpdatePausedUntil time.Time `json:"update_paused_until,omitzero"`
+	// UpdateError is the reason of the current refresh pause.
+	UpdateError string `json:"update_error,omitempty"`
 }
 
 // WatchKeitaroSync runs the catch-up ticker until ctx ends.
@@ -471,6 +485,7 @@ func (s *Server) keitaroSyncFinishRun(in keitaroSyncFinishIn, syncPath string) {
 	st.LastConverts = res.Conversions
 	st.Skipped = res.Skipped
 	st.LastCampaigns = res.Campaigns
+	st.LastUpdated = res.Updated
 	st.LagSeconds = keitaroSyncLagSeconds(*st, s.keitaroSyncClock())
 	if res.OK {
 		s.syncFailStreak = 0
@@ -572,7 +587,8 @@ func syncWindowBounds(cursor, upper time.Time, back time.Duration) (from, to tim
 	return from, to
 }
 
-// runKeitaroSyncPass bootstraps cursors when needed, imports new campaigns, then syncs clicks and conversions.
+// runKeitaroSyncPass bootstraps cursors when needed, imports new campaigns, refreshes the campaigns
+// already imported, then syncs clicks and conversions.
 // Every GET of the pass shares one budget of keitaroSyncGETCap requests.
 func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarget, st *keitaroSyncFile, have bool) keitaroSyncPassResult {
 	s.syncPassCount.Add(1)
@@ -590,6 +606,8 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarge
 		st.DomainsChecked = false
 		st.CampaignsCursor, st.CampaignsPending, st.CampaignsDeleted = 0, 0, 0
 		st.CampaignsFailed, st.CampaignsPausedUntil, st.CampaignsError = nil, time.Time{}, ""
+		st.UpdateCursor, st.CampaignsGone, st.UpdateFailed = 0, 0, nil
+		st.UpdatePausedUntil, st.UpdateError = time.Time{}, ""
 		have = false
 	}
 	if err := keitaroSyncCheckTimes(st.ClicksTo, st.ConversionsTo, now); err != nil {
@@ -610,8 +628,9 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarge
 	}
 
 	camps := s.keitaroSyncNewCampaigns(ctx, target, st)
+	upd := s.keitaroSyncUpdateCampaigns(ctx, target, st)
 	if err := s.saveKeitaroSyncAt(target.syncPath, *st); err != nil {
-		return keitaroSyncPassResult{ErrText: "save error", Campaigns: camps}
+		return keitaroSyncPassResult{ErrText: "save error", Campaigns: camps, Updated: upd}
 	}
 	var skip logSkipTally
 	notes := &syncCatalogNotes{}
@@ -626,7 +645,7 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarge
 	clickOpts.Clicks = true
 	clicks, err := s.runSyncStream(ctx, clickOpts)
 	if err != nil {
-		return keitaroSyncPassResult{ErrText: sanitize(err, creds.Key), Clicks: clicks, Skipped: skip.total(), Campaigns: camps}
+		return keitaroSyncPassResult{ErrText: sanitize(err, creds.Key), Clicks: clicks, Skipped: skip.total(), Campaigns: camps, Updated: upd}
 	}
 	convOpts := base
 	convOpts.Cursor = &st.ConversionsTo
@@ -634,7 +653,7 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarge
 	convOpts.Conversions = true
 	convs, err := s.runSyncStream(ctx, convOpts)
 	if err != nil {
-		return keitaroSyncPassResult{ErrText: sanitize(err, creds.Key), Clicks: clicks, Conversions: convs, Skipped: skip.total(), Campaigns: camps}
+		return keitaroSyncPassResult{ErrText: sanitize(err, creds.Key), Clicks: clicks, Conversions: convs, Skipped: skip.total(), Campaigns: camps, Updated: upd}
 	}
 	s.keitaroSyncCatalogCheck(ctx, target, st, notes)
 	sk := skip.total()
@@ -643,7 +662,7 @@ func (s *Server) runKeitaroSyncPass(ctx context.Context, target keitaroSyncTarge
 		msg += fmt.Sprintf(", skipped %d", sk)
 	}
 	msg += notes.suffix()
-	return keitaroSyncPassResult{OK: true, Message: msg, Clicks: clicks, Conversions: convs, Skipped: sk, Campaigns: camps}
+	return keitaroSyncPassResult{OK: true, Message: msg, Clicks: clicks, Conversions: convs, Skipped: sk, Campaigns: camps, Updated: upd}
 }
 
 // keitaroSyncCatalogCheck tops up the catalog from every id stored rows of the tracker host refer to,

@@ -144,8 +144,12 @@ type spooledPostback struct {
 	TID      string                  `json:"tid,omitempty"`
 	Profit   float64                 `json:"profit"`
 	DepSum   float64                 `json:"depsum,omitempty"`
+	Dep2Sum  float64                 `json:"dep2sum,omitempty"`
 	At       time.Time               `json:"at"`
 	Subs     [config.MaxSubID]string `json:"subs"`
+	// NoPayout marks a postback that carried no payout number. A record written
+	// before this field has none marked and keeps its payout as stored.
+	NoPayout bool `json:"no_payout,omitempty"`
 }
 
 // newSpooledPostback builds the queue record of in. q is the query of the
@@ -154,15 +158,18 @@ func newSpooledPostback(in postbackIn, q url.Values, at time.Time) spooledPostba
 	_, subs := config.ApplySource(q, nil)
 	return spooledPostback{
 		CID: in.cid, Status: in.status, Original: in.original, TID: in.tid,
-		Profit: in.profit, DepSum: in.depSum, At: at, Subs: subs,
+		Profit: in.profit, DepSum: in.depSum, Dep2Sum: in.dep2Sum, At: at, Subs: subs, NoPayout: in.payoutAbsent,
 	}
 }
 
-// storeIn returns the store input of the record.
-func (e spooledPostback) storeIn() store.PostbackIn {
+// storeIn returns the store input of the record. offerPayout is the reserve
+// lookup of the offer of the click; it is used only for a record that is marked
+// NoPayout.
+func (e spooledPostback) storeIn(offerPayout func(string) (float64, bool)) store.PostbackIn {
 	return store.PostbackIn{
-		CID: e.CID, Profit: e.Profit, DepSum: e.DepSum, Status: e.Status,
+		CID: e.CID, Profit: e.Profit, DepSum: e.DepSum, Dep2Sum: e.Dep2Sum, Status: e.Status,
 		Original: e.Original, TID: e.TID, At: e.At,
+		PayoutAbsent: e.NoPayout, OfferPayout: offerPayout,
 	}
 }
 
@@ -550,11 +557,15 @@ func (p *postbackQueue) handle(seg logbuf.Segment) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), postbackStoreTimeout)
-	res, err := cs.RecordConversion(ctx, e.storeIn())
+	res, err := cs.RecordConversion(ctx, e.storeIn(d.offerReserve))
 	cancel()
 	switch {
 	case err == nil:
 		p.storeUp()
+		if res.ProfitFromOffer {
+			e.Profit = res.Profit
+		}
+		d.noteOfferCap(context.Background(), res, e.Status)
 		d.queueOutbound(res, e.CID, e.Profit, e.Status, e.Subs)
 		d.stats.postbacks.note("replayed")
 		d.notePostback(e.CID, e.Status, "replayed", "in", e.Profit)

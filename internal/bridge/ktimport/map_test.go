@@ -49,7 +49,7 @@ func TestMapFixture(t *testing.T) {
 	if len(promo.Streams) != 1 || !promo.Streams[0].Status {
 		t.Fatalf("promo streams = %+v", promo.Streams)
 	}
-	if !strings.Contains(promo.Streams[0].Out.Out, "[CID]") || strings.Contains(promo.Streams[0].Out.Out, "{subid}") {
+	if !strings.Contains(promo.Streams[0].Out.Out, "[SUBID]") || strings.Contains(promo.Streams[0].Out.Out, "{subid}") {
 		t.Fatalf("macro url = %s", promo.Streams[0].Out.Out)
 	}
 	if promo.Streams[0].Rules.Country.Flag != 2 || promo.Streams[0].Name != "es" || promo.Streams[0].Comment != "keitaro_stream_id=11" {
@@ -128,7 +128,7 @@ func TestMapFixture(t *testing.T) {
 		t.Fatalf("white = %+v", white.Streams)
 	}
 	macros, _ := findGroup(res.Groups, "macros")
-	if len(macros.Streams) != 1 || !macros.Streams[0].Status || !strings.Contains(macros.Streams[0].Out.Out, "{bundle_id}") || strings.Contains(macros.Streams[0].Out.Out, "[CID]") {
+	if len(macros.Streams) != 1 || !macros.Streams[0].Status || !strings.Contains(macros.Streams[0].Out.Out, "{bundle_id}") || strings.Contains(macros.Streams[0].Out.Out, "[SUBID]") {
 		t.Fatalf("macros = %+v", macros.Streams)
 	}
 	nf, _ := findGroup(res.Groups, "netfilters")
@@ -157,7 +157,7 @@ func TestMapFixture(t *testing.T) {
 	if offer.NetworkID != "2" || offer.Group != "Offers" || offer.PayoutModel != "cpa" || offer.Payout != 12.5 || offer.PayoutCurrency != "USD" || !offer.PayoutParam {
 		t.Fatalf("offer = %+v", offer)
 	}
-	if len(offer.Countries) != 2 || offer.Countries[0] != "es" || offer.Countries[1] != "it" || !strings.Contains(offer.URL, "[CID]") {
+	if len(offer.Countries) != 2 || offer.Countries[0] != "es" || offer.Countries[1] != "it" || !strings.Contains(offer.URL, "[SUBID]") {
 		t.Fatalf("offer countries = %+v", offer)
 	}
 	if len(res.Landings) != 1 || res.Landings[0].ID != "701" || !res.Landings[0].Local || res.Landings[0].URL != "" || res.Landings[0].Entry != "" {

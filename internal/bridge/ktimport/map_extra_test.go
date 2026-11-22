@@ -140,7 +140,19 @@ func TestMapOfferGroupTrimmed(t *testing.T) {
 
 func TestRewriteKeepsUnknown(t *testing.T) {
 	got := rewriteMacros("https://m.example/go?x={bundle_id}&s={subid}&k={sub_id_1}")
-	if got != "https://m.example/go?x={bundle_id}&s=[CID]&k=[PAR-1]" {
+	if got != "https://m.example/go?x={bundle_id}&s=[SUBID]&k=[PAR-1]" {
 		t.Fatal(got)
+	}
+}
+
+// TestRewriteWritesSubID checks that the click id of an imported address is written as [SUBID]
+// both for the Keitaro macro {subid} and for the old label [CID].
+func TestRewriteWritesSubID(t *testing.T) {
+	got := rewriteMacros("https://m.example/go?a={subid}&b=[CID]&c=[COUNTRY]")
+	if got != "https://m.example/go?a=[SUBID]&b=[SUBID]&c=[COUNTRY]" {
+		t.Fatal(got)
+	}
+	if again := rewriteMacros(got); again != got {
+		t.Fatalf("a second pass changed the address: %s", again)
 	}
 }

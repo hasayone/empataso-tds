@@ -369,6 +369,20 @@ func sessionRouteDocs() map[string]routeDoc {
 				"Возвращает объект с одним сохранённым видом на ключ страницы или пустой объект."),
 			docOf("Збережені вигляди сторінок акаунта.",
 				"Повертає об'єкт з одним збереженим виглядом на ключ сторінки або порожній об'єкт.")),
+		"PUT /api/me/lang": cookieDoc("put_my_lang",
+			docOf("Save the panel language of this account.",
+				"lang is ru, en or uk. The environment administrator stores it on the admin profile. "+
+					"A users.json account stores it in that account. The conversion summary uses this language."),
+			docOf("Язык панели этого аккаунта.",
+				"lang — ru, en или uk. Администратор окружения пишет его в свой профиль. "+
+					"Аккаунт из users.json пишет его в свой профиль. Сводка конверсий уходит на этом языке."),
+			docOf("Мова панелі цього акаунта.",
+				"lang — ru, en або uk. Адміністратор оточення записує її у свій профіль. "+
+					"Акаунт з users.json записує її у свій профіль. Зведення конверсій іде цією мовою.")).
+			withBody(map[string]any{"type": "object", "required": []any{"lang"},
+				"properties": map[string]any{"lang": map[string]any{"type": "string"}}},
+				map[string]string{"lang": "ru"}, http.StatusBadRequest, http.StatusServiceUnavailable).
+			withResponse(map[string]string{"lang": "ru"}),
 		"PUT /api/me/views": cookieDoc("put_my_views",
 			docOf("Replace the saved page views of the account.",
 				"The body is an object of views by page key; other keys are dropped and an empty object removes all views. "+
@@ -716,7 +730,8 @@ func cronConfigSample() map[string]any {
 		"cleanup": map[string]any{"enabled": true, "every_minutes": 1440, "keys_days": 30},
 		"conversions": map[string]any{
 			"enabled": false, "every_minutes": 1, "template": "[PROFIT] [GROUP] [COUNTRY]",
-			"period": "today", "timezone": "UTC",
+			"period": "today", "timezone": "Europe/Warsaw",
+			"schedule": "daily", "at_hour": 9, "at_minute": 15,
 		},
 		"keitaro_sync": map[string]any{"enabled": false, "every_minutes": 15},
 	}
@@ -786,6 +801,7 @@ func cronRouteDocs() map[string]routeDoc {
 				"saved value. A secret sent as ******** or left empty keeps the stored one. 400 with the reason when " +
 				"a source URL, a list name, a bot signature source name (unique, letters, digits, dots, dashes, underscores) " +
 				"or a period is not valid; the shortest periods are in floors of GET. " +
+				"conversions.schedule is interval (the default) or daily: daily sends the profit summary at at_hour:at_minute in timezone, and every_minutes still decides how often a new conversion is announced. " +
 				"503 when the cron file is not set.",
 			RU: docOf("Сохранение настроек автоматизации.",
 				"Только для ключа администратора; нужна галочка ключа cron. Тело — вся конфигурация в форме config из GET: "+
@@ -793,6 +809,7 @@ func cronRouteDocs() map[string]routeDoc {
 					"Секрет, присланный как ******** или пустым, сохраняет прежний. 400 с причиной, если адрес источника, "+
 					"имя списка, имя источника сигнатур ботов (уникальное: буквы, цифры, точка, дефис, подчёркивание) "+
 					"или период недопустимы; наименьшие периоды — в floors у GET. "+
+					"У conversions поле schedule — interval (по умолчанию) или daily: daily шлёт сводку профита в at_hour:at_minute пояса timezone, а every_minutes по-прежнему задаёт, как часто уходит новая конверсия. "+
 					"503, если файл cron не задан."),
 			UK: docOf("Збереження налаштувань автоматизації.",
 				"Лише для ключа адміністратора; потрібна галочка ключа cron. Тіло — вся конфігурація у формі config із GET: "+
@@ -800,6 +817,7 @@ func cronRouteDocs() map[string]routeDoc {
 					"Секрет, надісланий як ******** або порожнім, зберігає попередній. 400 з причиною, якщо адреса джерела, "+
 					"ім'я списку, ім'я джерела сигнатур ботів (унікальне: літери, цифри, крапка, дефіс, підкреслення) "+
 					"чи період недопустимі; найменші періоди — у floors у GET. "+
+					"У conversions поле schedule — interval (за замовчуванням) або daily: daily надсилає зведення профіту о at_hour:at_minute поясу timezone, а every_minutes як і раніше задає, як часто йде нова конверсія. "+
 					"503, якщо файл cron не заданий."),
 			Body: objectBody("The configuration sections telegram, ip_lists, bot_signatures, geo_db, virustotal, disk, cleanup, conversions " +
 				"and keitaro_sync, each with enabled and every_minutes plus its own fields."),

@@ -22,7 +22,7 @@ func TestClickFactsSQL(t *testing.T) {
 		{true, true, "GROUP BY group_id, stream_name, offer_id, landing_id, network_id, fact_cur", true, true},
 	}
 	for _, tc := range cases {
-		q := clickFactsSQL(tc.click, tc.cost, false, "")
+		q := clickFactsSQL(tc.click, tc.cost, false, false, "")
 		if !strings.Contains(q, tc.groupBy) {
 			t.Errorf("click=%v cost=%v group: %s", tc.click, tc.cost, q)
 		}
@@ -37,7 +37,7 @@ func TestClickFactsSQL(t *testing.T) {
 			t.Errorf("click=%v cost=%v offer: %s", tc.click, tc.cost, q)
 		}
 	}
-	placed := clickFactsSQL(false, true, false, " AND country = ?")
+	placed := clickFactsSQL(false, true, false, false, " AND country = ?")
 	if !strings.Contains(placed, "ts < ? AND country = ? GROUP BY group_id, stream_name, fact_cur") {
 		t.Fatalf("where placement: %s", placed)
 	}
@@ -127,22 +127,22 @@ func (s stubScan) Scan(dest ...any) error {
 }
 
 func TestScanClickFactColumns(t *testing.T) {
-	full, err := scanClickFact(stubScan{vals: []any{"g", "s", "o", "l", "n", uint64(4), uint64(3), uint64(2), "USD", int64(150)}}, true, true)
+	full, err := scanClickFact(stubScan{vals: []any{"g", "s", "o", "l", "n", uint64(4), uint64(3), uint64(2), "USD", int64(150)}}, true, true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if full.GroupID != "g" || full.Stream != "s" || full.OfferID != "o" || full.LandingID != "l" || full.NetworkID != "n" || full.Hits != 4 || full.Uniq != 3 || full.UniqFirst != 2 || full.CostCur != "USD" || full.CostCents != 150 {
 		t.Fatalf("full %+v", full)
 	}
-	priced, err := scanClickFact(stubScan{vals: []any{"g", "s", uint64(2), uint64(1), uint64(1), "EUR", int64(20)}}, false, true)
+	priced, err := scanClickFact(stubScan{vals: []any{"g", "s", uint64(2), uint64(1), uint64(1), "EUR", int64(20)}}, false, true, false)
 	if err != nil || priced.OfferID != "" || priced.CostCur != "EUR" || priced.CostCents != 20 || priced.Hits != 2 {
 		t.Fatalf("priced %+v %v", priced, err)
 	}
-	click, err := scanClickFact(stubScan{vals: []any{"g", "s", "o", "l", "n", uint64(1), uint64(1), uint64(1)}}, true, false)
+	click, err := scanClickFact(stubScan{vals: []any{"g", "s", "o", "l", "n", uint64(1), uint64(1), uint64(1)}}, true, false, false)
 	if err != nil || click.CostCents != 0 || click.CostCur != "" || click.OfferID != "o" || click.LandingID != "l" || click.Uniq != 1 {
 		t.Fatalf("click %+v %v", click, err)
 	}
-	plain, err := scanClickFact(stubScan{vals: []any{"g", "s", uint64(1), uint64(0), uint64(0)}}, false, false)
+	plain, err := scanClickFact(stubScan{vals: []any{"g", "s", uint64(1), uint64(0), uint64(0)}}, false, false, false)
 	if err != nil || plain.CostCents != 0 || plain.CostCur != "" || plain.Hits != 1 || plain.Uniq != 0 {
 		t.Fatalf("plain %+v %v", plain, err)
 	}

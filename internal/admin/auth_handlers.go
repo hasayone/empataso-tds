@@ -245,6 +245,9 @@ func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
 		if email, ok := s.adminEmail.Load().(string); ok {
 			out.Email = email
 		}
+		if lang := s.adminLang(); lang != "" {
+			out.Prefs.Lang = lang
+		}
 	}
 	if boards, meta, err := s.visibleBoardItems(r.Context(), sess); err == nil {
 		out.Boards = boards

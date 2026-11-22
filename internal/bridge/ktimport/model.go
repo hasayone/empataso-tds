@@ -27,6 +27,7 @@ type Campaign struct {
 	ID               FlexInt         `json:"id"`
 	Alias            string          `json:"alias"`
 	Name             string          `json:"name"`
+	Notes            string          `json:"notes,omitempty"`
 	State            string          `json:"state"`
 	Type             string          `json:"type"`
 	GroupID          FlexInt         `json:"group_id"`
@@ -239,9 +240,11 @@ type Group struct {
 	Redirect string   `json:"redirect"`
 	Out      string   `json:"out"`
 	Folder   string   `json:"folder,omitempty"`
-	DomainID string   `json:"domain_id,omitempty"`
-	SourceID string   `json:"source_id,omitempty"`
-	Weight   bool     `json:"weight,omitempty"`
+	// Notes — заметка кампании Keitaro, обрезанная до MaxNotesRunes символов.
+	Notes    string `json:"notes,omitempty"`
+	DomainID string `json:"domain_id,omitempty"`
+	SourceID string `json:"source_id,omitempty"`
+	Weight   bool   `json:"weight,omitempty"`
 	// UniqSeconds — окно уникальности в секундах. Ноль оставляет окно движка в 24 часа.
 	UniqSeconds int        `json:"uniq_seconds,omitempty"`
 	Num         int        `json:"num,omitempty"`

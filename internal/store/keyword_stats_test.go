@@ -58,7 +58,7 @@ func TestKeywordStatsSQLShape(t *testing.T) {
 		"ORDER BY sum(profit_s) DESC, sum(hits) DESC, k ASC",
 		fmt.Sprintf("LIMIT %d", KeywordStatsLimit+1),
 		"countIf(status = 'lead')",
-		"countIf(status = 'sale')",
+		"countIf" + saleStatusSQL("status"),
 		"countIf(status = 'rejected')",
 		"SELECT k, sum(hits)",
 	} {
@@ -97,7 +97,7 @@ func TestKeywordLastClickSQLUnchanged(t *testing.T) {
 	legacy := want + `
 		UNION ALL
 		` + `SELECT ` + keywordKey + ` AS k, toUInt64(0), toUInt64(0), count(), countIf(status = 'lead'),
-		countIf(status = 'sale'), countIf(status = 'rejected'), sum(profit), ` + sumDep(c.depsumConv, "depsum") + `
+		countIf` + saleStatusSQL("status") + `, countIf(status = 'rejected'), sum(profit), ` + sumDep(c.depsumConv, "depsum") + `
 		FROM (` + c.keywordConvUnion() + `) WHERE ts >= ? AND ts < ?` +
 		voidedConfirmedSQL("cid", "status") + `
 		GROUP BY k`

@@ -25,10 +25,17 @@ type ShareRef struct {
 type Offer struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
-	URL       string `json:"url"`
-	Status    bool   `json:"status"`
-	Local     bool   `json:"local,omitempty"`
-	NetworkID string `json:"network_id,omitempty"`
+	URL        string `json:"url"`
+	Status     bool   `json:"status"`
+	Local      bool   `json:"local,omitempty"`
+	// Action is the click answer instead of a redirect to URL.
+	// Empty means the URL redirect. The engine matches the token and does not expand it.
+	// 404 answers 404, text and html show ActionBody, none does not redirect.
+	Action string `json:"action,omitempty"`
+	// ActionBody is the text or HTML of a text or html action.
+	// The engine expands macros in it. Empty for 404 and none.
+	ActionBody string `json:"action_body,omitempty"`
+	NetworkID  string `json:"network_id,omitempty"`
 	// Group is a label stored on this offer. The set of groups is these labels.
 	Group string `json:"group,omitempty"`
 	// CreatedBy is the users.json id of the panel user who created this record.
@@ -46,8 +53,253 @@ type Offer struct {
 	Payout float64 `json:"payout,omitempty"`
 	// PayoutCurrency is a three-letter currency code, for example USD.
 	PayoutCurrency string `json:"payout_currency,omitempty"`
-	// PayoutParam reports whether the payout value is sent as a query parameter.
+	// PayoutParam is the "payout parameter" tick: the conversion takes its payout
+	// from the payout parameter of the postback, and Payout in PayoutCurrency is
+	// the reserve for a postback that has none.
 	PayoutParam bool `json:"payout_param,omitempty"`
+	// Values are the named values of the offer. The engine puts the encoded value
+	// in place of {offer_value:name} in the offer URL.
+	Values []OfferValue `json:"values,omitempty"`
+	// Notes is a free text of the operator. The engine does not read it.
+	Notes string `json:"notes,omitempty"`
+	// Upsell counts a later sale of the same click as another sale when the postback
+	// carries a tid this click has not had. Off means a repeat of the click is not another sale.
+	Upsell bool `json:"upsell,omitempty"`
+	// ConvCap turns the daily conversion limit on. ConvCapLimit is its number N:
+	// once N leads and sales have been written for the offer in the current day
+	// of CapTZ, the offer hands the click to FallbackID until the next day there.
+	ConvCap      bool `json:"conv_cap,omitempty"`
+	ConvCapLimit int  `json:"conv_cap_limit,omitempty"`
+	// ConvCapOfferID is a hand-over offer saved before the single alternative.
+	// The engine uses FallbackID. The field is kept so a save does not drop it.
+	ConvCapOfferID string `json:"conv_cap_offer_id,omitempty"`
+	// ConvTotal turns the total conversion limit on. ConvTotalLimit is its number N: once the
+	// offer has N leads and sales over all time, a click goes to FallbackID.
+	ConvTotal      bool `json:"conv_total,omitempty"`
+	ConvTotalLimit int  `json:"conv_total_limit,omitempty"`
+	// ConvTotalOfferID is a hand-over offer saved before the single alternative.
+	// The engine uses FallbackID. The field is kept so a save does not drop it.
+	ConvTotalOfferID string `json:"conv_total_offer_id,omitempty"`
+	// CapTZ is the IANA zone whose midnight ends the daily limit. Empty means the
+	// counters stay on the UTC day they were written on, until the panel stores
+	// the statistics zone.
+	CapTZ string `json:"cap_tz,omitempty"`
+	// FallbackID is the alternative offer. A click meant for this offer goes there
+	// when this offer is stopped or a conversion limit is used up, and is counted
+	// there. Empty means the offer is skipped. A random offer is never chosen.
+	FallbackID string `json:"fallback_id,omitempty"`
+}
+
+// CapHit tells which conversion limits of an offer are used up: a set of CapDaily and CapTotal.
+type CapHit uint8
+
+const (
+	// CapDaily marks the daily limit as used up in the offer's current day.
+	CapDaily CapHit = 1 << iota
+	// CapTotal marks the total limit as used up.
+	CapTotal
+)
+
+// Limits of the free fields of an offer.
+const (
+	// MaxOfferValues is the number of named values one offer may carry.
+	MaxOfferValues = 50
+	// MaxOfferValueName and MaxOfferValueText are the byte limits of a value name and a value.
+	MaxOfferValueName = 64
+	MaxOfferValueText = 1024
+	// MaxOfferNotes is the byte limit of the notes.
+	MaxOfferNotes = 10000
+	// MaxConvCapLimit is the highest conversion limit, daily or total.
+	MaxConvCapLimit = 1000000
+	// OfferAction404 answers the click with HTTP 404.
+	OfferAction404 = "404"
+	// OfferActionText shows ActionBody as text/plain.
+	OfferActionText = "text"
+	// OfferActionHTML shows ActionBody as text/html, without wrapping it in a page.
+	OfferActionHTML = "html"
+	// OfferActionNone does not redirect and does not replace the page.
+	OfferActionNone = "none"
+	// MaxOfferActionBody is the byte limit of the text or HTML of an action.
+	MaxOfferActionBody = 100000
+)
+
+// OfferValue is one named value of an offer.
+type OfferValue struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+}
+
+// OfferValueToken returns the macro that stands for the value called name in an offer URL.
+func OfferValueToken(name string) string {
+	return "{offer_value:" + name + "}"
+}
+
+// ApplyValues puts the values of the offer into raw.
+// raw is the offer URL template. Every {offer_value:name} of a value the offer
+// has is replaced by that value, percent-encoded as a query component, so the
+// result never holds a brace or bracket that the macro pass could read again.
+// A placeholder of a name the offer does not have stays as written. It does
+// not fail.
+func (o Offer) ApplyValues(raw string) string {
+	if len(o.Values) == 0 || !strings.Contains(raw, "{offer_value:") {
+		return raw
+	}
+	pairs := make([]string, 0, len(o.Values)*2)
+	for _, v := range o.Values {
+		name := strings.TrimSpace(v.Name)
+		if name == "" {
+			continue
+		}
+		pairs = append(pairs, OfferValueToken(name), url.QueryEscape(v.Value))
+	}
+	return strings.NewReplacer(pairs...).Replace(raw)
+}
+
+// OfferCountryUnknown is the entry of Offer.Countries for a click whose country the engine could not tell.
+const OfferCountryUnknown = "unknown"
+
+// AllowsCountry reports whether the offer may be served to a click from the country.
+// country is the click country as the engine holds it: two letters in any case, or anything else
+// (the "no data" dash included) for a click of unknown country. An offer without countries takes every
+// click. With countries it takes a click whose code is in the list; a click of unknown country is taken
+// only when the list has OfferCountryUnknown. Codes in the list are compared without case and space.
+func (o Offer) AllowsCountry(country string) bool {
+	if len(o.Countries) == 0 {
+		return true
+	}
+	cc := strings.ToLower(strings.TrimSpace(country))
+	if len(cc) != 2 {
+		cc = OfferCountryUnknown
+	}
+	for _, code := range o.Countries {
+		if strings.ToLower(strings.TrimSpace(code)) == cc {
+			return true
+		}
+	}
+	return false
+}
+
+// offerActionKind is the stored action token: trimmed, compared without case.
+func offerActionKind(action string) string {
+	return strings.ToLower(strings.TrimSpace(action))
+}
+
+// ActionReady reports whether the offer answers a click without its URL.
+// 404 and none are ready on their own. text and html are ready only when
+// ActionBody has a non-space character. An unknown action is not ready:
+// the click stays a URL redirect. It does not fail.
+func (o Offer) ActionReady() bool {
+	switch offerActionKind(o.Action) {
+	case OfferAction404, OfferActionNone:
+		return true
+	case OfferActionText, OfferActionHTML:
+		return strings.TrimSpace(o.ActionBody) != ""
+	default:
+		return false
+	}
+}
+
+// ClickAnswer tells how a click of this offer is answered.
+// redirect is the render type, or empty when out is the URL and the caller
+// keeps the stream redirect. out is that URL or the action body.
+// ok is false when the offer cannot take the click. An unknown action, and
+// text or html with an empty body, fall back to the URL. It does not fail.
+func (o Offer) ClickAnswer() (redirect, out string, ok bool) {
+	switch offerActionKind(o.Action) {
+	case OfferAction404:
+		return "404_not_found", "", true
+	case OfferActionText:
+		if strings.TrimSpace(o.ActionBody) != "" {
+			return "show_text", o.ActionBody, true
+		}
+	case OfferActionHTML:
+		if strings.TrimSpace(o.ActionBody) != "" {
+			return "show_html", o.ActionBody, true
+		}
+	case OfferActionNone:
+		return "stop", "", true
+	}
+	if o.Local || strings.TrimSpace(o.URL) == "" {
+		return "", "", false
+	}
+	return "", o.URL, true
+}
+
+// SendsURL reports whether this offer sends the visitor to its URL.
+// A ready action reports false, so a network query is not appended to a page.
+// It does not fail.
+func (o Offer) SendsURL() bool {
+	kind, _, ok := o.ClickAnswer()
+	return ok && kind == ""
+}
+
+// CapLimit is the daily conversion limit of the offer.
+// It returns the number N and true when the limit is on and N is above zero;
+// an offer with the limit off reports false whatever N holds.
+func (o Offer) CapLimit() (int, bool) {
+	if !o.ConvCap || o.ConvCapLimit <= 0 {
+		return 0, false
+	}
+	return o.ConvCapLimit, true
+}
+
+// TotalLimit is the total conversion limit of the offer.
+// It returns the number N and true when the limit is on and N is above zero;
+// an offer with the limit off reports false whatever N holds.
+func (o Offer) TotalLimit() (int, bool) {
+	if !o.ConvTotal || o.ConvTotalLimit <= 0 {
+		return 0, false
+	}
+	return o.ConvTotalLimit, true
+}
+
+// CapRedirect is the alternative offer that takes the clicks while a limit is used up.
+// hit holds the limits that are used up. The alternative is FallbackID, the same offer
+// a stopped offer hands its clicks to. It returns "" when hit is empty or FallbackID is
+// empty, which means the offer is skipped. A random offer is never chosen.
+func (o Offer) CapRedirect(hit CapHit) string {
+	if hit == 0 {
+		return ""
+	}
+	return strings.TrimSpace(o.FallbackID)
+}
+
+// ClickRevenue is the payout a click of this offer earns at once.
+// It returns the amount and true only for cpc, a finite amount above zero and
+// a currency the revenue is kept in: USD or none. cpa and an empty model return
+// false, so that amount waits for a conversion and is not written on the click.
+func (o Offer) ClickRevenue() (float64, bool) {
+	if strings.ToLower(strings.TrimSpace(o.PayoutModel)) != "cpc" {
+		return 0, false
+	}
+	if !(o.Payout > 0) || math.IsInf(o.Payout, 0) {
+		return 0, false
+	}
+	switch strings.ToUpper(strings.TrimSpace(o.PayoutCurrency)) {
+	case "", "USD":
+		return o.Payout, true
+	}
+	return 0, false
+}
+
+// ReservePayout is the payout a conversion of this offer gets when its postback
+// carries no payout number.
+// It returns the amount and true only when the offer has the payout parameter
+// tick, a finite amount above zero and a currency the revenue is kept in: USD
+// or none. Conversions have no currency column and no rates exist, so an amount
+// in another currency is not written as dollars.
+func (o Offer) ReservePayout() (float64, bool) {
+	if strings.ToLower(strings.TrimSpace(o.PayoutModel)) == "cpc" {
+		return 0, false
+	}
+	if !o.PayoutParam || !(o.Payout > 0) || math.IsInf(o.Payout, 0) {
+		return 0, false
+	}
+	switch strings.ToUpper(strings.TrimSpace(o.PayoutCurrency)) {
+	case "", "USD":
+		return o.Payout, true
+	}
+	return 0, false
 }
 
 // Domain is a host parked on this tracker.

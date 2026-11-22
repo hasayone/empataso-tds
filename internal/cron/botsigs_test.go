@@ -2,6 +2,7 @@ package cron
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -140,6 +141,93 @@ func TestBotSignaturesRunNow(t *testing.T) {
 	js := run()
 	if js.OK || !strings.Contains(js.Error, "HTTP 502") {
 		t.Fatalf("failed run reported %+v", js)
+	}
+	if f := e.readBotFile(); len(f.Rules) != 1 || f.Rules[0].Pattern != "(?i)Zoombot/" {
+		t.Fatalf("the working database was replaced: %+v", f.Rules)
+	}
+}
+
+// TestBotSourceOwnFile: a source gets its own file only after a download parses,
+// that file holds the rules, and a later failure leaves the file as it was and
+// is not a success. An empty answer creates no file and is not a success either.
+func TestBotSourceOwnFile(t *testing.T) {
+	e := newEnv(t)
+	var mode atomic.Int32
+	e.mux.HandleFunc("/own.txt", func(w http.ResponseWriter, r *http.Request) {
+		switch mode.Load() {
+		case 0:
+			return
+		case 2:
+			http.Error(w, "down", http.StatusBadGateway)
+		default:
+			_, _ = w.Write([]byte("Zoombot/\n(?<!x)broken\nZoombot/\n"))
+		}
+	})
+	cfg := Default()
+	cfg.BotSignatures = BotSignatures{EveryMinutes: 1440, Sources: []BotSource{
+		{Name: "added", URL: e.srv.URL + "/own.txt", Enabled: true},
+	}}
+	if err := Save(e.r.paths.Config, cfg); err != nil {
+		t.Fatal(err)
+	}
+	path := botSourcePath(e.r.paths.DataDir, "added")
+	run := func() JobStatus {
+		t.Helper()
+		if err := RequestRun(e.r.paths.Config, JobBotSignatures); err != nil {
+			t.Fatal(err)
+		}
+		e.r.Tick(context.Background())
+		e.r.Wait()
+		st, err := ReadStatus(StatusPath(e.r.paths.Config))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return st.Jobs[JobBotSignatures]
+	}
+	if js := run(); js.OK || js.Error == "" || js.LastRun.IsZero() {
+		t.Fatalf("empty download must not succeed: %+v", js)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("an empty download created a source file")
+	}
+	if _, err := os.Stat(filepath.Join(e.dir, "data", detect.FileBotSignatures)); !os.IsNotExist(err) {
+		t.Fatal("an empty download wrote the database")
+	}
+
+	mode.Store(1)
+	js := run()
+	if !js.OK || js.Error != "" {
+		t.Fatalf("parsed rules must be a success: %+v", js)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal("an added source must get its own file:", err)
+	}
+	var doc botSourceDoc
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatal(err)
+	}
+	if len(doc.Rules) != 1 || doc.Rules[0].Pattern != "(?i)Zoombot/" || doc.Rules[0].Source != "added" {
+		t.Fatalf("source file rules %+v", doc.Rules)
+	}
+	raw, err := os.ReadFile(filepath.Join(e.dir, "data", detect.FileBotSignatures))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db, _, err := detect.LoadBotDB(raw)
+	if err != nil || db == nil || db.Len() != 1 {
+		t.Fatalf("engine load = %v len %v", err, db)
+	}
+
+	mode.Store(2)
+	before := append([]byte(nil), b...)
+	js = run()
+	if js.OK || !strings.Contains(js.Error, "HTTP 502") {
+		t.Fatalf("a failed download must not be a success: %+v", js)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil || string(after) != string(before) {
+		t.Fatal("the failed source replaced its file")
 	}
 	if f := e.readBotFile(); len(f.Rules) != 1 || f.Rules[0].Pattern != "(?i)Zoombot/" {
 		t.Fatalf("the working database was replaced: %+v", f.Rules)

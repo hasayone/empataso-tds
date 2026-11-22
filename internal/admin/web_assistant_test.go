@@ -123,7 +123,7 @@ func TestAssistantWidgetLayout(t *testing.T) {
 	must(t, html, "body.has-aifab{--ai-lift:calc(56px + var(--ai-sb,0px))}", "the lift is on while the button is mounted")
 	must(t, html, "@media (max-width:1280px){body:has(#savebar){--ai-sb:60px}}", "the button clears the centred save bar")
 	must(t, html, "body.has-aifab.ai-open{--ai-lift:0px}", "no lift while the panel stands in the button's place")
-	must(t, html, "z-index:55;height:44px;display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:0 14px;", "the label and the beta mark share the centre of the button")
+	must(t, html, "z-index:55;height:44px;display:inline-flex;align-items:center;justify-content:center;line-height:1;padding:0 13px;", "the label and the beta mark share the centre of the button")
 	must(t, html, ".aifab .aib{display:inline-flex;align-items:center;justify-content:center;height:18px;margin:0;padding:0 7px;line-height:1;", "the beta mark is centred on the label")
 	must(t, html, "bottom:calc(var(--edge-b,20px) + var(--dock-lift,0px));z-index:72", "the panel stands above the Keitaro window")
 	must(t, html, "@media (max-width:640px){\n    button.aifab{right:12px}\n    .aipanel{left:0;right:0;bottom:0;width:100%", "a bottom sheet on a phone")
@@ -221,7 +221,7 @@ func TestAssistantWidgetStreamRequest(t *testing.T) {
 	html := spaSource()
 	stream := spaFunctionLine(html, "aiStream")
 	for _, needle := range []string{
-		"'/api/ai/chats/'+encodeURIComponent(chatId)+'/messages'",
+		"'/api/ai/chats/'+encodeURIComponent(chatId)+(join?'/stream':'/messages')",
 		"'Accept':'text/event-stream'",
 		"'X-CSRF-Token':CSRF",
 		"boardApplyHeaders(headers,path)",
@@ -243,7 +243,13 @@ func TestAssistantWidgetStreamRequest(t *testing.T) {
 	} {
 		must(t, send, needle, "send")
 	}
-	must(t, spaFunctionLine(html, "aiMountPanel"), "q('#ai-stop',p).onclick=()=>{if(AI.abort) AI.abort.abort()}", "the stop button cancels the request")
+	must(t, spaFunctionLine(html, "aiMountPanel"), "q('#ai-stop',p).onclick=()=>{aiCancel()}", "the stop button asks the server to cancel the turn")
+	must(t, spaFunctionLine(html, "aiCancel"), "/cancel'", "the stop button calls the cancel route, not the page abort")
+	mustNot(t, spaFunctionLine(html, "aiCancel"), "AI.abort.abort()}catch", "the cancel does not depend on the open stream")
+	must(t, spaFunctionLine(html, "aiStream"), "(join?'/stream':'/messages')", "a null payload joins the running turn")
+	must(t, spaFunctionLine(html, "aiRestore"), "call('GET','/api/ai/chats')", "the panel opens the latest chat of the user")
+	must(t, spaFunctionLine(html, "aiRestore"), "if(c.status==='running') aiFollow()", "a running turn is joined after a reload")
+	must(t, spaFunctionLine(html, "aiStatusLoad"), "aiRestore()", "the restore runs after the status")
 	must(t, html, "const AI_EVENTS=['status','tool','text','proposal','usage','done','error'];", "known events")
 	for _, ev := range []string{"'status'", "'tool'", "'text'", "'proposal'", "'usage'", "'done'", "'error'"} {
 		must(t, spaFunctionLine(html, "aiOnEvent"), "ev.type==="+ev, "handler for "+ev)
@@ -460,7 +466,7 @@ func TestAssistantWidgetHistory(t *testing.T) {
 	must(t, del, "call('DELETE','/api/ai/chats/'+encodeURIComponent(c.id))", "delete a chat")
 	must(t, spaFunctionLine(html, "aiNewChat"), "if(AI.busy) return", "no new chat while a turn runs")
 	must(t, spaFunctionLine(html, "aiBusyUI"), "q('#ai-new',p).disabled=AI.busy", "the new chat button is off during a turn")
-	must(t, spaFunctionLine(html, "aiMountPanel"), "AI.qtimer=setTimeout(aiHistLoad,250)", "the search waits for a pause in typing")
+	must(t, spaFunctionLine(html, "aiMountPanel"), "AI.qs=bindSearch(q('#ai-q',p)", "the search waits for a pause in typing")
 	must(t, spaFunctionLine(html, "aiPaintHist"), "ai.chat.hist.none", "an empty list has a text")
 	must(t, spaFunctionLine(html, "aiStop"), "AI.abort.abort()", "sign-out cuts the running turn")
 }

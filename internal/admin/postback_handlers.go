@@ -174,7 +174,7 @@ func postbackExportHeader() []string {
 		"campaign_id", "origin_campaign", "origin_campaign_id", "root_cid", "origin_stream", "origin_keyword", "click_ts", "original_status", "prev_status", "tid",
 		"ip", "region", "lang", "os", "os_version", "browser", "browser_ver", "brand",
 		"useragent", "referer", "se", "keyword", "asn", "org",
-		"site", "ad_campaign_id", "creative_id", "external_id", "xrw", "device_model", "depsum",
+		"site", "ad_campaign_id", "creative_id", "external_id", "xrw", "device_model", "depsum", "dep2sum",
 	)
 }
 
@@ -201,7 +201,7 @@ func postbackExportRecord(p store.PostbackRow) []string {
 		p.UserAgent, p.Referer, p.SE, p.Keyword,
 		strconv.FormatUint(uint64(p.ASN), 10), p.Org,
 		p.Site, p.AdCampaignID, p.CreativeID, p.ExternalID, p.XRW, p.DeviceModel,
-		fmt.Sprintf("%.2f", p.DepSum),
+		fmt.Sprintf("%.2f", p.DepSum), fmt.Sprintf("%.2f", p.Dep2Sum),
 	)
 	for i := range rec {
 		rec[i] = csvSafe(rec[i])

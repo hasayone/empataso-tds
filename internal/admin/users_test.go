@@ -6,6 +6,7 @@ import (
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -181,6 +182,31 @@ func TestUsersLangUK(t *testing.T) {
 		t.Fatalf("prefs.lang %q", u.Prefs.Lang)
 	}
 	code, _ = userJSON(t, c, http.MethodPut, base+"/api/users/"+u.ID, csrf, `{"prefs":{"lang":"de"}}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("bad lang want 400, got %d", code)
+	}
+}
+
+// TestMeLangSavesAdminProfile checks that the environment administrator's language is stored on the profile.
+func TestMeLangSavesAdminProfile(t *testing.T) {
+	s, c, csrf, base := usersHTTP(t)
+	s.cfg.PasswordFile = filepath.Join(t.TempDir(), "admin.hash")
+	code, raw := userJSON(t, c, http.MethodPut, base+"/api/me/lang", csrf, `{"lang":"ru"}`)
+	if code != http.StatusOK {
+		t.Fatalf("save %d %s", code, raw)
+	}
+	code, raw = userJSON(t, c, http.MethodGet, base+"/api/me", csrf, "")
+	if code != http.StatusOK {
+		t.Fatalf("me %d %s", code, raw)
+	}
+	var me meResponse
+	if err := json.Unmarshal(raw, &me); err != nil {
+		t.Fatal(err)
+	}
+	if me.Prefs.Lang != "ru" {
+		t.Fatalf("prefs.lang %q", me.Prefs.Lang)
+	}
+	code, _ = userJSON(t, c, http.MethodPut, base+"/api/me/lang", csrf, `{"lang":"de"}`)
 	if code != http.StatusBadRequest {
 		t.Fatalf("bad lang want 400, got %d", code)
 	}

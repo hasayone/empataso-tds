@@ -103,6 +103,12 @@ func aiStartStream(w http.ResponseWriter) {
 // The stream starts with ": open", carries ": ping" every 15 s and the events status, tool, text,
 // proposal, usage, and done or error. The model never applies a change: a propose call becomes a
 // card the user applies later.
+//
+// The turn runs on its own goroutine, not inside the request. Closing the stream (a closed tab, a
+// reload, a lost connection) detaches the page and does not stop the turn: it goes on to its end
+// and stores the reply, and the same user joins it again through GET /api/ai/chats/{id}/stream or
+// reads the stored chat. The turn stops on the user's cancel (POST /api/ai/chats/{id}/cancel), at
+// the turn timeout, the step or money limits or a shutdown of the process.
 func (s *Server) handleAIMessage(w http.ResponseWriter, r *http.Request) {
 	if !aiWantsSSE(r) {
 		aiWriteErr(w, newAIError(http.StatusNotAcceptable, "ai_not_acceptable", "send Accept: text/event-stream"))
@@ -123,14 +129,22 @@ func (s *Server) handleAIMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), s.ai.turns.limit())
-	defer cancel()
+	// The turn does not belong to the request: it keeps the access of the user (the values of the
+	// request context) but not its cancellation, so a page that closes or reloads does not stop it.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), s.ai.turns.limit())
 	run, err := s.aiTurnBegin(uid, chat.ID, cancel)
 	if err != nil {
+		cancel()
 		s.aiWriteErrIn(w, err, in.lang)
 		return
 	}
-	defer s.aiTurnEnd(uid, run)
+	launched := false
+	defer func() {
+		if !launched {
+			cancel()
+			s.aiTurnEnd(uid, run)
+		}
+	}()
 
 	t, err := s.aiNewTurn(r.Context(), sessionFrom(r.Context()), uid, chat.ID, st, in)
 	if err != nil {
@@ -143,17 +157,89 @@ func (s *Server) handleAIMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	t.sse = newAIFeed()
+	s.aiTurnSetFeed(run, t.sse)
+	launched = true
+	s.ai.turns.wg.Add(1)
+	go s.aiRunTurn(ctx, cancel, uid, run, t, msgs)
+	s.aiServeFeed(w, r, t.sse)
+}
+
+// aiRunTurn runs a launched turn to its end on its own goroutine: the loop, the closing events, the
+// stored chat. A turn that ends without a stored status is stored as interrupted. The registry entry
+// is removed before the feed closes, so a page that sees the stream end can send the next message.
+// cancel releases the turn context, and run is the registry entry of the turn.
+func (s *Server) aiRunTurn(ctx context.Context, cancel context.CancelFunc, uid string, run *aiTurnRun, t *aiTurn, msgs []aiTurnMsg) {
+	defer s.ai.turns.wg.Done()
+	defer cancel()
+	defer t.sse.close()
+	defer s.aiTurnEnd(uid, run)
 	defer func() {
 		if !t.settled {
 			t.persist(aiChatInterrupted, aiErrInterrupted)
 		}
 	}()
-	aiStartStream(w)
-	t.sse = newAISSE(w)
-	defer t.sse.finish()
-	t.sse.comment("open")
 	defer t.sse.heartbeat(s.ai.turns.beat())()
 	started := time.Now()
 	runErr := t.safeLoop(ctx, msgs)
 	t.conclude(ctx, runErr, started)
+}
+
+// aiServeFeed streams the events of a turn to one page until the turn ends or the page leaves. The
+// turn goes on when the page leaves: only the page is detached from the feed.
+func (s *Server) aiServeFeed(w http.ResponseWriter, r *http.Request, feed *aiSSE) {
+	aiStartStream(w)
+	sub := feed.attach(w)
+	select {
+	case <-sub.gone:
+	case <-r.Context().Done():
+	}
+	feed.detach(sub)
+}
+
+// handleAIChatStream answers GET /api/ai/chats/{id}/stream: a page of the same user joins the turn
+// that runs in the chat. The stream replays the events of the turn so far (steps, tools, the reply
+// text so far, proposals) and then follows it live to done or error, as the stream of the message
+// request does. Closing the page does not stop the turn.
+//
+// It answers 406 without Accept: text/event-stream, 403 and 503 as the other chat routes, and 404 for
+// a chat that is not the caller's or has no running turn (the turn ended; the chat holds the reply).
+func (s *Server) handleAIChatStream(w http.ResponseWriter, r *http.Request) {
+	if !aiWantsSSE(r) {
+		aiWriteErr(w, newAIError(http.StatusNotAcceptable, "ai_not_acceptable", "send Accept: text/event-stream"))
+		return
+	}
+	_, uid, ok := s.aiChatGate(w, r)
+	if !ok {
+		return
+	}
+	chat, err := s.aiChatGet(uid, r.PathValue("id"))
+	if err != nil {
+		s.failWrite(w, err)
+		return
+	}
+	feed, ok := s.aiTurnFeedOf(uid, chat.ID)
+	if !ok {
+		s.failWrite(w, aiPlainError(http.StatusNotFound, "no turn is running in this chat"))
+		return
+	}
+	s.aiServeFeed(w, r, feed)
+}
+
+// handleAIChatCancel answers POST /api/ai/chats/{id}/cancel with 204: the user stops the turn that
+// runs in the chat. It is the only way a page stops a turn; closing the page does not. A chat with
+// no running turn is 204 too, since the turn may have ended on its own just before; a chat that is
+// not the caller's is 404. The turn stores what it has and the chat is left interrupted.
+func (s *Server) handleAIChatCancel(w http.ResponseWriter, r *http.Request) {
+	_, uid, ok := s.aiChatGate(w, r)
+	if !ok {
+		return
+	}
+	chat, err := s.aiChatGet(uid, r.PathValue("id"))
+	if err != nil {
+		s.failWrite(w, err)
+		return
+	}
+	s.aiTurnCancelChat(uid, chat.ID)
+	w.WriteHeader(http.StatusNoContent)
 }

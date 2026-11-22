@@ -45,7 +45,7 @@ func TestApplyMergeAndSimulate(t *testing.T) {
 			_ = json.NewDecoder(r.Body).Decode(&req)
 			selected, out := "-", ""
 			if req.Group == "offer-es" {
-				selected, out = "kt-11", "https://offer.example/p?subid=[CID]&c=[COUNTRY]"
+				selected, out = "kt-11", "https://offer.example/p?subid=[SUBID]&c=[COUNTRY]"
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"path": []map[string]string{{"selected": selected, "out": out}},
@@ -97,7 +97,7 @@ func TestApplyMergeAndSimulate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if selected != "kt-11" || !strings.Contains(out, "[CID]") {
+	if selected != "kt-11" || !strings.Contains(out, "[SUBID]") {
 		t.Fatalf("simulate %s %s", selected, out)
 	}
 	selected, _, err = admin.Simulate(context.Background(), merged, "weights", "ES")

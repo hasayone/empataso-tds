@@ -309,7 +309,7 @@ func (c *CH) keywordConvUnion() string {
 // Placeholders are from, to, then the conversion filter args. The string does not fail.
 func (c *CH) keywordStatsConv(p keywordPlan) string {
 	return `SELECT ` + p.cvKey + ` AS k, toUInt64(0), toUInt64(0), count(), countIf(status = 'lead'),
-		countIf(status = 'sale'), countIf(status = 'rejected'), sum(profit), ` + sumDep(c.depsumConv, "depsum") + `
+		countIf` + saleStatusSQL("status") + `, countIf(status = 'rejected'), sum(profit), ` + sumDep(c.depsumConv, "depsum") + `
 		FROM (` + c.keywordConvUnion() + `) WHERE ts >= ? AND ts < ?` +
 		voidedConfirmedSQL("cid", "status") + p.cv + `
 		GROUP BY k`

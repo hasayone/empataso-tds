@@ -232,6 +232,13 @@ func (s *Server) findNewCampaigns(ctx context.Context, target keitaroSyncTarget,
 // landings need more archive GETs than budget is not taken, nor any after it.
 // It returns the batch. An error comes from reading the manifest or the catalogs.
 func (s *Server) mapNewCampaigns(ctx context.Context, store ManifestStore, snap ktimport.Snapshot, ids []int, budget int) (newCampaignsBatch, error) {
+	return s.mapCampaignSet(ctx, store, snap, ids, budget, true)
+}
+
+// mapCampaignSet maps every campaign of ids and merges the results; see mapNewCampaigns.
+// skipKnown drops a campaign whose group id the manifest already lists: true for the new-campaign
+// step, false for the step that refreshes campaigns already imported.
+func (s *Server) mapCampaignSet(ctx context.Context, store ManifestStore, snap ktimport.Snapshot, ids []int, budget int, skipKnown bool) (newCampaignsBatch, error) {
 	var out newCampaignsBatch
 	prev, err := loadManifestStore(store)
 	if err != nil {
@@ -246,7 +253,7 @@ func (s *Server) mapNewCampaigns(ctx context.Context, store ManifestStore, snap 
 			Offers: true, Landings: true, Networks: true, Sources: true, Domains: true, Campaigns: true,
 			Campaign: id, Known: prev.Has,
 		})
-		if groupsKnown(r.Groups, prev) {
+		if skipKnown && groupsKnown(r.Groups, prev) {
 			out.taken = append(out.taken, id)
 			out.skipped = append(out.skipped, id)
 			continue
@@ -361,6 +368,30 @@ func addCampaignResult(dst *ktimport.Result, r, fresh ktimport.Result) {
 // An error means a store or the manifest could not be read or saved; archive failures are only logged.
 func (s *Server) saveNewCampaigns(ctx context.Context, target keitaroSyncTarget, batch newCampaignsBatch) error {
 	res := batch.res
+	if err := s.saveCampaignAssets(ctx, target, &res); err != nil {
+		return err
+	}
+	prev, err := loadManifestStore(target.manifestStore)
+	if err != nil {
+		return err
+	}
+	var run ktimport.Manifest
+	run.Add(ktimport.KindLists, sortedNames(res.Lists)...)
+	run.Add(ktimport.KindPages, sortedNames(res.Pages)...)
+	_, losses, err := s.importGroups(ctx, res.Groups, prev, "", &run, target.creds.host(), target.board, target.manifestStore)
+	if len(losses) > 0 {
+		s.logInfo("keitaro sync campaigns report", "lines", len(losses))
+	}
+	return err
+}
+
+// saveCampaignAssets writes what the groups of res refer to: catalog rows through the insert-only
+// merge, landing archives of the added local landings, IP lists and HTML pages. res.Groups may lose
+// IP list names when the lists store is missing. The stored catalog ids join the manifest of target;
+// lists, pages and groups do not.
+// An error means a store or the manifest could not be read or saved; archive failures are only logged.
+func (s *Server) saveCampaignAssets(ctx context.Context, target keitaroSyncTarget, resp *ktimport.Result) error {
+	res := *resp
 	added, err := s.insertCampaignCatalogs(ctx, target.manifestStore, res)
 	if err != nil {
 		return err
@@ -381,18 +412,8 @@ func (s *Server) saveNewCampaigns(ctx context.Context, target keitaroSyncTarget,
 	if _, _, err := s.importPages(&res); err != nil {
 		return err
 	}
-	prev, err := loadManifestStore(target.manifestStore)
-	if err != nil {
-		return err
-	}
-	var run ktimport.Manifest
-	run.Add(ktimport.KindLists, sortedNames(res.Lists)...)
-	run.Add(ktimport.KindPages, sortedNames(res.Pages)...)
-	_, losses, err := s.importGroups(ctx, res.Groups, prev, "", &run, target.creds.host(), target.board, target.manifestStore)
-	if len(losses) > 0 {
-		s.logInfo("keitaro sync campaigns report", "lines", len(losses))
-	}
-	return err
+	*resp = res
+	return nil
 }
 
 // insertCampaignCatalogs merges catalog rows that are not stored yet with mergeTopUp, raises

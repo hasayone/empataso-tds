@@ -43,6 +43,7 @@ func (c *CH) ensureSchemaWaves(withOrigin bool) {
 		c.schemaAlter("events", waveOrigin)
 	}
 	c.schemaAlter("events", waveRoot)
+	c.schemaAlter("events", waveRev)
 	c.schemaExec(eventsCIDIndexSQL)
 	c.EnsureDedup()
 	c.schemaExec(`CREATE TABLE IF NOT EXISTS conversions (
@@ -87,6 +88,7 @@ func (c *CH) ensureSchemaWaves(withOrigin bool) {
 	c.netCols = c.ready("events", waveNet)
 	c.clickCols = c.ready("events", waveClick) && c.ready("conversions", waveClick)
 	c.costCols = c.ready("events", waveCost)
+	c.revCols = c.ready("events", waveRev)
 	c.extEvents = c.ready("events", waveExt)
 	c.extConv = c.ready("conversions", waveExt)
 	c.modelEvents = c.ready("events", waveModel)

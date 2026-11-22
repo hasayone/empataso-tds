@@ -347,6 +347,7 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			next = append(next, o, copyO)
 			targetOfferIDs[newID] = true
 		}
+		relinkOfferFallbacks(next, out.Map.Offers)
 		if err := s.cfg.Offers.Save(ctx, next); err != nil {
 			return out, http.StatusInternalServerError, "save error"
 		}

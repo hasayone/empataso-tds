@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"sync/atomic"
 	"time"
 
@@ -71,6 +72,7 @@ func OpenWith(p Paths, log *slog.Logger) (*DB, error) {
 	d := &DB{log: log}
 	d.city.path, d.asn.path, d.dbip.path = p.City, p.ASN, p.DBIPASN
 	d.city.kind, d.asn.kind, d.dbip.kind = KindCity, KindASN, KindDBIPASN
+	d.ensureDirs()
 	var first error
 	loaded := false
 	for _, s := range d.sources() {
@@ -87,6 +89,29 @@ func OpenWith(p Paths, log *slog.Logger) (*DB, error) {
 
 // sources lists the databases in a fixed order: City, MaxMind ASN, DB-IP ASN.
 func (d *DB) sources() []*source { return []*source{&d.city, &d.asn, &d.dbip} }
+
+// ensureDirs creates the parent directory of each configured database at 0o755,
+// the mode the process already uses when it reads these paths.
+// It does not create the database file: an empty or broken mmdb is worse than
+// a missing one, and Watch keeps waiting for a real file. A path with no
+// directory (a bare file name) is skipped. A mkdir failure is logged; OpenWith
+// still returns the database that could not be read.
+func (d *DB) ensureDirs() {
+	seen := map[string]bool{}
+	for _, s := range d.sources() {
+		if s.path == "" {
+			continue
+		}
+		dir := filepath.Dir(s.path)
+		if dir == "" || dir == "." || seen[dir] {
+			continue
+		}
+		seen[dir] = true
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			d.log.Warn("geo directory", "path", dir, "err", err)
+		}
+	}
+}
 
 // load reads the file if it is configured and has changed since the last
 // successful load. The previous reader stays in place on any failure: a

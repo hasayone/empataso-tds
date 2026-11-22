@@ -131,7 +131,7 @@ A normative document: requirements + what's already done (✅) and what's planne
   `internal/fetch/fetch.go`). `net/http` has no default for it at all.
 - ✅ The fetch cache is bounded by bytes (`cacheBudget` in
   `internal/fetch/fetch.go`) and sweeps expired entries. Its keys are URLs after
-  macro expansion, and `[IP]`, `[CID]` and `[PAR-n]` make a key asked for once
+  macro expansion, and `[IP]`, `[SUBID]` and `[PAR-n]` (`[CID]` expands the same way) make a key asked for once
   and never again — unbounded, that map was a log of every URL the process had
   ever built.
 - ✅ Request body size limits (MaxBytesReader); log export is bounded.

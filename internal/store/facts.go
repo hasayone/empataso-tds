@@ -23,13 +23,15 @@ type ClickFact struct {
 	Hits      int64  `json:"hits"`
 	Uniq      int64  `json:"uniq"`
 	UniqFirst int64  `json:"uniq_first"`
-	CostCents int64  `json:"cost_cents"`
-	CostCur   string `json:"cost_cur"`
+	CostCents int64   `json:"cost_cents"`
+	CostCur   string  `json:"cost_cur"`
+	Revenue   float64 `json:"revenue,omitempty"`
 }
 
 // StatusFact is one conversion status for a period.
-// Profit is the sum of payouts for that status. DepSum is the sum of deposits
-// for that status and is not the payout. Rejected rows are separate.
+// Profit is the sum of payouts for that status. DepSum and Dep2Sum are the sums
+// of the first and the second deposit for that status and are not the payout.
+// Rejected rows are separate.
 type StatusFact struct {
 	OfferID   string  `json:"offer_id"`
 	NetworkID string  `json:"network_id"`
@@ -38,6 +40,7 @@ type StatusFact struct {
 	N         int64   `json:"n"`
 	Profit    float64 `json:"profit"`
 	DepSum    float64 `json:"depsum"`
+	Dep2Sum   float64 `json:"dep2sum"`
 }
 
 // Facts is the click and conversion breakdown used by the catalog tables.
@@ -118,7 +121,7 @@ func (c *CH) clickFactsBundle(ctx context.Context, from, to time.Time, where str
 // each currency is its own row and CostCents is the sum for that currency.
 // It returns an error when the query or a scan fails.
 func (c *CH) clickFacts(ctx context.Context, from, to time.Time, where string, wargs []any) ([]ClickFact, error) {
-	q := clickFactsSQL(c.clickCols, c.costCols, c.stepEvents, where)
+	q := clickFactsSQL(c.clickCols, c.costCols, c.stepEvents, c.revCols, where)
 	qargs := append([]any{from, to}, wargs...)
 	rows, err := c.conn.Query(ctx, q, qargs...)
 	if err != nil {
@@ -127,7 +130,7 @@ func (c *CH) clickFacts(ctx context.Context, from, to time.Time, where string, w
 	defer rows.Close()
 	var out []ClickFact
 	for rows.Next() {
-		row, err := scanClickFact(rows, c.clickCols, c.costCols)
+		row, err := scanClickFact(rows, c.clickCols, c.costCols, c.revCols)
 		if err != nil {
 			return nil, err
 		}
@@ -149,7 +152,7 @@ func (c *CH) clickFacts(ctx context.Context, from, to time.Time, where string, w
 // the second. where is empty or an events filter that starts with " AND ",
 // placed after "ts < ?". Placeholders are from, to, then that filter. It does
 // not fail.
-func clickFactsSQL(clickCols, costCols, step bool, where string) string {
+func clickFactsSQL(clickCols, costCols, step, rev bool, where string) string {
 	cols := "group_id, stream_name"
 	group := "group_id, stream_name"
 	if clickCols {
@@ -161,6 +164,9 @@ func clickFactsSQL(clickCols, costCols, step bool, where string) string {
 		cols += ", if(cost_cents > 0, cost_cur, '') AS fact_cur, sum(cost_cents)"
 		group += ", fact_cur"
 	}
+	if rev {
+		cols += ", sum(revenue)"
+	}
 	return "SELECT " + cols + " FROM events WHERE ts >= ? AND ts < ?" + where + " GROUP BY " + group
 }
 
@@ -170,41 +176,59 @@ type factRow interface {
 }
 
 // scanClickFact reads one clickFacts row.
-// rows is the open result. clickCols and costCols select the column set
+// rows is the open result. clickCols, costCols and rev select the column set
 // from clickFactsSQL. Hits, Uniq and UniqFirst come from the counts. Without
-// costCols the cost fields stay zero and empty. A scan error is returned.
-func scanClickFact(rows factRow, clickCols, costCols bool) (ClickFact, error) {
+// costCols the cost fields stay zero and empty. Without rev, Revenue stays zero.
+// A scan error is returned.
+func scanClickFact(rows factRow, clickCols, costCols, rev bool) (ClickFact, error) {
 	var row ClickFact
 	var hits, uniq, first uint64
-	var err error
-	switch {
-	case clickCols && costCols:
-		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.LandingID, &row.NetworkID, &hits, &uniq, &first, &row.CostCur, &row.CostCents)
-	case clickCols:
-		err = rows.Scan(&row.GroupID, &row.Stream, &row.OfferID, &row.LandingID, &row.NetworkID, &hits, &uniq, &first)
-	case costCols:
-		err = rows.Scan(&row.GroupID, &row.Stream, &hits, &uniq, &first, &row.CostCur, &row.CostCents)
-	default:
-		err = rows.Scan(&row.GroupID, &row.Stream, &hits, &uniq, &first)
+	dest := []any{&row.GroupID, &row.Stream}
+	if clickCols {
+		dest = append(dest, &row.OfferID, &row.LandingID, &row.NetworkID)
 	}
-	if err != nil {
+	dest = append(dest, &hits, &uniq, &first)
+	if costCols {
+		dest = append(dest, &row.CostCur, &row.CostCents)
+	}
+	if rev {
+		dest = append(dest, &row.Revenue)
+	}
+	if err := rows.Scan(dest...); err != nil {
 		return ClickFact{}, err
 	}
 	row.Hits, row.Uniq, row.UniqFirst = int64(hits), int64(uniq), int64(first)
 	return row, nil
 }
 
-func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, wargs []any) ([]StatusFact, error) {
-	q := `SELECT offer_id, network_id, status, count(), sum(profit), ` + sumDep(c.depsumConv, "depsum") + `
+// statusFactsSQL is the conversion breakdown by offer and network.
+// where is empty or an events filter that starts with " AND ".
+// dep selects sum(depsum) and sum(dep2sum); a closed wave uses typed zeros
+// and does not name the columns. The folded status is aliased folded, not
+// status: ClickHouse substitutes a SELECT alias for a column of the same
+// name, so AS status makes the WHERE and the voided subquery read the
+// aggregate and the query is rejected. Placeholders are from, to, and, when
+// where is set, from, to and the where args. It does not fail.
+func statusFactsSQL(where string, dep bool) string {
+	q := `SELECT offer_id, network_id, ` + foldedStatusSQL("status") + ` AS folded, count(), sum(profit), ` + sumDep(dep, "depsum") + `, ` + sumDep(dep, "dep2sum") + `
 		FROM conversions FINAL
 		WHERE ts >= ? AND ts < ?` + voidedConfirmedSQL("cid", "status")
-	qargs := []any{from, to}
 	if where != "" {
 		q += eventsCidInSQL(where)
+	}
+	return q + ` GROUP BY offer_id, network_id, folded`
+}
+
+// statusFacts reads conversion counts per offer, network and status.
+// where is empty or from buildWhere on events. wargs are its placeholders.
+// It returns an error when the query or a scan fails.
+func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, wargs []any) ([]StatusFact, error) {
+	q := statusFactsSQL(where, c.depsumConv)
+	qargs := []any{from, to}
+	if where != "" {
 		qargs = append(qargs, from, to)
 		qargs = append(qargs, wargs...)
 	}
-	q += ` GROUP BY offer_id, network_id, status`
 	rows, err := c.conn.Query(ctx, q, qargs...)
 	if err != nil {
 		return nil, err
@@ -214,7 +238,7 @@ func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, 
 	for rows.Next() {
 		var row StatusFact
 		var n uint64
-		if err := rows.Scan(&row.OfferID, &row.NetworkID, &row.Status, &n, &row.Profit, &row.DepSum); err != nil {
+		if err := rows.Scan(&row.OfferID, &row.NetworkID, &row.Status, &n, &row.Profit, &row.DepSum, &row.Dep2Sum); err != nil {
 			return nil, err
 		}
 		row.N = int64(n)
@@ -225,12 +249,12 @@ func (c *CH) statusFacts(ctx context.Context, from, to time.Time, where string, 
 
 // groupStatusSQL joins conversions to one campaign id per click.
 // where is empty or an events filter that starts with " AND ".
-// dep selects sum(c.depsum); a closed wave uses a typed zero and does not
-// name the column. The aggregate is aliased gid: group_id in where must stay
+// dep selects sum(c.depsum) and sum(c.dep2sum); a closed wave uses typed zeros
+// and does not name the columns. The aggregate is aliased gid: group_id in where must stay
 // the events column. Placeholders are from, to, the where args, then from, to.
 // It does not fail.
 func groupStatusSQL(where string, dep bool) string {
-	return `SELECT e.gid, c.status, count(), sum(c.profit), ` + sumDep(dep, "c.depsum") + `
+	return `SELECT e.gid, ` + foldedStatusSQL("c.status") + ` AS status, count(), sum(c.profit), ` + sumDep(dep, "c.depsum") + `, ` + sumDep(dep, "c.dep2sum") + `
 		FROM conversions AS c FINAL
 		INNER JOIN (
 			SELECT cid, any(group_id) AS gid
@@ -239,7 +263,7 @@ func groupStatusSQL(where string, dep bool) string {
 			GROUP BY cid
 		) AS e ON e.cid = c.cid
 		WHERE c.ts >= ? AND c.ts < ?` + voidedConfirmedSQL("c.cid", "c.status") + `
-		GROUP BY e.gid, c.status`
+		GROUP BY e.gid, ` + foldedStatusSQL("c.status")
 }
 
 // groupStatus reads conversion counts per campaign and status.
@@ -256,7 +280,7 @@ func (c *CH) groupStatus(ctx context.Context, from, to time.Time, where string, 
 	for rows.Next() {
 		var row StatusFact
 		var n uint64
-		if err := rows.Scan(&row.GroupID, &row.Status, &n, &row.Profit, &row.DepSum); err != nil {
+		if err := rows.Scan(&row.GroupID, &row.Status, &n, &row.Profit, &row.DepSum, &row.Dep2Sum); err != nil {
 			return nil, err
 		}
 		row.N = int64(n)

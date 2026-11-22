@@ -263,14 +263,14 @@ func statsRouteDocs() map[string]routeDoc {
 		"GET /api/stats/facts": {
 			ID: "stats_facts", Summary: "Click and conversion facts per catalog row.",
 			Description: "The answer is {ready, clicks, status}. clicks are the hits, uniques and click cost per campaign, stream, offer, " +
-				"landing and affiliate network; status are the conversion count, profit and depsum per offer, affiliate network, " +
+				"landing and affiliate network; status are the conversion count, profit and depsum (the deposit) per offer, affiliate network, " +
 				"campaign and status. ready is false when the offer and network columns are not on the tables yet. " +
 				"For a caller who may not see the conversion status, the status rows keep only confirmed conversions summed into one row per key. " +
 				"Missing statistics give an empty answer with 200. A bad filter is 400 and a query stopped as too heavy is 504 \"query too heavy\".",
 			RU: docText{
 				Summary: "Факты по кликам и конверсиям для строк каталогов.",
 				Description: "Ответ — {ready, clicks, status}. clicks — хиты, уникальные и цена кликов по кампании, потоку, офферу, " +
-					"лендингу и партнёрской сети; status — число конверсий, profit и depsum по офферу, партнёрской сети, " +
+					"лендингу и партнёрской сети; status — число конверсий, profit и depsum (депозит) по офферу, партнёрской сети, " +
 					"кампании и статусу. ready равен false, если колонок оффера и сети в таблицах ещё нет. " +
 					"Для вызывающего, который не видит статус конверсии, в status остаются только подтверждённые конверсии, сложенные в одну строку на ключ. " +
 					"Без статистики ответ пустой с кодом 200. Неверный фильтр даёт 400, запрос, остановленный как слишком тяжёлый, — 504 «query too heavy».",
@@ -278,7 +278,7 @@ func statsRouteDocs() map[string]routeDoc {
 			UK: docText{
 				Summary: "Факти за кліками та конверсіями для рядків каталогів.",
 				Description: "Відповідь — {ready, clicks, status}. clicks — хіти, унікальні та ціна кліків за кампанією, потоком, офером, " +
-					"лендінгом і партнерською мережею; status — кількість конверсій, profit і depsum за офером, партнерською мережею, " +
+					"лендінгом і партнерською мережею; status — кількість конверсій, profit і depsum (депозит) за офером, партнерською мережею, " +
 					"кампанією та статусом. ready дорівнює false, якщо колонок офера й мережі в таблицях ще немає. " +
 					"Для викликаючого, який не бачить статус конверсії, у status залишаються лише підтверджені конверсії, складені в один рядок на ключ. " +
 					"Без статистики відповідь порожня з кодом 200. Хибний фільтр дає 400, запит, зупинений як надто важкий, — 504 «query too heavy».",
@@ -291,7 +291,7 @@ func statsRouteDocs() map[string]routeDoc {
 					"hits": 1250, "uniq": 980, "uniq_first": 900, "cost_cents": 0, "cost_cur": "",
 				}},
 				"status": []any{map[string]any{
-					"offer_id": "o1", "network_id": "n1", "group_id": "promo", "status": "sale", "n": 12, "profit": 360.5, "depsum": 0,
+					"offer_id": "o1", "network_id": "n1", "group_id": "promo", "status": "sale", "n": 12, "profit": 360.5, "depsum": 0, "dep2sum": 0,
 				}},
 			},
 			Errors: []int{400, 500, 504},
@@ -445,7 +445,7 @@ func journalRouteDocs() map[string]routeDoc {
 				"total": 30.5, "depsum": 0, "count": 1,
 				"rows": []any{map[string]any{
 					"ts": "2026-11-16T10:20:00Z", "group": "Promo", "stream": "main", "domain": "example.com", "page": "/",
-					"device": "mobile", "country": "us", "city": "Austin", "profit": 30.5, "depsum": 0, "cid": "c1",
+					"device": "mobile", "country": "us", "city": "Austin", "profit": 30.5, "depsum": 0, "dep2sum": 0, "cid": "c1",
 					"status": "sale", "offer_id": "o1", "network_id": "n1",
 				}},
 			},
@@ -459,7 +459,7 @@ func journalRouteDocs() map[string]routeDoc {
 				"ts, group, stream, domain, page, device, country, city, profit, cid, status, offer_id, landing_id, source_id, network_id, " +
 				"sub_id_1 to sub_id_30, campaign_id, origin_campaign, origin_campaign_id, click_ts, original_status, prev_status, tid, ip, " +
 				"region, lang, os, os_version, browser, browser_ver, brand, useragent, referer, se, keyword, asn, org, site, ad_campaign_id, " +
-				"creative_id, external_id, xrw, device_model, depsum. A cell that starts with =, +, - or @ gets a leading apostrophe. " +
+				"creative_id, external_id, xrw, device_model, depsum, dep2sum. A cell that starts with =, +, - or @ gets a leading apostrophe. " +
 				"The sample shows the first columns only. " + exportEN,
 			RU: docText{
 				Summary: "Журнал конверсий за период в виде CSV-файла.",
@@ -468,7 +468,7 @@ func journalRouteDocs() map[string]routeDoc {
 					"ts, group, stream, domain, page, device, country, city, profit, cid, status, offer_id, landing_id, source_id, network_id, " +
 					"sub_id_1 … sub_id_30, campaign_id, origin_campaign, origin_campaign_id, click_ts, original_status, prev_status, tid, ip, " +
 					"region, lang, os, os_version, browser, browser_ver, brand, useragent, referer, se, keyword, asn, org, site, ad_campaign_id, " +
-					"creative_id, external_id, xrw, device_model, depsum. Ячейка, начинающаяся с =, +, - или @, получает впереди апостроф. " +
+					"creative_id, external_id, xrw, device_model, depsum, dep2sum. Ячейка, начинающаяся с =, +, - или @, получает впереди апостроф. " +
 					"В примере показаны только первые колонки. " + exportRU,
 			},
 			UK: docText{
@@ -478,7 +478,7 @@ func journalRouteDocs() map[string]routeDoc {
 					"ts, group, stream, domain, page, device, country, city, profit, cid, status, offer_id, landing_id, source_id, network_id, " +
 					"sub_id_1 … sub_id_30, campaign_id, origin_campaign, origin_campaign_id, click_ts, original_status, prev_status, tid, ip, " +
 					"region, lang, os, os_version, browser, browser_ver, brand, useragent, referer, se, keyword, asn, org, site, ad_campaign_id, " +
-					"creative_id, external_id, xrw, device_model, depsum. Комірка, що починається з =, +, - або @, отримує попереду апостроф. " +
+					"creative_id, external_id, xrw, device_model, depsum, dep2sum. Комірка, що починається з =, +, - або @, отримує попереду апостроф. " +
 					"У прикладі показано лише перші колонки. " + exportUK,
 			},
 			Query: joinParams(rangeParams, filterParams, postbackValueParams, sortParams),

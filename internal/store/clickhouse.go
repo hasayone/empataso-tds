@@ -28,6 +28,9 @@ type CH struct {
 	// costCols: events carry cost_cents and cost_cur. Writes name them only
 	// after ensureSchema has seen both, otherwise the whole insert fails.
 	costCols bool
+	// revCols: events carry revenue, the click revenue of a CPC offer.
+	// Writes name the column only after ensureSchema has seen it.
+	revCols bool
 	// extEvents: events carry the ext wave (site and the ad identifiers).
 	// Writes name those columns only after ensureSchema has seen them.
 	extEvents bool

@@ -10,7 +10,7 @@ func TestPickSelectWired(t *testing.T) {
 	for _, fn := range []string{"function pickSearch(", "function pickSegments(", "function enhancePickSelect(", "function enhancePicks(", "function flowOpt("} {
 		must(t, html, fn, fn)
 	}
-	must(t, html, "const PICK_DEBOUNCE_MS=250;", "typing pause before filtering")
+	must(t, html, "const PICK_DEBOUNCE_MS=SEARCH_WAIT_MS;", "the combobox waits like every search field")
 	must(t, html, "const PICK_SELECT_LIMIT=100;", "long lists draw at most 100 rows")
 	must(t, html, "const api=bindPickCombo(inp, {", "the select search runs on the shared combobox")
 	must(t, html, "const hit=pickSearch(poolFor(q), q, lim);", "the shared combobox ranks with pickSearch")

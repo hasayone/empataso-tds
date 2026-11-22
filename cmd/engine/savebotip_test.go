@@ -34,8 +34,8 @@ func TestSaveBotIPWritesEachIPOnce(t *testing.T) {
 		detectBot(lists, sigs, dir, botVisit(ip, uaGoogleBot), bots)
 		waitPTR(t, c, ip)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "ip_google.dat")); err == nil {
-		t.Fatal("an address must not be saved before the DNS check finished")
+	if b, err := os.ReadFile(filepath.Join(dir, "ip_google.dat")); err != nil || strings.TrimSpace(string(b)) != "" {
+		t.Fatalf("an address must not be saved before the DNS check finished: %q, %v", b, err)
 	}
 	for i := 0; i < 50; i++ {
 		detectBot(lists, sigs, dir, botVisit(ip1, uaGoogleBot), bots)
@@ -70,8 +70,8 @@ func TestSaveBotIPSkipsFakeAndPending(t *testing.T) {
 	if got := detectBot(lists, sigs, dir, botVisit(ip, uaGoogleBot), bots); got != "fake_google" {
 		t.Fatalf("checked click = %q, want fake_google", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "ip_google.dat")); err == nil {
-		t.Fatal("a pending or fake crawler must not be saved")
+	if b, err := os.ReadFile(filepath.Join(dir, "ip_google.dat")); err != nil || strings.TrimSpace(string(b)) != "" {
+		t.Fatalf("a pending or fake crawler must not be saved: %q, %v", b, err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "ip_fake_google.dat")); err == nil {
 		t.Fatal("a fake label must not get a list file")

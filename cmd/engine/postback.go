@@ -25,16 +25,21 @@ const postbackTIDMax = 128
 
 // postbackIn is one public /postback query.
 // cid is the click id. profit is the payout. depSum is the deposit and is
-// not the payout. status is folded to lower case. original is that status
-// before folding, at most 64 bytes. tid is the transaction id, at most 128
-// bytes. ok is false when a payout alias or the deposit parses as NaN or Inf.
+// not the payout. dep2Sum is not read from the query and stays 0. status is
+// folded to lower case. original is that status before folding, at most 64
+// bytes. tid is the transaction id, at most 128 bytes. ok is false when a
+// payout alias or the deposit parses as NaN or Inf.
 type postbackIn struct {
 	cid              string
 	profit           float64
 	depSum           float64
+	dep2Sum          float64
 	status, original string
 	tid              string
 	ok               bool
+	// payoutAbsent is true when no payout alias held a number, so profit is 0
+	// only by default; a payout that was sent, even a zero, leaves it false.
+	payoutAbsent bool
 }
 
 func firstNonEmpty(q url.Values, keys ...string) string {
@@ -54,8 +59,8 @@ func firstNonEmpty(q url.Values, keys ...string) string {
 // The payout is the first value that parses as a finite number among
 // payout, profit and sum. The deposit is the first non-empty of DepSum and
 // depsum; an empty value stays 0 and a value that is not a number stays 0.
-// ok is false when a payout alias or the deposit parses as NaN or Inf.
-// The old ?pb= pixel does not call this function.
+// dep2sum and Dep2Sum are not read. ok is false when a payout alias or the
+// deposit parses as NaN or Inf. The old ?pb= pixel does not call this function.
 func parsePostback(q url.Values) postbackIn {
 	rawStatus := firstNonEmpty(q, "status", "type", "goal")
 	in := postbackIn{
@@ -64,6 +69,8 @@ func parsePostback(q url.Values) postbackIn {
 		original: config.LimitBytes(rawStatus, postbackOriginalMax),
 		tid:      config.LimitBytes(strings.TrimSpace(q.Get("tid")), postbackTIDMax),
 		ok:       true,
+
+		payoutAbsent: true,
 	}
 	for _, k := range []string{"payout", "profit", "sum"} {
 		raw := strings.TrimSpace(q.Get(k))
@@ -79,22 +86,33 @@ func parsePostback(q url.Values) postbackIn {
 			return in
 		}
 		in.profit = v
+		in.payoutAbsent = false
 		break
 	}
-	rawDep := firstNonEmpty(q, "DepSum", "depsum")
-	if rawDep == "" {
-		return in
-	}
-	dep, err := strconv.ParseFloat(rawDep, 64)
-	if err != nil {
-		return in
-	}
-	if math.IsNaN(dep) || math.IsInf(dep, 0) {
+	var ok bool
+	if in.depSum, ok = parseDeposit(q, "DepSum", "depsum"); !ok {
 		in.ok = false
-		return in
 	}
-	in.depSum = dep
 	return in
+}
+
+// parseDeposit reads one deposit amount from the query.
+// q is the query. names are the accepted parameter names; the first one with a
+// non-empty value is read. An absent or empty parameter and a value that is not
+// a number give 0, so no deposit is invented. ok is false only for NaN and Inf.
+func parseDeposit(q url.Values, names ...string) (v float64, ok bool) {
+	raw := firstNonEmpty(q, names...)
+	if raw == "" {
+		return 0, true
+	}
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, true
+	}
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		return 0, false
+	}
+	return v, true
 }
 
 // postbackOut is the JSON body of GET and POST /postback.
@@ -218,8 +236,9 @@ func (d *engineDeps) handlePostback(w http.ResponseWriter, r *http.Request, path
 	if in.cid != "" && cs != nil {
 		sctx, cancel := context.WithTimeout(ctx, postbackStoreTimeout)
 		res, recErr = cs.RecordConversion(sctx, store.PostbackIn{
-			CID: in.cid, Profit: in.profit, DepSum: in.depSum, Status: in.status,
+			CID: in.cid, Profit: in.profit, DepSum: in.depSum, Dep2Sum: in.dep2Sum, Status: in.status,
 			Original: in.original, TID: in.tid, At: at,
+			PayoutAbsent: in.payoutAbsent, OfferPayout: d.offerReserve, Upsell: d.offerUpsell,
 		})
 		cancel()
 		if recErr != nil {
@@ -227,6 +246,10 @@ func (d *engineDeps) handlePostback(w http.ResponseWriter, r *http.Request, path
 				d.log.Warn("postback failed", "cid", in.cid, "err", recErr)
 			}
 		} else {
+			if res.ProfitFromOffer {
+				in.profit = res.Profit
+			}
+			d.noteOfferCap(ctx, res, in.status)
 			_, subs := config.ApplySource(q, nil)
 			d.queueOutboundCtx(ctx, res, in.cid, in.profit, in.status, subs)
 		}
@@ -242,6 +265,36 @@ func (d *engineDeps) handlePostback(w http.ResponseWriter, r *http.Request, path
 	}
 	d.journalIn(r, pathKey, q, in, outcome, res)
 	writePostback(w, code, errMsg)
+}
+
+// offerReserve is the reserve payout of an offer for a postback without one.
+// offerID is the offer of the click. It returns the amount and true when the
+// offer is in the catalog and Offer.ReservePayout gives one; an offer without
+// the payout parameter tick, an unknown id and a nil d give false, so the
+// payout stays what the postback carried.
+func (d *engineDeps) offerReserve(offerID string) (float64, bool) {
+	if d == nil || d.offers == nil {
+		return 0, false
+	}
+	o, ok := d.offers.Get(offerID)
+	if !ok {
+		return 0, false
+	}
+	return o.ReservePayout()
+}
+
+// offerUpsell reports whether the offer counts a later sale with a new tid as
+// another sale. offerID is the offer of the click. An unknown id and a nil d
+// return false, so a repeat stays one sale.
+func (d *engineDeps) offerUpsell(offerID string) bool {
+	if d == nil || d.offers == nil {
+		return false
+	}
+	o, ok := d.offers.Get(offerID)
+	if !ok {
+		return false
+	}
+	return o.Upsell
 }
 
 // parkPostback puts a postback that could not be settled now into the disk

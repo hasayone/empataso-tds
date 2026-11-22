@@ -550,6 +550,9 @@ func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, pre
 				cg.CreatedBy = old.CreatedBy
 			}
 			cg.StickyStream = old.StickyStream
+			if cg.Notes == "" {
+				cg.Notes = old.Notes
+			}
 			cg.BoardID = old.BoardID
 			out = append(out, cg)
 			continue

@@ -57,8 +57,11 @@ type Event struct {
 	Subs [config.MaxSubID]string
 	// CostCents and CostCur are a price that arrived on the click itself.
 	// Zero means the click has no incoming price and a manual window may include it.
-	CostCents    int64
-	CostCur      string
+	CostCents int64
+	CostCur   string
+	// Revenue is the payout a CPC offer earns on this click. Zero means the
+	// click has no revenue of its own; a CPA offer leaves it zero.
+	Revenue float64
 	Site         string
 	AdCampaignID string
 	CreativeID   string

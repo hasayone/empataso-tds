@@ -144,7 +144,7 @@ go run ./cmd/cron
 - Группа: `http://домен/<id>` (и алиасы `http://домен/<alias>`)
 - С ключевым словом: `http://домен/<id>?q=КЛЮЧ`
 - С доп. параметрами: `http://домен/<id>?p1=...&p2=...` → макросы `[PAR-1..5]`
-- Постбэк-пиксель: `http://домен/?pb=KEY&cid=[CID]&profit=1.50`; без ключа —
+- Постбэк-пиксель: `http://домен/?pb=KEY&cid=[SUBID]&profit=1.50` (`[CID]` раскрывается так же); без ключа —
   `GET|POST /postback` с `subid`, `status`, `payout`, `depsum`
   ([wiki/postbacks.md](wiki/postbacks.md))
 - Любая переменная строки запроса может быть условием потока («URL parameter»:
@@ -282,7 +282,7 @@ heartbeat раз в несколько секунд). Карточка на ка
 | VirusTotal | Спрашивает о каждом домене из выводов потоков (и о перечисленных вручную). О новых помеченных доменах сообщает один раз; по желанию потоки, ведущие на них, выключаются |
 | Disk space | Предупреждает, когда свободное место падает ниже порога, и ещё раз — когда оно восстанавливается |
 | Keyword cleanup | Удаляет файлы ключевых слов старше N дней |
-| Conversion alerts | Отправляет каждый новый постбэк в Telegram по шаблону (`[PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [CID]`). Строки с `domain`, равным хосту импорта Keitaro из манифеста, не анонсирует |
+| Conversion alerts | Отправляет каждый новый постбэк в Telegram по шаблону (`[PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [SUBID]`). Строки с `domain`, равным хосту импорта Keitaro из манифеста, не анонсирует |
 | Актуализация данных Keitaro | Дотягивает клики и конверсии по курсору (`keitaro_sync` в `cron.json`); исполняет **admin**, не cron-сервис. Нужны Keitaro и ClickHouse; подробно — [wiki/keitaro.md](wiki/keitaro.md) |
 
 Telegram (токен бота + ID чата) — канал уведомлений, с кнопкой **Send a
@@ -324,7 +324,7 @@ chance,distribution,header}, bots, separation, remote, api_mac, curl}`.
 ## Макросы вывода
 
 `[KEY] [PATH] [IP] [COUNTRY] [CITY] [REGION] [ASN] [ORG] [TIMEZONE] [UTC]
-[LANG] [DEVICE] [OPERATOR] [DOMAIN] [USERAGENT] [CID] [PAR-1..5]
+[LANG] [DEVICE] [OPERATOR] [DOMAIN] [USERAGENT] [SUBID] [PAR-1..5]
 [()COUNTRY()] [()CITY()]
 [RANDNUM-a-b] [RANDSTR-(набор)-n] [RANDLINE-(файл)-n[/u]] [RANDDFL-(каталог)-n[/u]]`
 

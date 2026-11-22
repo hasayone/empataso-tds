@@ -8,6 +8,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/emtds/bridge/ktimport"
 	"github.com/hasayone/empataso-tds/internal/config"
 )
 
@@ -49,6 +50,9 @@ func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
 // maxFolderRunes is the longest campaign folder label the admin accepts.
 // The count is runes, so a 64-letter Cyrillic label still fits.
 const maxFolderRunes = 64
+
+// maxNotesRunes is the longest campaign note the admin accepts, counted in runes.
+const maxNotesRunes = ktimport.MaxNotesRunes
 
 // maxGroupsBody is the largest PUT /api/groups body.
 // Several thousand imported campaigns are saved as one array.
@@ -619,6 +623,9 @@ func prepareGroups(groups []config.Group) string {
 		groups[i].Folder = strings.TrimSpace(groups[i].Folder)
 		if utf8.RuneCountInString(groups[i].Folder) > maxFolderRunes {
 			return "folder is longer than 64 characters: " + groups[i].ID
+		}
+		if utf8.RuneCountInString(groups[i].Notes) > maxNotesRunes {
+			return "notes are longer than 10000 characters: " + groups[i].ID
 		}
 		if msg := prepareGroupParams(&groups[i]); msg != "" {
 			return msg

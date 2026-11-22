@@ -2,8 +2,12 @@ package cron
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -23,14 +27,36 @@ var convPeriodIDs = map[string]bool{
 	"all": true, "dates": true, "times": true,
 }
 
-// runConversions announces postbacks recorded since the last run and, once
-// in the same run, the payout sum for the configured report period.
-// cfg is the cron configuration. The summary goes through the same Telegram
-// channel as each conversion. A first run does not replay old conversions
-// one by one, but it does send the period profit. Returns a short status
-// and a store or Telegram error. A missing store or an unconfigured bot is
-// an error and sends nothing.
+// How one conversions run treats the profit summary. The new-conversion
+// messages are sent either way.
+const (
+	// convSummaryFollow sends the summary on every interval run. In daily mode
+	// it sends only when the stored next run is already due.
+	convSummaryFollow = iota
+	// convSummaryForce sends the summary on this run. Run now uses it, and so
+	// does the daily clock when that clock has been reached.
+	convSummaryForce
+	// convSummarySkip announces new conversions and does not send the summary.
+	convSummarySkip
+)
+
+// runConversions runs the conversions job as an interval does: new conversions
+// and one profit summary in the same run.
+// cfg is the cron configuration. Returns a short status and a store or
+// Telegram error. A missing store or an unconfigured bot is an error and
+// sends nothing.
 func (r *Runner) runConversions(ctx context.Context, cfg Config) (string, error) {
+	return r.announceConversions(ctx, cfg, convSummaryFollow)
+}
+
+// announceConversions announces postbacks recorded since the last run and,
+// when the summary mode asks for it, the payout sum for the configured period.
+// cfg is the cron configuration. summary is convSummaryFollow, convSummaryForce
+// or convSummarySkip. Skip still announces each new conversion and does not
+// send the profit line. A first run does not replay old conversions one by
+// one. Returns a short status and a store or Telegram error. A missing store
+// or an unconfigured bot is an error and sends nothing.
+func (r *Runner) announceConversions(ctx context.Context, cfg Config, summary int) (string, error) {
 	if r.pb == nil {
 		return "", errors.New("no ClickHouse connection: set EMTDS_CLICKHOUSE_ADDR for the cron service")
 	}
@@ -81,6 +107,13 @@ func (r *Runner) runConversions(ctx context.Context, cfg Config) (string, error)
 		// summary so a later Telegram failure does not send those lines again.
 		r.state(func(st *Status) { st.ConvSince = to })
 	}
+	if !convSendSummary(r, cfg, summary, to) {
+		if first {
+			r.state(func(st *Status) { st.ConvSince = to })
+			return "watching for new conversions", nil
+		}
+		return fmt.Sprintf("%d new conversion(s)", nRows), nil
+	}
 	msg, err := r.sendProfitSummary(ctx, cfg)
 	if err != nil {
 		if first {
@@ -95,6 +128,26 @@ func (r *Runner) runConversions(ctx context.Context, cfg Config) (string, error)
 	return fmt.Sprintf("%d new conversion(s); %s", nRows, msg), nil
 }
 
+// convSendSummary reports whether this run should send the profit summary.
+// summary is the mode chosen by the scheduler. to is the run clock, truncated
+// to a second. Follow sends on an interval, and in daily mode only when the
+// stored next run is already due. Force sends. Skip does not. It does not fail.
+func convSendSummary(r *Runner, cfg Config, summary int, to time.Time) bool {
+	switch summary {
+	case convSummarySkip:
+		return false
+	case convSummaryForce:
+		return true
+	default:
+		if !cfg.Conversions.Daily() {
+			return true
+		}
+		var next time.Time
+		r.state(func(st *Status) { next = st.Jobs[JobConversions].NextRun })
+		return !next.IsZero() && !to.Before(next)
+	}
+}
+
 // sendProfitSummary sends the period payout once.
 // cfg supplies the period and the Telegram chat. The amount is the payout
 // sum of the conversion journal for that window, the same sum the report
@@ -102,11 +155,13 @@ func (r *Runner) runConversions(ctx context.Context, cfg Config) (string, error)
 // (profit and the period id) and a query or Telegram error. It notifies once.
 func (r *Runner) sendProfitSummary(ctx context.Context, cfg Config) (string, error) {
 	from, to := convPeriod(cfg.Conversions, r.now())
-	_, profit, err := r.pb.PostbacksExcluding(ctx, from, to, "", 1, "")
+	// The store caps a page at 1000 rows. profit is the sum of the whole
+	// period, including rows past that page. The lines below use the page.
+	rows, profit, err := r.pb.PostbacksExcluding(ctx, from, to, "", 1000, "")
 	if err != nil {
 		return "", err
 	}
-	text := profitSummaryText(cfg.Conversions.Period, from, to, profit, alertLang())
+	text := profitSummaryText(cfg.Conversions.Period, from, to, profit, rows, summaryLang(r.paths.Groups))
 	if err := r.notify(ctx, cfg.Telegram, text); err != nil {
 		return "", err
 	}
@@ -123,12 +178,22 @@ func (r *Runner) advanceConvSince(lastOK time.Time) {
 	r.state(func(st *Status) { st.ConvSince = next })
 }
 
+// conversionText fills one conversion into the Telegram template.
+//
+// tpl is the template. p is the postback row. The string is the message text.
+// [PROFIT] is this conversion's payout. [CAMPAIGN] and [GROUP] are the campaign
+// name stored as the group name. [KEY] is the keyword. [SUBID] and [CID] are
+// the click id. A token with no field is left as written. There is no error.
 func conversionText(tpl string, p store.PostbackRow) string {
+	campaign := p.Group
 	return strings.NewReplacer(
 		"[PROFIT]", strconv.FormatFloat(p.Profit, 'f', 2, 64),
-		"[GROUP]", p.Group, "[STREAM]", p.Stream,
+		"[CAMPAIGN]", campaign, "[GROUP]", campaign,
+		"[STREAM]", p.Stream,
 		"[COUNTRY]", strings.ToUpper(p.Country), "[CITY]", p.City,
-		"[DEVICE]", p.Device, "[DOMAIN]", p.Domain, "[CID]", p.CID,
+		"[DEVICE]", p.Device, "[DOMAIN]", p.Domain,
+		"[KEY]", p.Keyword,
+		"[SUBID]", p.CID, "[CID]", p.CID,
 	).Replace(tpl)
 }
 
@@ -151,7 +216,82 @@ func (c Conversions) validate() error {
 			return errors.New("conversions: period needs both ends")
 		}
 	}
+	switch c.Schedule {
+	case "", "interval", "daily":
+	default:
+		return fmt.Errorf("conversions: unknown schedule %q", c.Schedule)
+	}
+	if c.AtHour < 0 || c.AtHour > 23 || c.AtMinute < 0 || c.AtMinute > 59 {
+		return errors.New("conversions: time of day is not a clock time")
+	}
 	return nil
+}
+
+// Daily reports whether the profit summary runs at a clock time.
+// An empty schedule and "interval" are the interval. It does not fail.
+func (c Conversions) Daily() bool { return c.Schedule == "daily" }
+
+// NextSummary is the next moment the profit summary should be sent.
+// now is the clock. interval is the job period, used when the schedule is
+// not daily. In daily mode the result is the next AtHour:AtMinute strictly
+// after now in Timezone; a time equal to now belongs to the next day. An
+// empty or unknown zone is UTC. It does not fail.
+func (c Conversions) NextSummary(now time.Time, interval time.Duration) time.Time {
+	if c.Daily() {
+		return c.nextDaily(now)
+	}
+	if interval < 0 {
+		interval = 0
+	}
+	return now.Add(interval)
+}
+
+// nextDaily is the next AtHour:AtMinute strictly after now in the period zone.
+// Seconds are zero. It does not fail.
+func (c Conversions) nextDaily(now time.Time) time.Time {
+	loc := convLocation(c.Timezone)
+	local := now.In(loc)
+	slot := time.Date(local.Year(), local.Month(), local.Day(), c.AtHour, c.AtMinute, 0, 0, loc)
+	if !slot.After(local) {
+		slot = slot.AddDate(0, 0, 1)
+	}
+	return slot
+}
+
+// onClock reports whether t is exactly AtHour:AtMinute:00 in the period zone.
+// A zero t is not. It does not fail.
+func (c Conversions) onClock(t time.Time) bool {
+	if t.IsZero() {
+		return false
+	}
+	local := t.In(convLocation(c.Timezone))
+	return local.Hour() == c.AtHour && local.Minute() == c.AtMinute && local.Second() == 0 && local.Nanosecond() == 0
+}
+
+// placeConversions points the conversions job at the schedule that is switched on.
+// now is the tick clock. js is the stored status. The returned status has NextRun
+// rewritten when the stored instant belongs to the other mode. changed is false
+// when NextRun was already right. A daily clock that is already due stays, so a
+// missed time still runs. An interval next run that lies further ahead than one
+// interval is pulled back to now plus that interval. It does not fail.
+func (c Config) placeConversions(now time.Time, js JobStatus) (JobStatus, bool) {
+	if c.Conversions.Daily() {
+		if js.NextRun.IsZero() || !c.Conversions.onClock(js.NextRun) {
+			next := c.Conversions.nextDaily(now)
+			if js.NextRun.Equal(next) {
+				return js, false
+			}
+			js.NextRun = next
+			return js, true
+		}
+		return js, false
+	}
+	iv := c.Interval(JobConversions)
+	if !js.NextRun.IsZero() && js.NextRun.After(now.Add(iv)) {
+		js.NextRun = now.Add(iv)
+		return js, true
+	}
+	return js, false
 }
 
 // convPeriod is the half-open window [from, to) of the report period at now.
@@ -290,20 +430,281 @@ func alertLang() string {
 	}
 }
 
-// profitSummaryText is the one Telegram line for the period payout.
-// period is the report period id. from and to are the window, used when the
-// period is a custom range. profit is the payout sum. lang is ru, uk or en.
+// summaryLang is the language of the conversion summary: ru, uk or en.
+// groupsPath is the groups file; the profile is read beside it. An empty path,
+// a missing profile and a profile without a language use alertLang.
 // It does not fail.
-func profitSummaryText(period string, from, to time.Time, profit float64, lang string) string {
+func summaryLang(groupsPath string) string {
+	if lang := profileLang(groupsPath); lang != "" {
+		return lang
+	}
+	return alertLang()
+}
+
+// profileLang is the platform language of the account the summary is sent for.
+// groupsPath is the groups file. The environment administrator's language is
+// admin.json in the same directory (the password file lives there too).
+// When that file has no language, enabled users in users.json are used: one
+// shared language, or the language shared by administrators. Anything else,
+// including a path in the working directory, is empty. It does not fail.
+func profileLang(groupsPath string) string {
+	groupsPath = strings.TrimSpace(groupsPath)
+	if groupsPath == "" {
+		return ""
+	}
+	dir := filepath.Dir(groupsPath)
+	if dir == "" || dir == "." {
+		return ""
+	}
+	if lang := jsonLang(filepath.Join(dir, "admin.json")); lang != "" {
+		return lang
+	}
+	return usersLang(filepath.Join(dir, "users.json"))
+}
+
+// jsonLang reads the lang field of one JSON object.
+// path is the file. A missing file, broken JSON and a language other than
+// ru, en or uk are empty. It does not fail.
+func jsonLang(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var rec struct {
+		Lang string `json:"lang"`
+	}
+	if json.Unmarshal(b, &rec) != nil {
+		return ""
+	}
+	return normLang(rec.Lang)
+}
+
+// usersLang is the shared profile language of enabled accounts.
+// path is users.json. Accounts without ru, en or uk are skipped. When the
+// remaining languages disagree, the administrators' language is used if they
+// agree. Otherwise the result is empty. A missing or broken file is empty.
+// It does not fail.
+func usersLang(path string) string {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	var users []struct {
+		Type    string `json:"type"`
+		Enabled bool   `json:"enabled"`
+		Prefs   struct {
+			Lang string `json:"lang"`
+		} `json:"prefs"`
+	}
+	if json.Unmarshal(b, &users) != nil {
+		return ""
+	}
+	var all, admins []string
+	for _, u := range users {
+		if !u.Enabled {
+			continue
+		}
+		lang := normLang(u.Prefs.Lang)
+		if lang == "" {
+			continue
+		}
+		all = append(all, lang)
+		if strings.EqualFold(u.Type, "ADMIN") {
+			admins = append(admins, lang)
+		}
+	}
+	if lang, ok := oneLang(all); ok {
+		return lang
+	}
+	if lang, ok := oneLang(admins); ok {
+		return lang
+	}
+	return ""
+}
+
+// oneLang reports whether every item is the same language.
+// langs may be empty. ok is false when the slice is empty or the items differ.
+// It does not fail.
+func oneLang(langs []string) (string, bool) {
+	if len(langs) == 0 {
+		return "", false
+	}
+	for _, lang := range langs[1:] {
+		if lang != langs[0] {
+			return "", false
+		}
+	}
+	return langs[0], true
+}
+
+// normLang accepts ru, en and uk, in any letter case.
+// Anything else, including empty, is empty. It does not fail.
+func normLang(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "ru", "en", "uk":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return ""
+	}
+}
+
+// convSummaryLines is how many values one section of the summary lists.
+// The rest of that section becomes one remainder line.
+const convSummaryLines = 5
+
+// profitSummaryText is the Telegram report of the period payout.
+// period is the report period id. from and to label a custom range.
+// profit is the payout sum of the whole period, not the sum of rows.
+// rows are the conversions of the period page; a section is omitted when
+// every row lacks that field. lang is ru, uk or en. It does not fail.
+func profitSummaryText(period string, from, to time.Time, profit float64, rows []store.PostbackRow, lang string) string {
 	amount := strconv.FormatFloat(profit, 'f', 2, 64)
 	label := convPeriodLabel(period, from, to, lang)
+	var b strings.Builder
 	switch lang {
 	case "ru":
-		return "Профит за " + label + ": " + amount
+		b.WriteString("Профит за " + label)
 	case "uk":
-		return "Профіт за " + label + ": " + amount
+		b.WriteString("Профіт за " + label)
 	default:
-		return "Profit for " + label + ": " + amount
+		b.WriteString("Earned " + label)
+	}
+	b.WriteByte('\n')
+	b.WriteString(amount)
+	for _, block := range convSummaryBlocks(rows, lang) {
+		b.WriteString("\n\n")
+		b.WriteString(block)
+	}
+	return b.String()
+}
+
+// convSummaryBlocks lists the non-empty parts of a period: campaign, stream,
+// country, device and keyword. rows are the conversion page. lang is ru, uk
+// or en. A field that is empty on every row is left out. There is no separate
+// group: the campaign name is the group name stored on the conversion.
+// It does not fail.
+func convSummaryBlocks(rows []store.PostbackRow, lang string) []string {
+	n := langSlot(lang)
+	type dim struct {
+		title string
+		pick  func(store.PostbackRow) string
+	}
+	dims := []dim{
+		{[...]string{"Campaigns", "Кампании", "Кампанії"}[n], func(p store.PostbackRow) string { return strings.TrimSpace(p.Group) }},
+		{[...]string{"Streams", "Потоки", "Потоки"}[n], func(p store.PostbackRow) string { return strings.TrimSpace(p.Stream) }},
+		{[...]string{"Countries", "Страны", "Країни"}[n], func(p store.PostbackRow) string {
+			return strings.ToUpper(strings.TrimSpace(p.Country))
+		}},
+		{[...]string{"Devices", "Устройства", "Пристрої"}[n], func(p store.PostbackRow) string {
+			return convDeviceLabel(p.Device, n)
+		}},
+		{[...]string{"Keywords", "Ключи", "Ключі"}[n], func(p store.PostbackRow) string { return strings.TrimSpace(p.Keyword) }},
+	}
+	var out []string
+	for _, d := range dims {
+		if block := convDimBlock(d.title, d.pick, rows, lang); block != "" {
+			out = append(out, block)
+		}
+	}
+	return out
+}
+
+// convDimBlock is one section: a title and the largest amounts.
+// title is already in lang. pick reads one field; an empty value is skipped.
+// rows are the conversion page. At most convSummaryLines names are listed,
+// largest amount first, and the rest is one line. An empty section is empty.
+// It does not fail.
+func convDimBlock(title string, pick func(store.PostbackRow) string, rows []store.PostbackRow, lang string) string {
+	sums := map[string]float64{}
+	for _, row := range rows {
+		name := pick(row)
+		if name == "" {
+			continue
+		}
+		sums[name] += row.Profit
+	}
+	if len(sums) == 0 {
+		return ""
+	}
+	type line struct {
+		name string
+		sum  float64
+	}
+	lines := make([]line, 0, len(sums))
+	for name, sum := range sums {
+		lines = append(lines, line{name, sum})
+	}
+	sort.Slice(lines, func(i, j int) bool {
+		if lines[i].sum != lines[j].sum {
+			return lines[i].sum > lines[j].sum
+		}
+		return lines[i].name < lines[j].name
+	})
+	var b strings.Builder
+	b.WriteString(title)
+	shown := lines
+	if len(shown) > convSummaryLines {
+		shown = lines[:convSummaryLines]
+	}
+	for _, ln := range shown {
+		b.WriteByte('\n')
+		b.WriteString(ln.name)
+		b.WriteString(" — ")
+		b.WriteString(strconv.FormatFloat(ln.sum, 'f', 2, 64))
+	}
+	if rest := lines[len(shown):]; len(rest) > 0 {
+		sum := 0.0
+		for _, ln := range rest {
+			sum += ln.sum
+		}
+		b.WriteByte('\n')
+		b.WriteString(convMoreLine(len(rest), sum, lang))
+	}
+	return b.String()
+}
+
+// convMoreLine is the remainder of a section that does not fit.
+// n is how many names were left out. sum is their payout. lang is ru, uk or en.
+// It does not fail.
+func convMoreLine(n int, sum float64, lang string) string {
+	amount := strconv.FormatFloat(sum, 'f', 2, 64)
+	switch lang {
+	case "ru":
+		return fmt.Sprintf("ещё %d — %s", n, amount)
+	case "uk":
+		return fmt.Sprintf("ще %d — %s", n, amount)
+	default:
+		return fmt.Sprintf("and %d more — %s", n, amount)
+	}
+}
+
+// langSlot is the index of lang in a three-string label: en, ru, uk.
+// Anything other than ru and uk is English. It does not fail.
+func langSlot(lang string) int {
+	switch lang {
+	case "ru":
+		return 1
+	case "uk":
+		return 2
+	default:
+		return 0
+	}
+}
+
+// convDeviceLabel is the device name in the summary language.
+// device is the stored value. slot is langSlot. phone, computer and tablet
+// are translated; any other non-empty value is returned trimmed. An empty
+// device stays empty. It does not fail.
+func convDeviceLabel(device string, slot int) string {
+	switch strings.ToLower(strings.TrimSpace(device)) {
+	case "phone":
+		return [...]string{"phone", "телефон", "телефон"}[slot]
+	case "computer", "desktop":
+		return [...]string{"computer", "компьютер", "комп'ютер"}[slot]
+	case "tablet":
+		return [...]string{"tablet", "планшет", "планшет"}[slot]
+	default:
+		return strings.TrimSpace(device)
 	}
 }
 

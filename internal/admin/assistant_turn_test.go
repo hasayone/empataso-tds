@@ -611,7 +611,7 @@ func TestAssistantTurnProviderErrorIsAnErrorEvent(t *testing.T) {
 	}
 }
 
-func TestAssistantTurnClientAbortCancelsTheProviderCall(t *testing.T) {
+func TestAssistantTurnUserCancelCancelsTheProviderCall(t *testing.T) {
 	var canceled atomic.Bool
 	stub := newAIStub(t, func(w http.ResponseWriter, r *http.Request, n int) {
 		<-r.Context().Done()
@@ -619,14 +619,15 @@ func TestAssistantTurnClientAbortCancelsTheProviderCall(t *testing.T) {
 	})
 	e := newTurnEnv(t, stub, aiTurnSettings)
 	chat := e.newChat(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	resp, err := e.sendRaw(ctx, chat, `{"text":"slow"}`, "")
+	resp, err := e.sendRaw(context.Background(), chat, `{"text":"slow"}`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	eventually(t, "the provider call", func() bool { return stub.calls() == 1 })
-	cancel()
+	if code, body := e.do(t, http.MethodPost, "/api/ai/chats/"+chat+"/cancel", ""); code != http.StatusNoContent {
+		t.Fatalf("cancel %d %s", code, body)
+	}
 	eventually(t, "the provider call to be canceled", canceled.Load)
 	eventually(t, "the chat to be interrupted", func() bool {
 		return e.chatOf(t, chat).Status == aiChatInterrupted && e.noTurns()
@@ -1130,14 +1131,15 @@ func TestAssistantTurnStopAfterSendChargesNothing(t *testing.T) {
 	})
 	e := newTurnEnv(t, stub, aiTurnSettings)
 	chat := e.newChat(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	resp, err := e.sendRaw(ctx, chat, `{"text":"slow"}`, "")
+	resp, err := e.sendRaw(context.Background(), chat, `{"text":"slow"}`, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	eventually(t, "the provider call", func() bool { return stub.calls() == 1 })
-	cancel()
+	if code, body := e.do(t, http.MethodPost, "/api/ai/chats/"+chat+"/cancel", ""); code != http.StatusNoContent {
+		t.Fatalf("cancel %d %s", code, body)
+	}
 	eventually(t, "the turn to end", func() bool { return canceled.Load() && e.noTurns() })
 	if got := e.usedToday(); got != 0 {
 		t.Fatalf("a stopped call was charged %d tokens", got)

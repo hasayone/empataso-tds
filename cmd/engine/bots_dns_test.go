@@ -90,8 +90,8 @@ func TestChPTRNeverSavesIP(t *testing.T) {
 	if got := detectBot(lists, sigs, dir, botVisit(ip, uaWinChrome), cfg); got != "google" {
 		t.Fatalf("confirmed crawler = %q, want google", got)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "ip_google.dat")); err == nil {
-		t.Fatal("ch_ptr must not write ip_google.dat")
+	if b, err := os.ReadFile(filepath.Join(dir, "ip_google.dat")); err != nil || strings.TrimSpace(string(b)) != "" {
+		t.Fatalf("ch_ptr must not write an address into ip_google.dat: %q, %v", b, err)
 	}
 }
 

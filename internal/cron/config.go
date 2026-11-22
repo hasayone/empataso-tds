@@ -204,18 +204,25 @@ type Cleanup struct {
 // 30d, year, all, dates, times). Empty means today. From and To bound dates
 // and times, as RFC3339 or a local timestamp in Timezone. Timezone is an IANA
 // name; empty means UTC. The summary uses the same payout sum as the report.
+// Schedule is "interval" (empty means the same) or "daily". EveryMinutes is how
+// often new conversions are announced, and how often the summary is sent when
+// the schedule is an interval. AtHour and AtMinute are the daily clock, 0–23
+// and 0–59, read in Timezone.
 type Conversions struct {
 	Enabled      bool   `json:"enabled"`
 	EveryMinutes int    `json:"every_minutes"`
-	Template     string `json:"template"` // [PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [CID]
+	Template     string `json:"template"` // [PROFIT] [CAMPAIGN] [GROUP] [STREAM] [COUNTRY] [DEVICE] [KEY] [CITY] [DOMAIN] [SUBID] [CID]
 	Period       string `json:"period,omitempty"`
 	From         string `json:"from,omitempty"`
 	To           string `json:"to,omitempty"`
 	Timezone     string `json:"timezone,omitempty"`
+	Schedule     string `json:"schedule,omitempty"`
+	AtHour       int    `json:"at_hour,omitempty"`
+	AtMinute     int    `json:"at_minute,omitempty"`
 }
 
 // DefaultConversionTemplate is used when the template is empty.
-const DefaultConversionTemplate = "💰 [PROFIT] — [GROUP] / [STREAM] · [COUNTRY] · [DEVICE]"
+const DefaultConversionTemplate = "💰 [PROFIT] — [CAMPAIGN] / [STREAM] · [COUNTRY] · [DEVICE] · [KEY]"
 
 // Default returns the configuration a fresh installation starts with:
 // intervals and sources filled in so that turning a job on is one switch.
@@ -415,6 +422,17 @@ func (c Config) Interval(job string) time.Duration {
 		m = MaxKeitaroSyncInterval
 	}
 	return time.Duration(m) * time.Minute
+}
+
+// nextFire is when job should run next after a run that ended at now.
+// Conversions use the summary schedule: now plus the interval, or the next
+// daily clock in the period time zone. Every other job is now plus its
+// interval. It does not fail.
+func (c Config) nextFire(job string, now time.Time) time.Time {
+	if job == JobConversions {
+		return c.Conversions.NextSummary(now, c.Interval(job))
+	}
+	return now.Add(c.Interval(job))
 }
 
 // Enabled reports whether the job is switched on.

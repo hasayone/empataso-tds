@@ -8,11 +8,11 @@ import (
 
 func TestRejectedClickDropsEarlierSale(t *testing.T) {
 	sql := voidedCIDSelect()
-	if !strings.Contains(sql, "maxIf(ts, status = 'rejected') >= maxIf(ts, status IN ('lead', 'sale'))") {
+	if !strings.Contains(sql, "maxIf(ts, status = 'rejected') >= maxIf(ts, "+confirmedStatusSQL("status")+")") {
 		t.Fatalf("a later sale must stay: %s", sql)
 	}
 	drop := voidedConfirmedSQL("cid", "status")
-	if !strings.Contains(drop, "status IN ('lead', 'sale')") || strings.Contains(drop, "NOT (status = 'rejected'") {
+	if !strings.Contains(drop, confirmedStatusSQL("status")) || strings.Contains(drop, "NOT (status = 'rejected'") {
 		t.Fatalf("rejected row must stay in the log totals path: %s", drop)
 	}
 }

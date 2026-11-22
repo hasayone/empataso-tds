@@ -129,6 +129,7 @@ func main() {
 	sctx, scancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer scancel()
 	_ = srv.Shutdown(sctx)
+	app.WaitTurns(5 * time.Second)
 	app.FlushKeyUse()
 	log.Info("admin api stopped")
 }
@@ -334,7 +335,9 @@ func startGeo(ctx context.Context, cfg *admin.Config, log *slog.Logger) {
 	}
 	log.Info("geo paths", "city", gf.City, "asn", gf.ASN, "dbip_asn", gf.DBIPASN)
 	db, err := geo.OpenWith(geo.Paths(gf), log)
-	if err != nil {
+	if err != nil && errors.Is(err, os.ErrNotExist) {
+		log.Info("geo database is not in place yet, will keep watching")
+	} else if err != nil {
 		log.Warn("geo db not loaded yet, will keep watching", "err", err)
 	}
 	cfg.Geo = db

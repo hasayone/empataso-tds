@@ -304,16 +304,43 @@ func (r *Runner) Tick(ctx context.Context) {
 	for _, job := range Jobs {
 		r.mu.Lock()
 		js := r.st.Jobs[job]
-		due := cfg.Enabled(job) && !now.Before(js.NextRun)
 		busy := r.running[job]
 		r.mu.Unlock()
+		if job == JobConversions && !busy {
+			if placed, changed := cfg.placeConversions(now, js); changed {
+				js = placed
+				r.mu.Lock()
+				cur := r.st.Jobs[job]
+				cur.NextRun = js.NextRun
+				r.st.Jobs[job] = cur
+				r.mu.Unlock()
+				r.save()
+			}
+		}
+		summary := convSummaryFollow
+		due := cfg.Enabled(job) && !now.Before(js.NextRun)
+		if job == JobConversions && cfg.Conversions.Daily() {
+			iv := cfg.Interval(job)
+			lastEnd := js.LastRun.Add(time.Duration(js.DurationMS) * time.Millisecond)
+			convDue := js.LastRun.IsZero() || !now.Before(lastEnd.Add(iv))
+			slotDue := !js.NextRun.IsZero() && !now.Before(js.NextRun)
+			due = cfg.Enabled(job) && (convDue || slotDue)
+			if slotDue {
+				summary = convSummaryForce
+			} else {
+				summary = convSummarySkip
+			}
+		}
+		if requested[job] && job == JobConversions {
+			summary = convSummaryForce
+		}
 		if busy || !(due || requested[job]) {
 			continue
 		}
-		r.start(ctx, cfg, job)
+		r.start(ctx, cfg, job, summary)
 	}
 	if requested[JobTelegramTest] {
-		r.start(ctx, cfg, JobTelegramTest)
+		r.start(ctx, cfg, JobTelegramTest, convSummaryFollow)
 	}
 	r.maybeCheckRedis(ctx, cfg.Telegram)
 	r.maybeCheckLoss(ctx, cfg.Telegram)
@@ -346,7 +373,7 @@ func (r *Runner) takeRequests() map[string]bool {
 	return out
 }
 
-func (r *Runner) start(ctx context.Context, cfg Config, job string) {
+func (r *Runner) start(ctx context.Context, cfg Config, job string, summary int) {
 	r.mu.Lock()
 	if r.running[job] {
 		r.mu.Unlock()
@@ -364,7 +391,7 @@ func (r *Runner) start(ctx context.Context, cfg Config, job string) {
 	go func() {
 		defer r.wg.Done()
 		began := r.now()
-		msg, err := r.exec(ctx, cfg, job)
+		msg, err := r.exec(ctx, cfg, job, summary)
 		took := r.now().Sub(began)
 
 		r.mu.Lock()
@@ -386,9 +413,11 @@ func (r *Runner) start(ctx context.Context, cfg Config, job string) {
 		// The interval counts from the end of a run. Counted from its start, a
 		// job that takes longer than its interval — a VirusTotal pass over many
 		// domains — would be due again the moment it finished and would spend
-		// the whole day at the API's rate limit.
+		// the whole day at the API's rate limit. Conversions use the summary
+		// schedule: the interval, or the next daily clock. A manual run does
+		// not change which of those is switched on.
 		if job != JobTelegramTest {
-			js.NextRun = r.now().Add(cfg.Interval(job))
+			js.NextRun = cfg.nextFire(job, r.now())
 		}
 		r.st.Jobs[job] = js
 		delete(r.running, job)
@@ -403,7 +432,7 @@ func (r *Runner) start(ctx context.Context, cfg Config, job string) {
 	}()
 }
 
-func (r *Runner) exec(ctx context.Context, cfg Config, job string) (msg string, err error) {
+func (r *Runner) exec(ctx context.Context, cfg Config, job string, summary int) (msg string, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			err = fmt.Errorf("panic: %v", p)
@@ -423,7 +452,7 @@ func (r *Runner) exec(ctx context.Context, cfg Config, job string) (msg string, 
 	case JobCleanup:
 		return r.runCleanup(cfg.Cleanup)
 	case JobConversions:
-		return r.runConversions(ctx, cfg)
+		return r.announceConversions(ctx, cfg, summary)
 	case JobTelegramTest:
 		if !cfg.Telegram.Configured() {
 			return "", errors.New("telegram is not configured: set the bot token and the chat id")

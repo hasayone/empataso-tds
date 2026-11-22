@@ -22,7 +22,7 @@ func TestKeitaroSyncCardCampaigns(t *testing.T) {
 	html := spaSource()
 	var src strings.Builder
 	src.WriteString("const esc=s=>String(s).replace(/</g,'&lt;'); const when=v=>'@'+v; const ago=v=>'ago:'+v; const errInfo=()=>null;\n")
-	src.WriteString("const DICT={'cron.ktsync.newcamps':'новых кампаний {n}','cron.ktsync.camps.pending':'В очереди','cron.ktsync.camps.deleted':'Удалены у нас','cron.ktsync.camps.failed':'Не перенесены','cron.ktsync.camps.paused':'Пауза до {time}: {reason}'};\n")
+	src.WriteString("const DICT={'cron.ktsync.newcamps':'новых кампаний {n}','cron.ktsync.camps.pending':'В очереди','cron.ktsync.camps.deleted':'Удалены у нас','cron.ktsync.camps.failed':'Не перенесены','cron.ktsync.camps.paused':'Пауза до {time}: {reason}','cron.ktsync.updated':'обновлено {n}','cron.ktsync.gone':'нет в Keitaro {n}','cron.ktsync.camps.gone':'Нет в Keitaro','cron.ktsync.camps.updfailed':'Не обновлены','cron.ktsync.upd.paused':'Обновление на паузе до {time}: {reason}'};\n")
 	src.WriteString("const tr=k=>DICT[k]||k; const trFill=(k,m)=>{let s=tr(k); Object.keys(m||{}).forEach(n=>{s=s.split('{'+n+'}').join(String(m[n]))}); return s};\n")
 	for _, name := range []string{"cronJobOutcome", "cronLagText", "keitaroSyncState", "keitaroSyncCursorsHTML", "keitaroSyncCampaignsText", "cronJobMsg", "cronJobLine"} {
 		fn := spaFunctionLine(html, name)
@@ -52,6 +52,14 @@ ok(rows.includes('7401, 7402'), 'failed ids');
 ok(rows.includes('Keitaro ответил 402'), 'pause reason');
 const past = {keitaro_sync_state:{campaigns_paused_until:'2000-01-01T00:00:00Z', campaigns_error:'old'}};
 ok(!keitaroSyncCursorsHTML(past).includes('old'), 'an expired pause is hidden');
+const refresh = {status:{jobs:{keitaro_sync:job}}, keitaro_sync_state:{last_campaigns:0, last_updated:2, campaigns_gone:1, update_failed:[7, 9],
+  update_paused_until:new Date(Date.now()+3600e3).toISOString(), update_error:'кампании не обновлены'}};
+ok(keitaroSyncCampaignsText(refresh) === 'новых кампаний 0, обновлено 2, нет в Keitaro 1', 'refresh tail: ' + keitaroSyncCampaignsText(refresh));
+const refreshRows = keitaroSyncCursorsHTML(refresh);
+ok(refreshRows.includes('Нет в Keitaro:</span> 1'), 'gone row: ' + refreshRows);
+ok(refreshRows.includes('Не обновлены:</span> <span class="mono">7, 9'), 'failed refresh ids');
+ok(refreshRows.includes('Обновление на паузе до') && refreshRows.includes('кампании не обновлены'), 'refresh pause');
+ok(!keitaroSyncCampaignsText({status:{jobs:{keitaro_sync:job}}, keitaro_sync_state:{last_campaigns:1, last_updated:0}}).includes('обновлено'), 'no refresh part for zero');
 if (failed) process.exit(1);
 `)
 	f := filepath.Join(t.TempDir(), "card.js")

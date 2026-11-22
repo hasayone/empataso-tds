@@ -425,6 +425,7 @@ nginx менять не нужно: в `deploy/nginx/emtds.conf` (по IP) и `e
 - `GET /api/ai/changes` — Список предложенных и применённых правок ИИ
 - `GET /api/ai/chats` — Список ИИ-чатов вызывающего
 - `GET /api/ai/chats/{id}` — Прочитать ИИ-чат
+- `GET /api/ai/chats/{id}/stream` — Подключиться к ходу, который идёт в чате
 - `GET /api/ai/models` — Список моделей ИИ-провайдера
 - `GET /api/ai/settings` — Прочитать настройки ИИ-помощника
 - `GET /api/ai/status` — Сообщить, доступен ли ИИ-помощник сессии
@@ -452,6 +453,7 @@ nginx менять не нужно: в `deploy/nginx/emtds.conf` (по IP) и `e
 - `POST /api/ai/changes/{id}/reject` — Отклонить предложенную правку
 - `POST /api/ai/changes/{id}/revert` — Откатить применённую правку
 - `POST /api/ai/chats` — Начать ИИ-чат
+- `POST /api/ai/chats/{id}/cancel` — Остановить ход, который идёт в чате
 - `POST /api/ai/chats/{id}/messages` — Отправить сообщение и получить ответ потоком
 - `POST /api/ai/chats/{id}/revert` — Откатить все правки одного чата
 - `POST /api/ai/messages/{message_id}/revert` — Откатить все правки одного ответа
@@ -753,6 +755,8 @@ curl -b "сессия" "http://127.0.0.1:8090/api/keywords/stats?from=2026-10-01
 | GET | `/api/ai/chats/{id}` | админ | — | `200`: `id`, `title`, `status`, `messages`, `changes` (карточки) |
 | DELETE | `/api/ai/chats/{id}` | админ | — | `204`; правки чата остаются |
 | POST | `/api/ai/chats/{id}/messages` | админ | `text` (до 8000 знаков), `context` (`page`, `arg`, `board`, `range`, `filters`, `tab`, `campaign`), `model`, `lang` (`en`, `ru`, `uk`, иначе `en`) | поток SSE, нужен `Accept: text/event-stream`, иначе `406 ai_not_acceptable` |
+| GET | `/api/ai/chats/{id}/stream` | админ | — | поток SSE, нужен `Accept: text/event-stream`, иначе `406 ai_not_acceptable`; повторяет события идущего хода с начала и следует за ним до `done` или `error`; `404`, если в чате нет идущего хода (ответ читается из чата) |
+| POST | `/api/ai/chats/{id}/cancel` | админ | — | `204`; останавливает идущий ход чата, без хода тоже `204`; единственный способ остановки, закрытие страницы ход не трогает |
 | GET | `/api/ai/changes?chat_id=&status=` | админ | — | `200 {"changes":[карточка]}` |
 | POST | `/api/ai/changes/{id}/apply` | админ | `confirm_delete`, `confirm_host` | `200`, карточка |
 | POST | `/api/ai/changes/{id}/reject` | админ | — | `200`, карточка |

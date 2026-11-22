@@ -19,7 +19,7 @@ import (
 // cacheBudget bounds the bytes the cache may hold, keys and values together.
 //
 // The cache keys are URLs after macro expansion, and several macros come from
-// the visitor: [IP], [CID] (fresh on every request), [PAR-1]..[PAR-5] (the raw
+// the visitor: [IP], [SUBID] and its old name [CID] (fresh on every request), [PAR-1]..[PAR-5] (the raw
 // query string). A key built from those is asked for once and never again, and
 // a body under it is up to 8 MiB. Without a bound the map is a log of every
 // such URL the process has ever seen, for as long as it runs.
@@ -264,7 +264,7 @@ func (c *Client) lookup(key string) (string, bool) {
 // cache was in before it existed, not a failure. The refusal is logged, at most
 // once a minute, with the key that was refused and the shape of what is in the
 // map: a handful of entries adding up to the budget means huge bodies, tens of
-// thousands of small ones means one-off keys — a [CID] or [PAR-n] in a curl
+// thousands of small ones means one-off keys — a [SUBID] or [PAR-n] in a curl
 // URL, i.e. a template to fix rather than code.
 func (c *Client) store(key, val string, ttl time.Duration) {
 	c.mu.Lock()

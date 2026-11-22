@@ -74,6 +74,7 @@ func TestRouteAccessCoversEveryRoute(t *testing.T) {
 var cookieOnlyRoutes = map[string]bool{
 	"POST /api/logout":               true,
 	"GET /api/me":                    true,
+	"PUT /api/me/lang":               true,
 	"GET /api/me/views":              true,
 	"PUT /api/me/views":              true,
 	"POST /api/password":             true,
@@ -139,6 +140,8 @@ var cookieOnlyRoutes = map[string]bool{
 	"GET /api/ai/chats/{id}":                    true,
 	"DELETE /api/ai/chats/{id}":                 true,
 	"POST /api/ai/chats/{id}/messages":          true,
+	"GET /api/ai/chats/{id}/stream":            true,
+	"POST /api/ai/chats/{id}/cancel":           true,
 	"POST /api/ai/chats/{id}/revert":            true,
 	"GET /api/ai/changes":                       true,
 	"POST /api/ai/changes/{id}/apply":           true,

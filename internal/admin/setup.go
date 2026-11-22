@@ -22,6 +22,8 @@ import (
 type adminProfile struct {
 	Login string `json:"login"`
 	Email string `json:"email"`
+	// Lang is the panel language of the environment administrator: ru, en or uk.
+	Lang string `json:"lang,omitempty"`
 }
 
 // setupView is the body of GET /api/setup.
@@ -100,6 +102,89 @@ func setupLoginOK(login string) bool {
 func setupEmailOK(email string) bool {
 	addr, err := mail.ParseAddress(email)
 	return err == nil && addr.Address == email
+}
+
+// adminLang is the panel language stored on the environment administrator profile.
+// ru, en and uk are returned. A missing file, a broken file and any other
+// language are empty. It does not fail.
+func (s *Server) adminLang() string {
+	path, err := adminProfilePath(s.cfg.PasswordFile)
+	if err != nil {
+		return ""
+	}
+	prof, err := readAdminProfile(path)
+	if err != nil {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(prof.Lang)) {
+	case "ru", "en", "uk":
+		return strings.ToLower(strings.TrimSpace(prof.Lang))
+	default:
+		return ""
+	}
+}
+
+// writeAdminLang stores lang on the environment administrator profile.
+// lang is ru, en or uk. Login and email already in the file stay.
+// A missing password file and a write error are returned.
+func (s *Server) writeAdminLang(lang string) error {
+	path, err := adminProfilePath(s.cfg.PasswordFile)
+	if err != nil {
+		return err
+	}
+	prof, err := readAdminProfile(path)
+	if err != nil {
+		return err
+	}
+	prof.Lang = lang
+	raw, err := json.Marshal(prof)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(path, append(raw, '\n'), 0o600)
+}
+
+// handleMeLang saves the panel language of the signed-in account.
+// The body is lang: ru, en or uk. The environment administrator writes it on
+// the admin profile. A users.json account writes that account's prefs and keeps
+// the time zone. A bad language is 400. A missing password file for the
+// environment administrator is 503. User-store errors use the users statuses.
+func (s *Server) handleMeLang(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Lang string `json:"lang"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	lang := strings.ToLower(strings.TrimSpace(body.Lang))
+	switch lang {
+	case "ru", "en", "uk":
+	default:
+		writeErr(w, http.StatusBadRequest, "invalid language")
+		return
+	}
+	sess := sessionFrom(r.Context())
+	if sess.UID != "" {
+		if _, err := s.updateUser(sess.UID, func(u *security.User) error {
+			merged := mergePrefs(u.Prefs, security.Prefs{Lang: lang})
+			if err := validatePrefs(merged); err != nil {
+				return err
+			}
+			u.Prefs = merged
+			return nil
+		}); err != nil {
+			writeUserUpdateErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"lang": lang})
+		return
+	}
+	if err := s.writeAdminLang(lang); err != nil {
+		writeErr(w, http.StatusServiceUnavailable, "profile is not stored")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"lang": lang})
 }
 
 // handleSetupGet tells the panel whether the first-run form is still open.

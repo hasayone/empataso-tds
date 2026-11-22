@@ -9,7 +9,7 @@ import "time"
 var confirmedSeriesSQL = `SELECT toStartOfInterval(ts, INTERVAL ? second) AS t,
         count() AS conv, sum(profit) AS revenue
  FROM conversions FINAL
- WHERE ts >= ? AND ts < ? AND status IN ('lead', 'sale')` + voidedConfirmedSQL("cid", "status") + `
+ WHERE ts >= ? AND ts < ? AND ` + confirmedStatusSQL("status") + voidedConfirmedSQL("cid", "status") + `
  GROUP BY t`
 
 // confirmedSeriesFilteredSQL is confirmedSeriesSQL restricted to clicks in eventsWhere.
@@ -19,7 +19,7 @@ func confirmedSeriesFilteredSQL(eventsWhere string) string {
 	return `SELECT toStartOfInterval(ts, INTERVAL ? second) AS t,
         count() AS conv, sum(profit) AS revenue
  FROM conversions FINAL
- WHERE ts >= ? AND ts < ? AND status IN ('lead', 'sale')` + voidedConfirmedSQL("cid", "status") + eventsCidInSQL(eventsWhere) + `
+ WHERE ts >= ? AND ts < ? AND ` + confirmedStatusSQL("status") + voidedConfirmedSQL("cid", "status") + eventsCidInSQL(eventsWhere) + `
  GROUP BY t`
 }
 

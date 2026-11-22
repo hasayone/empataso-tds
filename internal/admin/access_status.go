@@ -34,6 +34,7 @@ func foldConfirmed(rows []store.StatusFact) []store.StatusFact {
 		out[i].N += r.N
 		out[i].Profit += r.Profit
 		out[i].DepSum += r.DepSum
+		out[i].Dep2Sum += r.Dep2Sum
 	}
 	return out
 }

@@ -1725,7 +1725,7 @@ func TestSaveFlowsPointLogic(t *testing.T) {
 	src.WriteString("function syncSaveBar(){} async function flushIPDraft(){}\n")
 	src.WriteString("async function call(m,p,b){calls.push(m+' '+p+(Array.isArray(b)?' list':'')); if(fail&&fail(m,p)){const e=new Error('campaign id is taken: x'); e.status=409; throw e} return {status:'saved'}}\n")
 	src.WriteString(sharedListsDecl)
-	for _, name := range []string{"groupJSON", "groupParse", "markDirty", "snapshotGroups", "moveFlowLinks", "settleMovedLinks", "saveFlows"} {
+	for _, name := range []string{"groupJSON", "groupParse", "markDirty", "snapshotGroups", "moveFlowLinks", "settleMovedLinks", "adoptRelinked", "saveFlows"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)

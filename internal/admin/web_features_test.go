@@ -573,11 +573,11 @@ func TestSpaRolesUI(t *testing.T) {
 func TestSpaHiddenForRole(t *testing.T) {
 	html := spaSource()
 	must(t, spaFunctionLine(html, "colShown"), "columnHidden(ME, names)", "journal columns of a hidden field are dropped")
-	offers := spaBetween(html, "const payHidden=offerPayoutHidden(ME);", "const picked=[];")
+	offers := spaBetween(html, "const payHidden=offerPayoutHidden(ME);", "const capOn=")
 	if offers == "" {
 		t.Fatal("offer form payout switch not found")
 	}
-	must(t, html, "${payHidden?'':`<div class=\"g2\"><div class=\"fld\"><label>${tr('off.payout')}", "payout fields are left out when hidden")
+	must(t, html, "${payHidden?'':`<input id=\"opayout\"", "payout fields are left out when hidden")
 	must(t, html, "if(!payHidden){", "payout is sent only when it was shown")
 	mustNot(t, html, "payout:payRaw>0?payRaw:0, payout_currency:q('#ocur',box).value, payout_param", "payout is not part of the fixed body")
 	must(t, spaFunctionLine(html, "renderPerf"), "shown('revenue'", "the performance table drops a hidden revenue column")
@@ -600,8 +600,8 @@ var ncErrKeys = []string{
 	"nc.err.name", "nc.err.user", "nc.err.clong", "nc.err.ccountry", "nc.err.cphone", "nc.err.cemail",
 }
 
-// TestSpaDepSum checks the deposit column is translated and kept out of revenue and the chart.
-// t is the test handle. It reads the SPA source. It does not fail the process.
+// TestSpaDepSum checks the deposit column label is depSum in ru, en and uk, that Dep2Sum is not in the interface, and that the deposit stays out of revenue and the chart.
+// t is the test handle. It reads the SPA source. It fails the test when the label or an exclusion is wrong.
 func TestSpaDepSum(t *testing.T) {
 	html := spaSource()
 	for _, key := range []string{"col.depsum", "fld.depsum"} {
@@ -609,17 +609,23 @@ func TestSpaDepSum(t *testing.T) {
 			t.Errorf("dictionary key %q is defined %d time(s), want 3", key, n)
 		}
 	}
-	must(t, html, "'col.depsum':'DepSum'", "column title is DepSum")
-	must(t, html, "'fld.depsum':'DepSum'", "field name is DepSum")
-	if n := strings.Count(html, "'col.depsum':'DepSum'"); n != 3 {
-		t.Errorf("col.depsum DepSum is defined %d time(s), want 3", n)
+	must(t, html, "'col.depsum':'depSum'", "column title is depSum")
+	must(t, html, "'fld.depsum':'depSum'", "field name is depSum")
+	if n := strings.Count(html, "'col.depsum':'depSum'"); n != 3 {
+		t.Errorf("col.depsum depSum is defined %d time(s), want 3", n)
 	}
-	if n := strings.Count(html, "'fld.depsum':'DepSum'"); n != 3 {
-		t.Errorf("fld.depsum DepSum is defined %d time(s), want 3", n)
+	if n := strings.Count(html, "'fld.depsum':'depSum'"); n != 3 {
+		t.Errorf("fld.depsum depSum is defined %d time(s), want 3", n)
 	}
+	mustNot(t, html, "'col.depsum':'DepSum'", "column title is not DepSum")
+	mustNot(t, html, "'fld.depsum':'DepSum'", "field name is not DepSum")
+	mustNot(t, html, "Dep2Sum", "Dep2Sum is not in the interface")
+	mustNot(t, html, "Deposits sum", "the column is not named Deposits sum")
+	mustNot(t, html, "Сумма депозитов", "the column is not named Сумма депозитов")
 	mustNot(t, html, "'col.depsum':'Депозит'", "column title is not Депозит")
 	mustNot(t, html, "'fld.depsum':'Депозит'", "field name is not Депозит")
-	mustNot(t, html, "['depsum','col.depsum'", "tables do not list a DepSum column")
+	must(t, html, "const DEP_COL=['depsum','col.depsum',0];", "offers list the DepSum column")
+	must(t, html, "['revenue','col.revenue',1]", "revenue stays the payout column")
 	mustNot(t, spaFunctionLine(html, "paintMetricSum"), "col.depsum", "catalog totals do not show DepSum")
 	mustNot(t, spaFunctionLine(html, "paintPbDock"), "depsum", "the conversion dock does not show DepSum")
 	must(t, spaFunctionLine(html, "loadCols"), "placeDepSumAfterCpc(out)", "a saved list still runs the deposit placement")
@@ -627,7 +633,7 @@ func TestSpaDepSum(t *testing.T) {
 	must(t, spaFunctionLine(html, "packMetrics"), "depsum:m.depsum", "deposit is packed beside revenue")
 	mustNot(t, spaFunctionLine(html, "packMetrics"), "rev:m.rev+m.depsum", "deposit is not added into revenue")
 	must(t, spaFunctionLine(html, "foldStatus"), "o.depsum+=+r.depsum||0", "lead and sale deposits are summed")
-	must(t, html, "FLOW_USD_COLS=new Set(['revenue','depsum','uepc','epc'])", "deposit CSV is USD")
+	must(t, html, "FLOW_USD_COLS=new Set(['revenue','depsum','uepc','epc','ec','ecpm'])", "deposit CSV is USD")
 	if strings.Contains(html, "{id:'depsum',key:") {
 		t.Fatal("chart series lists the deposit")
 	}
@@ -648,7 +654,7 @@ func TestSpaCatalogDock(t *testing.T) {
 	must(t, net, "dockHTML('net','netexport')", "networks dock")
 	must(t, net, "has-flowdock", "networks pins the dock")
 	must(t, net, "paintCatalogDock(", "networks fills the dock")
-	must(t, net, "exportNetworks(", "networks export from the dock")
+	must(t, net, "networkExportItems(", "networks export from the dock")
 	must(t, net, "NET_PAGE_I=0", "networks search and sort return to the first page")
 	mustNot(t, spaFunctionLine(html, "catalogBar"), "export", "catalog bar has no export")
 	must(t, spaFunctionLine(html, "paintCatalogDock"), "touchPageViews()", "page size is stored on the account")
@@ -659,6 +665,52 @@ func TestSpaCatalogDock(t *testing.T) {
 	must(t, spaFunctionLine(html, "exportNetworks"), "exportCatalogTable('networks'", "networks export uses the catalog helper")
 	mustNot(t, pageFnBody(html, "landings"), "dockHTML(", "landings have no catalog dock")
 	mustNot(t, pageFnBody(html, "sources"), "dockHTML(", "sources have no catalog dock")
+}
+
+// TestSpaNetworkOfferExport checks the networks export menu: one network found by search adds CSV and HTML
+// of that network's offers, an empty search keeps the two network items, and the offer file is the offers
+// export of that network only.
+func TestSpaNetworkOfferExport(t *testing.T) {
+	html := spaSource()
+	net := spaFunctionLine(html, "networks")
+	must(t, net, "searchedNetwork(rows)", "the menu follows the network the search found")
+	must(t, net, "networkExportItems(hit, asHTML=>exportNetworkOffers(hit, offers, asHTML))", "offer export uses the offers loaded on this page")
+	items := spaFunctionLine(html, "networkExportItems")
+	must(t, items, "tr('Export CSV')", "without a found network the menu keeps Export CSV")
+	must(t, items, "tr('Export HTML')", "without a found network the menu keeps Export HTML")
+	must(t, items, "if(hit)", "offer items appear only when one network is found")
+	must(t, items, "tr('net.export.csv')", "the found network has a CSV item")
+	must(t, items, "tr('net.export.html')", "the found network has an HTML item")
+	must(t, items, "tr('net.export.off.csv')", "offers of that network have a CSV item")
+	must(t, items, "tr('net.export.off.html')", "offers of that network have an HTML item")
+	must(t, items, "exportNetworks(false)", "the first item is still the network CSV")
+	found := spaFunctionLine(html, "searchedNetwork")
+	must(t, found, "if(!q) return null", "an empty search finds no network")
+	must(t, found, "list.length===1", "several matches are not one network")
+	rows := spaFunctionLine(html, "networkOfferRows")
+	must(t, rows, "String(o.network_id)===id", "only offers of this network")
+	exp := spaFunctionLine(html, "exportNetworkOffers")
+	must(t, exp, "exportCatalogTable('offers'", "offers use the offers export")
+	must(t, exp, "networkOfferRows(net, offers)", "the file is that network's offers")
+	mustNot(t, exp, "postback_url", "the offer file has no postback")
+	mustNot(t, exp, "o.url", "the offer file has no offer address")
+	mustNot(t, exp, "CAT_Q.offers", "the offers page search is not applied")
+	for _, label := range []string{
+		"'net.export.csv':'Network CSV'",
+		"'net.export.csv':'Партнёрка CSV'",
+		"'net.export.csv':'Мережа CSV'",
+		"'net.export.html':'Network HTML'",
+		"'net.export.html':'Партнёрка HTML'",
+		"'net.export.html':'Мережа HTML'",
+		"'net.export.off.csv':'Offers of this network CSV'",
+		"'net.export.off.csv':'Офферы этой партнёрки CSV'",
+		"'net.export.off.csv':'Офери цієї мережі CSV'",
+		"'net.export.off.html':'Offers of this network HTML'",
+		"'net.export.off.html':'Офферы этой партнёрки HTML'",
+		"'net.export.off.html':'Офери цієї мережі HTML'",
+	} {
+		must(t, html, label, "export menu label")
+	}
 }
 
 // TestSpaMoneyUnified checks that every amount goes through moneyText: an empty currency code is
@@ -927,7 +979,11 @@ func TestSpaKeitaroCron(t *testing.T) {
 		}
 	}
 	must(t, html, "keitaro_sync:['cron.ktsync.title','cron.ktsync.hint']", "JOBINFO keitaro_sync")
-	must(t, html, "'cron.ktsync.hint':'Догружает клики, конверсии и новые кампании", "ru hint names new campaigns")
+	must(t, html, "'cron.ktsync.hint':'Догружает клики и конверсии с последнего курсора с запасом назад и добавляет новые кампании. Уже перенесённые кампании Keitaro тоже обновляются: название, потоки, ссылки, заметки. Чужие кампании, не из Keitaro, не трогаются.'", "ru hint: catch-up, new campaigns, imported ones are updated, foreign ones are not touched")
+	mustNot(t, html, "'cron.ktsync.hint':'Догружает клики, конверсии и новые кампании", "ru hint does not open with the old wording")
+	mustNot(t, html, "перенесённые не трогаются", "ru hint does not say imported campaigns stay untouched")
+	must(t, html, "'cron.ktsync.hint':'Loads clicks and conversions from the last checkpoint with overlap and adds new campaigns. Campaigns already imported from Keitaro are updated too:", "en hint says imported campaigns are updated")
+	must(t, html, "'cron.ktsync.hint':'Довантажує кліки та конверсії з останнього курсора із запасом назад і додає нові кампанії. Уже перенесені кампанії Keitaro теж оновлюються:", "uk hint says imported campaigns are updated")
 	must(t, spaFunctionLine(html, "paintCronStatus"), "keitaroSyncCampaignsText(st)", "last run shows new campaigns")
 	must(t, spaFunctionLine(html, "cronJobDisabled"), "job==='keitaro_sync'", "keitaro toggle guard")
 	must(t, spaFunctionLine(html, "cronJobDisabled"), "job==='conversions'", "conversions toggle guard")
@@ -938,6 +994,29 @@ func TestSpaKeitaroCron(t *testing.T) {
 	must(t, spaFunctionLine(html, "jobBody"), "case 'keitaro_sync'", "keitaro_sync card body")
 	must(t, spaFunctionLine(html, "jobBody"), "keitaroSyncNeedImport(CRONST)", "full import banner")
 	must(t, spaFunctionLine(html, "jobBody"), "cron.ktsync.noconv", "conversions hint without telegram")
+	sched := spaFunctionLine(html, "convScheduleHTML")
+	must(t, sched, "row('interval'", "interval mode stays on the card")
+	must(t, sched, "row('daily'", "daily mode stays on the card")
+	must(t, sched, "data-conv-at", "daily clock is a time field")
+	must(t, sched, `step="60"`, "daily clock keeps minute steps")
+	mustNot(t, sched, `type="time"`, "daily clock is not the native AM/PM field")
+	period := spaFunctionLine(html, "convPeriodHTML")
+	must(t, period, `id="conv-tz"`, "period zone uses the profile picker button")
+	must(t, period, `id="conv-tz-list"`, "period zone uses the profile picker list")
+	must(t, period, `class="tzpick"`, "period zone uses the profile picker shell")
+	mustNot(t, period, `data-p="conversions.timezone"`, "period zone is not a text field")
+	tzBind := spaFunctionLine(html, "bindConvTz")
+	must(t, tzBind, "bindTzPick(", "period zone is the profile timezone component")
+	must(t, tzBind, "conversions.timezone", "a pick stores conversions.timezone")
+	must(t, spaFunctionLine(html, "paintAutomation"), "bindConvTz(v)", "period zone is wired when the card is painted")
+	mustNot(t, sched, " hidden", "neither summary mode is hidden")
+	must(t, spaFunctionLine(html, "convClockBind"), "time_24hr:true", "picker hours are 00-23")
+	must(t, html, "/assets/flatpickr/flatpickr.min.js", "time picker is vendored")
+	for _, lang := range []string{"en", "ru", "uk"} {
+		if !trKeyDefined(html, lang, "cron.conv.daily") {
+			t.Errorf("missing cron.conv.daily in %s", lang)
+		}
+	}
 	must(t, spaFunctionLine(html, "cronRunToastText"), "errInfo", "run-now errors translated")
 	must(t, html, "'идёт актуализация':'kt.sync.busy'", "sync busy server text")
 	must(t, spaFunctionLine(html, "ktDockTick"), "!job.sync_running", "import dock ignores sync_running")
@@ -1197,6 +1276,32 @@ func TestSpaBoardPanel(t *testing.T) {
 	must(t, spaFunctionLine(html, "paintBoardsTable"), "data-bpanel", "composition stays a button")
 	must(t, spaFunctionLine(html, "bindBoardRowDrag"), "PUT','/api/boards/order'", "drag saves the section order")
 	must(t, html, "'board.move':'Переместить'", "ru move")
+}
+
+// TestSpaBoardPartnerGroups checks the composition card titles partner groups
+// and fills their checkboxes from the group field of affiliate networks.
+// Saving still sends those labels in groups.networks.
+func TestSpaBoardPartnerGroups(t *testing.T) {
+	html := spaSource()
+	card := pageFnBody(html, "boardPanelCard")
+	must(t, card, "tr('board.compose.partners')", "partner groups caption")
+	must(t, card, "const netGroups=groupLabels(netAll)", "partner groups come from the network group field")
+	must(t, card, "boardPanelCheckGrid('networks', netGroups, netChecked)", "partner groups are checkboxes")
+	must(t, card, "boardPanelSearchHTML(kind, chips[kind])", "partner groups keep the catalog search")
+	grid := spaFunctionLine(html, "boardPanelCheckGrid")
+	must(t, grid, "if(!list.length) return", "the none hint is only for an empty label list")
+	collect := spaFunctionLine(html, "collectBoardPanelAssign")
+	must(t, collect, "groups:{offers:[], landings:[], networks:[], sources:[]}", "save body keeps network groups")
+	must(t, collect, "['offers','landings','networks','sources']", "checked partner groups are collected")
+	for _, text := range []string{
+		"'board.compose.partners':'Partner groups'",
+		"'board.compose.partners':'Группы партнёров'",
+		"'board.compose.partners':'Групи партнерів'",
+	} {
+		if n := strings.Count(html, text); n != 1 {
+			t.Errorf("%s defined %d times, want 1", text, n)
+		}
+	}
 }
 
 // TestSpaBoardInclude checks the main view toggle, section filters and deletes before a full campaign save.

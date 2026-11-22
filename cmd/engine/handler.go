@@ -79,6 +79,11 @@ type engineDeps struct {
 	// convOverride replaces the ClickHouse client for postbacks; tests set it.
 	convOverride conversionStore
 
+	// totalSeeds holds the retry times of the total conversion counters being seeded, and
+	// totalCount replaces the store count of leads and sales of an offer; tests set it.
+	totalSeeds totalSeeds
+	totalCount func(ctx context.Context, offerID string) (int64, error)
+
 	// noStepWave is true while events may lack the step column: before
 	// ClickHouse connects, and after it connects without that column. The
 	// /offer step then logs the first step's uniqueness, so a campaign with a
@@ -498,12 +503,35 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	// distribution of out variants (|||): random/rotator/evenly.
 	dist := ""
 	cat := d.catalogs()
+	cat.OfferFull = d.offerFull(rctx, cat.Offers)
+	cat.Country = country
+	var offerID, landingID, networkID string
 	if selStream != nil && !botServed && (len(selStream.Out.Offers) > 0 || len(selStream.Out.Landings) > 0) {
-		redirect, outRaw = router.ResolveOut(selStream, cat, offerStep, redirect, outRaw, nil)
+		served := router.ResolveServed(selStream, cat, offerStep, redirect, outRaw, nil)
+		redirect, outRaw = served.Redirect, served.Out
+		if served.OfferID != "" || served.LandingID != "" {
+			offerID, landingID = served.OfferID, served.LandingID
+			if o, ok := cat.Offers[served.OfferID]; ok {
+				networkID = o.NetworkID
+			}
+		}
 	}
-	offerID, landingID, networkID := clickIDs(selStream, cat, outRaw, offerStep)
+	if offerID == "" && landingID == "" {
+		offerID, landingID, networkID = clickIDs(selStream, cat, outRaw, offerStep)
+	}
+	// A network query is part of the partner URL. An action page is not that URL.
 	if networkID != "" {
-		outRaw = appendOfferQuery(outRaw, d.offerQuery(networkID))
+		if o, ok := cat.Offers[offerID]; !ok || o.SendsURL() {
+			outRaw = appendOfferQuery(outRaw, d.offerQuery(networkID))
+		}
+	}
+	clickRev := 0.0
+	if offerID != "" {
+		offer := cat.Offers[offerID]
+		outRaw = offer.ApplyValues(outRaw)
+		if rev, ok := offer.ClickRevenue(); ok {
+			clickRev = rev
+		}
 	}
 	var shares []int
 	if selStream != nil {
@@ -615,7 +643,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			BrowserV: info.BrowserVer, Brand: info.Brand, CID: cid,
 			ASN: g.ASN, Org: dashEmpty(g.Org), Timezone: dashEmpty(g.Timezone), Via: via,
 			OfferID: offerID, LandingID: landingID, SourceID: grp.SourceID, NetworkID: networkID,
-			Subs: storedSubs(subs), CostCents: costCents, CostCur: costCur,
+			Subs: storedSubs(subs), CostCents: costCents, CostCur: costCur, Revenue: clickRev,
 			Site: extras.Site, AdCampaignID: extras.AdCampaignID, CreativeID: extras.CreativeID,
 			ExternalID: extras.ExternalID, XRW: requestXRW(r, apiMode),
 			DeviceModel: info.Model, Step: b2u8(ownStep),
@@ -652,7 +680,9 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 }
 
 // clickIDs names the offer or landing whose template equals outRaw.
-// The network id is the one stored on that offer. No match leaves the ids empty.
+// A stream offer counts as the offer that serves it (Catalogs.Serve), so a click sent to a spare
+// offer belongs to the spare one. The network id is the one stored on that offer. No match leaves
+// the ids empty.
 func clickIDs(stream *config.Stream, cat router.Catalogs, outRaw string, offerStep bool) (offerID, landingID, networkID string) {
 	if stream == nil || outRaw == "" {
 		return "", "", ""
@@ -669,9 +699,9 @@ func clickIDs(stream *config.Stream, cat router.Catalogs, outRaw string, offerSt
 		}
 	}
 	for _, ref := range stream.Out.Offers {
-		o, ok := cat.Offers[ref.ID]
-		if ok && o.Status && !o.Local && o.URL == outRaw {
-			return ref.ID, "", o.NetworkID
+		served, ok := cat.Serve(ref.ID)
+		if ok && cat.Offers[served].URL == outRaw {
+			return served, "", cat.Offers[served].NetworkID
 		}
 	}
 	return "", "", ""

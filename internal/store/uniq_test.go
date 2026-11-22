@@ -58,14 +58,14 @@ func TestSummaryQueriesUseStepFilterOnlyWithWave(t *testing.T) {
 func TestFactsKeepEveryStep(t *testing.T) {
 	for _, click := range []bool{false, true} {
 		for _, cost := range []bool{false, true} {
-			plain := clickFactsSQL(click, cost, false, "")
+			plain := clickFactsSQL(click, cost, false, false, "")
 			if strings.Contains(plain, "step") {
 				t.Errorf("clickFactsSQL(%v, %v) without the wave mentions step: %s", click, cost, plain)
 			}
 			if !strings.Contains(plain, "count(), countIf(uniq = 1), countIf(uniq = 1)") {
 				t.Errorf("without the wave uniq_first must equal uniq: %s", plain)
 			}
-			stepped := clickFactsSQL(click, cost, true, "")
+			stepped := clickFactsSQL(click, cost, true, false, "")
 			if !strings.Contains(stepped, "count(), countIf(uniq = 1), countIf(uniq = 1 AND step = 0)") {
 				t.Errorf("clickFactsSQL(%v, %v) with the wave: %s", click, cost, stepped)
 			}
@@ -79,11 +79,11 @@ func TestFactsKeepEveryStep(t *testing.T) {
 // A click row without a price has an empty currency key, so the zero-cent
 // currency label of the /offer step does not open a currency of its own.
 func TestFactsCurrencyKeyNeedsCents(t *testing.T) {
-	q := clickFactsSQL(true, true, true, "")
+	q := clickFactsSQL(true, true, true, false, "")
 	if !strings.Contains(q, "if(cost_cents > 0, cost_cur, '') AS fact_cur") || !strings.Contains(q, "GROUP BY group_id, stream_name, offer_id, landing_id, network_id, fact_cur") {
 		t.Errorf("currency key: %s", q)
 	}
-	where := clickFactsSQL(true, true, true, " AND cost_cur = ?")
+	where := clickFactsSQL(true, true, true, false, " AND cost_cur = ?")
 	if !strings.Contains(where, "AND cost_cur = ?") {
 		t.Errorf("the cost_cur filter must stay on the column: %s", where)
 	}

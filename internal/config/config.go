@@ -98,6 +98,9 @@ type Group struct {
 	SourceID string `json:"source_id,omitempty"`
 	// Folder is the operator's grouping label for the campaign list and its filter. The engine ignores it.
 	Folder string `json:"folder,omitempty"`
+	// Notes is the operator's free text about the campaign, shown on the campaign page.
+	// A Keitaro import and the Keitaro sync fill it from the tracker note. The engine ignores it.
+	Notes string `json:"notes,omitempty"`
 	// BoardID is the panel section id for this campaign. Empty means the main section.
 	// The engine does not read it.
 	BoardID string `json:"board_id,omitempty"`

@@ -105,6 +105,19 @@ func TestExpandFullMacroSet(t *testing.T) {
 	}
 }
 
+// TestSubIDAndCIDExpandToTheSameClickID checks that [SUBID], the old [CID] and {subid} give one identifier,
+// so a link written before the rename keeps working, and that it is not rescanned for macros.
+func TestSubIDAndCIDExpandToTheSameClickID(t *testing.T) {
+	d := MacroDeps{CID: "k3j9x0a1b2c"}
+	got := Expand("a=[SUBID]&b=[CID]&c={subid}&d=[subid]", d)
+	if got != "a=k3j9x0a1b2c&b=k3j9x0a1b2c&c=k3j9x0a1b2c&d=[subid]" {
+		t.Fatalf("click id macros: %s", got)
+	}
+	if got := Expand("[SUBID]", MacroDeps{CID: "[CID]"}); got != "[CID]" {
+		t.Fatalf("a substituted value must not be expanded again: %s", got)
+	}
+}
+
 func TestRandDfl(t *testing.T) {
 	dir := t.TempDir()
 	os.MkdirAll(filepath.Join(dir, "pool"), 0o755)

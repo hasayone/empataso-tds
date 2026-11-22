@@ -28,14 +28,16 @@ const (
 	clickWaveSubs = 12
 	// waveOrigin adds origin_group_name and origin_group_id to events and conversions.
 	waveOrigin wave = "origin"
-	// waveDep adds depsum to conversions. It is the deposit, not the payout.
+	// waveDep adds depsum and dep2sum to conversions. They are the deposits, not the payout.
 	waveDep wave = "dep"
 	// waveRoot adds root attribution; an empty root_cid means the click is its own root.
 	waveRoot wave = "root"
+	// waveRev adds the click revenue of a CPC offer. It is not a conversion payout.
+	waveRev wave = "rev"
 )
 
 // allWaves lists every wave in the order probes and the fields API use.
-var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep, waveOrigin, waveDep, waveSub, waveRoot}
+var allWaves = []wave{waveBase, waveNet, waveClick, waveCost, waveExt, waveModel, waveStep, waveOrigin, waveDep, waveSub, waveRoot, waveRev}
 
 // Field is one journal column shared by filters, breakdown and the SPA.
 // Name is the API name. Events and Conv are the physical columns; an empty
@@ -127,6 +129,7 @@ func buildFields() []Field {
 		{Name: "status", Conv: "status", Type: lc, ConvWave: waveBase, Dim: true, Lower: true},
 		{Name: "profit", Conv: "profit", Type: "Float64", ConvWave: waveBase},
 		{Name: "depsum", Conv: "depsum", Type: "Float64", ConvWave: waveDep, Default: "0"},
+		{Name: "dep2sum", Conv: "dep2sum", Type: "Float64", ConvWave: waveDep, Default: "0"},
 		{Name: "asn", Events: "asn", Conv: "asn", Type: "UInt32", EventsWave: waveNet, ConvWave: waveExt, Dim: true,
 			Expr: "if(asn = 0, '', concat('AS', toString(asn)))"},
 		{Name: "org", Events: "org", Conv: "org", Type: lc, EventsWave: waveNet, ConvWave: waveExt, Dim: true},
@@ -159,6 +162,7 @@ func buildFields() []Field {
 		Field{Name: "prev_status", Conv: "prev_status", Type: lc, ConvWave: waveExt, Dim: true},
 		Field{Name: "tid", Conv: "tid", Type: "String", ConvWave: waveExt},
 		Field{Name: "step", Events: "step", Type: "UInt8", EventsWave: waveStep, Default: "0", Internal: true},
+		Field{Name: "click_revenue", Events: "revenue", Type: "Float64", EventsWave: waveRev, Default: "0", Internal: true},
 	)
 	for i := clickWaveSubs + 1; i <= config.MaxSubID; i++ {
 		name := fmt.Sprintf("sub_id_%d", i)

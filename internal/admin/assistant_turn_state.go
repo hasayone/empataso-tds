@@ -7,19 +7,23 @@ import (
 	"time"
 )
 
-// aiTurnRun is a turn that runs: the chat it answers and the function that cancels it.
+// aiTurnRun is a turn that runs: the chat it answers, the function that cancels it and the feed
+// of its events, which a page attaches to. feed is set once the turn has its feed.
 type aiTurnRun struct {
 	chatID string
 	cancel context.CancelFunc
+	feed   *aiSSE
 }
 
 // aiTurnState is the registry of running turns, one per user and at most aiTurnMaxProcess in all.
 //
-// mu guards runs, which maps the chat uid to its turn. heartbeat and timeout replace the ping
+// mu guards runs, which maps the chat uid to its turn. wg counts the turn goroutines, so a
+// shutdown can wait for them to store their chats. heartbeat and timeout replace the ping
 // period and the turn limit in tests; zero values mean aiHeartbeat and aiTurnTimeout.
 type aiTurnState struct {
 	mu        sync.Mutex
 	runs      map[string]*aiTurnRun
+	wg        sync.WaitGroup
 	heartbeat time.Duration
 	timeout   time.Duration
 }
@@ -68,6 +72,58 @@ func (s *Server) aiTurnEnd(uid string, run *aiTurnRun) {
 	defer t.mu.Unlock()
 	if t.runs[uid] == run {
 		delete(t.runs, uid)
+	}
+}
+
+// aiTurnSetFeed gives run the feed pages attach to.
+func (s *Server) aiTurnSetFeed(run *aiTurnRun, feed *aiSSE) {
+	t := &s.ai.turns
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	run.feed = feed
+}
+
+// aiTurnFeedOf returns the feed of the turn that uid runs on chat chatID. It reports false when
+// the user has no turn, the turn answers another chat, or it has no feed yet.
+func (s *Server) aiTurnFeedOf(uid, chatID string) (*aiSSE, bool) {
+	t := &s.ai.turns
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	run := t.runs[uid]
+	if run == nil || run.chatID != chatID || run.feed == nil {
+		return nil, false
+	}
+	return run.feed, true
+}
+
+// aiTurnCancelChat cancels the turn that uid runs on chat chatID, on the user's own request. It
+// reports whether there was such a turn. A turn of another chat of the user is left alone.
+func (s *Server) aiTurnCancelChat(uid, chatID string) bool {
+	t := &s.ai.turns
+	t.mu.Lock()
+	run := t.runs[uid]
+	t.mu.Unlock()
+	if run == nil || run.chatID != chatID {
+		return false
+	}
+	run.cancel()
+	return true
+}
+
+// WaitTurns waits until every turn has stored its chat or the time ends. A shutdown calls it after
+// CancelTurns, because a turn no longer lives inside the request that started it. It reports whether
+// every turn ended in time.
+func (s *Server) WaitTurns(limit time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		s.ai.turns.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(limit):
+		return false
 	}
 }
 

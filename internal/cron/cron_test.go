@@ -676,7 +676,7 @@ func TestConversions(t *testing.T) {
 	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || !strings.Contains(msg, "watching for new conversions") || len(e.messages()) != 1 {
 		t.Fatalf("first run: %q, %v, %q", msg, err, e.messages())
 	}
-	if m := e.messages(); m[0] != "Profit for today: 9.00" || strings.Count(m[0], "Profit for today") != 1 {
+	if m := e.messages(); m[0] != "Earned today\n9.00" || strings.Contains(m[0], "Profit for today") {
 		t.Fatalf("first summary: %q", m)
 	}
 
@@ -693,8 +693,9 @@ func TestConversions(t *testing.T) {
 	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || !strings.HasPrefix(msg, "2 new conversion(s)") {
 		t.Fatalf("%q, %v", msg, err)
 	}
-	want := []string{"1.00 Promo/ru_mobile RU phone c1", "2.50 Promo/us_all US phone c2", "Profit for today: 3.50"}
-	if m := e.messages(); len(m) != 3 || m[0] != want[0] || m[1] != want[1] || m[2] != want[2] || strings.Count(strings.Join(m, "\n"), "Profit for today") != 1 {
+	sum := profitSummaryText("today", time.Time{}, time.Time{}, 3.5, pb.rows, "en")
+	want := []string{"1.00 Promo/ru_mobile RU phone c1", "2.50 Promo/us_all US phone c2", sum}
+	if m := e.messages(); len(m) != 3 || m[0] != want[0] || m[1] != want[1] || m[2] != want[2] || strings.Contains(strings.Join(m, "\n"), "Profit for today") || !strings.Contains(sum, "3.50") {
 		t.Errorf("messages = %q; want %q", m, want)
 	}
 	var incrTo time.Time
@@ -718,7 +719,7 @@ func TestConversions(t *testing.T) {
 	if !strings.HasPrefix(msg, "0 new conversion(s)") || len(pb.calls) < nCall+2 || !pb.calls[nCall].from.Equal(prevTo) {
 		t.Errorf("%q; from %v, want %v", msg, pb.calls[nCall].from, prevTo)
 	}
-	if m := e.messages(); len(m) != 1 || m[0] != "Profit for today: 3.50" {
+	if m := e.messages(); len(m) != 1 || m[0] != sum || strings.Contains(m[0], "Profit for today") {
 		t.Errorf("quiet run: %q", m)
 	}
 }
@@ -780,7 +781,7 @@ func TestConversionsTelegramPartialAdvance(t *testing.T) {
 	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || !strings.HasPrefix(msg, "2 new conversion(s)") {
 		t.Fatalf("%q %v", msg, err)
 	}
-	if m := e.messages(); len(m) != 3 || strings.Count(strings.Join(m, "\n"), "Profit for today") != 1 {
+	if m := e.messages(); len(m) != 3 || strings.Count(strings.Join(m, "\n"), "Earned today") != 1 || strings.Contains(strings.Join(m, "\n"), "Profit for today") {
 		t.Fatalf("messages = %q", m)
 	}
 }
@@ -808,7 +809,7 @@ func TestConversionsBacklogAndFailure(t *testing.T) {
 	}
 	m := e.messages()
 	joined := strings.Join(m, "\n")
-	if len(m) != maxAnnounce+2 || !strings.Contains(m[maxAnnounce], "5 more conversions, 5.00 in total") || strings.Count(joined, "Profit for today") != 1 {
+	if len(m) != maxAnnounce+2 || !strings.Contains(m[maxAnnounce], "5 more conversions, 5.00 in total") || strings.Count(joined, "Earned today") != 1 || strings.Contains(joined, "Profit for today") {
 		t.Errorf("%d messages, last %q", len(m), m[len(m)-1])
 	}
 
@@ -832,6 +833,187 @@ func TestConversionsBacklogAndFailure(t *testing.T) {
 	}
 }
 
+func TestConversionsScheduleNext(t *testing.T) {
+	loc, err := time.LoadLocation("Europe/Warsaw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 1, 15, 8, 0, 0, 0, loc)
+	iv := Conversions{Schedule: "interval", EveryMinutes: 15, Timezone: "Europe/Warsaw", AtHour: 9, AtMinute: 15}
+	if got := iv.NextSummary(now, 15*time.Minute); !got.Equal(now.Add(15 * time.Minute)) {
+		t.Fatalf("interval next = %v", got)
+	}
+	daily := Conversions{Schedule: "daily", AtHour: 9, AtMinute: 15, Timezone: "Europe/Warsaw", EveryMinutes: 1}
+	slot := time.Date(2026, 1, 15, 9, 15, 0, 0, loc)
+	if got := daily.NextSummary(now, time.Minute); !got.Equal(slot) {
+		t.Fatalf("before the clock: %v want %v", got, slot)
+	}
+	if got := daily.NextSummary(slot, time.Minute); !got.Equal(slot.AddDate(0, 0, 1)) {
+		t.Fatalf("on the clock: %v want the next day", got)
+	}
+	if got := daily.NextSummary(slot.Add(time.Minute), time.Minute); !got.Equal(slot.AddDate(0, 0, 1)) {
+		t.Fatalf("after the clock: %v", got)
+	}
+
+	cfg := Default()
+	cfg.Conversions = daily
+	placed, changed := cfg.placeConversions(now, JobStatus{})
+	if !changed || !placed.NextRun.Equal(slot) {
+		t.Fatalf("empty next = %v changed %v", placed.NextRun, changed)
+	}
+	kept, changed := cfg.placeConversions(slot.Add(time.Minute), JobStatus{NextRun: slot})
+	if changed || !kept.NextRun.Equal(slot) {
+		t.Fatalf("a due clock must stay, got %v changed %v", kept.NextRun, changed)
+	}
+	cfg.Conversions.Schedule = "interval"
+	cfg.Conversions.EveryMinutes = 1
+	pulled, changed := cfg.placeConversions(now, JobStatus{NextRun: slot.AddDate(0, 0, 1)})
+	if !changed || !pulled.NextRun.Equal(now.Add(time.Minute)) {
+		t.Fatalf("leaving daily: %v changed %v", pulled.NextRun, changed)
+	}
+
+	bad := Default()
+	bad.Conversions.Schedule = "weekly"
+	if err := bad.Validate(); err == nil {
+		t.Fatal("weekly schedule must be rejected")
+	}
+	bad.Conversions.Schedule = "daily"
+	bad.Conversions.AtHour = 24
+	if err := bad.Validate(); err == nil {
+		t.Fatal("hour 24 must be rejected")
+	}
+	bad.Conversions.AtHour, bad.Conversions.AtMinute = 9, 15
+	bad.Conversions.Timezone = "Europe/Warsaw"
+	if err := bad.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	path := filepath.Join(t.TempDir(), "cron.json")
+	saved := Default()
+	saved.Conversions.Schedule = "daily"
+	saved.Conversions.AtHour = 9
+	saved.Conversions.AtMinute = 15
+	saved.Conversions.EveryMinutes = 5
+	saved.Conversions.Timezone = "Europe/Warsaw"
+	if err := Save(path, saved); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := loaded.Conversions
+	if got.Schedule != "daily" || got.AtHour != 9 || got.AtMinute != 15 || got.EveryMinutes != 5 || got.Timezone != "Europe/Warsaw" {
+		t.Fatalf("saved schedule = %+v", got)
+	}
+}
+
+func TestConversionsDailySummary(t *testing.T) {
+	t.Setenv("EMTDS_ALERT_LANG", "en")
+	e := newEnv(t)
+	pb := &fakePB{}
+	e.r.pb = pb
+	loc, err := time.LoadLocation("Europe/Warsaw")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	clock := time.Date(2026, 1, 15, 8, 0, 0, 0, loc)
+	e.r.now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return clock
+	}
+	set := func(t time.Time) {
+		mu.Lock()
+		clock = t
+		mu.Unlock()
+	}
+	cfg := Default()
+	cfg.Telegram = tg
+	cfg.Conversions.Enabled = true
+	cfg.Conversions.EveryMinutes = 1
+	cfg.Conversions.Schedule = "daily"
+	cfg.Conversions.AtHour = 9
+	cfg.Conversions.AtMinute = 15
+	cfg.Conversions.Timezone = "Europe/Warsaw"
+	cfg.Conversions.Period = "today"
+	e.saveConfig(cfg)
+
+	e.r.Tick(context.Background())
+	e.r.Wait()
+	if len(e.messages()) != 0 {
+		t.Fatalf("before the clock, no summary: %q", e.messages())
+	}
+	slot := time.Date(2026, 1, 15, 9, 15, 0, 0, loc)
+	if got := e.status().Jobs[JobConversions].NextRun; !got.Equal(slot) {
+		t.Fatalf("next = %v want %v", got, slot)
+	}
+
+	set(time.Date(2026, 1, 15, 8, 2, 0, 0, loc))
+	pb.rows = []store.PostbackRow{{
+		TS: time.Date(2026, 1, 15, 8, 0, 30, 0, loc), Profit: 4, CID: "c1",
+		Group: "G", Stream: "S", Country: "pl", Device: "phone",
+	}}
+	e.r.Tick(context.Background())
+	e.r.Wait()
+	if m := e.messages(); len(m) != 1 || strings.Contains(m[0], "Profit") {
+		t.Fatalf("conversion only: %q", m)
+	}
+	if got := e.status().Jobs[JobConversions].NextRun; !got.Equal(slot) {
+		t.Fatalf("a conversion poll moved the summary to %v", got)
+	}
+
+	set(slot)
+	e.mu.Lock()
+	e.sent = nil
+	e.mu.Unlock()
+	e.r.Tick(context.Background())
+	e.r.Wait()
+	if n := strings.Count(strings.Join(e.messages(), "\n"), "Earned today"); n != 1 || strings.Contains(strings.Join(e.messages(), "\n"), "Profit for today") {
+		t.Fatalf("slot messages: %q", e.messages())
+	}
+	tomorrow := slot.AddDate(0, 0, 1)
+	if got := e.status().Jobs[JobConversions].NextRun; !got.Equal(tomorrow) {
+		t.Fatalf("after the slot next = %v want %v", got, tomorrow)
+	}
+
+	set(time.Date(2026, 1, 15, 9, 17, 0, 0, loc))
+	e.mu.Lock()
+	e.sent = nil
+	e.mu.Unlock()
+	e.r.Tick(context.Background())
+	e.r.Wait()
+	if st := e.status().Jobs[JobConversions]; st.LastRun.Before(time.Date(2026, 1, 15, 9, 17, 0, 0, loc)) {
+		t.Fatalf("the poll after the summary did not run: %+v", st)
+	}
+	if strings.Contains(strings.Join(e.messages(), "\n"), "Profit") {
+		t.Fatalf("summary repeated: %q", e.messages())
+	}
+
+	if err := RequestRun(e.r.paths.Config, JobConversions); err != nil {
+		t.Fatal(err)
+	}
+	e.mu.Lock()
+	e.sent = nil
+	e.mu.Unlock()
+	e.r.Tick(context.Background())
+	e.r.Wait()
+	if n := strings.Count(strings.Join(e.messages(), "\n"), "Earned today"); n != 1 || strings.Contains(strings.Join(e.messages(), "\n"), "Profit for today") {
+		t.Fatalf("run now: %q", e.messages())
+	}
+	loaded, err := Load(e.r.paths.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Conversions.Schedule != "daily" || loaded.Conversions.AtHour != 9 || loaded.Conversions.AtMinute != 15 || loaded.Conversions.EveryMinutes != 1 {
+		t.Fatalf("run now changed the schedule: %+v", loaded.Conversions)
+	}
+	if got := e.status().Jobs[JobConversions].NextRun; !got.Equal(tomorrow) {
+		t.Fatalf("run now moved the next summary to %v", got)
+	}
+}
+
 func TestConvPeriodMatchesReport(t *testing.T) {
 	now := time.Date(2026, 10, 13, 15, 0, 0, 0, time.UTC)
 	from, to := convPeriod(Conversions{Period: "today"}, now)
@@ -850,7 +1032,7 @@ func TestConvPeriodMatchesReport(t *testing.T) {
 	if err := (Conversions{Period: "nope"}).validate(); err == nil {
 		t.Fatal("unknown period must be refused")
 	}
-	if got := profitSummaryText("today", from, to, 12.5, "ru"); got != "Профит за сегодня: 12.50" {
+	if got := profitSummaryText("today", from, to, 12.5, nil, "ru"); got != "Профит за сегодня\n12.50" || strings.Contains(got, "Profit for today") {
 		t.Fatalf("ru summary %q", got)
 	}
 }
@@ -870,7 +1052,7 @@ func TestConversionsManualProfitOnce(t *testing.T) {
 		t.Fatalf("manual: %q %v", msg, err)
 	}
 	m := e.messages()
-	if len(m) != 1 || m[0] != "Profit for today: 4.50" {
+	if len(m) != 1 || m[0] != "Earned today\n4.50" || strings.Contains(m[0], "Profit for today") {
 		t.Fatalf("one summary, no replay: %q", m)
 	}
 	pb.rows = append(pb.rows, store.PostbackRow{TS: clock.Add(time.Minute), Profit: 1, CID: "new"})
@@ -884,12 +1066,65 @@ func TestConversionsManualProfitOnce(t *testing.T) {
 	m = e.messages()
 	nProfit := 0
 	for _, line := range m {
-		if strings.HasPrefix(line, "Profit for today") {
+		if strings.HasPrefix(line, "Earned today") {
 			nProfit++
 		}
 	}
-	if nProfit != 1 || len(m) != 2 || m[1] != "Profit for today: 5.50" {
+	if nProfit != 1 || len(m) != 2 || m[1] != "Earned today\n5.50" || strings.Contains(strings.Join(m, "\n"), "Profit for today") {
 		t.Fatalf("summary once beside the new line: %q", m)
+	}
+}
+
+func TestConvSummaryFollowsRussianProfile(t *testing.T) {
+	t.Setenv("EMTDS_ALERT_LANG", "en")
+	e := newEnv(t)
+	pb := &fakePB{}
+	e.r.pb = pb
+	raw := `[{"id":"u1","login":"owner","type":"ADMIN","enabled":true,"prefs":{"lang":"ru"}}]`
+	if err := os.WriteFile(filepath.Join(e.dir, "users.json"), []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clock := time.Date(2026, 9, 30, 12, 0, 0, 0, time.UTC)
+	e.r.now = func() time.Time { return clock }
+	cfg := Default()
+	cfg.Telegram = tg
+	cfg.Conversions.Period = "today"
+	pb.rows = []store.PostbackRow{{
+		TS: clock.Add(-time.Hour), Profit: 12.5, Group: "Promo", Stream: "ru_mobile",
+		Country: "ru", Device: "phone", Keyword: "shoes", CID: "c1",
+	}}
+	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || !strings.Contains(msg, "profit 12.50") {
+		t.Fatalf("manual: %q %v", msg, err)
+	}
+	m := e.messages()
+	if len(m) != 1 || strings.Contains(m[0], "Profit for today") || !strings.Contains(m[0], "Профит за сегодня") || !strings.Contains(m[0], "12.50") {
+		t.Fatalf("summary: %q", m)
+	}
+	want := profitSummaryText("today", time.Time{}, time.Time{}, 12.5, pb.rows, "ru")
+	if m[0] != want || !strings.Contains(m[0], "Promo — 12.50") {
+		t.Fatalf("got\n%s\nwant\n%s", m[0], want)
+	}
+}
+
+func TestConvProfileLang(t *testing.T) {
+	t.Setenv("EMTDS_ALERT_LANG", "en")
+	dir := t.TempDir()
+	groups := filepath.Join(dir, "groups.json")
+	body := `[{"type":"USER","enabled":true,"prefs":{"lang":"en"}},{"type":"ADMIN","enabled":true,"prefs":{"lang":"ru"}}]`
+	if err := os.WriteFile(filepath.Join(dir, "users.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := profileLang(groups); got != "ru" {
+		t.Fatalf("admins %q", got)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "admin.json"), []byte(`{"login":"owner","lang":"uk"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := summaryLang(groups); got != "uk" {
+		t.Fatalf("admin profile %q", got)
+	}
+	if got := summaryLang(""); got != "en" {
+		t.Fatalf("fallback %q", got)
 	}
 }
 

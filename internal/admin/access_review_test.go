@@ -199,7 +199,7 @@ func TestHiddenMacroRefusedInCampaign(t *testing.T) {
 	cases := []struct{ hidden, macro string }{
 		{"ip", "[IP]"}, {"ip", "[ip]"}, {"useragent", "[USERAGENT]"}, {"asn", "[ASN]"},
 		{"keyword", "{keyword}"}, {"keyword", "[KEY]"}, {"status", "{status}"}, {"profit", "{payout}"},
-		{"sub_id_3", "{sub_id_3}"}, {"sub_id_3", "[PAR-3]"}, {"country", "[()COUNTRY()]"}, {"cid", "{subid}"},
+		{"sub_id_3", "{sub_id_3}"}, {"sub_id_3", "[PAR-3]"}, {"country", "[()COUNTRY()]"}, {"cid", "{subid}"}, {"cid", "[SUBID]"}, {"cid", "[CID]"},
 		{"root_cid", "{root_subid}"},
 	}
 	rig := newRolesRig(t, "")

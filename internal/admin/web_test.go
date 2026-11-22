@@ -822,7 +822,7 @@ func TestCatalogNames(t *testing.T) {
 	mustNot(t, rep, "r.group,r.stream,r.country", "report export does not dump raw ids")
 	must(t, spaFunctionLine(html, "entryCampaignConds"), "f:'campaign_id'", "the campaign button filters by campaign id")
 	mustNot(t, conv, "f:'campaign',", "conversion filter is not the campaign name")
-	must(t, conv, "entryCampaignConds(arg)", "the campaign address becomes a visible conversion filter")
+	must(t, conv, "entryConversionConds(arg, hiddenFields(ME))", "the campaign address becomes a visible conversion filter")
 	mustNot(t, spaFunctionLine(html, "pbCondsForQuery"), "campaign_id", "the conversion query adds no hidden campaign condition")
 	mustNot(t, spaFunctionLine(html, "logCondsForQuery"), "campaign_id", "the click query adds no hidden campaign condition")
 	must(t, pb, "dockTotal(r", "conversion counter uses the filtered count")
@@ -1527,7 +1527,8 @@ func TestSPAFlowHeaderIcons(t *testing.T) {
 		t.Fatal("streamHint missing")
 	}
 	must(t, hint, `conv>0?'<span class="c-rev">'+convText+'</span>':convText`, "conversions are bright only above zero")
-	must(t, hint, `fmt(sp.bots)+' '+tr('bots')`, "bots stay outside the green span")
+	must(t, hint, `bots>0?botsBit(bots):''`, "bots show only above zero, as an icon and a number")
+	mustNot(t, hint, `tr('bots')`, "the word bots is not written on the line")
 	mustNot(t, hint, `c-rev">'+fmt(sp.bots)`, "bots are not painted as revenue")
 	money := spaFunctionLine(html, "branchMoney")
 	must(t, money, `profit>0?'<span class="c-rev">'+rev+'</span>':rev`, "revenue is bright only above zero")
@@ -2425,8 +2426,9 @@ func TestKeyOnceCopy(t *testing.T) {
 	must(t, fn, `copyBtn.isConnected`, "label reset skips a closed dialog")
 	mustNot(t, fn, `navigator.clipboard`, "no second clipboard implementation")
 	must(t, spaFunctionLine(html, "copyText"), `if(after) after();`, "copyText reports success to the caller")
-	must(t, html, `.modal .key-once{display:block;box-sizing:border-box;width:100%;`, "key field spans the dialog")
-	must(t, html, `overflow-wrap:anywhere;word-break:break-all`, "long key wraps inside the field")
+	must(t, html, `.modal .key-once{width:100%;`, "key field spans the dialog")
+	must(t, html, `.upd-page .cli-row code,.key-once{display:block;min-width:0;`, "key field is a code block")
+	must(t, html, `.modal .key-once{width:100%;cursor:pointer;word-break:break-all}`, "long key wraps inside the field")
 	must(t, html, `.modal .key-once:focus-visible{`, "keyboard focus ring on the key")
 	for _, lang := range []string{"en", "ru", "uk"} {
 		if !trKeyDefined(html, lang, "cf.ns.copied") {

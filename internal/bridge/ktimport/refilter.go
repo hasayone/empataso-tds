@@ -76,6 +76,19 @@ func RenoteStream(comment string, skipped []string) string {
 	return base
 }
 
+// NoteSkipped читает имена пропущенных фильтров из заметки потока.
+//
+// Параметры: comment — заметка потока.
+// Результат: имена в порядке заметки; nil, если пометки о пропущенных фильтрах нет.
+// Ошибки: нет.
+func NoteSkipped(comment string) []string {
+	_, rest, ok := strings.Cut(comment, skippedFiltersNote)
+	if !ok || strings.TrimSpace(rest) == "" {
+		return nil
+	}
+	return strings.Split(rest, ", ")
+}
+
 // NoteStreamID читает id потока Keitaro из заметки keitaro_stream_id=N.
 //
 // Параметры: comment — заметка потока.

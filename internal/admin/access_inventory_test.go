@@ -93,6 +93,7 @@ var macroSurface = map[string]struct {
 		"Group.ID":                          "campaign id",
 		"Group.Name":                        "campaign label",
 		"Group.Folder":                      "list grouping label",
+		"Group.Notes":                       "operator note; the engine does not read it",
 		"Group.BoardID":                     "panel section id; never expanded",
 		"Group.Streams[].Name":              "stream label; also the identity that places a link",
 		"Group.Streams[].Comment":           "operator note",
@@ -107,6 +108,9 @@ var macroSurface = map[string]struct {
 		"Offer.Name":    "offer label",
 		"Offer.Group":   "catalog label",
 		"Offer.BoardID": "panel section id; never expanded",
+		"Offer.Notes":   "operator note; the engine does not read it",
+		// The name is the key of {offer_value:name}; the engine looks it up and never expands it.
+		"Offer.Values[].Name": "value name; a lookup key, never expanded",
 	}},
 	"Landing": {reflect.TypeOf(config.Landing{}), map[string]string{
 		"Landing.ID":      "landing id",
@@ -227,6 +231,7 @@ var writeRouteGuard = map[string]string{
 	"POST /api/logout":                          "session only, stores nothing",
 	"POST /api/password":                        "own password",
 	"PUT /api/me/views":                         "own sort and filter state, never expanded",
+	"PUT /api/me/lang":                          "own panel language, no template",
 	"PUT /api/groups":                           "validateGroupMacros, validateGroupParams",
 	"PUT /api/groups/{id}":                      "validateGroupMacros, validateGroupParams",
 	"DELETE /api/groups/{id}":                   "removes a campaign",

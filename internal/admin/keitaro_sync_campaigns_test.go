@@ -58,7 +58,9 @@ func (f *newCampaignsTracker) server() *httptest.Server {
 			id := strings.TrimSuffix(strings.TrimPrefix(p, "campaigns/"), "/streams")
 			body, ok := f.streams[id]
 			if !ok {
-				f.t.Errorf("streams of campaign %s were read", id)
+				if id != "7" && id != "8" {
+					f.t.Errorf("streams of campaign %s were read", id)
+				}
 				body = `[]`
 			}
 			_, _ = w.Write([]byte(body))
@@ -134,7 +136,7 @@ func newCampaignsServer(t *testing.T, tracker *httptest.Server, now *time.Time) 
 
 func TestKeitaroSyncImportsNewCampaigns(t *testing.T) {
 	fake := &newCampaignsTracker{t: t,
-		camps: `[{"id":7,"alias":"test","name":"T","state":"active"},{"id":8,"alias":"gone","name":"G","state":"active"},
+		camps: `[{"id":7,"alias":"test","name":"Edited here","state":"active"},{"id":8,"alias":"gone","name":"G","state":"active"},
 			{"id":9,"alias":"fresh","name":"Fresh","state":"active"},{"id":10,"alias":"second","name":"Second","state":"active","domain_id":5}]`,
 		streams: map[string]string{"9": botStreams("reject", 11, 12), "10": botStreams("accept", 12)},
 	}
@@ -177,10 +179,9 @@ func TestKeitaroSyncImportsNewCampaigns(t *testing.T) {
 		t.Fatalf("state = %+v", st)
 	}
 
-	_, streamsBefore := fake.count()
 	res = s.runKeitaroSyncPass(context.Background(), target, st, true)
-	if _, streamsAfter := fake.count(); !res.OK || res.Campaigns != 0 || streamsAfter != streamsBefore {
-		t.Fatalf("second pass %+v streams %d → %d", res, streamsBefore, streamsAfter)
+	if !res.OK || res.Campaigns != 0 || res.Updated != 0 || len(groups.list) != 3 {
+		t.Fatalf("second pass %+v groups %v", res, groupIDs(groups.list))
 	}
 	s.keitaroSyncFinishRun(keitaroSyncFinishIn{State: st, Result: res, Interval: time.Minute, Began: now}, s.cfg.KeitaroSyncFile)
 	if st.LastCampaigns != 0 {
@@ -190,7 +191,7 @@ func TestKeitaroSyncImportsNewCampaigns(t *testing.T) {
 
 func TestKeitaroSyncNewCampaignsSkipKnownGroupID(t *testing.T) {
 	fake := &newCampaignsTracker{t: t,
-		camps:   `[{"id":7,"alias":"test","name":"T","state":"active"},{"id":20,"alias":"gone","name":"Same alias","state":"active"}]`,
+		camps:   `[{"id":7,"alias":"test","name":"Edited here","state":"active"},{"id":20,"alias":"gone","name":"Same alias","state":"active"}]`,
 		streams: map[string]string{"20": botStreams("accept", 12)},
 	}
 	tracker := fake.server()
@@ -266,7 +267,7 @@ func TestKeitaroGETBudgetRefusesOverLimit(t *testing.T) {
 
 func TestKeitaroSyncNewCampaigns402Pauses(t *testing.T) {
 	fake := &newCampaignsTracker{t: t,
-		camps:   `[{"id":7,"alias":"test","name":"T","state":"active"},{"id":9,"alias":"fresh","name":"Fresh","state":"active"}]`,
+		camps:   `[{"id":7,"alias":"test","name":"Edited here","state":"active"},{"id":9,"alias":"fresh","name":"Fresh","state":"active"}]`,
 		streams: map[string]string{"9": botStreams("reject", 12)},
 	}
 	tracker := fake.server()

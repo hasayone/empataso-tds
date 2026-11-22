@@ -118,7 +118,7 @@ TDS стоит перед твоими офферами и лендингами 
   передать посетителя в другую группу**, так что группы можно выстраивать в
   цепочки.
 - Богатый набор макросов: `[KEY] [IP] [COUNTRY] [CITY] [REGION] [LANG] [DEVICE]
-  [OPERATOR] [DOMAIN] [USERAGENT] [CID] [ASN] [ORG] [TIMEZONE] [UTC]
+  [OPERATOR] [DOMAIN] [USERAGENT] [SUBID] [ASN] [ORG] [TIMEZONE] [UTC]
   [PAR-1..5] [()COUNTRY()] [()CITY()]
   [RANDNUM-a-b] [RANDSTR-(set)-n] [RANDLINE-(file)-n] [RANDDFL-(dir)-n]`.
 - Распределение вариантов через `|||`: `random` / `rotator` (cookie) / `evenly`
@@ -734,7 +734,7 @@ TimeoutStopSec=30
 `[KEY]` (url-кодированный ключ) · `[PATH]` (хост) · `[IP]` · `[COUNTRY]` `[CITY]`
 `[REGION]` · `[ASN]` `[ORG]` (url-кодированный) · `[TIMEZONE]` `[UTC]` · `[LANG]` ·
 `[DEVICE]` · `[OPERATOR]` · `[DOMAIN]` · `[USERAGENT]` ·
-`[CID]` (click id, для постбэков) · `[PAR-1..5]` (доп. GET-параметры) ·
+`[SUBID]` (click id, для постбэков; `[CID]` — прежнее имя, старые ссылки раскрываются так же) · `[PAR-1..5]` (доп. GET-параметры) ·
 `[()COUNTRY()]` `[()CITY()]` · `[RANDNUM-a-b]` · `[RANDSTR-(charset)-n]` ·
 `[RANDLINE-(file)-n[/u]]` · `[RANDDFL-(dir)-n[/u]]`.
 
@@ -762,10 +762,10 @@ UA-блэклист и IP-списки поисковиков. Детект ид
 ## Постбэк и API-режим
 
 **Постбэк (трекинг конверсий).** Положи click id в URL оффера через макрос
-`[CID]`, и пусть оффер вызовет:
+`[SUBID]`, и пусть оффер вызовет:
 
 ```
-http://your-host/?pb=YOUR_POSTBACK_KEY&cid=[CID]&profit=1.50
+http://your-host/?pb=YOUR_POSTBACK_KEY&cid=[SUBID]&profit=1.50
 ```
 Движок найдёт исходное событие по `cid` и запишет конверсию (видна в разделе
 **Conversions**).

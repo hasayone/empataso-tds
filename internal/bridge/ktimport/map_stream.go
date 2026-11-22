@@ -188,6 +188,7 @@ func (c *mapCtx) mapCampaign(camp Campaign, streams []KStream) (Group, []Loss) {
 	g := Group{
 		ID: id, Name: camp.Name, Num: int(camp.ID), Status: status, Redirect: "show_text", Out: "",
 		Folder: folder, Weight: strings.EqualFold(camp.Type, "weight"), Postbacks: posts,
+		Notes:   trimNotes(camp.Notes),
 		Streams: c.mapStreams(streams, !status),
 	}
 	if secs, odd := campaignUniqSeconds(camp.CookiesTTL); !odd && secs > 0 {
@@ -213,6 +214,22 @@ func trimFolder(name string) (string, bool) {
 		return name, false
 	}
 	return string([]rune(name)[:64]), true
+}
+
+// MaxNotesRunes — предел заметки кампании в символах, как в админке emtds.
+const MaxNotesRunes = 10000
+
+// trimNotes готовит заметку кампании Keitaro к записи в группу.
+//
+// Параметры: text — поле notes кампании.
+// Результат: текст без краевых пробелов, обрезанный до MaxNotesRunes символов. Пустая заметка даёт пустую строку.
+// Ошибки: нет.
+func trimNotes(text string) string {
+	text = strings.TrimSpace(text)
+	if utf8.RuneCountInString(text) <= MaxNotesRunes {
+		return text
+	}
+	return string([]rune(text)[:MaxNotesRunes])
 }
 
 // parsePostbacks читает массив исходящих шаблонов кампании.
@@ -550,17 +567,19 @@ func localOffer(st KStream, offers map[int]Offer, losses *[]Loss) bool {
 
 // rewriteMacros заменяет известные макросы Keitaro на метки emtds.
 // Неизвестное имя в фигурных скобках остаётся: движок читает его как параметр URL.
+// Идентификатор клика всегда записывается как [SUBID]: и макрос {subid}, и старая метка [CID] в тексте.
 //
 // Параметры: raw — исходная строка URL или текста.
 // Результат: строка после замены известных макросов.
 // Ошибки: нет.
 func rewriteMacros(raw string) string {
-	return macroRE.ReplaceAllStringFunc(raw, func(m string) string {
+	out := macroRE.ReplaceAllStringFunc(raw, func(m string) string {
 		if next, ok := macroMap[m]; ok {
 			return next
 		}
 		return m
 	})
+	return strings.ReplaceAll(out, legacyClickIDMacro, clickIDMacro)
 }
 
 // finishMacros сначала заменяет известные макросы, затем placeholder этой кампании.

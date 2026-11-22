@@ -25,7 +25,7 @@ func TestRedirectMappings(t *testing.T) {
 		{"do_nothing", "", "stop", "", ""},
 		{"status404", "", "404_not_found", "", ""},
 		{"status404", "<html><body>white</body></html>", "show_html_404", "<html><body>white</body></html>", ""},
-		{"status404", "<b>{subid}</b>", "show_html_404", "<b>[CID]</b>", ""},
+		{"status404", "<b>{subid}</b>", "show_html_404", "<b>[SUBID]</b>", ""},
 		{"curl", "https://a.example/x", "stop", "", "action_type curl нет соответствия, поток остановлен"},
 		{"campaign", "", "stop", "", "целевая кампания не задана"},
 		{"campaign", "   ", "stop", "", "целевая кампания не задана"},

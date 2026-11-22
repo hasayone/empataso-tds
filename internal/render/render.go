@@ -44,6 +44,10 @@ func Do(redirect, out string, o Options) Result {
 	case "show_text":
 		return Result{Status: 200, ContentType: ct(o, "text/plain; charset=utf-8"), Body: []byte(out)}
 
+	case "show_html":
+		// out is the page as typed. It is not wrapped in another document.
+		return Result{Status: http.StatusOK, ContentType: ct(o, "text/html; charset=utf-8"), Body: []byte(out)}
+
 	case "meta_refresh":
 		return htmlResult(200, fmt.Sprintf(`<!DOCTYPE html><head><meta http-equiv="refresh" content="0; URL=%s"></head><body></body></html>`, attr(out)))
 

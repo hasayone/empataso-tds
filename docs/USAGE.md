@@ -143,7 +143,7 @@ the uniqueness cookie the client sets, `ztu` by default).
 - Group: `http://host/<id>` (and aliases `http://host/<alias>`)
 - With a keyword: `http://host/<id>?q=KEYWORD`
 - With extra params: `http://host/<id>?p1=...&p2=...` → macros `[PAR-1..5]`
-- Postback pixel: `http://host/?pb=KEY&cid=[CID]&profit=1.50`; the keyless
+- Postback pixel: `http://host/?pb=KEY&cid=[SUBID]&profit=1.50` (`[CID]` expands the same way); the keyless
   `GET|POST /postback` takes `subid`, `status`, `payout`, `depsum`
   ([wiki/postbacks.md](wiki/postbacks.md))
 - Any query-string variable can be a stream condition ("URL parameter":
@@ -277,7 +277,7 @@ settings, interval, the last result with its time, and **Run now**.
 | VirusTotal | Asks for every domain in stream outputs (and any listed by hand). Newly flagged domains are reported once; optionally the streams sending to them are switched off |
 | Disk space | Alerts when free space drops below the threshold, and once more when it recovers |
 | Keyword cleanup | Deletes keyword files older than N days |
-| Conversion alerts | Sends each new postback to Telegram by a template (`[PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [CID]`). Skips rows whose `domain` equals the Keitaro import manifest host |
+| Conversion alerts | Sends each new postback to Telegram by a template (`[PROFIT] [GROUP] [STREAM] [COUNTRY] [CITY] [DEVICE] [DOMAIN] [SUBID]`). Skips rows whose `domain` equals the Keitaro import manifest host |
 | Keitaro data catch-up | Pulls clicks and conversions from a cursor (`keitaro_sync` in `cron.json`); runs in **admin**, not the cron service. Requires Keitaro and ClickHouse; see [wiki/keitaro.md](wiki/keitaro.md) |
 
 Telegram (bot token + chat ID) is the notification channel, with a **Send a
@@ -319,7 +319,7 @@ api_mac, curl}`.
 ## Output macros
 
 `[KEY] [PATH] [IP] [COUNTRY] [CITY] [REGION] [ASN] [ORG] [TIMEZONE] [UTC]
-[LANG] [DEVICE] [OPERATOR] [DOMAIN] [USERAGENT] [CID] [PAR-1..5]
+[LANG] [DEVICE] [OPERATOR] [DOMAIN] [USERAGENT] [SUBID] [PAR-1..5]
 [()COUNTRY()] [()CITY()]
 [RANDNUM-a-b] [RANDSTR-(set)-n] [RANDLINE-(file)-n[/u]] [RANDDFL-(dir)-n[/u]]`
 

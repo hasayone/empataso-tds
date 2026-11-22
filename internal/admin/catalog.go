@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"github.com/emtds/bridge/ktimport"
@@ -90,6 +91,45 @@ func validCatalogID(id string) string {
 	return ""
 }
 
+// validOfferDestination checks the id and, unless a ready action answers the click, the URL.
+// A ready action (404, text or html with a body, none) may omit the URL. A URL that is
+// present still has to be http or https. o is the offer. It returns an empty string when
+// valid, otherwise a client error message.
+func validOfferDestination(o config.Offer) string {
+	if o.ActionReady() {
+		if msg := validCatalogID(o.ID); msg != "" {
+			return msg
+		}
+		if o.Local || strings.TrimSpace(o.URL) == "" {
+			return ""
+		}
+		return validDestination(o.ID, o.URL, false)
+	}
+	return validDestination(o.ID, o.URL, o.Local)
+}
+
+// validOfferAction checks the action token and its body.
+// Empty means a URL redirect. text and html need a non-empty body, so an empty page
+// is not stored as that action. An unknown token is refused. o is the offer.
+// It returns an empty string when valid, otherwise a client error message.
+func validOfferAction(o config.Offer) string {
+	switch strings.ToLower(strings.TrimSpace(o.Action)) {
+	case "", config.OfferAction404, config.OfferActionText, config.OfferActionHTML, config.OfferActionNone:
+	default:
+		return "action is not valid"
+	}
+	if len(o.ActionBody) > config.MaxOfferActionBody {
+		return "action_body is too long"
+	}
+	switch strings.ToLower(strings.TrimSpace(o.Action)) {
+	case config.OfferActionText, config.OfferActionHTML:
+		if strings.TrimSpace(o.ActionBody) == "" {
+			return "action_body required"
+		}
+	}
+	return ""
+}
+
 func validDestination(id, raw string, local bool) string {
 	if msg := validCatalogID(id); msg != "" {
 		return msg
@@ -150,8 +190,51 @@ func trimGroupLabel(s string) string {
 	return string([]rune(s)[:maxFolderRunes])
 }
 
+// prepOffer trims the group label, the value names and the limits of an offer.
+// A value with an empty name is dropped, because it has no macro to stand for.
+// A limit that is off keeps its number, so turning it back on restores the saved
+// count, and drops the old per-limit hand-over offer: the alternative is FallbackID.
 func prepOffer(o *config.Offer) {
 	o.Group = trimGroupLabel(o.Group)
+	o.Action = strings.ToLower(strings.TrimSpace(o.Action))
+	var values []config.OfferValue
+	for _, v := range o.Values {
+		v.Name = strings.TrimSpace(v.Name)
+		if v.Name != "" {
+			values = append(values, v)
+		}
+	}
+	o.Values = values
+	o.FallbackID = strings.TrimSpace(o.FallbackID)
+	o.CapTZ = strings.TrimSpace(o.CapTZ)
+	o.ConvCapOfferID = strings.TrimSpace(o.ConvCapOfferID)
+	o.ConvTotalOfferID = strings.TrimSpace(o.ConvTotalOfferID)
+	if !o.ConvCap {
+		o.ConvCapOfferID = ""
+	}
+	if !o.ConvTotal {
+		o.ConvTotalOfferID = ""
+	}
+}
+
+// relinkOfferFallbacks points the spare offer and the limit hand-over offers of each copied offer at
+// the copy of that offer.
+// list is the offer list that already holds the copies. copied maps an original offer id to the id of
+// its copy. A copy whose target was not copied in the same request gets none, so a copy never sends
+// clicks to a record of another section.
+func relinkOfferFallbacks(list []config.Offer, copied map[string]string) {
+	isCopy := make(map[string]bool, len(copied))
+	for _, id := range copied {
+		isCopy[id] = true
+	}
+	for i := range list {
+		if !isCopy[list[i].ID] {
+			continue
+		}
+		list[i].FallbackID = copied[list[i].FallbackID]
+		list[i].ConvCapOfferID = copied[list[i].ConvCapOfferID]
+		list[i].ConvTotalOfferID = copied[list[i].ConvTotalOfferID]
+	}
 }
 
 func prepLanding(o *config.Landing) {
@@ -195,7 +278,10 @@ func (s *Server) offerCatalog() crudCatalog[config.Offer] {
 }
 
 func validOffer(o config.Offer) string {
-	if msg := validDestination(o.ID, o.URL, o.Local); msg != "" {
+	if msg := validOfferDestination(o); msg != "" {
+		return msg
+	}
+	if msg := validOfferAction(o); msg != "" {
 		return msg
 	}
 	if o.NetworkID != "" {
@@ -214,6 +300,111 @@ func validOffer(o config.Offer) string {
 	}
 	if msg := validOfferPayoutCurrency(o.PayoutCurrency); msg != "" {
 		return msg
+	}
+	if msg := validOfferValues(o.Values); msg != "" {
+		return msg
+	}
+	if len(o.Notes) > config.MaxOfferNotes {
+		return "notes is too long"
+	}
+	if msg := validOfferFallback(o); msg != "" {
+		return msg
+	}
+	if msg := validOfferCap("conv_cap", o.ConvCap, o.ConvCapLimit); msg != "" {
+		return msg
+	}
+	if msg := validOfferCap("conv_total", o.ConvTotal, o.ConvTotalLimit); msg != "" {
+		return msg
+	}
+	if msg := validOfferCapTZ(o.CapTZ); msg != "" {
+		return msg
+	}
+	if msg := validOfferTarget("conv_cap_offer_id", o.ID, o.ConvCapOfferID); msg != "" {
+		return msg
+	}
+	return validOfferTarget("conv_total_offer_id", o.ID, o.ConvTotalOfferID)
+}
+
+// validOfferTarget checks an offer a limit or a stop hands the clicks to: empty, or a catalog id that
+// is not the offer's own. Whether that offer exists is not checked here: the engine treats a missing
+// one as nowhere to go, and a longer loop of offers ends at runtime.
+// field is the JSON name for the message, id the offer's own id (empty for a new offer) and target
+// the value. It returns an empty string when valid, otherwise a client error message.
+func validOfferTarget(field, id, target string) string {
+	if target == "" {
+		return ""
+	}
+	if msg := validCatalogID(target); msg != "" {
+		return field + ": " + msg
+	}
+	if id != "" && target == id {
+		return field + " must not be the offer itself"
+	}
+	return ""
+}
+
+// validOfferFallback checks the spare offer of an offer: empty, or a catalog id that is not
+// the offer's own. Whether the spare offer exists is not checked here: the engine treats a
+// missing one as no spare offer, and a longer loop of spare offers ends at runtime.
+// It returns an empty string when valid, otherwise a client error message.
+func validOfferFallback(o config.Offer) string {
+	return validOfferTarget("fallback_id", o.ID, o.FallbackID)
+}
+
+// validOfferValues checks the named values of an offer.
+// Names are unique, at most config.MaxOfferValueName bytes, free of braces and
+// control characters; values are at most config.MaxOfferValueText bytes.
+// It returns an empty string when valid, otherwise a client error message.
+func validOfferValues(values []config.OfferValue) string {
+	if len(values) > config.MaxOfferValues {
+		return "values: too many"
+	}
+	seen := map[string]bool{}
+	for _, v := range values {
+		name := strings.TrimSpace(v.Name)
+		switch {
+		case name == "":
+			return "values: name must not be empty"
+		case len(name) > config.MaxOfferValueName || strings.ContainsAny(name, "{}[]\r\n\t") || seen[name]:
+			return "values: name is not valid or repeats: " + name
+		case len(v.Value) > config.MaxOfferValueText:
+			return "values: value is too long: " + name
+		}
+		seen[name] = true
+	}
+	return ""
+}
+
+// validOfferCap checks a conversion limit of an offer, the daily or the total one.
+// A limit that is on needs a number from 1 to config.MaxConvCapLimit. A limit
+// that is off may still carry its number.
+// name is the JSON name of the switch (conv_cap or conv_total; its number is name_limit), on the
+// switch and limit the number.
+// It returns an empty string when valid, otherwise a client error message.
+func validOfferCap(name string, on bool, limit int) string {
+	if limit < 0 || limit > config.MaxConvCapLimit {
+		return name + "_limit is out of range"
+	}
+	if on && limit == 0 {
+		return name + "_limit must be above zero when " + name + " is on"
+	}
+	return ""
+}
+
+// validOfferCapTZ checks the time zone of the daily limit.
+// zone is an IANA name. Empty is valid and means the UTC day. Local and an
+// unknown name are rejected. It returns an empty string when valid, otherwise
+// a client error message.
+func validOfferCapTZ(zone string) string {
+	zone = strings.TrimSpace(zone)
+	if zone == "" {
+		return ""
+	}
+	if strings.EqualFold(zone, "Local") {
+		return "cap_tz is not a time zone"
+	}
+	if _, err := time.LoadLocation(zone); err != nil {
+		return "cap_tz is not a time zone"
 	}
 	return ""
 }

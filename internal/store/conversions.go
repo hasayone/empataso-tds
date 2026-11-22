@@ -13,7 +13,8 @@ import (
 
 // PostbackIn is one conversion to record from a click id.
 // CID selects the click. Profit is the payout. DepSum is the deposit and is
-// not the payout. Status is stored lowercased and trimmed. Original is the
+// not the payout; it is written to the depsum column the DepSum report sums.
+// Dep2Sum is not taken from the postback. Status is stored lowercased and trimmed. Original is the
 // raw status; when it is empty, Status is kept as the raw value. TID is the
 // network transaction id. At is the moment the postback reached the engine; it
 // becomes the row time. A zero At means now. A postback that waited in the
@@ -23,12 +24,23 @@ type PostbackIn struct {
 	CID              string
 	Profit           float64
 	DepSum           float64
+	Dep2Sum          float64
 	Status, Original string
 	TID              string
 	At               time.Time
 	// Legacy marks the old /?pb= pixel. It copies the click and does not
 	// read the chain root.
 	Legacy bool
+	// PayoutAbsent is true when the postback carried no payout number. Only
+	// then is OfferPayout asked for a reserve; a payout that is present, even
+	// a zero, is kept as it came.
+	PayoutAbsent bool
+	// OfferPayout returns the reserve payout of the offer id of the click, or
+	// false when that offer has none. A nil function means no reserve.
+	OfferPayout func(offerID string) (float64, bool)
+	// Upsell reports whether the offer counts a later sale with a new tid as
+	// another sale. A nil function means it does not.
+	Upsell func(offerID string) bool
 }
 
 // ConversionResult is what RecordConversion reports about a stored conversion.
@@ -46,6 +58,29 @@ type ConversionResult struct {
 	// NetworkID is the affiliate network of the click, empty when the click has
 	// none or the click columns are not on the table yet.
 	NetworkID string
+	// OfferID is the offer of the click, empty when the click has none.
+	OfferID string
+	// Profit is the payout the row was written with. ProfitFromOffer is true
+	// when that payout is the reserve of the offer and not the postback's.
+	Profit          float64
+	ProfitFromOffer bool
+}
+
+// SettlePayout decides the payout a conversion is written with.
+// in is the postback and offerID the offer of the click, empty when the click
+// has none. The payout of the postback stands unless the postback carried no
+// payout number, the status is not rejected and the offer gives a reserve
+// through in.OfferPayout; then the reserve is the payout. The amounts are
+// taken as they are, with no rounding.
+// It returns the payout and whether it came from the offer.
+func SettlePayout(in PostbackIn, offerID string) (float64, bool) {
+	if !in.PayoutAbsent || in.OfferPayout == nil || offerID == "" || normalStatus(in.Status) == "rejected" {
+		return in.Profit, false
+	}
+	if v, ok := in.OfferPayout(offerID); ok {
+		return v, true
+	}
+	return in.Profit, false
 }
 
 // RecordConversion finds the click cid and writes one conversion.
@@ -78,6 +113,8 @@ func (c *CH) RecordConversion(ctx context.Context, in PostbackIn) (ConversionRes
 		return ConversionResult{}, err
 	}
 	status := normalStatus(in.Status)
+	var fromOffer bool
+	in.Profit, fromOffer = SettlePayout(in, snap.offer)
 	prev := ""
 	if c.extConv {
 		prev, err = c.prevStatus(ctx, in.CID, status, in.At)
@@ -88,6 +125,19 @@ func (c *CH) RecordConversion(ctx context.Context, in PostbackIn) (ConversionRes
 	earlier, err := c.pairSeenBefore(ctx, in.CID, status, in.At)
 	if err != nil {
 		return ConversionResult{}, err
+	}
+	stored, fresh := status, !earlier
+	if status == "sale" && earlier {
+		upsell := in.Upsell != nil && snap.offer != "" && in.Upsell(snap.offer)
+		tid := strings.TrimSpace(in.TID)
+		seen := false
+		if upsell && tid != "" {
+			seen, err = c.saleTIDSeen(ctx, in.CID, tid)
+			if err != nil {
+				return ConversionResult{}, err
+			}
+		}
+		stored, fresh = saleRow(status, true, upsell, tid, seen)
 	}
 	if snap.rootCID != "" && !in.Legacy && c.ready("events", waveRoot) && c.ready("conversions", waveRoot) {
 		stream, keyword, found, err := c.readRootClick(ctx, snap.rootCID, snap.ts)
@@ -100,10 +150,42 @@ func (c *CH) RecordConversion(ctx context.Context, in PostbackIn) (ConversionRes
 			c.rootMissing.Add(1)
 		}
 	}
-	if err := c.writeConversion(ctx, snap, in, prev); err != nil {
+	writeIn := in
+	writeIn.Status = stored
+	if err := c.writeConversion(ctx, snap, writeIn, prev); err != nil {
 		return ConversionResult{}, err
 	}
-	return ConversionResult{GroupID: snap.gid, Fresh: !earlier, RootCID: snap.rootCID, NetworkID: snap.network}, nil
+	return ConversionResult{GroupID: snap.gid, Fresh: fresh, RootCID: snap.rootCID, NetworkID: snap.network, OfferID: snap.offer, Profit: in.Profit, ProfitFromOffer: fromOffer}, nil
+}
+
+// saleRow decides how a repeat sale is stored.
+// status is the normalized postback status. repeat is true when a sale of this
+// click is already stored. upsell is the offer switch. tid is the postback
+// transaction id. seen is true when this tid was already stored for the click.
+// It returns the status to write and whether the row is a new sale. A first
+// sale stays "sale". With upsell off, or without a new tid, a repeat is the
+// same sale. With upsell on and a tid this click has not had, the row is
+// "sale:" plus that tid, so it is another sale and not a replacement.
+func saleRow(status string, repeat, upsell bool, tid string, seen bool) (stored string, fresh bool) {
+	if status != "sale" || !repeat {
+		return status, !repeat
+	}
+	tid = strings.TrimSpace(tid)
+	if !upsell || tid == "" {
+		return status, false
+	}
+	return "sale:" + tid, !seen
+}
+
+// saleTIDSeen reports whether this click already has a sale stored under tid.
+// ctx bounds the query. cid is the click id and tid the transaction id.
+// A scan error is returned.
+func (c *CH) saleTIDSeen(ctx context.Context, cid, tid string) (bool, error) {
+	var n uint64
+	if err := c.conn.QueryRow(ctx, `SELECT count() FROM conversions WHERE cid = ? AND status = ?`, cid, "sale:"+tid).Scan(&n); err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // RecordPostback finds an event by cid and writes one conversion.
@@ -276,11 +358,29 @@ func clickExtPtr(s *clickSnap, col string) any {
 // as their newest lead or sale. A click with no rejected row is absent.
 // A later lead or sale after the rejection is absent too.
 // The statement has no placeholders and does not fail.
+// saleStatusSQL matches a sale, including an extra sale stored as sale:<tid>.
+// col is the status column, qualified when the query aliases the table.
+func saleStatusSQL(col string) string {
+	return "(" + col + " = 'sale' OR startsWith(" + col + ", 'sale:'))"
+}
+
+// confirmedStatusSQL matches a lead or a sale, including an extra sale.
+// col is the status column. It does not fail.
+func confirmedStatusSQL(col string) string {
+	return "(" + col + " = 'lead' OR " + saleStatusSQL(col) + ")"
+}
+
+// foldedStatusSQL turns sale:<tid> into sale so a report counts one status.
+// col is the status column. It does not fail.
+func foldedStatusSQL(col string) string {
+	return "if(startsWith(" + col + ", 'sale:'), 'sale', " + col + ")"
+}
+
 func voidedCIDSelect() string {
 	return `SELECT cid FROM conversions FINAL
 		GROUP BY cid
 		HAVING maxIf(ts, status = 'rejected') > toDateTime(0)
-			AND maxIf(ts, status = 'rejected') >= maxIf(ts, status IN ('lead', 'sale'))`
+			AND maxIf(ts, status = 'rejected') >= maxIf(ts, ` + confirmedStatusSQL("status") + `)`
 }
 
 // voidedConfirmedSQL is an AND fragment that drops lead and sale rows of a
@@ -288,11 +388,11 @@ func voidedCIDSelect() string {
 // qualified when the outer query aliases the conversions table.
 // Rejected rows and every other status stay. It has no placeholders and does not fail.
 func voidedConfirmedSQL(cid, status string) string {
-	return ` AND NOT (` + status + ` IN ('lead', 'sale') AND ` + cid + ` IN (` + voidedCIDSelect() + `))`
+	return ` AND NOT (` + confirmedStatusSQL(status) + ` AND ` + cid + ` IN (` + voidedCIDSelect() + `))`
 }
 
 // sumDep is the deposit aggregate, or a typed zero when the wave is absent.
-// on is true when conversions carry depsum. col is the column, qualified when
+// on is true when conversions carry the deposit columns. col is the column, qualified when
 // the query aliases the table; it is used only when on is true, so a closed
 // wave does not name the column. The string is a SELECT expression and does not fail.
 func sumDep(on bool, col string) string {
@@ -321,6 +421,22 @@ func (c *CH) prevStatus(ctx context.Context, cid, status string, at time.Time) (
 	return prev, err
 }
 
+// previousDep2Sum is the dep2sum already stored for this click and status.
+// cid and status are the conversion key, status already folded. It returns
+// that number and true when a row exists, including zero. A missing row or a
+// read error returns 0 and false, so the insert does not write 0 into the column.
+func (c *CH) previousDep2Sum(ctx context.Context, cid, status string) (float64, bool) {
+	if c == nil || c.conn == nil || cid == "" {
+		return 0, false
+	}
+	var v float64
+	err := c.conn.QueryRow(ctx, `SELECT dep2sum FROM conversions WHERE cid = ? AND status = ? ORDER BY ts DESC LIMIT 1`, cid, status).Scan(&v)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
 // pairSeenBefore reports whether a conversion with cid and status is stored
 // with a time other than at: any other row of the pair means this postback is
 // not the first arrival, whether that row is older or was written first with a
@@ -340,8 +456,10 @@ func (c *CH) pairSeenBefore(ctx context.Context, cid, status string, at time.Tim
 // ctx bounds the batch. in supplies profit, the deposit, status, tid and the
 // arrival time. prev is the previous status, written only with the ext wave.
 // Status is stored lowercased and trimmed; original_status keeps the raw text.
-// depsum is written only when that wave is ready and is never part of the
-// base column list. The row time is in.At written explicitly, never the server
+// depsum is written only when that wave is ready and is never part of the base
+// column list. dep2sum is copied from the row already stored for this click and
+// status, so a new postback does not replace that column with 0; a first row
+// leaves it out. The row time is in.At written explicitly, never the server
 // default: voidedCIDSelect compares the times of lead and rejected rows, and a
 // lead written late with the time of its write would outlive the rejection that
 // arrived after it. Returns a batch error unchanged.
@@ -391,6 +509,10 @@ func (c *CH) writeConversion(ctx context.Context, snap clickSnap, in PostbackIn,
 	if c.depsumConv {
 		cols += ", depsum"
 		row = append(row, in.DepSum)
+		if kept, ok := c.previousDep2Sum(ctx, in.CID, status); ok {
+			cols += ", dep2sum"
+			row = append(row, kept)
+		}
 	}
 	if c.ready("conversions", waveRoot) {
 		for _, col := range columnsOf("conversions", waveRoot) {
@@ -476,6 +598,7 @@ type PostbackRow struct {
 	City    string    `json:"city"`
 	Profit  float64   `json:"profit"`
 	DepSum  float64   `json:"depsum"`
+	Dep2Sum float64   `json:"dep2sum"`
 	CID     string    `json:"cid"`
 	Status  string    `json:"status"`
 	Offer   string    `json:"offer_id,omitempty"`

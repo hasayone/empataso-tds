@@ -27,6 +27,63 @@ func boardAssignServer(t *testing.T) (*http.Client, string, string, *boardMemGro
 	return c, csrf, hs.URL, groups
 }
 
+// TestBoardAssignPartnerGroupKept checks that a partner group selected in the
+// composition stays on the section when the same composition is saved again.
+// A network of another section is not moved. An empty group label does not
+// pull a network that has no group.
+func TestBoardAssignPartnerGroupKept(t *testing.T) {
+	dir := t.TempDir()
+	nets := NewJSONStore[config.AffiliateNetwork](filepath.Join(dir, "networks.json"))
+	if err := nets.Save(context.Background(), []config.AffiliateNetwork{
+		{ID: "beat", Name: "Gambeat", Group: "Gambling"},
+		{ID: "plain", Name: "Plain"},
+		{ID: "stay", Name: "Other board", Group: "Gambling", BoardID: "aso"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	groups := &boardMemGroups{list: []config.Group{{ID: "m1", Name: "Main", BoardID: "main"}}}
+	hs, srv := boardTestServer(t, groups, "", nil)
+	srv.cfg.Networks = nets
+	c, csrf := boardLogin(t, hs.URL, "admin", "p@ss")
+	assign := func(labels []string) {
+		t.Helper()
+		body := boardAssignBody{}
+		body.Groups.Networks = labels
+		resp, raw := boardJSON(t, c, http.MethodPost, hs.URL+"/api/boards/seo/assign", "", csrf, body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("assign %d %s", resp.StatusCode, raw)
+		}
+	}
+	boardOf := func(id string) string {
+		t.Helper()
+		list, err := nets.List(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, n := range list {
+			if n.ID == id {
+				return n.BoardID
+			}
+		}
+		t.Fatalf("network %s missing", id)
+		return ""
+	}
+	assign([]string{"Gambling"})
+	if boardOf("beat") != "seo" {
+		t.Fatalf("group network board=%q", boardOf("beat"))
+	}
+	if boardOf("plain") != "" {
+		t.Fatalf("ungrouped network moved: %q", boardOf("plain"))
+	}
+	if boardOf("stay") != "aso" {
+		t.Fatalf("other section moved: %q", boardOf("stay"))
+	}
+	assign([]string{"Gambling"})
+	if boardOf("beat") != "seo" || boardOf("stay") != "aso" {
+		t.Fatalf("second save lost the group: beat=%q stay=%q", boardOf("beat"), boardOf("stay"))
+	}
+}
+
 func TestBoardAssignFolderAndReturnMain(t *testing.T) {
 	c, csrf, base, groups := boardAssignServer(t)
 	body := boardAssignBody{}

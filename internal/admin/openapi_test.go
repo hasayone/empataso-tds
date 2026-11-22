@@ -29,7 +29,7 @@ var mcpForbidden = []string{
 	"POST /api/update/apply", "POST /api/update/rollback", "POST /api/update/check",
 	"GET /api/ai/settings", "PUT /api/ai/settings", "POST /api/ai/test", "GET /api/ai/models", "GET /api/ai/status",
 	"GET /api/ai/chats", "POST /api/ai/chats", "GET /api/ai/chats/{id}", "DELETE /api/ai/chats/{id}",
-	"POST /api/ai/chats/{id}/messages", "GET /api/ai/changes", "POST /api/ai/changes/{id}/apply",
+	"POST /api/ai/chats/{id}/messages", "GET /api/ai/chats/{id}/stream", "POST /api/ai/chats/{id}/cancel", "GET /api/ai/changes", "POST /api/ai/changes/{id}/apply",
 	"POST /api/ai/changes/{id}/reject", "POST /api/ai/changes/{id}/revert",
 	"POST /api/ai/messages/{message_id}/revert", "POST /api/ai/chats/{id}/revert",
 }

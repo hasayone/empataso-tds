@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"slices"
 	"strings"
@@ -46,6 +47,34 @@ type batchRecConn struct {
 	batch   *fakeBatch
 	queries []string
 	ctxs    []context.Context
+	// keepDep2 is the dep2sum a previous conversion row would return.
+	// keepDep2OK is false when that row does not exist.
+	keepDep2   float64
+	keepDep2OK bool
+}
+
+// keptDep2Row is the one-column answer of previousDep2Sum.
+type keptDep2Row struct {
+	v  float64
+	ok bool
+}
+
+func (r keptDep2Row) Err() error { return nil }
+func (r keptDep2Row) Scan(dest ...any) error {
+	if !r.ok {
+		return sql.ErrNoRows
+	}
+	p, ok := dest[0].(*float64)
+	if !ok || len(dest) != 1 {
+		return sql.ErrNoRows
+	}
+	*p = r.v
+	return nil
+}
+func (r keptDep2Row) ScanStruct(any) error { return sql.ErrNoRows }
+
+func (c *batchRecConn) QueryRow(context.Context, string, ...any) driver.Row {
+	return keptDep2Row{v: c.keepDep2, ok: c.keepDep2OK}
 }
 
 func (c *batchRecConn) PrepareBatch(ctx context.Context, query string, _ ...driver.PrepareBatchOption) (driver.Batch, error) {

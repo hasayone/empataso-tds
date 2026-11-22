@@ -14,7 +14,7 @@ func TestDepSumField(t *testing.T) {
 	if !ok || f.Dim || f.Events != "" || f.Conv != "depsum" || f.Type != "Float64" || f.ConvWave != waveDep || f.Default != "0" {
 		t.Fatalf("field %+v ok=%v", f, ok)
 	}
-	if got := alterSQL("conversions", waveDep); got != "ADD COLUMN IF NOT EXISTS depsum Float64 DEFAULT 0" {
+	if got := alterSQL("conversions", waveDep); got != "ADD COLUMN IF NOT EXISTS depsum Float64 DEFAULT 0, ADD COLUMN IF NOT EXISTS dep2sum Float64 DEFAULT 0" {
 		t.Fatalf("alter %q", got)
 	}
 	if alterSQL("events", waveDep) != "" {
@@ -83,7 +83,7 @@ func TestDepSumSQL(t *testing.T) {
 		t.Fatalf("union names depsum while the wave is closed:\n%s", closed)
 	}
 	open := conversionUnion(false, false, false, conversionLateWaves{}, false, true)
-	if !strings.Contains(open, "toFloat64(0) AS depsum") || !strings.Contains(open, ", depsum FROM conversions") {
+	if !strings.Contains(open, "toFloat64(0) AS depsum") || !strings.Contains(open, ", depsum, dep2sum FROM conversions") {
 		t.Fatalf("open union:\n%s", open)
 	}
 	off := sliceConvSQL(&CH{}, "", false)
@@ -99,15 +99,18 @@ func TestDepSumSQL(t *testing.T) {
 	}
 	c := &CH{depsumConv: true}
 	sel, extra := c.postbackColumns(false, false)
-	if len(extra) != 1 || extra[0] != "depsum" || !strings.HasSuffix(sel, ", depsum") {
+	if len(extra) != 2 || extra[0] != "depsum" || extra[1] != "dep2sum" || !strings.HasSuffix(sel, ", depsum, dep2sum") {
 		t.Fatalf("journal select %q %v", sel, extra)
 	}
 	var row PostbackRow
 	dest := c.postbackDest(&row, nil, extra)
-	if len(dest) != 12 {
+	if len(dest) != 13 {
 		t.Fatalf("scan targets %d", len(dest))
 	}
-	if p, ok := dest[len(dest)-1].(*float64); !ok || p != &row.DepSum {
+	if p, ok := dest[len(dest)-1].(*float64); !ok || p != &row.Dep2Sum {
+		t.Fatal("dep2sum scan target is not the second deposit")
+	}
+	if p, ok := dest[len(dest)-2].(*float64); !ok || p != &row.DepSum {
 		t.Fatal("depsum scan target is not the deposit")
 	}
 }

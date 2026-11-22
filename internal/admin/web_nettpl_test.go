@@ -103,13 +103,13 @@ func TestSPAInstructionStyles(t *testing.T) {
 	html := spaSource()
 	for _, rule := range []string{
 		".net-notes p{margin:0 0 10px}",
-		".net-notes code{display:inline;padding:1px 6px;border:1px solid var(--border)",
+		".net-notes code{display:inline;color:var(--accent);line-height:1.7;",
+		"code{padding:1px 6px;border-radius:5px;background:var(--surface-3)",
 		"font-family:var(--mono)",
 		"white-space:pre-wrap;overflow-wrap:anywhere",
 		".net-notes a{color:var(--accent);text-decoration:underline",
 		"max-width:100%;overflow-wrap:anywhere",
 		"border-left:3px solid var(--accent)",
-		"background:var(--surface);color:var(--accent);font-family:var(--mono)",
 	} {
 		must(t, html, rule, "instruction box style")
 	}

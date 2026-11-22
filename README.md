@@ -115,7 +115,7 @@ not like a script.**
   pages, JSON API responses, stub, …) — including **`group`: hand the visitor
   to another group**, so flows can be chained.
 - A rich macro set: `[KEY] [IP] [COUNTRY] [CITY] [REGION] [LANG] [DEVICE]
-  [OPERATOR] [DOMAIN] [USERAGENT] [CID] [ASN] [ORG] [TIMEZONE] [UTC]
+  [OPERATOR] [DOMAIN] [USERAGENT] [SUBID] [ASN] [ORG] [TIMEZONE] [UTC]
   [PAR-1..5] [()COUNTRY()] [()CITY()]
   [RANDNUM-a-b] [RANDSTR-(set)-n] [RANDLINE-(file)-n] [RANDDFL-(dir)-n]`.
 - Output-variant distribution with `|||`: `random` / `rotator` (cookie) /
@@ -727,7 +727,7 @@ exact match; `ua`/`referer`/`key`/`org` accept `/regex/` or a substring;
 `[KEY]` (url-encoded keyword) · `[PATH]` (host) · `[IP]` · `[COUNTRY]` `[CITY]`
 `[REGION]` · `[ASN]` `[ORG]` (url-encoded) · `[TIMEZONE]` `[UTC]` · `[LANG]` ·
 `[DEVICE]` · `[OPERATOR]` · `[DOMAIN]` · `[USERAGENT]` ·
-`[CID]` (click id, for postbacks) · `[PAR-1..5]` (extra GET params) ·
+`[SUBID]` (click id, for postbacks; `[CID]` is the old name and expands the same way) · `[PAR-1..5]` (extra GET params) ·
 `[()COUNTRY()]` `[()CITY()]` · `[RANDNUM-a-b]` · `[RANDSTR-(charset)-n]` ·
 `[RANDLINE-(file)-n[/u]]` · `[RANDDFL-(dir)-n[/u]]`.
 
@@ -755,10 +755,10 @@ search-engine IP lists. Detection runs **after** stream selection. Then:
 ## Postback & API mode
 
 **Postback (conversion tracking).** Put a click id into your offer URL via the
-`[CID]` macro, then have the offer call back:
+`[SUBID]` macro, then have the offer call back:
 
 ```
-http://your-host/?pb=YOUR_POSTBACK_KEY&cid=[CID]&profit=1.50
+http://your-host/?pb=YOUR_POSTBACK_KEY&cid=[SUBID]&profit=1.50
 ```
 The engine finds the original event by `cid` and records the conversion (visible
 under **Conversions**).

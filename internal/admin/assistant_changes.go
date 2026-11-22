@@ -188,8 +188,8 @@ const aiChgFetchRedirect = "curl"
 var aiChgResources = map[string]aiChgResource{
 	"offers": {
 		name: "offers", res: resOffers, base: "/api/offers", label: "group",
-		fields: aiFieldSet("name", "url", "status", "local", "network_id", "group", "countries",
-			"payout_model", "payout", "payout_currency", "payout_param"),
+		fields: aiFieldSet("name", "url", "status", "local", "action", "action_body", "network_id", "group", "countries",
+			"payout_model", "payout", "payout_currency", "payout_param", "values", "notes", "upsell", "conv_cap", "conv_cap_limit", "conv_cap_offer_id", "conv_total", "conv_total_limit", "conv_total_offer_id", "cap_tz", "fallback_id"),
 		check: aiCheckAs(validOffer),
 	},
 	"landings": {
