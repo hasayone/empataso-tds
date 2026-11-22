@@ -492,6 +492,7 @@ nginx менять не нужно: в `deploy/nginx/emtds.conf` (по IP) и `e
 - `PUT /api/cloudflare` — Сохранение токена и id аккаунта Cloudflare.
 - `PUT /api/docs/settings` — Открыть или закрыть публичную документацию API.
 - `PUT /api/keitaro/settings` — Сохранить адрес и ключ Keitaro.
+- `PUT /api/me/lang` — Язык панели этого аккаунта.
 - `PUT /api/me/views` — Замена сохранённых видов страниц аккаунта.
 - `PUT /api/registrars/namecheap` — Сохранение аккаунта Namecheap.
 - `PUT /api/roles/{id}` — Смена имени или доступа роли.

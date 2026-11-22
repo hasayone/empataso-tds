@@ -547,7 +547,7 @@ func TestSpaRolesUI(t *testing.T) {
 	must(t, spaFunctionLine(html, "boot"), "FIELDS.fields=byFieldOrder(info.fields", "the field catalog is sorted once by the display order")
 	order := spaBetween(html, "const FIELD_ORDER=[", "];")
 	for _, f := range store.StaticFields() {
-		if !strings.Contains(order, "'"+f.Name+"'") && !strings.HasPrefix(f.Name, "sub_id_") {
+		if !strings.Contains(order, "'"+f.Name+"'") && !strings.HasPrefix(f.Name, "sub_id_") && !spaHiddenFields[f.Name] {
 			t.Errorf("field %s is missing from FIELD_ORDER", f.Name)
 		}
 	}

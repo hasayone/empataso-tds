@@ -906,6 +906,8 @@ const tr = k => k, trFill = (k, m) => k + JSON.stringify(m);
 const uiLocale = () => 'en-US';
 const icon = k => '[' + k + ']';
 const $ = h => { const e = new El('svg'); e.attrs.markup = h; return e; };
+// bindSearch runs the search at once; the pause of the real one is checked in web_search_wait_test.go.
+const bindSearch = (inp, run) => { inp.oninput = () => run(inp.value); return {flush(){}, cancel(){}}; };
 `
 
 // TestAssistantWidgetModelPicker runs the shared model list under node: the search matches id and name in any letter case, the

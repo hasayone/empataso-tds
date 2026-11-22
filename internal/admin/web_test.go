@@ -1789,7 +1789,7 @@ func TestOfferFormAndColumns(t *testing.T) {
 	macros := offerMacroSource(html)
 	must(t, macros, "{subid}", "offer URL macro subid")
 	must(t, macros, "{root_subid}", "offer URL macro root_subid")
-	must(t, html, "{origin} {root_subid}", "stream output macro hint root_subid")
+	must(t, html, "'[SUBID]','{root_subid}','{origin}'", "stream output macro picker lists root_subid")
 	if got := strings.Count(html, "{payout} {root_subid} {sub_id_1}"); got != 3 {
 		t.Fatalf("outbound postback macro hint root_subid count = %d, want 3", got)
 	}
