@@ -71,17 +71,26 @@ func idleJournal() keitaroJournal {
 	return keitaroJournal{Stage: "idle", Counts: map[string]int{}, Losses: []ktimport.Loss{}, Logs: map[string]keitaroLogMark{}}
 }
 
-// canResume reports whether a resumed run has work left for this journal.
-// It is true for a failed full import (not a one-campaign dosync and not filters_only)
-// whose catalogs did not pass, or whose selected clicks or conversions are not done.
-func (r keitaroJournal) canResume() bool {
-	if r.Stage != "failed" || r.Request.FiltersOnly || r.Request.CampaignID != 0 || r.CampaignID != 0 {
+// workLeft reports whether this journal still has a full import to finish.
+// It is false for a one-campaign dosync and for filters_only.
+// It is true when the catalogs were selected and did not pass, or when the selected
+// clicks or conversions are not done. It does not return an error.
+func (r keitaroJournal) workLeft() bool {
+	if r.Request.FiltersOnly || r.Request.CampaignID != 0 || r.CampaignID != 0 {
 		return false
 	}
 	if r.Request.catalog() && !r.CatalogsDone {
 		return true
 	}
 	return (r.Request.Clicks && !r.Logs["clicks"].Done) || (r.Request.Conversions && !r.Logs["conversions"].Done)
+}
+
+// canResume reports whether a resumed run has work left for this journal.
+// It is true for a failed full import (not a one-campaign dosync and not filters_only)
+// whose catalogs did not pass, or whose selected clicks or conversions are not done.
+// It does not return an error.
+func (r keitaroJournal) canResume() bool {
+	return r.Stage == "failed" && r.workLeft()
 }
 
 // resumeRun builds the continuation of this journal.

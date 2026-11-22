@@ -87,7 +87,9 @@ func Do(redirect, out string, o Options) Result {
 		return htmlResult(http.StatusForbidden, `<!DOCTYPE html><head><title>Access forbidden!</title></head><body><h1>Access forbidden!</h1><h2>Error 403</h2></body></html>`)
 
 	case "404_not_found":
-		return htmlResult(http.StatusNotFound, `<!DOCTYPE html><head><title>Object not found!</title></head><body><h1>Object not found!</h1><h2>Error 404</h2></body></html>`)
+		// Status only, no body and no Content-Type: the browser draws its own
+		// error page, and the response carries Content-Length: 0.
+		return Result{Status: http.StatusNotFound}
 
 	case "500_server_error":
 		return htmlResult(http.StatusInternalServerError, `<!DOCTYPE html><head><title>Server error!</title></head><body><h1>Server error!</h1><h2>Error 500</h2></body></html>`)

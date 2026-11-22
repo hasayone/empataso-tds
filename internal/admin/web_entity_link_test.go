@@ -53,3 +53,27 @@ func TestSPAEntityNamesAreLinks(t *testing.T) {
 		t.Errorf("ent.gone is defined %d times, want 3 (en, ru, uk)", n)
 	}
 }
+
+// TestSPAOriginCampaignIDIsText checks that the origin-campaign id column of the click
+// log and the conversion log prints the stored slug as text. The name column stays the
+// link to #/flows/{slug}. Campaign, offer, landing, network and source id columns stay
+// plain text as well; the report has no id column that draws a campaign name.
+func TestSPAOriginCampaignIDIsText(t *testing.T) {
+	html := spaSource()
+	for name, src := range map[string]string{
+		"logCell":  spaFunctionLine(html, "logCell"),
+		"convCell": spaFunctionLine(html, "convCell"),
+	} {
+		if src == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		must(t, src, "entityHTML('campaign_id', x.origin_campaign_id, x.origin_campaign)", name+" origin name stays a link")
+		must(t, src, "if(id==='origin_campaign_id') return esc(x.origin_campaign_id||'')", name+" origin id is the stored slug")
+		mustNot(t, src, "if(id==='origin_campaign_id') return entityHTML", name+" origin id is not a campaign link")
+		for _, id := range []string{"campaign_id", "offer_num", "landing_num", "network_num", "source_num"} {
+			mustNot(t, src, "if(id==='"+id+"') return entityHTML", name+" "+id+" is not a name link")
+		}
+	}
+	must(t, spaFunctionLine(html, "cellClass"), "id==='origin_campaign_id'", "origin id is monospace like the other ids")
+	must(t, html, "const entityCol={offer:['offer_id','offer'], source:['source_id','source']};", "report links names, not campaign ids")
+}

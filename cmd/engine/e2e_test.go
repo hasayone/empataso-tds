@@ -304,7 +304,7 @@ func TestE2E_AllRedirectTypes(t *testing.T) {
 		{"under_construction", "", 200, "", "", "404.png"},
 		{"stop", "", 200, "", "", ""},
 		{"403_forbidden", "", 403, "", "", "403"},
-		{"404_not_found", "", 404, "", "", "404"},
+		{"404_not_found", "", 404, "", "", ""},
 		{"500_server_error", "", 500, "", "", "500"},
 		{"api", "https://api.example?k=[KEY]", 200, "json", "", "api.example"},
 		{"show_out", "https://so.example", 200, "json", "", "so.example"},

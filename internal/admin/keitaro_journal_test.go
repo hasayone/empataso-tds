@@ -1,6 +1,7 @@
 package admin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -209,5 +210,283 @@ func TestKeitaroResumeContinuesClicks(t *testing.T) {
 	}
 	if strings.Contains(string(b), key) || strings.Contains(string(b), tracker.URL) || !strings.Contains(string(b), `"stage": "done"`) {
 		t.Fatalf("journal %s", b)
+	}
+}
+
+// timeoutNetErr is a network timeout for keitaroDeadlineErr.
+type timeoutNetErr struct{}
+
+func (timeoutNetErr) Error() string   { return "read tcp 10.0.0.1:443: i/o timeout" }
+func (timeoutNetErr) Timeout() bool   { return true }
+func (timeoutNetErr) Temporary() bool { return true }
+
+// withKeitaroDeadlineBudget shortens one attempt and the pause between attempts for a test.
+// limit is the context of one attempt. pause is the wait before the same import continues.
+func withKeitaroDeadlineBudget(t *testing.T, limit, pause time.Duration) {
+	t.Helper()
+	prevLimit, prevPause := keitaroJobTimeout, keitaroDeadlinePause
+	keitaroJobTimeout = limit
+	keitaroDeadlinePause = pause
+	t.Cleanup(func() {
+		keitaroJobTimeout = prevLimit
+		keitaroDeadlinePause = prevPause
+	})
+}
+
+// TestKeitaroDeadlineIsNotCancel checks that a deadline and a network timeout continue,
+// and that a cancel and an admin restart do not.
+func TestKeitaroDeadlineIsNotCancel(t *testing.T) {
+	if !keitaroDeadlineErr(context.DeadlineExceeded) {
+		t.Fatal("deadline")
+	}
+	if !keitaroDeadlineErr(timeoutNetErr{}) {
+		t.Fatal("i/o timeout")
+	}
+	if keitaroDeadlineErr(context.Canceled) || keitaroTimeoutText(keitaroInterruptedMsg) || keitaroTimeoutText("context canceled") {
+		t.Fatal("cancel or restart counted as a timeout")
+	}
+	prod := "keitaro: POST /admin_api/v1/clicks/log не выполнен: context deadline exceeded"
+	if !keitaroTimeoutText(prod) {
+		t.Fatal("prod text")
+	}
+	j := newKeitaroJob()
+	j.rec = failedClickJournal("context canceled")
+	if _, ok := j.claimDeadlineResume(); ok {
+		t.Fatal("cancel claimed")
+	}
+	j.rec = failedClickJournal(prod)
+	j.rec.Interrupted = true
+	if _, ok := j.claimDeadlineResume(); ok {
+		t.Fatal("interrupted claimed")
+	}
+	if msg := j.beginImport(); msg != "" {
+		t.Fatal(msg)
+	}
+	j.setRequest(keitaroImportReq{Clicks: true, From: "2026-10-01", To: "2026-10-01"})
+	j.progress("clicks", 1, 2)
+	j.rec.Interrupted = true
+	if j.keepAfterDeadline(prod, true) {
+		t.Fatal("interrupted run kept")
+	}
+}
+
+// failedClickJournal is a stopped click import with the given error.
+func failedClickJournal(errMsg string) keitaroJournal {
+	return keitaroJournal{
+		Stage: "failed", LastStage: "clicks", Error: errMsg, Resumable: true,
+		StartedAt: "2026-11-22T12:31:00Z", FinishedAt: "2026-11-22T14:31:00Z",
+		Request: keitaroImportReq{Clicks: true, From: "2026-10-01", To: "2026-10-01"},
+		Counts:  map[string]int{}, Losses: nil, Logs: map[string]keitaroLogMark{"clicks": {Rows: 10, Through: "2026-10-01 00:00:03"}},
+	}
+}
+
+// TestKeitaroDeadlineHoldStaysRunning checks that a timeout leaves the same import running
+// and not finished, and that a second claim does not start another one.
+func TestKeitaroDeadlineHoldStaysRunning(t *testing.T) {
+	prod := "keitaro: POST /admin_api/v1/clicks/log не выполнен: context deadline exceeded"
+	j := newKeitaroJob()
+	if msg := j.beginImport(); msg != "" {
+		t.Fatal(msg)
+	}
+	j.setRequest(keitaroImportReq{Clicks: true, From: "2026-10-01", To: "2026-10-01"})
+	j.progress("clicks", 1, 2)
+	through := time.Date(2026, 10, 1, 0, 11, 6, 0, time.UTC)
+	j.markLog("clicks", 1000, through, false)
+	if !j.keepAfterDeadline(prod, true) {
+		t.Fatal("deadline not kept")
+	}
+	v := j.snapshot()
+	if !v.Running || v.Stage == "failed" || v.Stage == "done" || v.Error == "" || v.Resumable {
+		t.Fatalf("while retrying %+v", v)
+	}
+	next, ok := j.deadlineContinuation()
+	if !ok || next.clicksFrom != "2026-10-01 00:11:06" || next.clicksRows != 1000 {
+		t.Fatalf("continuation %+v %v", next, ok)
+	}
+	if _, ok := j.claimDeadlineResume(); ok {
+		t.Fatal("second claim while running")
+	}
+	if j.keepAfterDeadline("context canceled", false) {
+		t.Fatal("cancel kept")
+	}
+}
+
+// deadlineClickFake serves n clicks and then holds the next blocks click reads until the caller
+// context ends, stop is closed, or the hold passes. The hold is long enough for the import
+// context to die first. stop lets the test close the server without waiting on that hold.
+type deadlineClickFake struct {
+	n      int
+	blocks atomic.Int32
+	served atomic.Int32
+	stop   <-chan struct{}
+}
+
+func (f *deadlineClickFake) handler(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	if r.URL.Path != "/admin_api/v1/clicks/log" {
+		_, _ = w.Write([]byte(`[]`))
+		return
+	}
+	if f.served.Load() > 0 && f.blocks.Load() > 0 {
+		f.blocks.Add(-1)
+		timer := time.NewTimer(8 * time.Second)
+		select {
+		case <-r.Context().Done():
+			timer.Stop()
+		case <-f.stop:
+			timer.Stop()
+		case <-timer.C:
+		}
+		w.WriteHeader(http.StatusGatewayTimeout)
+		return
+	}
+	f.served.Add(1)
+	var body struct {
+		Range  struct{ From string } `json:"range"`
+		Offset int                   `json:"offset"`
+	}
+	_ = json.NewDecoder(r.Body).Decode(&body)
+	start := time.Date(2026, 10, 1, 0, 0, 0, 0, time.UTC)
+	from, _ := time.Parse(keitaroTimeLayout, body.Range.From)
+	var rows []map[string]any
+	for i := 0; i < f.n; i++ {
+		ts := start.Add(time.Duration(i/3) * time.Second)
+		if !from.IsZero() && ts.Before(from) {
+			continue
+		}
+		rows = append(rows, map[string]any{"sub_id": fmt.Sprintf("c%04d", i), "datetime": ts.Format(keitaroTimeLayout), "device_type": "desktop"})
+	}
+	total := len(rows)
+	end := body.Offset + 1000
+	if end > total {
+		end = total
+	}
+	page := []map[string]any{}
+	if body.Offset < total {
+		page = rows[body.Offset:end]
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"rows": page, "total": total})
+}
+
+// TestKeitaroDeadlineContinuesClicks checks that a context deadline on clicks/log does not
+// finish the import, does not stop it, and does not write a click twice.
+func TestKeitaroDeadlineContinuesClicks(t *testing.T) {
+	withKeitaroDeadlineBudget(t, 5*time.Second, 20*time.Millisecond)
+	const n = 1500
+	stop := make(chan struct{})
+	fake := &deadlineClickFake{n: n, stop: stop}
+	fake.blocks.Store(2)
+	tracker := httptest.NewServer(http.HandlerFunc(fake.handler))
+	t.Cleanup(tracker.Close)
+	t.Cleanup(func() { close(stop) })
+	sink := &fakeSink{}
+	s, admin := newKeitaroServers(t, tracker.URL, "fixture-key", nil, sink, nil)
+	postKeitaroImport(t, admin, map[string]any{"clicks": true, "from": "2026-10-01", "to": "2026-10-01"})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	var stopped atomic.Bool
+	go func() {
+		seen := false
+		for {
+			if ctx.Err() != nil {
+				return
+			}
+			v := s.ktJob.snapshot()
+			if v.Running {
+				seen = true
+			}
+			if seen && !v.Running && v.Stage != "done" {
+				stopped.Store(true)
+				return
+			}
+			if !v.Running && v.Stage == "done" {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	}()
+
+	job := waitKeitaroJobFor(t, admin, 45*time.Second)
+	if stopped.Load() || job.Stage != "done" || job.Error != "" || job.Running {
+		t.Fatalf("job %+v stopped %v", job, stopped.Load())
+	}
+	if fake.blocks.Load() != 0 {
+		t.Fatalf("deadlines left %d", fake.blocks.Load())
+	}
+	seen := map[string]int{}
+	for _, ev := range sink.events {
+		seen[ev.CID]++
+	}
+	if len(seen) != n || len(sink.events) != n {
+		t.Fatalf("unique %d events %d", len(seen), len(sink.events))
+	}
+	for cid, n := range seen {
+		if n != 1 {
+			t.Fatalf("click %s written %d times", cid, n)
+		}
+	}
+	view := s.ktJob.snapshot()
+	if view.Resumes < 2 || view.Stage != "done" {
+		t.Fatalf("resumes %+v", view)
+	}
+}
+
+// TestKeitaroDeadlinePickup continues a journal already stopped by a deadline when admin starts,
+// and leaves an interrupted one stopped.
+func TestKeitaroDeadlinePickup(t *testing.T) {
+	prod := "keitaro: POST /admin_api/v1/clicks/log не выполнен: context deadline exceeded"
+	dir := t.TempDir()
+	path := filepath.Join(dir, "keitaro-job.json")
+	writeDeadlineJournal(t, path, false, prod)
+	fake := &clickLogFake{n: 3}
+	tracker := httptest.NewServer(http.HandlerFunc(fake.handler))
+	t.Cleanup(tracker.Close)
+	sink := &fakeSink{}
+	s, admin := newKeitaroServers(t, tracker.URL, "fixture-key", nil, sink, &keitaroFiles{dir: dir, jobFile: path})
+	job := waitKeitaroJobFor(t, admin, 15*time.Second)
+	if job.Stage != "done" || job.Error != "" || job.Running {
+		t.Fatalf("picked up %+v", job)
+	}
+	if len(sink.events) != 3 {
+		t.Fatalf("events %d", len(sink.events))
+	}
+	seen := map[string]int{}
+	for _, ev := range sink.events {
+		seen[ev.CID]++
+	}
+	if len(seen) != 3 {
+		t.Fatalf("unique %d", len(seen))
+	}
+	if s.ktJob.snapshot().Resumes != 1 {
+		t.Fatalf("resumes %+v", s.ktJob.snapshot())
+	}
+
+	cutPath := filepath.Join(t.TempDir(), "keitaro-job.json")
+	writeDeadlineJournal(t, cutPath, true, prod)
+	cutFake := &clickLogFake{n: 3}
+	cutTracker := httptest.NewServer(http.HandlerFunc(cutFake.handler))
+	t.Cleanup(cutTracker.Close)
+	cutSink := &fakeSink{}
+	cut, _ := newKeitaroServers(t, cutTracker.URL, "fixture-key", nil, cutSink, &keitaroFiles{jobFile: cutPath})
+	v := cut.ktJob.snapshot()
+	if v.Running || v.Stage != "failed" || !v.Interrupted || len(cutSink.events) != 0 {
+		t.Fatalf("interrupted started %+v events %d", v, len(cutSink.events))
+	}
+}
+
+// writeDeadlineJournal writes a stopped click import. interrupted marks an admin restart.
+func writeDeadlineJournal(t *testing.T, path string, interrupted bool, errMsg string) {
+	t.Helper()
+	rec := failedClickJournal(errMsg)
+	rec.Interrupted = interrupted
+	rec.Running = false
+	rec.Logs = map[string]keitaroLogMark{"clicks": {}}
+	b, err := json.MarshalIndent(rec, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(b, '\n'), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }

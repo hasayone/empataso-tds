@@ -20421,7 +20421,7 @@ function cellClass(id){
   const cls=[];
   if(id==='profit') cls.push('num','ok');
   if(id==='depsum') cls.push('num');
-  if(id==='ip'||id==='cid'||id==='out'||id==='campaign_id'||id==='tid'||id==='offer_num'||id==='landing_num'||id==='network_num'||id==='source_num'||id==='ip_mask1'||id==='ip_mask2'||/^sub_id_\d+$/.test(id)) cls.push('mono');
+  if(id==='ip'||id==='cid'||id==='out'||id==='campaign_id'||id==='origin_campaign_id'||id==='tid'||id==='offer_num'||id==='landing_num'||id==='network_num'||id==='source_num'||id==='ip_mask1'||id==='ip_mask2'||/^sub_id_\d+$/.test(id)) cls.push('mono');
   if(id==='keyword'||id==='out'||id==='useragent'||id==='referer'||id==='page'||id==='site') cls.push('ell');
   return cls.join(' ');
 }
@@ -20432,6 +20432,7 @@ function subValue(x, id){
   return ((x&&x.subs)||[])[+m[1]-1]||'';
 }
 // logCell renders one click-log cell. x is a log row. id is the column. It returns HTML.
+// origin_campaign_id is the stored campaign slug as text. The name column is the link.
 function logCell(x, id){
   if(id==='ts') return esc(when(x.ts));
   if(id==='country') return `<span class="flag">${flag(x.country)}</span>${esc(x.country||'')}`;
@@ -20446,7 +20447,7 @@ function logCell(x, id){
   if(id==='asn') return esc(asnText(x.asn));
   if(id==='campaign') return entityHTML('campaign_id', x.campaign_id, x.group);
   if(id==='origin_campaign') return entityHTML('campaign_id', x.origin_campaign_id, x.origin_campaign);
-  if(id==='origin_campaign_id') return entityHTML('campaign_id', x.origin_campaign_id);
+  if(id==='origin_campaign_id') return esc(x.origin_campaign_id||'');
   if(id==='useragent') return esc(x.useragent||'');
   if(id==='timezone') return esc(x.timezone||'');
   if(id==='offer_id'||id==='landing_id'||id==='network_id'||id==='source_id') return entityHTML(id, x[id]);
@@ -20463,6 +20464,7 @@ function logCell(x, id){
   return esc(v==null?'':v);
 }
 // convCell renders one conversion cell. x is a postback row. id is the column. It returns HTML.
+// origin_campaign_id is the stored campaign slug as text. The name column is the link.
 function convCell(x, id){
   if(id==='ts'||id==='click_ts') return esc(when(x[id]));
   if(id==='country') return `<span class="flag">${flag(x.country)}</span>${esc(countryLabel(x.country, uiLang())||x.country||'')}`;
@@ -20471,7 +20473,7 @@ function convCell(x, id){
   if(id==='sale_period') return esc(salePeriod(x.ts, x.click_ts));
   if(id==='campaign') return entityHTML('campaign_id', x.campaign_id, x.group);
   if(id==='origin_campaign') return entityHTML('campaign_id', x.origin_campaign_id, x.origin_campaign);
-  if(id==='origin_campaign_id') return entityHTML('campaign_id', x.origin_campaign_id);
+  if(id==='origin_campaign_id') return esc(x.origin_campaign_id||'');
   if(id==='campaign_group') return esc(campaignGroupLabel(x));
   if(id==='offer_id'||id==='landing_id'||id==='network_id'||id==='source_id') return entityHTML(id, x[id]);
   if(id==='device') return esc(deviceLabel(x.device));

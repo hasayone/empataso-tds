@@ -566,6 +566,7 @@ func New(cfg Config) (*Server, error) {
 	}
 	s.aiRecoverChanges()
 	s.aiRecoverChats()
+	s.pickupKeitaroDeadline()
 	return s, nil
 }
 

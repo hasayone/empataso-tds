@@ -1,7 +1,9 @@
 package render
 
 import (
+	"io"
 	"math/rand"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
@@ -253,11 +255,32 @@ func TestDoShowTextAndErrors(t *testing.T) {
 	if r := Do("show_text", "hello", Options{}); string(r.Body) != "hello" || r.Status != 200 {
 		t.Errorf("show_text: %+v", r)
 	}
-	if r := Do("404_not_found", "", Options{}); r.Status != 404 {
-		t.Errorf("404: status=%d", r.Status)
+	if r := Do("404_not_found", "", Options{}); r.Status != 404 || len(r.Body) != 0 || r.ContentType != "" {
+		t.Errorf("404 must be a bare status: %+v", r)
 	}
 	if r := Do("stop", "", Options{}); r.Status != 200 || len(r.Body) != 0 {
 		t.Errorf("stop must be an empty 200: %+v", r)
+	}
+}
+
+// TestDo404OverTheWire checks that a real server answers 404_not_found with
+// Content-Length: 0 and no Content-Type, so the browser shows its own page.
+func TestDo404OverTheWire(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		Do("404_not_found", "", Options{}).Write(w)
+	}))
+	defer srv.Close()
+	resp, err := http.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 404 || len(body) != 0 || resp.ContentLength != 0 {
+		t.Fatalf("status=%d len=%d content-length=%d", resp.StatusCode, len(body), resp.ContentLength)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "" {
+		t.Fatalf("Content-Type=%q, want none", ct)
 	}
 }
 

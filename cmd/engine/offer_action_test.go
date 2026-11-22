@@ -19,7 +19,7 @@ func TestOfferActionClick(t *testing.T) {
 		body  string
 		loc   string
 	}{
-		{name: "404", offer: config.Offer{ID: "o1", Status: true, Action: "404"}, code: http.StatusNotFound, ctype: "text/html"},
+		{name: "404", offer: config.Offer{ID: "o1", Status: true, Action: "404"}, code: http.StatusNotFound},
 		{name: "text", offer: config.Offer{ID: "o1", Status: true, Action: "text", ActionBody: "hello"}, code: http.StatusOK, ctype: "text/plain", body: "hello"},
 		{name: "html", offer: config.Offer{ID: "o1", Status: true, Action: "html", ActionBody: "<p>hi</p>"}, code: http.StatusOK, ctype: "text/html", body: "<p>hi</p>"},
 		{name: "none", offer: config.Offer{ID: "o1", Status: true, Action: "none"}, code: http.StatusOK},
@@ -46,8 +46,8 @@ func TestOfferActionClick(t *testing.T) {
 			if c.body != "" && rec.Body.String() != c.body {
 				t.Fatalf("body %q, want %q", rec.Body.String(), c.body)
 			}
-			if c.name == "404" && !strings.Contains(rec.Body.String(), "404") {
-				t.Fatalf("404 body %q", rec.Body.String())
+			if c.name == "404" && (rec.Body.Len() != 0 || rec.Header().Get("Content-Type") != "") {
+				t.Fatalf("404 must be a bare status, got %q (%q)", rec.Body.String(), rec.Header().Get("Content-Type"))
 			}
 			if c.name == "html" && strings.Contains(rec.Body.String(), "<!DOCTYPE") {
 				t.Fatalf("html was wrapped: %q", rec.Body.String())

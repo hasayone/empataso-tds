@@ -4,15 +4,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net"
 	"net/http"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/emtds/bridge/ktimport"
 )
 
-const keitaroJobTimeout = 2 * time.Hour
+// keitaroJobTimeout is the limit of one import attempt.
+// The attempt that follows a timeout gets a new context of this length.
+var keitaroJobTimeout = 2 * time.Hour
+
+// keitaroDeadlinePause is the wait before the same import continues after a timeout.
+// The wait keeps a tracker that is not answering out of a tight loop.
+var keitaroDeadlinePause = 30 * time.Second
 
 // keitaroJob is one background import and the lock that keeps a purge from
 // overlapping it. The mutex guards every field below it except saveMu, file and warn.
@@ -35,6 +43,8 @@ type keitaroJob struct {
 	file string
 	// warn receives journal read and write failures; nil drops them.
 	warn func(string, ...any)
+	// deadlineHold is true after a timeout left this same import running.
+	deadlineHold bool
 }
 
 // keitaroUpdatePendingMsg is the refusal of begin* and holdWrite while an update is pending.
@@ -344,6 +354,7 @@ func (j *keitaroJob) finish(errMsg string, counts map[string]int, losses []ktimp
 		j.rec.Stage = "done"
 	}
 	j.rec.Resumable = j.rec.canResume()
+	j.deadlineHold = false
 	j.mu.Unlock()
 	j.save(true)
 }
@@ -399,8 +410,9 @@ func copyCounts(in map[string]int) map[string]int {
 // dry_run only reports them; a malformed filters_only body is 400.
 // resume true continues the last failed full import (see handleKeitaroResume).
 // A running import or a purge in progress is 409. Success is 202 with started true.
-// The work uses a two-hour background context, not the request context.
-// The key is removed from the job error later. This handler does not return an error value.
+// Each attempt uses a keitaroJobTimeout background context, not the request context.
+// A timeout continues the same run from the journal. The key is removed from the job
+// error later. This handler does not return an error value.
 func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 	var req keitaroImportReq
 	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&req); err != nil {
@@ -494,14 +506,206 @@ func (j *keitaroJob) beginImportRefusal() string {
 // startKeitaroRun runs one import or resumed import in the background.
 // r supplies the session that owns new catalog rows. run is the work and the earlier totals.
 // Settings cannot change while the job holds the lock, so creds is the copy for the whole run.
-// The work uses a keitaroJobTimeout background context, not the request context.
+// Each attempt uses a keitaroJobTimeout background context, not the request context.
+// A timeout continues that same run; this does not start a second job.
+// It does not return an error.
 func (s *Server) startKeitaroRun(r *http.Request, run keitaroResumeRun, creds ktCreds, board string, manifestStore ManifestStore) {
-	ctx, cancel := context.WithTimeout(context.Background(), keitaroJobTimeout)
 	owner := sessionFrom(r.Context()).UID
-	go func() {
-		defer cancel()
-		s.runKeitaroImportFrom(ctx, run, owner, creds, board, manifestStore)
-	}()
+	go s.driveKeitaroImport(context.Background(), run, owner, creds, board, manifestStore)
+}
+
+// driveKeitaroImport runs one import, and after a timeout continues it from the journal.
+// parent cancels the run when it is canceled; a timeout of parent does not continue.
+// run is the work and the earlier totals. owner is the session UID for new catalog rows.
+// creds is the tracker copy for every attempt. board selects the manifest.
+// manifestStore receives the manifest of the run.
+// A timeout or a deadline starts a new context of keitaroJobTimeout after keitaroDeadlinePause.
+// A cancel, an interrupted run and any other error stop. The same job is used throughout.
+// It does not return an error.
+func (s *Server) driveKeitaroImport(parent context.Context, run keitaroResumeRun, owner string, creds ktCreds, board string, manifestStore ManifestStore) {
+	if parent == nil {
+		parent = context.Background()
+	}
+	for {
+		ctx, cancel := context.WithTimeout(parent, keitaroJobTimeout)
+		again := s.runKeitaroImportFrom(ctx, run, owner, creds, board, manifestStore)
+		cancel()
+		if !again || parent.Err() != nil {
+			if again {
+				s.ktJob.finishRunningTimeout()
+			}
+			return
+		}
+		timer := time.NewTimer(keitaroDeadlinePause)
+		select {
+		case <-parent.Done():
+			timer.Stop()
+			s.ktJob.finishRunningTimeout()
+			return
+		case <-timer.C:
+		}
+		next, ok := s.ktJob.deadlineContinuation()
+		if !ok {
+			s.ktJob.finishRunningTimeout()
+			return
+		}
+		run = next
+	}
+}
+
+// pickupKeitaroDeadline continues one import that a timeout already stopped, once, when admin starts.
+// The journal must be resumable, not interrupted, and its error must be a timeout or a deadline.
+// A cancel, an interrupted run and any other stop stay stopped. A second call finds the job
+// running and does nothing. It does not return an error.
+func (s *Server) pickupKeitaroDeadline() {
+	if s == nil || s.ktJob == nil {
+		return
+	}
+	run, ok := s.ktJob.claimDeadlineResume()
+	if !ok {
+		return
+	}
+	creds, store := s.keitaroImportBundle(run.req.Board)
+	if (run.req.needsTracker() && !creds.configured()) || s.keitaroStoreMissing(run.req) != "" {
+		s.ktJob.finishRunningTimeout()
+		return
+	}
+	go s.driveKeitaroImport(context.Background(), run, "", creds, run.req.Board, store)
+}
+
+// keitaroDeadlineErr reports whether err is a timeout or a context deadline.
+// err is the tracker or context failure. A nil error and a cancel return false.
+// It returns true for a deadline, a network timeout, and the same phrases in the text.
+// It does not return an error.
+func keitaroDeadlineErr(err error) bool {
+	if err == nil || errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	return keitaroTimeoutText(err.Error())
+}
+
+// keitaroTimeoutText reports whether msg is a timeout or a context deadline.
+// msg is the stored job error or the text of a tracker error.
+// It returns true for a deadline, an i/o timeout, a client timeout and a TLS handshake timeout.
+// A cancel, an admin restart and any other text return false. It does not return an error.
+func keitaroTimeoutText(msg string) bool {
+	if msg == "" || msg == keitaroInterruptedMsg {
+		return false
+	}
+	if strings.Contains(msg, "context canceled") || strings.Contains(msg, "context cancelled") {
+		return false
+	}
+	return strings.Contains(msg, "context deadline exceeded") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "Client.Timeout exceeded") ||
+		strings.Contains(msg, "TLS handshake timeout")
+}
+
+// keepAfterDeadline keeps the running import going after a timeout.
+// errMsg is the safe error text to store. deadline is true when the failure is a timeout
+// or a context deadline even if the text does not say so.
+// It returns true when the same run should continue: the job stays running, the stage stays
+// the stage it stopped in, and errMsg is kept on the journal. The checkpoint is not moved.
+// It returns false for a cancel, an interrupted run, a run that is not going, a run with no
+// work left, and any other error. The caller then finishes the run. It does not return an error.
+func (j *keitaroJob) keepAfterDeadline(errMsg string, deadline bool) bool {
+	j.mu.Lock()
+	if !j.running || j.rec.Interrupted || !j.rec.workLeft() {
+		j.mu.Unlock()
+		return false
+	}
+	if strings.Contains(errMsg, "context canceled") || strings.Contains(errMsg, "context cancelled") {
+		j.mu.Unlock()
+		return false
+	}
+	if !deadline && !keitaroTimeoutText(errMsg) {
+		j.mu.Unlock()
+		return false
+	}
+	if errMsg == "" {
+		errMsg = "context deadline exceeded"
+	}
+	j.rec.Error = errMsg
+	j.rec.FinishedAt = ""
+	j.rec.Resumable = false
+	j.rec.Resumes++
+	j.deadlineHold = true
+	j.mu.Unlock()
+	j.save(true)
+	return true
+}
+
+// deadlineContinuation reads the checkpoint of the import that keepAfterDeadline left running.
+// It returns that continuation and true when the job is running, the stored error is a timeout,
+// and work is left. It returns false when the run should stop. It does not return an error.
+func (j *keitaroJob) deadlineContinuation() (keitaroResumeRun, bool) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if !j.running || j.rec.Interrupted || !j.rec.workLeft() {
+		return keitaroResumeRun{}, false
+	}
+	if !j.deadlineHold && !keitaroTimeoutText(j.rec.Error) {
+		return keitaroResumeRun{}, false
+	}
+	j.deadlineHold = false
+	return j.rec.resumeRun(), true
+}
+
+// claimDeadlineResume takes a stopped import whose journal is a timeout and marks it running.
+// It returns the continuation and true when the journal is resumable, not interrupted, and the
+// error is a timeout or a deadline. The start time and the checkpoint stay.
+// It returns false for a cancel, an interrupted run, a run that is already going, and any other stop.
+// A second call returns false. It does not return an error.
+func (j *keitaroJob) claimDeadlineResume() (keitaroResumeRun, bool) {
+	j.mu.Lock()
+	if j.running || j.purging || j.syncing || j.writers > 0 || j.updating {
+		j.mu.Unlock()
+		return keitaroResumeRun{}, false
+	}
+	if j.rec.Interrupted || !j.rec.canResume() || !keitaroTimeoutText(j.rec.Error) {
+		j.mu.Unlock()
+		return keitaroResumeRun{}, false
+	}
+	run := j.rec.resumeRun()
+	j.running = true
+	if j.rec.LastStage != "" {
+		j.rec.Stage = j.rec.LastStage
+	}
+	j.rec.LastStage = ""
+	j.rec.Resumable = false
+	j.rec.FinishedAt = ""
+	j.rec.Resumes++
+	j.mu.Unlock()
+	j.save(true)
+	return run, true
+}
+
+// finishRunningTimeout stops an import that was left running but cannot continue.
+// Work still left is stored as a failure with the timeout text. No work left is stored as done.
+// A job that is not running is left as it is. It does not return an error.
+func (j *keitaroJob) finishRunningTimeout() {
+	j.mu.Lock()
+	if !j.running {
+		j.mu.Unlock()
+		return
+	}
+	errMsg := j.rec.Error
+	if !j.rec.workLeft() {
+		errMsg = ""
+	} else if errMsg == "" {
+		errMsg = "context deadline exceeded"
+	}
+	counts := copyCounts(j.rec.Counts)
+	losses := append([]ktimport.Loss{}, j.rec.Losses...)
+	j.mu.Unlock()
+	j.finish(errMsg, counts, losses, "")
 }
 
 // handleKeitaroJob returns a copy of the import state.
@@ -524,6 +728,8 @@ type importState struct {
 	res           ktimport.Result
 	owner         string
 	fail          string
+	// deadline is true when fail is a timeout or a context deadline.
+	deadline      bool
 	creds         ktCreds
 	snapCampaigns []ktimport.Campaign
 	board         string
@@ -556,21 +762,25 @@ func (s *Server) runStage(st *importState, name, key string, step func() (int, [
 }
 
 // runKeitaroImport performs one import and stores the outcome on the job.
-// ctx bounds the tracker calls. req is the body already accepted by the handler.
+// ctx bounds the tracker calls. A cancel of ctx stops the run. A timeout of ctx continues
+// the same run with a new context. req is the body already accepted by the handler.
 // creds is the origin and key copied at the start; every stage, mask and manifest
 // host of this run comes from it.
 // On failure the stage is failed and the error is safe to show. Counts and losses
 // collected before the failure stay in the state. It does not return an error.
 // It logs one line with the counts and the duration. The key and URLs are not logged.
 func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, owner string, creds ktCreds, board string, manifestStore ManifestStore) {
-	s.runKeitaroImportFrom(ctx, keitaroResumeRun{req: req}, owner, creds, board, manifestStore)
+	s.driveKeitaroImport(ctx, keitaroResumeRun{req: req}, owner, creds, board, manifestStore)
 }
 
 // runKeitaroImportFrom performs one import, or the rest of a resumed one, as runKeitaroImport.
 // run.req is the work left; run.counts and run.losses are the totals of the earlier attempts and
 // start the totals of this one. The catalog pass and the log marks go to the job journal as they
 // happen; the click log starts at run.clicksFrom when set and counts on from run.clicksRows.
-func (s *Server) runKeitaroImportFrom(ctx context.Context, run keitaroResumeRun, owner string, creds ktCreds, board string, manifestStore ManifestStore) {
+// It returns true when the attempt stopped on a timeout and the same import stays running.
+// It returns false when the attempt finished or stopped for another reason.
+// It does not return an error.
+func (s *Server) runKeitaroImportFrom(ctx context.Context, run keitaroResumeRun, owner string, creds ktCreds, board string, manifestStore ManifestStore) (again bool) {
 	req := run.req
 	started := time.Now()
 	counts := copyCounts(run.counts)
@@ -581,6 +791,11 @@ func (s *Server) runKeitaroImportFrom(ctx context.Context, run keitaroResumeRun,
 	}
 	defer func() {
 		s.logKeitaro("keitaro import", st.counts, time.Since(started))
+		if s.ktJob.keepAfterDeadline(st.fail, st.deadline) {
+			s.ktJob.publish(st.counts, st.losses, creds.Key)
+			again = true
+			return
+		}
 		s.ktJob.finish(st.fail, st.counts, st.losses, creds.Key)
 	}()
 	if req.FiltersOnly {
@@ -599,7 +814,7 @@ func (s *Server) runKeitaroImportFrom(ctx context.Context, run keitaroResumeRun,
 	if req.catalog() {
 		snap, err := s.fetchImportSnapshot(ctx, creds, req.CampaignID)
 		if err != nil {
-			st.fail = sanitize(err, creds.Key)
+			st.noteTrackerErr(err, creds.Key)
 			return
 		}
 		st.snapCampaigns = snap.Campaigns
@@ -667,9 +882,18 @@ func (s *Server) runKeitaroImportFrom(ctx context.Context, run keitaroResumeRun,
 		}
 		st.losses = append(st.losses, extra...)
 		if err != nil {
-			st.fail = sanitize(err, creds.Key)
+			st.noteTrackerErr(err, creds.Key)
 		}
 	}
+	return
+}
+
+// noteTrackerErr stores a tracker failure on the run.
+// err is the failure. key is removed from the text. A timeout or a context deadline
+// is marked so the same import can continue. It does not return an error.
+func (st *importState) noteTrackerErr(err error, key string) {
+	st.fail = sanitize(err, key)
+	st.deadline = keitaroDeadlineErr(err)
 }
 
 // fetchImportSnapshot reads the tracker snapshot of one import run.

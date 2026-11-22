@@ -236,11 +236,16 @@ func readKeitaroJob(t *testing.T, srv *httptest.Server) keitaroJobBody {
 
 func waitKeitaroJob(t *testing.T, srv *httptest.Server) keitaroJobBody {
 	t.Helper()
+	return waitKeitaroJobFor(t, srv, 10*time.Second)
+}
+
+func waitKeitaroJobFor(t *testing.T, srv *httptest.Server, limit time.Duration) keitaroJobBody {
+	t.Helper()
 	c := newClient(t)
 	if code, _ := login(t, c, srv.URL, "admin", "p@ss"); code != http.StatusOK {
 		t.Fatalf("login %d", code)
 	}
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(limit)
 	var body keitaroJobBody
 	for {
 		resp, err := c.Get(srv.URL + "/api/keitaro/job")
