@@ -142,10 +142,9 @@ func TestGroupsGetAndSave(t *testing.T) {
 }
 
 func TestGroupsSaveValidation(t *testing.T) {
-	srv, _, _ := fullServer(t, nil)
+	srv, fg, _ := fullServer(t, nil)
 	c, csrf := authedClient(t, srv.URL)
 
-	// empty ID
 	put := func(payload string) int {
 		req, _ := http.NewRequest(http.MethodPut, srv.URL+"/api/groups", strings.NewReader(payload))
 		req.Header.Set("X-CSRF-Token", csrf)
@@ -153,9 +152,17 @@ func TestGroupsSaveValidation(t *testing.T) {
 		r.Body.Close()
 		return r.StatusCode
 	}
-	if code := put(`[{"id":""}]`); code != http.StatusBadRequest {
-		t.Errorf("empty id → 400, got %d", code)
+	if code := put(`[{"id":""}]`); code != http.StatusOK {
+		t.Fatalf("empty id → 200, got %d", code)
 	}
+	var drawn string
+	for _, g := range fg.saved {
+		if g.ID != "" && g.ID != "g1" {
+			drawn = g.ID
+			break
+		}
+	}
+	assertCampaignSlug(t, drawn)
 	if code := put(`[{"id":"x"},{"id":"x"}]`); code != http.StatusBadRequest {
 		t.Errorf("duplicate id → 400, got %d", code)
 	}
