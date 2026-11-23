@@ -22,13 +22,16 @@ var errRefilterHost = errors.New("imported campaigns come from another tracker")
 // filters_only reads only the streams of the listed campaigns, or of every imported campaign
 // with all_imported, and rewrites only stream filters. It combines with dry_run and nothing else.
 // It returns a client message, or an empty string when the request is valid.
-// campaign_ids, all_imported and dry_run without filters_only are refused.
+// campaign_ids, all_imported and dry_run without filters_only or parameters_only are refused.
 func (req *keitaroImportReq) forFilters() string {
 	if !req.FiltersOnly {
-		if len(req.CampaignIDs) > 0 || req.AllImported || req.DryRun {
-			return "campaign_ids, all_imported and dry_run need filters_only"
+		if !req.ParametersOnly && (len(req.CampaignIDs) > 0 || req.AllImported || req.DryRun) {
+			return "campaign_ids, all_imported and dry_run need filters_only or parameters_only"
 		}
 		return ""
+	}
+	if req.ParametersOnly {
+		return "filters_only does not combine with parameters_only"
 	}
 	if req.catalog() || req.Clicks || req.Conversions || req.CampaignID != 0 {
 		return "filters_only does not combine with other import flags or campaign_id"

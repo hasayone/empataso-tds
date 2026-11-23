@@ -18,6 +18,12 @@ import (
 // Ошибки: нет.
 func (c *mapCtx) mapCampaigns(src Snapshot, losses []Loss) ([]Group, []Loss) {
 	c.aliases = campaignAliases(src.Campaigns)
+	c.sources = map[int]KSource{}
+	for _, row := range src.TrafficSources {
+		if int(row.ID) > 0 {
+			c.sources[int(row.ID)] = row
+		}
+	}
 	c.seen = map[string]bool{}
 	camps := append([]Campaign(nil), src.Campaigns...)
 	sort.Slice(camps, func(i, j int) bool {
@@ -185,6 +191,14 @@ func (c *mapCtx) mapCampaign(camp Campaign, streams []KStream) (Group, []Loss) {
 		params = nil
 	}
 	c.swaps = campaignMacroMap(params)
+	var src KSource
+	if c.sources != nil {
+		src = c.sources[int(camp.TrafficSourceID)]
+	}
+	fields := fieldsFromParams(src.Parameters, params)
+	for _, key := range fields.Skipped {
+		losses = append(losses, Loss{Kind: "skipped", Ref: id, Detail: "параметр " + key + " длиннее 255 байт"})
+	}
 	g := Group{
 		ID: id, Name: camp.Name, Num: int(camp.ID), Status: status, Redirect: "show_text", Out: "",
 		Folder: folder, Weight: strings.EqualFold(camp.Type, "weight"), Postbacks: posts,
@@ -200,6 +214,12 @@ func (c *mapCtx) mapCampaign(camp Campaign, streams []KStream) (Group, []Loss) {
 	if int(camp.TrafficSourceID) > 0 {
 		g.SourceID = numID(int(camp.TrafficSourceID))
 	}
+	g.Parameters = fields.Parameters
+	g.ParamTokens = fields.Tokens
+	g.CostParam = fields.CostParam
+	g.CostToken = fields.CostToken
+	g.CurrencyParam = fields.CurrencyParam
+	g.CurrencyToken = fields.CurrencyToken
 	return g, losses
 }
 

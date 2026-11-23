@@ -7,10 +7,12 @@ package ktimport
 // swaps — placeholder текущей кампании → маска emtds. lists и pages — файлы этого прогона.
 // losses — отчёт текущей кампании, пока собираются её потоки.
 // only — id кампании Keitaro, которую надо перенести, или 0 для всех.
+// sources — источники снимка по id: их параметры ложатся под параметры кампании.
 type mapCtx struct {
 	offers   map[int]Offer
 	landings map[int]Landing
 	groups   map[int][]KGroup
+	sources  map[int]KSource
 	aliases  map[int]string
 	seen     map[string]bool
 	swaps    map[string]string

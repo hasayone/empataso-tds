@@ -66,7 +66,7 @@ func mapSources(rows []KSource) ([]CatSource, []Loss) {
 //
 // Параметры: row — источник.
 // Результат: карта параметр → имя во входящей ссылке и строки отчёта по отброшенным ключам.
-// Ошибки: нет. Скобки placeholder в имя не попадают.
+// Ошибки: нет. Имя берётся как linkQueryName. Токен источника сюда не пишется: у каталога источника его нет.
 func sourceParams(row KSource) (map[string]string, []Loss) {
 	keys := make([]string, 0, len(row.Parameters))
 	for key := range row.Parameters {
@@ -82,7 +82,7 @@ func sourceParams(row KSource) (map[string]string, []Loss) {
 			losses = append(losses, Loss{Kind: "skipped", Ref: ref, Detail: "параметр " + key + " не переносится"})
 			continue
 		}
-		val := incomingName(row.Parameters[key])
+		val := linkQueryName(canon, row.Parameters[key])
 		if val == "" {
 			continue
 		}

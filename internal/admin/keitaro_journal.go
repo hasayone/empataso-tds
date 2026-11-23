@@ -72,11 +72,11 @@ func idleJournal() keitaroJournal {
 }
 
 // workLeft reports whether this journal still has a full import to finish.
-// It is false for a one-campaign dosync and for filters_only.
+// It is false for a one-campaign dosync, for filters_only and for parameters_only.
 // It is true when the catalogs were selected and did not pass, or when the selected
 // clicks or conversions are not done. It does not return an error.
 func (r keitaroJournal) workLeft() bool {
-	if r.Request.FiltersOnly || r.Request.CampaignID != 0 || r.CampaignID != 0 {
+	if r.Request.FiltersOnly || r.Request.ParametersOnly || r.Request.CampaignID != 0 || r.CampaignID != 0 {
 		return false
 	}
 	if r.Request.catalog() && !r.CatalogsDone {
@@ -86,7 +86,7 @@ func (r keitaroJournal) workLeft() bool {
 }
 
 // canResume reports whether a resumed run has work left for this journal.
-// It is true for a failed full import (not a one-campaign dosync and not filters_only)
+// It is true for a failed full import (not a one-campaign dosync, not filters_only and not parameters_only)
 // whose catalogs did not pass, or whose selected clicks or conversions are not done.
 // It does not return an error.
 func (r keitaroJournal) canResume() bool {

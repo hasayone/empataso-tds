@@ -31,52 +31,6 @@ func campaignParams(raw json.RawMessage) (map[string]KParam, string) {
 	return out, ""
 }
 
-// incomingName — имя параметра во входящей ссылке клика.
-//
-// Параметры: p — поле Keitaro.
-// Результат: alias, иначе placeholder без скобок, иначе подпись без пробелов и скобок.
-// Пустая строка значит, что имени query нет.
-// Ошибки: нет.
-func incomingName(p KParam) string {
-	if v := queryKey(stripBraces(p.Alias)); v != "" {
-		return v
-	}
-	if v := queryKey(stripBraces(p.Placeholder)); v != "" {
-		return v
-	}
-	name := strings.TrimSpace(p.Name)
-	if strings.ContainsAny(name, " {}") {
-		return ""
-	}
-	return queryKey(name)
-}
-
-// queryKey оставляет ключ query без пробелов и скобок.
-//
-// Параметры: raw — кандидат.
-// Результат: ключ или пустая строка.
-// Ошибки: нет.
-func queryKey(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if raw == "" || strings.ContainsAny(raw, " \t{}") {
-		return ""
-	}
-	return raw
-}
-
-// stripBraces снимает одну пару фигурных скобок по краям.
-//
-// Параметры: raw — placeholder или alias.
-// Результат: внутренность макроса либо исходная строка без краевых пробелов.
-// Ошибки: нет.
-func stripBraces(raw string) string {
-	raw = strings.TrimSpace(raw)
-	if len(raw) >= 2 && strings.HasPrefix(raw, "{") && strings.HasSuffix(raw, "}") {
-		return strings.TrimSpace(raw[1 : len(raw)-1])
-	}
-	return raw
-}
-
 // campaignMacroMap строит замену placeholder этой кампании.
 //
 // Параметры: params — разобранные параметры кампании.
@@ -238,7 +192,7 @@ func fillOneSource(src *CatSource, id string, camp Campaign, params map[string]K
 		if !ok || owned[canon] {
 			continue
 		}
-		name := incomingName(params[key])
+		name := linkQueryName(canon, params[key])
 		if name == "" {
 			continue
 		}

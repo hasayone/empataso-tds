@@ -110,7 +110,10 @@ func keitaroRouteDocs() map[string]routeDoc {
 				"Clicks and conversions need both from and to. With filters_only true only the filters of the streams " +
 				"of imported campaigns are rewritten: send campaign_ids or all_imported true, one of the two; dry_run true " +
 				"then only reports what would change. filters_only does not combine with the other flags or campaign_id, " +
-				"and campaign_ids, all_imported and dry_run are refused without it. " +
+				"and campaign_ids, all_imported and dry_run are refused without filters_only or parameters_only. " +
+				"parameters_only with campaign_ids or all_imported fills empty parameter names and tokens of imported campaigns. " +
+				"Clicks, conversions and streams are not read and not rewritten. A parameter key that is already stored stays, even when its value is empty. " +
+				"dry_run only counts what would change. parameters_only does not combine with the other flags, filters_only or campaign_id. " +
 				"resume true alone continues the last failed transfer (resumable in GET /api/keitaro/job): nothing imported is removed, " +
 				"catalogs that already passed are skipped, clicks continue from the last written batch without doubling a cid, " +
 				"conversions are read again; 409 nothing to resume when there is no such run, 400 with any other field. " +
@@ -123,7 +126,10 @@ func keitaroRouteDocs() map[string]routeDoc {
 					"Для кликов и конверсий нужны оба поля from и to. С filters_only равным true переписываются только "+
 					"фильтры потоков импортированных кампаний: передайте campaign_ids или all_imported равным true, одно из двух; "+
 					"dry_run равным true только покажет, что изменилось бы. filters_only не сочетается с другими флагами и "+
-					"campaign_id, а campaign_ids, all_imported и dry_run без него отклоняются. "+
+					"campaign_id, а campaign_ids, all_imported и dry_run без filters_only или parameters_only отклоняются. "+
+					"parameters_only с campaign_ids или all_imported заполняет пустые имена и токены параметров уже перенесённых кампаний. "+
+					"Клики, конверсии и потоки не читаются и не перезаписываются. Уже записанный параметр остаётся, даже если значение пустое. "+
+					"dry_run только считает, сколько кампаний изменилось бы. parameters_only не сочетается с другими флагами, filters_only и campaign_id. "+
 					"Одно поле resume равным true продолжает последний оборванный перенос (resumable в GET /api/keitaro/job): "+
 					"импортированное не удаляется, пройденные каталоги пропускаются, клики дочитываются с последней записанной пачки "+
 					"без повторов cid, конверсии читаются заново; 409 nothing to resume, если продолжать нечего, 400 с другими полями. "+
@@ -136,14 +142,19 @@ func keitaroRouteDocs() map[string]routeDoc {
 					"Для кліків і конверсій потрібні обидва поля from і to. З filters_only, рівним true, перезаписуються лише "+
 					"фільтри потоків імпортованих кампаній: передайте campaign_ids або all_imported, рівний true, одне з двох; "+
 					"dry_run, рівний true, лише покаже, що змінилося б. filters_only не поєднується з іншими прапорцями та "+
-					"campaign_id, а campaign_ids, all_imported і dry_run без нього відхиляються. "+
+					"campaign_id, а campaign_ids, all_imported і dry_run без filters_only або parameters_only відхиляються. "+
+					"parameters_only з campaign_ids або all_imported заповнює порожні імена й токени параметрів уже перенесених кампаній. "+
+					"Кліки, конверсії й потоки не читаються і не перезаписуються. Уже записаний параметр лишається, навіть якщо значення порожнє. "+
+					"dry_run лише рахує, скільки кампаній змінилося б. parameters_only не поєднується з іншими прапорцями, filters_only і campaign_id. "+
 					"Одне поле resume, рівне true, продовжує останнє обірване перенесення (resumable у GET /api/keitaro/job): "+
 					"імпортоване не видаляється, пройдені каталоги пропускаються, кліки дочитуються з останньої записаної пачки "+
 					"без повторів cid, конверсії читаються заново; 409 nothing to resume, якщо продовжувати нічого, 400 з іншими полями. "+
 					"409, поки йдуть перенесення, чистка, догрузка або оновлення; 503, якщо Keitaro чи сховище не налаштовані."),
 			Body: objectBody("Flags domains, networks, offers, landings, sources, campaigns, users, clicks, conversions (booleans); " +
 				"from and to (YYYY-MM-DD) for clicks and conversions; board_id; campaign_id (Keitaro campaign id, " +
-				"not combined with users, clicks or conversions); resume (boolean, alone: continue the last failed transfer)."),
+				"not combined with users, clicks or conversions); parameters_only with campaign_ids or all_imported " +
+				"(fills empty campaign parameter names and tokens, does not read clicks or rewrite streams); " +
+				"resume (boolean, alone: continue the last failed transfer)."),
 			Example: map[string]any{
 				"domains": true, "networks": true, "offers": true, "landings": true, "sources": true, "campaigns": true,
 			},

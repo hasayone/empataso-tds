@@ -250,7 +250,16 @@ type Group struct {
 	Num         int        `json:"num,omitempty"`
 	Postbacks   []Postback `json:"postbacks,omitempty"`
 	PostbackIDs []string   `json:"postback_ids,omitempty"`
-	Streams     []Stream   `json:"streams"`
+	// Parameters — имя поля в ссылке клика: наше имя → ключ query.
+	Parameters map[string]string `json:"parameters,omitempty"`
+	// ParamTokens — токен поля как в Keitaro, без раскрытия: наше имя → placeholder.
+	ParamTokens map[string]string `json:"param_tokens,omitempty"`
+	// CostParam и CurrencyParam — ключи query цены и валюты клика.
+	CostParam     string `json:"cost_param,omitempty"`
+	CostToken     string `json:"cost_token,omitempty"`
+	CurrencyParam string `json:"currency_param,omitempty"`
+	CurrencyToken string `json:"currency_token,omitempty"`
+	Streams       []Stream `json:"streams"`
 }
 
 // Postback — исходящий шаблон конверсии кампании.

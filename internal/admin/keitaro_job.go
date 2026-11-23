@@ -408,6 +408,8 @@ func copyCounts(in map[string]int) map[string]int {
 // a negative id or campaign_id with users, clicks or conversions is 400.
 // filters_only with campaign_ids or all_imported rewrites only imported stream filters, and with
 // dry_run only reports them; a malformed filters_only body is 400.
+// parameters_only with campaign_ids or all_imported fills empty parameter names and tokens of
+// imported campaigns and does not read clicks or rewrite streams; dry_run only reports the count.
 // resume true continues the last failed full import (see handleKeitaroResume).
 // A running import or a purge in progress is 409. Success is 202 with started true.
 // Each attempt uses a keitaroJobTimeout background context, not the request context.
@@ -424,6 +426,10 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if msg := req.forFilters(); msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	if msg := req.forParameters(); msg != "" {
 		writeErr(w, http.StatusBadRequest, msg)
 		return
 	}
@@ -800,6 +806,10 @@ func (s *Server) runKeitaroImportFrom(ctx context.Context, run keitaroResumeRun,
 	}()
 	if req.FiltersOnly {
 		s.runRefilter(ctx, req, st)
+		return
+	}
+	if req.ParametersOnly {
+		s.runCampaignParams(ctx, req, st)
 		return
 	}
 	var from, to string

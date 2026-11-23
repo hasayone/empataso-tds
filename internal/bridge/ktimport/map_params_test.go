@@ -176,6 +176,73 @@ func TestSourcePlaceholderStripsBraces(t *testing.T) {
 	}
 }
 
+func TestCampaignParameterColumns(t *testing.T) {
+	raw := json.RawMessage(`{
+		"keyword": {"name": "keyword", "placeholder": "{keyword}", "alias": "utm_term"},
+		"site": {"name": "site", "placeholder": "{site}", "alias": "site"},
+		"ad_campaign_id": {"name": "ad_campaign_id", "placeholder": "{campaign_id}", "alias": "campaign_id"},
+		"creative_id": {"name": "creative_id", "placeholder": "{creative_id}", "alias": "creative_id"},
+		"external_id": {"name": "external_id", "placeholder": "{clickid}", "alias": "clickid"},
+		"cost": {"name": "cost", "placeholder": "{price}", "alias": "cost"},
+		"currency": {"name": "currency", "placeholder": "{currency}", "alias": "currency"},
+		"sub_id_1": {"name": "sub_id_1", "placeholder": "{sub1}", "alias": "sub1"}
+	}`)
+	snap := Snapshot{
+		Campaigns: []Campaign{{ID: 1, Alias: "screen", Name: "Screen", State: "active", Parameters: raw}},
+		Streams: map[string][]KStream{
+			"1": {{ID: 1, State: "active", ActionType: "http", ActionPayload: "https://a.example/"}},
+		},
+	}
+	g, _ := findGroup(MapAll(snap).Groups, "screen")
+	names := map[string]string{
+		"keyword": "utm_term", "site": "site", "ad_campaign_id": "campaign_id",
+		"creative_id": "creative_id", "external_id": "clickid", "sub_id_1": "sub1",
+	}
+	tokens := map[string]string{
+		"keyword": "{keyword}", "site": "{site}", "ad_campaign_id": "{campaign_id}",
+		"creative_id": "{creative_id}", "external_id": "{clickid}", "sub_id_1": "{sub1}",
+	}
+	for key, want := range names {
+		if g.Parameters[key] != want || g.ParamTokens[key] != tokens[key] {
+			t.Fatalf("%s name %q token %q", key, g.Parameters[key], g.ParamTokens[key])
+		}
+	}
+	if g.CostParam != "cost" || g.CostToken != "{price}" || g.CurrencyParam != "currency" || g.CurrencyToken != "{currency}" {
+		t.Fatalf("price %+v", g)
+	}
+}
+
+func TestStaticPlaceholderStaysToken(t *testing.T) {
+	raw := json.RawMessage(`{
+		"keyword": {"placeholder": "Win"},
+		"sub_id_1": {"name": "bundle_id", "placeholder": "com.app.id", "alias": "bundle_id"},
+		"cost": {"name": "cost"},
+		"currency": {"name": "currency"}
+	}`)
+	snap := Snapshot{
+		Campaigns: []Campaign{{
+			ID: 2, Alias: "brand", State: "active", TrafficSourceID: 4, Parameters: raw,
+		}},
+		Streams: map[string][]KStream{
+			"2": {{ID: 2, State: "active", ActionType: "http", ActionPayload: "https://a.example/"}},
+		},
+		TrafficSources: []KSource{{
+			ID: 4, Name: "fb",
+			Parameters: map[string]KParam{"keyword": {Alias: "utm_term", Placeholder: "{keyword}"}},
+		}},
+	}
+	g, _ := findGroup(MapAll(snap).Groups, "brand")
+	if g.Parameters["keyword"] != "utm_term" || g.ParamTokens["keyword"] != "Win" {
+		t.Fatalf("keyword %+v %+v", g.Parameters, g.ParamTokens)
+	}
+	if g.Parameters["sub_id_1"] != "bundle_id" || g.ParamTokens["sub_id_1"] != "com.app.id" {
+		t.Fatalf("sub %+v %+v", g.Parameters, g.ParamTokens)
+	}
+	if g.CostParam != "" || g.CurrencyParam != "" {
+		t.Fatalf("label-only price stored: %+v", g)
+	}
+}
+
 func TestCampaignParametersArray(t *testing.T) {
 	snap := Snapshot{
 		Campaigns: []Campaign{{

@@ -45,8 +45,11 @@ type keitaroImportReq struct {
 	CampaignIDs []int `json:"campaign_ids"`
 	// AllImported runs filters_only over every campaign in the import manifest.
 	AllImported bool `json:"all_imported"`
-	// DryRun reports filters_only changes without saving them.
+	// DryRun reports filters_only or parameters_only changes without saving them.
 	DryRun bool `json:"dry_run"`
+	// ParametersOnly fills empty campaign parameter names and tokens. It does not
+	// read clicks or conversions and does not rewrite streams.
+	ParametersOnly bool `json:"parameters_only"`
 	// Resume continues the last failed full import from its journal; it takes no other field.
 	Resume bool `json:"resume,omitempty"`
 }
@@ -158,9 +161,9 @@ func keitaroDetectVersion(ctx context.Context, client *ktimport.Client) ktimport
 }
 
 // needsTracker reports whether the request has to call the tracker.
-// It returns true when any catalog, campaign, click, conversion or filters_only flag is set.
+// It returns true when any catalog, campaign, click, conversion, filters_only or parameters_only flag is set.
 func (req keitaroImportReq) needsTracker() bool {
-	return req.catalog() || req.Conversions || req.Clicks || req.FiltersOnly
+	return req.catalog() || req.Conversions || req.Clicks || req.FiltersOnly || req.ParametersOnly
 }
 
 // catalog reports whether a snapshot must be fetched.
@@ -212,7 +215,7 @@ func (s *Server) keitaroStoreMissing(req keitaroImportReq) string {
 		(req.Domains && s.cfg.Domains == nil) ||
 		(req.Landings && s.cfg.Landings == nil) ||
 		(req.Offers && s.cfg.Offers == nil) ||
-		((req.Campaigns || req.FiltersOnly) && s.cfg.Groups == nil) ||
+		((req.Campaigns || req.FiltersOnly || req.ParametersOnly) && s.cfg.Groups == nil) ||
 		(req.Users && !s.usersEnabled())
 	if missing {
 		return "store unavailable"
@@ -504,6 +507,8 @@ func mergeCatalog[B any, T any](ctx context.Context, incoming []B, cm catalogMer
 // A group is replaced only when prev already lists its id. Otherwise the stored group is kept.
 // A replaced import keeps its stored number when the incoming row has none,
 // and always keeps the stored sticky_stream and traffic_log_off switches, which Keitaro does not carry.
+// A parameter name, token or price field that is already stored stays, including an empty name
+// that clears a source mapping. An absent key is filled from the incoming row.
 // A new import keeps the number from the merge. Missing numbers are filled for ids in this import.
 // Losses are the bridge merge report. An error means a JSON conversion failed.
 func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, prev ktimport.Manifest, owner string, board string) ([]config.Group, []ktimport.Loss, error) {
@@ -555,6 +560,7 @@ func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, pre
 				cg.Notes = old.Notes
 			}
 			cg.BoardID = old.BoardID
+			keepCampaignParams(old, &cg)
 			out = append(out, cg)
 			continue
 		}
