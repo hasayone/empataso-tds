@@ -65,6 +65,10 @@ type engineDeps struct {
 	// stats counts postback outcomes and outbound jobs for the metrics file.
 	stats engineStats
 
+	// traffic writes the click paths of the campaign traffic log. It is nil
+	// without Redis or with EMTDS_TRAFFIC_LOG_MAX=0, and nothing is recorded then.
+	traffic *trafficLogger
+
 	// pbq, plog and outSpool are the disk queues of postbacks, postback journal
 	// lines and outbound jobs. They are nil without a spool, and a postback is
 	// then answered from the store alone.
@@ -177,6 +181,7 @@ func hitPercent(p int) bool {
 // uniqueness → router → bots → separation/remote/chance → distribution →
 // render → async log → key collection.
 func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
+	began := time.Now()
 	// The query is parsed once; every read below shares it.
 	query := r.URL.Query()
 
@@ -272,6 +277,10 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	if d.counters != nil && grp.Firewall.Enabled {
 		fw := grp.Firewall
 		if ok, _ := d.counters.Firewall(rctx, grp.ID, ip, fw.Queries, secs(fw.Seconds)); !ok {
+			if d.traffic.on(grp) {
+				d.recordClick(clickPath{r: r, began: began, apiMode: apiMode, entered: grp, served: grp, ip: ip,
+					stream: "-", action: "forbidden", notes: []string{"antiflood"}})
+			}
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
@@ -399,11 +408,18 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		streamName, redirect, outRaw, ctype string
 		selStream                           *config.Stream
 		via                                 string // the first link followed: "<group id>/<stream>"
+		entered                             = grp  // the campaign the visitor entered
+		hops                                []router.HopDraft
 	)
 	for hop := 0; ; hop++ {
 		deps := router.Deps{IP: d.lists}
 		if d.counters != nil {
 			deps.Limiter = limiter{c: d.counters, ctx: rctx, id: grp.ID}
+		}
+		var rec *router.HopRecorder
+		if d.traffic.on(entered) || d.traffic.on(grp) {
+			rec = &router.HopRecorder{}
+			deps.Seen = rec.Note
 		}
 		streamName, redirect, outRaw, ctype, selStream = "-", grp.Redirect, grp.Out, grp.Header, nil
 		if s, ok := d.selectStream(w, r, grp, v, deps, apiMode); ok {
@@ -420,6 +436,9 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			// selecting the stream and taking its limit are one event, so there is
 			// nothing to record here.
 		}
+		if rec != nil {
+			hops = append(hops, router.HopDraft{Group: grp.ID, Rec: rec, V: v, Selected: streamName})
+		}
 		if redirect != "group" {
 			break
 		}
@@ -431,8 +450,17 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 		// is a configuration error; the visitor gets what an unknown group gets.
 		if next == nil || !next.Status || next == grp || hop >= config.MaxGroupHops {
 			d.log.Warn("engine: group link not followed", "group", grp.ID, "stream", streamName, "target", outRaw, "hop", hop)
+			if rec != nil {
+				hops[len(hops)-1].Error = "group_link"
+				d.recordClick(clickPath{r: r, began: began, apiMode: apiMode, entered: entered, served: grp, cid: cid,
+					ip: ip, geo: g, info: info, v: v, country: country, operator: operator, unique: loggedUnique,
+					subs: subs, stream: streamName, action: "trash", hops: hops, notes: []string{"group_link"}})
+			}
 			trashResult(d.trashMode, d.trashURL).Write(w)
 			return
+		}
+		if rec != nil {
+			hops[len(hops)-1].Link = next.ID
 		}
 		if via == "" {
 			via = grp.ID + "/" + streamName
@@ -660,6 +688,18 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 				d.keyFiles.add(grp.ID, kse, true)
 			}
 		}
+	}
+
+	// The click path for the campaign traffic log: queued without waiting.
+	if d.traffic != nil {
+		var notes []string
+		if logRedirect == "curl_error" {
+			notes = append(notes, "curl_error")
+		}
+		d.recordClick(clickPath{r: r, began: began, apiMode: apiMode, entered: entered, served: grp, cid: cid, step: offerStep,
+			ip: ip, geo: g, info: info, v: v, country: country, operator: operator, bot: bot, botWhy: botWhy, botServe: botServed,
+			unique: loggedUnique, subs: subs, via: via, stream: streamName, action: logRedirect, out: out,
+			offerID: offerID, landing: landingID, network: networkID, saved: d.logs != nil, hops: hops, notes: notes})
 	}
 
 	// Diagnostic headers (before writing the response) + render.

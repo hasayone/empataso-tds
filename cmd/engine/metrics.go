@@ -241,6 +241,7 @@ func (d *engineDeps) metricsSnapshot(instance string, started, now time.Time) co
 	}
 	m.Postbacks = d.stats.postbacks.snapshot()
 	m.Outbound = d.stats.outbound.snapshot()
+	m.TrafficLog = d.traffic.stats()
 	m.OriginLinkAdded = d.stats.originLink.added.Load()
 	m.OriginLinkUnknown = d.stats.originLink.unknownHost.Load()
 	if ch := d.clickhouse(); ch != nil {

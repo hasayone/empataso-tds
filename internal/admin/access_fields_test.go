@@ -669,6 +669,7 @@ func TestEveryResponseKeyIsClassified(t *testing.T) {
 		"lines": true, "size": true, "max_lines": true,
 		"enabled": true, "create_apps": true, "postback": true,
 		"url_masked": true, "available": true, "method": true,
+		"entries": true, "max": true, "ttl_hours": true, "click_ttl_hours": true,
 	}
 	for ep, keys := range adminJSONRoutes(t, newRolesRig(t, "")) {
 		for k := range keys {

@@ -1379,6 +1379,27 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   .tester{margin-bottom:14px;padding:14px 16px}
   .tester .grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:0 12px}
   .tres{display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding-top:12px;margin-top:2px;border-top:1px solid var(--border)}
+  .tlmodal{width:min(880px,calc(100vw - 24px));max-height:min(88vh,880px);display:flex;flex-direction:column;padding:16px 18px;overflow:hidden}
+  .tl-bar{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+  .tl-bar h3{margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tl-list{flex:1;min-height:140px;overflow:auto;border:1px solid var(--border);border-radius:10px}
+  .tl-item+.tl-item{border-top:1px solid var(--border)}
+  .tl-head{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,auto) auto;align-items:center;gap:12px;width:100%;height:auto;min-height:38px;padding:8px 12px;border:0;border-radius:0;background:none;box-shadow:none;color:var(--fg);font:inherit;font-size:13px;text-align:left;cursor:pointer}
+  .tl-head:hover{background:var(--accent-soft)}
+  .tl-head svg:last-child{transition:transform .15s}
+  .tl-item.open .tl-head svg:last-child{transform:rotate(180deg)}
+  .tl-when{color:var(--muted);white-space:nowrap}
+  .tl-out{color:var(--muted);text-align:right}
+  .tl-body{padding:0 14px 14px;border-top:1px dashed var(--border)}
+  .tl-trace .sec{padding:12px 0}
+  .tl-streams{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+  .tl-streams li{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13px}
+  .tl-streams .nm{font-weight:600}
+  .tl-hop .row{margin-bottom:6px}
+  .tl-hop+.tl-hop{margin-top:12px}
+  .tl-sim{margin-top:12px;border-top:1px solid var(--border);padding-top:10px}
+  .tl-sim summary{cursor:pointer;font-weight:650;margin-bottom:4px}
+  @media (max-width:640px){.tl-head{grid-template-columns:minmax(0,1fr) auto}.tl-when{grid-column:1/-1}.tl-out{display:none}}
 
   /* stream editor */
   .crow{display:grid;grid-template-columns:1fr 26px;gap:6px 8px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:8px;background:var(--surface-2)}
@@ -13148,10 +13169,60 @@ function landEntryShown(files, entry){
   const paths=new Set((Array.isArray(files)?files:[]).map(f=>String(f&&f.path||'')));
   return ['index.php','index.html'].find(p=>paths.has(p))||'';
 }
+/** TRACE_HIDDEN is what the engine writes in a click address in place of a secret query value. */
+const TRACE_HIDDEN='[hidden]';
+/** traceQueryOf returns the query of a stored click address as the tester takes it.
+ * A pair whose value the engine hid is dropped: it cannot be replayed.
+ * @param {string} url address as stored, for example /promo?sub_id_1=a&token=[hidden]
+ * @returns {string} query without the question mark, '' when there is none
+ */
+function traceQueryOf(url){
+  const s=String(url||''), i=s.indexOf('?');
+  if(i<0) return '';
+  return s.slice(i+1).split('&').filter(p=>p&&!p.endsWith('='+TRACE_HIDDEN)).join('&');
+}
+/** traceTester turns a stored click path into the fields of the visitor tester.
+ * @param {object} t click path as the traffic log returns it
+ * @param {Object<string,string>} uas browser presets of the tester, name to user agent
+ * @returns {{ip:string,ua:string,uaRaw:string,country:string,lang:string,referer:string,key:string,query:string,repeat:boolean}}
+ *   ua is the preset that carries the click's user agent, '' when no preset does; uaRaw is then the agent itself
+ */
+function traceTester(t, uas){
+  const v=(t&&t.visitor)||{};
+  const agent=String(v.useragent||'');
+  const preset=agent?Object.keys(uas||{}).find(k=>uas[k]===agent)||'':'';
+  return {
+    ip:String((t&&t.ip)||''), ua:preset, uaRaw:preset?'':agent,
+    country:String(v.country||'').toLowerCase(), lang:String(v.lang||''), referer:String(v.referer||''),
+    key:String(v.keyword||''), query:traceQueryOf(t&&t.url), repeat:v.unique===false
+  };
+}
+/** traceDurText formats the time the engine spent on a click.
+ * @param {number} us microseconds
+ * @returns {string} for example 740 µs, 3.2 ms or 120 ms
+ */
+function traceDurText(us){
+  const n=Math.max(0, +us||0);
+  if(n<1000) return n+' µs';
+  return n<100000?(n/1000).toFixed(1)+' ms':Math.round(n/1000)+' ms';
+}
+/** traceBrief picks the values of the one-line summary of a stored click path.
+ * @param {object} t click path
+ * @returns {{ip:string,country:string,device:string,stream:string,action:string}} stream is '-' for the campaign default
+ */
+function traceBrief(t){
+  const v=(t&&t.visitor)||{};
+  return {
+    ip:String((t&&t.ip)||''), country:v.country&&v.country!=='-'?String(v.country).toLowerCase():'',
+    device:[v.os, v.browser].filter(Boolean).join(' '),
+    stream:String((t&&t.stream)||''), action:String((t&&t.action)||'')
+  };
+}
 // ---- pure: end ----
 
 const I18N={
 en:{
+'flows.log.traffic':'Traffic log','tl.title':'Traffic log','tl.logging':'Record clicks','tl.logging.hint':'While on, every click of this campaign is saved here with its path.','tl.search':'Search by IP, country, stream, Sub ID…','tl.empty':'No clicks recorded yet. New clicks appear here.','tl.off':'Recording is off for this campaign. Switch it on to see new clicks.','tl.unavailable':'The traffic log is kept in Redis, which is not connected.','tl.keeps':'Shown: {n}. The log keeps the latest {max} clicks; a campaign that gets none is cleared after {hours} h.','tl.sec.streams':'Streams checked','tl.sec.result':'Result','tl.url':'Requested address','tl.final':'Visitor IP','tl.trusted':'Address taken through a trusted proxy','tl.header.none':'not sent','tl.picked':'Selected','tl.hop.link':'handed the visitor to','tl.err.group_link':'The link to the next campaign could not be followed.','tl.via':'Link followed','tl.proxy':'Proxy or VPN','tl.saved':'Saved to statistics','tl.dur':'Handled in','tl.notes':'Notes','tl.note.api':'Request through the API client','tl.note.bot_served':'Answered as a bot','tl.note.antiflood':'Stopped by the request limit','tl.note.group_link':'Campaign link could not be followed','tl.note.curl_error':'Fetching the page failed','tl.again':'Simulate this click again','tl.ua.visit':'Browser of the click','tl.path':'Click path','tl.path.none':'The path of this click is not stored. A path is kept for {hours} h and only while the traffic log of the campaign is on.','tl.path.step0':'Click','tl.path.step1':'Offer step','tl.sim.path':'Path of the test click',
 'err.rate':'{what}: too many requests. Wait a little and try again.','err.rate.wait':'{what}: too many requests. You can try again in {wait}.','err.rate.update':'Update check','err.rate.login':'Sign-in','err.rate.checker':'Checker','err.rate.stats':'Reports','err.rate.docs':'API documentation','err.rate.ai':'Assistant','err.rate.server':'Server','err.code.ref':'Code: {code}','err.code.unknown':'The action failed. If it happens again, send the code below to support.','err.code.unauthorized':'Sign in again: the session has ended.','err.code.conflict':'The action is not possible now: the data has changed. Refresh the page and try again.','err.code.too_large':'The data is too large.','err.flow.taken':'The campaign ID «{id}» is already used by another campaign or alias. Choose another one.','err.flow.readonly':'Campaign «{id}» links to this one, but you cannot edit it, so the ID cannot change.','err.flow.badid':'The campaign ID must not contain spaces, /, ? or #.','err.code.internal':'The server could not do this. Try again later.','err.code.bad_gateway':'An external service answered with an error. Try again later.','err.code.unavailable':'The service is temporarily unavailable. Try again in a minute.','err.code.cookie_required':'This action works only in a browser session.','err.code.key_expired':'The API key has expired.','err.code.action_required':'This action needs a separate permission.',
 'kt.dock.hide':'Hide','kt.dock.open':'Open import','kt.dock.report':'Open report','kt.dock.retry':'Repeat…','stats.fail':'Statistics did not load: {err}. Figures that rest on it are shown as —.','stats.retry':'Retry','kt.dock.done':'Import finished','kt.dock.failed':'Import stopped','kt.dock.took':'Took {t}','kt.dock.stopped':'Stopped after {t}','kt.dock.elapsed':'Running {t}','kt.dock.of':'{done} of {total}','kt.dock.campaign':'(campaign {id})','kt.dock.warn':'Warnings: {n}','kt.journal':'Last import','kt.journal.started':'Started','kt.journal.updated':'updated','kt.journal.ended':'stopped','kt.journal.interrupted':'The import was cut by an admin restart','kt.resume':'Continue','kt.resume.hint':'Continues where it stopped: nothing imported is removed, passed catalogs are skipped, clicks continue from the last saved batch and conversions are read again without doubles.','rate.title':'Rate EmTDS','rate.card':'Platform rating','layout.card':'Content width','layout.box':'In a container','layout.wide':'Full width','layout.box.hint':'Content keeps a limited width and stays centred.','layout.wide.hint':'Content follows the screen width with margins; card grids add columns on wide screens.','rate.none':'Not rated yet','rate.do':'Rate','rate.change':'Change rating','rate.sub':'You have been working with us for an hour. How is it going?','rate.pick':'Point at a star and pick a score','rate.tg':'Thank the developer in person','rate.thanks':'Thank you!','rate.your':'Your rating: {n}','rate.l1':'Excellent','rate.l2':'Fucking awesome','rate.l3':'Damn, I actually cried','rate.l4':'Holy shit, this is incredible!','rate.l5':'FUCK, TAKE MY MONEY! YOU ARE A GOD!','kt.dock.partial':'Saved before the stop','kt.kind.conflict':'Conflict',
 'dash.pref.title':'Preferences','dash.pref.kpis':'Metrics','dash.pref.blocks':'Blocks','dash.pref.recent':'Recent clicks',
@@ -13251,6 +13322,7 @@ en:{
 // checker end
 },
 ru:{
+'flows.log.traffic':'Лог трафика','tl.title':'Лог трафика','tl.logging':'Логировать','tl.logging.hint':'Пока включено, каждый клик этой кампании сохраняется здесь вместе с путём.','tl.search':'Поиск по IP, стране, потоку, Sub ID…','tl.empty':'Пока нет записанных кликов. Новые клики появятся здесь.','tl.off':'Запись для этой кампании выключена. Включите её, чтобы видеть новые клики.','tl.unavailable':'Лог трафика хранится в Redis, а он не подключён.','tl.keeps':'Показано: {n}. В логе последние {max} кликов; кампания без кликов очищается через {hours} ч.','tl.sec.streams':'Проверка потоков','tl.sec.result':'Результат','tl.url':'Запрошенный адрес','tl.final':'IP посетителя','tl.trusted':'Адрес взят через доверенный прокси','tl.header.none':'не передан','tl.picked':'Выбран','tl.hop.link':'передал посетителя в','tl.err.group_link':'Не удалось перейти по ссылке на следующую кампанию.','tl.via':'Переход по ссылке','tl.proxy':'Прокси или VPN','tl.saved':'Записан в статистику','tl.dur':'Время обработки','tl.notes':'Пометки','tl.note.api':'Запрос через API-клиент','tl.note.bot_served':'Ответ как боту','tl.note.antiflood':'Остановлен лимитом запросов','tl.note.group_link':'Ссылка на кампанию не сработала','tl.note.curl_error':'Не удалось получить страницу','tl.again':'Имитировать клик снова','tl.ua.visit':'Браузер клика','tl.path':'Путь клика','tl.path.none':'Путь этого клика не сохранён. Путь хранится {hours} ч и только пока включён лог трафика кампании.','tl.path.step0':'Клик','tl.path.step1':'Шаг оффера','tl.sim.path':'Путь тестового клика',
 'err.rate':'{what}: слишком много запросов. Подождите немного и повторите.','err.rate.wait':'{what}: слишком много запросов. Повторить можно через {wait}.','err.rate.update':'Проверка обновлений','err.rate.login':'Вход','err.rate.checker':'Чекер','err.rate.stats':'Отчёты','err.rate.docs':'Документация API','err.rate.ai':'Ассистент','err.rate.server':'Сервер','err.code.ref':'Код: {code}','err.code.unknown':'Не удалось выполнить действие. Если повторится, передайте код ниже в поддержку.','err.code.unauthorized':'Войдите снова: сессия закончилась.','err.code.conflict':'Сейчас это действие недоступно: данные изменились. Обновите страницу и повторите.','err.code.too_large':'Слишком большой объём данных.','err.flow.taken':'ID «{id}» уже занят другой кампанией или алиасом. Выберите другой.','err.flow.readonly':'На эту кампанию ссылается кампания «{id}», которую вам нельзя менять, поэтому ID не изменить.','err.flow.badid':'ID кампании не может содержать пробелы, /, ? и #.','err.code.internal':'Сервер не смог выполнить действие. Повторите позже.','err.code.bad_gateway':'Внешний сервис ответил ошибкой. Повторите позже.','err.code.unavailable':'Сервис временно недоступен. Повторите через минуту.','err.code.cookie_required':'Это действие доступно только в сессии браузера.','err.code.key_expired':'Срок API-ключа истёк.','err.code.action_required':'Для этого действия нужно отдельное разрешение.',
 'kt.dock.hide':'Скрыть','kt.dock.open':'Открыть перенос','kt.dock.report':'Открыть отчёт','kt.dock.retry':'Повторить…','stats.fail':'Статистика не загрузилась: {err}. Показатели, которые от неё зависят, показаны как —.','stats.retry':'Повторить','kt.dock.done':'Перенос завершён','kt.dock.failed':'Перенос остановлен','kt.dock.took':'Заняло {t}','kt.dock.stopped':'Остановлен через {t}','kt.dock.elapsed':'Идёт {t}','kt.dock.of':'{done} из {total}','kt.dock.campaign':'(кампания {id})','kt.dock.warn':'Предупреждений: {n}','kt.journal':'Последний перенос','kt.journal.started':'Начат','kt.journal.updated':'обновлён','kt.journal.ended':'остановлен','kt.journal.interrupted':'Перенос оборвался перезапуском admin','kt.resume':'Продолжить','kt.resume.hint':'Продолжает с места остановки: импортированное не удаляется, пройденные каталоги пропускаются, клики дочитываются с последней сохранённой пачки, конверсии читаются заново без дублей.','rate.title':'Оцените EmTDS','rate.card':'Оценка платформы','layout.card':'Ширина контента','layout.box':'В контейнере','layout.wide':'На всю ширину','layout.box.hint':'Контент ограничен по ширине и стоит по центру.','layout.wide.hint':'Контент занимает ширину экрана с отступами, на широких экранах сетки карточек добавляют колонки.','rate.none':'Ещё не оценено','rate.do':'Оценить','rate.change':'Изменить оценку','rate.sub':'Вы работаете с нами уже час. Как вам?','rate.pick':'Наведите на звезду и выберите оценку','rate.tg':'Поблагодарить разработчика лично','rate.thanks':'Спасибо!','rate.your':'Ваша оценка: {n}','rate.l1':'Отлично','rate.l2':'Охуенно','rate.l3':'Бля я аж заплакал','rate.l4':'Господи как охуетительно!','rate.l5':'СУКА Я ТЕБЕ ДЕНЕГ КИНУ! ТЫ БОГ!','kt.dock.partial':'Успело сохраниться','kt.kind.conflict':'Конфликт',
 'dash.pref.title':'Предпочтения','dash.pref.kpis':'Метрики','dash.pref.blocks':'Блоки','dash.pref.recent':'Последние клики',
@@ -13350,6 +13422,7 @@ ru:{
 // checker end
 },
 uk:{
+'flows.log.traffic':'Лог трафіку','tl.title':'Лог трафіку','tl.logging':'Логувати','tl.logging.hint':'Поки увімкнено, кожен клік цієї кампанії зберігається тут разом зі шляхом.','tl.search':'Пошук за IP, країною, потоком, Sub ID…','tl.empty':'Поки немає записаних кліків. Нові кліки з’являться тут.','tl.off':'Запис для цієї кампанії вимкнено. Увімкніть його, щоб бачити нові кліки.','tl.unavailable':'Лог трафіку зберігається в Redis, а він не підключений.','tl.keeps':'Показано: {n}. У логу останні {max} кліків; кампанія без кліків очищається через {hours} год.','tl.sec.streams':'Перевірка потоків','tl.sec.result':'Результат','tl.url':'Запитана адреса','tl.final':'IP відвідувача','tl.trusted':'Адресу взято через довірений проксі','tl.header.none':'не передано','tl.picked':'Обрано','tl.hop.link':'передав відвідувача до','tl.err.group_link':'Не вдалося перейти за посиланням на наступну кампанію.','tl.via':'Перехід за посиланням','tl.proxy':'Проксі чи VPN','tl.saved':'Записано до статистики','tl.dur':'Час обробки','tl.notes':'Позначки','tl.note.api':'Запит через API-клієнт','tl.note.bot_served':'Відповідь як боту','tl.note.antiflood':'Зупинено лімітом запитів','tl.note.group_link':'Посилання на кампанію не спрацювало','tl.note.curl_error':'Не вдалося отримати сторінку','tl.again':'Імітувати клік знову','tl.ua.visit':'Браузер кліку','tl.path':'Шлях кліку','tl.path.none':'Шлях цього кліку не збережено. Шлях зберігається {hours} год і лише поки ввімкнено лог трафіку кампанії.','tl.path.step0':'Клік','tl.path.step1':'Крок офера','tl.sim.path':'Шлях тестового кліку',
 'err.rate':'{what}: забагато запитів. Зачекайте трохи й повторіть.','err.rate.wait':'{what}: забагато запитів. Повторити можна через {wait}.','err.rate.update':'Перевірка оновлень','err.rate.login':'Вхід','err.rate.checker':'Чекер','err.rate.stats':'Звіти','err.rate.docs':'Документація API','err.rate.ai':'Асистент','err.rate.server':'Сервер','err.code.ref':'Код: {code}','err.code.unknown':'Не вдалося виконати дію. Якщо повториться, передайте код нижче в підтримку.','err.code.unauthorized':'Увійдіть знову: сесія завершилася.','err.code.conflict':'Зараз ця дія недоступна: дані змінилися. Оновіть сторінку й повторіть.','err.code.too_large':'Завеликий обсяг даних.','err.flow.taken':'ID «{id}» уже зайнятий іншою кампанією або аліасом. Виберіть інший.','err.flow.readonly':'На цю кампанію посилається кампанія «{id}», яку вам не можна змінювати, тому ID не змінити.','err.flow.badid':'ID кампанії не може містити пробіли, /, ? і #.','err.code.internal':'Сервер не зміг виконати дію. Повторіть пізніше.','err.code.bad_gateway':'Зовнішній сервіс відповів помилкою. Повторіть пізніше.','err.code.unavailable':'Сервіс тимчасово недоступний. Повторіть за хвилину.','err.code.cookie_required':'Ця дія доступна лише в сесії браузера.','err.code.key_expired':'Термін API-ключа сплив.','err.code.action_required':'Для цієї дії потрібен окремий дозвіл.',
 'kt.dock.hide':'Сховати','kt.dock.open':'Відкрити перенесення','kt.dock.report':'Відкрити звіт','kt.dock.retry':'Повторити…','stats.fail':'Статистика не завантажилася: {err}. Показники, що від неї залежать, показано як —.','stats.retry':'Повторити','kt.dock.done':'Перенесення завершено','kt.dock.failed':'Перенесення зупинено','kt.dock.took':'Тривало {t}','kt.dock.stopped':'Зупинено через {t}','kt.dock.elapsed':'Триває {t}','kt.dock.of':'{done} з {total}','kt.dock.campaign':'(кампанія {id})','kt.dock.warn':'Попереджень: {n}','kt.journal':'Останнє перенесення','kt.journal.started':'Почато','kt.journal.updated':'оновлено','kt.journal.ended':'зупинено','kt.journal.interrupted':'Перенесення обірвав перезапуск admin','kt.resume':'Продовжити','kt.resume.hint':'Продовжує з місця зупинки: імпортоване не видаляється, пройдені каталоги пропускаються, кліки дочитуються з останньої збереженої пачки, конверсії читаються заново без дублів.','rate.title':'Оцініть EmTDS','rate.card':'Оцінка платформи','layout.card':'Ширина вмісту','layout.box':'У контейнері','layout.wide':'На всю ширину','layout.box.hint':'Вміст обмежений за шириною і стоїть по центру.','layout.wide.hint':'Вміст займає ширину екрана з відступами, на широких екранах сітки карток додають колонки.','rate.none':'Ще не оцінено','rate.do':'Оцінити','rate.change':'Змінити оцінку','rate.sub':'Ви працюєте з нами вже годину. Як вам?','rate.pick':'Наведіть на зірку й оберіть оцінку','rate.tg':'Подякувати розробнику особисто','rate.thanks':'Дякуємо!','rate.your':'Ваша оцінка: {n}','rate.l1':'Чудово','rate.l2':'Охуєнно','rate.l3':'Бля, я аж розплакався','rate.l4':'Господи, як охуєзно!','rate.l5':'СУКА, Я ТОБІ ГРОШЕЙ КИНУ! ТИ БОГ!','kt.dock.partial':'Встигло зберегтися','kt.kind.conflict':'Конфлікт',
 'dash.pref.title':'Уподобання','dash.pref.kpis':'Метрики','dash.pref.blocks':'Блоки','dash.pref.recent':'Останні кліки',
@@ -16166,6 +16239,7 @@ function paintFlowCards(){
         const items=[{label:tr('Open'),icon:'arrow',on:open},
           {label:tr('flows.log.clicks'),icon:'logs',on:()=>go('logs/'+encodeURIComponent(g.id))},
           {label:tr('flows.log.conv'),icon:'conversions',on:()=>go('conversions/'+encodeURIComponent(g.id))}];
+        if(pageAllowed(ME,'logs')) items.push({label:tr('flows.log.traffic'),icon:'logs',on:()=>openTrafficLog(g)});
         if(edit){
           items.push({label:tr('col.spend'),icon:'conversions',on:()=>spendDialog(g.id)},
             {label:g.status?tr('Turn off'):tr('Turn on'),icon:'play',on:()=>{g.status=!g.status;markDirty(g);paintFlowCards()}},
@@ -16268,6 +16342,7 @@ function paintFlowCards(){
 let CUR=null;            // the flow on screen (an element of GROUPS)
 let SIM=null;            // last simulation result for CUR, or null
 let TESTER=false;        // the "test a visitor" form is open
+let TESTER_RUN=false;    // run the tester as soon as it is drawn (a replayed click)
 let EDIT=-1;             // index of the stream open in the drawer, -1 = none
 let THEN_PICK=null;      // {g, idx, mode} while offers and a bare URL look the same
 let IP_TEXT=false;       // ip list edited as a textarea instead of chips
@@ -16467,7 +16542,8 @@ function renderFlow(){
     if(MENU&&MENU_ANCHOR===glogs){closeMenu();return}
     menu(glogs,[
       {label:tr('flows.log.clicks'),icon:'click',on:()=>go('logs/'+encodeURIComponent(g.id))},
-      {label:tr('flows.log.conv'),icon:'conversions',on:()=>go('conversions/'+encodeURIComponent(g.id))}
+      {label:tr('flows.log.conv'),icon:'conversions',on:()=>go('conversions/'+encodeURIComponent(g.id))},
+      ...(pageAllowed(ME,'logs')?[{label:tr('flows.log.traffic'),icon:'logs',on:()=>openTrafficLog(g)}]:[])
     ]);
   };
   if(flowEdit) q('#fbdest').onclick=e=>{if(!e.target.closest('[data-goto]'))openFlowSettings('default')};
@@ -16794,7 +16870,8 @@ const UAS={
   'iPad · Safari':'Mozilla/5.0 (iPad; CPU OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
   'Googlebot':'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
 };
-let TV={ip:'',ua:'iPhone · Safari',country:'',lang:'',referer:'',key:'',query:'',repeat:false};
+// uaRaw is a user agent outside the presets, set by a replayed click.
+let TV={uaRaw:'',ip:'',ua:'iPhone · Safari',country:'',lang:'',referer:'',key:'',query:'',repeat:false};
 function paintTester(){
   const box=q('#tester'); if(!box)return;
   if(!TESTER){box.innerHTML='';return}
@@ -16806,12 +16883,12 @@ function paintTester(){
     const trail=SIM.path.map(s=>`${esc(s.group)} → ${s.selected==='-'?'<i>'+tr('default')+'</i>':'<b>'+esc(s.selected)+'</b>'}`).join(' &nbsp;›&nbsp; ');
     res=`<div class="tres">${c('Country',v.country)}${c('City',v.city)}${c('Region',v.region)}${c('UTC',v.utc)}${c('ASN',v.asn?'AS'+v.asn:'')}${c('Organization',v.org)}${c('Mobile operator',v.operator)}${c('Device',v.device)}${c('OS',v.os)}${c('Browser',v.browser)}${c('Brand',v.brand)}
       <div class="spacer"></div><span>${trail}</span><span class="pill ${last.error?'bad':'acc'}">${esc(last.error||typeLabel(last.redirect))}</span></div>
-      ${calloutHTML('info',tr('tester.hint'),{cls:'mt'})}`;
+      ${calloutHTML('info',tr('tester.hint'),{cls:'mt'})}`+(SIM.trace?`<details class="tl-sim" open><summary>${esc(tr('tl.sim.path'))}</summary>${traceHTML(SIM.trace)}</details>`:'');
   }
   box.innerHTML=`<div class="card tester">
     <div class="grid">
       ${f('ip',tr('tester.ip'),'8.8.8.8',TV.ip)}
-      <div class="fld"><label>${tr('Device')}</label>${sel('tv_ua',Object.keys(UAS).map(k=>opt(k,k,TV.ua)).join(''))}</div>
+      <div class="fld"><label>${tr('Device')}</label>${sel('tv_ua',(TV.uaRaw?opt('',tr('tl.ua.visit'),''):'')+Object.keys(UAS).map(k=>opt(k,k,TV.uaRaw?'':TV.ua)).join(''))}</div>
       <div class="fld"><label for="tv_country_list">${tr('tester.country')}</label><select id="tv_country_list" data-pick aria-label="${esc(tr('tester.country'))}"><option value="">${tr('flows.state.all')}</option>${COUNTRIES.map(c=>`<option value="${c.code}" ${TV.country===c.code?'selected':''}>${esc(countryLabel(c.code, uiLang()))}</option>`).join('')}</select></div>
       ${f('lang',tr('tester.lang'),'en',TV.lang)}
       ${f('referer',tr('tester.referer'),'https://www.google.com/',TV.referer)}
@@ -16819,12 +16896,12 @@ function paintTester(){
       ${f('query',tr('tester.query'),'utm_source=fb&sub1=42',TV.query)}
       <div class="fld"><label>&nbsp;</label><div class="row"><label class="chk" style="margin:0;white-space:nowrap"><input type="checkbox" id="tv_repeat" ${TV.repeat?'checked':''}>${tr('returning')}</label><div class="spacer"></div><button class="primary" id="tv_run">${icon('play')}${tr('Run')}</button></div></div>
     </div>${res}</div>`;
-  const read=()=>{['ip','lang','referer','key','query'].forEach(k=>TV[k]=q('#tv_'+k).value.trim());const country=q('#tv_country_list');TV.country=country?country.value.trim():'';TV.ua=q('#tv_ua').value;TV.repeat=q('#tv_repeat').checked};
+  const read=()=>{['ip','lang','referer','key','query'].forEach(k=>TV[k]=q('#tv_'+k).value.trim());const country=q('#tv_country_list');TV.country=country?country.value.trim():'';const ua=q('#tv_ua').value;if(ua){TV.ua=ua;TV.uaRaw=''}TV.repeat=q('#tv_repeat').checked};
   const run=async()=>{
     read();
     if(!TV.ip){toast(tr('tester.needip'),true);q('#tv_ip').focus();return}
     try{
-      SIM=await call('POST','/api/simulate',{groups:simGroups(GROUPS, CUR&&CUR.id),group:CUR.id,visitor:{ip:TV.ip,useragent:UAS[TV.ua],referer:TV.referer,lang:TV.lang,key:TV.key,query:TV.query,country:TV.country,repeat:TV.repeat}});
+      SIM=await call('POST','/api/simulate',{groups:simGroups(GROUPS, CUR&&CUR.id),group:CUR.id,visitor:{ip:TV.ip,useragent:TV.uaRaw||UAS[TV.ua],referer:TV.referer,lang:TV.lang,key:TV.key,query:TV.query,country:TV.country,repeat:TV.repeat}});
       if(flowCanvasOpen()) renderFlow();
     }catch(e){toast(e.message,true)}
   };
@@ -16832,6 +16909,209 @@ function paintTester(){
   const countryList=q('#tv_country_list',box);
   if(countryList) countryList.onchange=()=>{TV.country=countryList.value.trim()};
   qa('input:not([type=checkbox])',box).forEach(i=>i.onkeydown=e=>{if(e.key==='Enter')run()});
+  if(TESTER_RUN){TESTER_RUN=false; run()}
+}
+
+/** trOr is tr with a fallback text for a key the dictionary does not know.
+ * @param {string} key dictionary key
+ * @param {string} fallback text shown when key has no entry
+ * @returns {string}
+ */
+function trOr(key, fallback){
+  const s=tr(key);
+  return s===key?fallback:s;
+}
+/** whenSec formats a time with seconds in the panel's language and time zone.
+ * @param {string} iso RFC 3339 time
+ * @returns {string} date and time, '' when iso is not a time
+ */
+function whenSec(iso){
+  const d=new Date(iso); if(!+d) return '';
+  const o={year:'numeric',month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'};
+  try{o.timeZone=uiTz()}catch(e){}
+  return d.toLocaleString(uiLocale(), o);
+}
+/** traceHTML draws the stored path of one click: what arrived, every stream the engine tried with the rules that
+ * turned the visitor away, what the visitor got and what the engine knew about the visitor.
+ * @param {object} t click path as the traffic log or a simulation returns it
+ * @returns {string} HTML
+ */
+function traceHTML(t){
+  const v=t.visitor||{};
+  const row=(k,val,mono)=>dash(val)||val===0?`<dt>${esc(k)}</dt><dd class="${mono?'mono':''}">${esc(val)}</dd>`:'';
+  const rowH=(k,html)=>html?`<dt>${esc(k)}</dt><dd>${html}</dd>`:'';
+  const mark=(cls,html)=>`<span class="verdict ${cls}">${html}</span>`;
+  const hops=(t.hops||[]).map(h=>{
+    const items=(h.streams||[]).map(c=>{
+      const verdict=c.match
+        ?(c.name===h.selected?mark('y',icon('check')+esc(tr('tl.picked'))):mark('m',esc(tr('would match'))))
+        :mark('n',icon('x')+esc((c.why||[]).map(whyLabel).join(', ')||'—'));
+      return `<li><span class="nm" title="${esc(c.name)}">${esc(c.name)}</span>${verdict}</li>`;
+    }).join('');
+    const fallback=h.selected==='-'?mark('y',icon('check')+esc(tr('default'))):'';
+    const link=h.link?`<div class="hint">${esc(tr('tl.hop.link'))} <b>${esc(h.link)}</b></div>`:'';
+    const err=h.error?`<div class="hint warn">${esc(trOr('tl.err.'+h.error, h.error))}</div>`:'';
+    return `<div class="tl-hop"><div class="row"><b>${esc(h.group)}</b>${fallback}</div><ul class="tl-streams">${items||`<li class="muted">${esc(tr('flows.nostreams'))}</li>`}</ul>${link}${err}</div>`;
+  }).join('');
+  const headers=(t.headers||[]).map(h=>`<dt class="mono">${esc(h.name)}</dt><dd class="mono">${h.value?esc(h.value):`<span class="muted">${esc(tr('tl.header.none'))}</span>`}</dd>`).join('');
+  const subs=Object.keys(v.subs||{}).sort((a,b)=>parseInt(a.slice(7),10)-parseInt(b.slice(7),10)).map(k=>row(fieldLabel(k),v.subs[k],1)).join('');
+  const {notes:tNotes}=t, notes=(tNotes||[]).map(n=>`<span class="pill">${esc(trOr('tl.note.'+n, n))}</span>`).join(' ');
+  const flags=[v.bot?tr('bot')+': '+v.bot+(v.bot_why?' ('+v.bot_why+')':''):(v.unique?tr('unique'):tr('repeat')), v.proxy?tr('tl.proxy'):'', t.source==='simulation'?'':(t.saved?tr('tl.saved'):'')].filter(Boolean).join(' · ');
+  return `<div class="tl-trace">
+    <div class="sec"><div class="st">${tr('Request')}</div><dl class="kv">
+      ${row(tr('tl.url'),t.url,1)}${row(tr('tl.final'),t.ip,1)}${t.trusted?row(tr('tl.trusted'),'✓'):''}${headers}
+    </dl></div>
+    <div class="sec"><div class="st">${tr('tl.sec.streams')}</div>${hops||`<div class="muted">—</div>`}</div>
+    <div class="sec"><div class="st">${tr('tl.sec.result')}</div><dl class="kv">
+      ${row(fieldLabel('stream'),t.stream==='-'?tr('default (no stream matched)'):t.stream)}${t.via?row(tr('tl.via'),t.via):''}${row(fieldLabel('redirect'),t.action?typeLabel(t.action):'')}${row(fieldLabel('out'),t.out,1)}
+      ${['offer_id','landing_id','network_id'].map(f=>row(fieldLabel(f),t[f],1)).join('')}${row(fieldLabel('cid'),t.cid,1)}
+      ${row(tr('Visit'),flags)}${t.source==='simulation'?'':row(tr('tl.dur'),traceDurText(t.dur_us))}${rowH(tr('tl.notes'),notes)}
+    </dl></div>
+    <div class="sec"><div class="st">${tr('Visitor')}</div><dl class="kv">
+      ${rowH(fieldLabel('country'),v.country?`<span class="flag">${flag(v.country)}</span>${esc(String(v.country).toUpperCase())}`:'')}${row(fieldLabel('city'),v.city)}${row(fieldLabel('region'),v.region)}${row(fieldLabel('timezone'),v.timezone)}
+      ${row(fieldLabel('asn'),v.asn?asnText(v.asn)+(v.org?' · '+v.org:''):v.org)}${row(fieldLabel('operator'),v.operator)}
+      ${row(fieldLabel('device'),v.device?deviceLabel(v.device):'')}${row(fieldLabel('os'),[v.os,v.os_version].filter(Boolean).join(' '))}${row(fieldLabel('browser'),[v.browser,v.browser_ver].filter(Boolean).join(' '))}${row(fieldLabel('brand'),[v.brand,v.model].filter(Boolean).join(' '))}
+      ${row(fieldLabel('lang'),v.lang)}${row(fieldLabel('keyword'),v.keyword)}${row(fieldLabel('referer'),v.referer,1)}${row(fieldLabel('useragent'),v.useragent,1)}${subs}
+    </dl></div></div>`;
+}
+/** replayClick opens the visitor tester of the click's campaign filled with the visitor of a stored click path
+ * and runs it, so the click walks the streams again. Nothing is written to the statistics.
+ * @param {object} t click path; t.campaign is the campaign the visitor entered
+ * @returns {void}
+ */
+function replayClick(t){
+  const id=String((t&&t.campaign)||'');
+  if(!id) return;
+  const f=traceTester(t, UAS);
+  Object.assign(TV, f, {ua:f.ua||TV.ua});
+  TESTER=true; TESTER_RUN=true; SIM=null;
+  closeTrafficLog(); closeDrawer();
+  if(flowCanvasOpen()&&String(CUR.id)===id) renderFlow();
+  else go('flows/'+encodeURIComponent(id));
+}
+let TL=null;   // the open traffic log window: {sc, m, onKey}
+/** closeTrafficLog closes the traffic log window of a campaign, if one is open.
+ * @returns {void}
+ */
+function closeTrafficLog(){
+  if(!TL) return;
+  const w=TL; TL=null;
+  w.sc.remove(); w.m.remove();
+  document.removeEventListener('keydown', w.onKey, true);
+}
+/** setTrafficLogFlag stores the recording switch on the campaign in the page and in its saved snapshot.
+ * The server already holds the switch, so it must not make the campaign look edited; when the campaign is edited
+ * for other reasons, only the saved snapshot takes it and the draft keeps its own changes.
+ * @param {object} g campaign from GROUPS
+ * @param {boolean} enabled whether the campaign records its click paths
+ * @returns {void}
+ */
+function setTrafficLogFlag(g, enabled){
+  const apply=o=>{ if(enabled) delete o.traffic_log_off; else o.traffic_log_off=true; };
+  const prev=SNAP.get(g), dirty=DIRTY.has(g);
+  apply(g);
+  if(prev){
+    if(!dirty) SNAP.set(g,{id:g.id,json:groupJSON(g)});
+    else{
+      const snap=groupParse(prev.json);
+      apply(snap);
+      SNAP.set(g,{id:prev.id,json:groupJSON(snap)});
+    }
+  }
+  markDirty(g);
+}
+/** openTrafficLog shows the latest clicks of a campaign with the path each one took. A row opens into the full
+ * path. The window searches, refreshes, and switches the recording of the campaign on and off.
+ * @param {object} g campaign from GROUPS
+ * @returns {Promise<void>}
+ */
+async function openTrafficLog(g){
+  closeTrafficLog();
+  const id=g.id, base='/api/campaigns/'+encodeURIComponent(id)+'/traffic-log';
+  const canSwitch=canEdit(ME,'campaigns',g);
+  const sc=$('<div class="scrim" style="z-index:74"></div>');
+  const m=$(`<div class="modal tlmodal" role="dialog" aria-modal="true" aria-labelledby="tl-h">
+    <div class="tl-bar"><h3 id="tl-h">${esc(tr('tl.title'))} · ${esc(id)}</h3>
+      ${canSwitch?`<label class="chk" style="margin:0;white-space:nowrap" title="${esc(tr('tl.logging.hint'))}"><input type="checkbox" id="tl-on">${esc(tr('tl.logging'))}</label>`:''}
+      <button type="button" class="icon ghost" id="tl-refresh" title="${esc(tr('Refresh'))}" aria-label="${esc(tr('Refresh'))}">${icon('refresh')}</button>
+      <button type="button" class="icon ghost" id="tl-close" title="${esc(tr('ed.close'))}" aria-label="${esc(tr('ed.close'))}">${icon('x')}</button></div>
+    <input type="search" id="tl-q" placeholder="${esc(tr('tl.search'))}" autocomplete="off" aria-label="${esc(tr('tl.search'))}">
+    <div class="hint" id="tl-info" style="margin:8px 0"></div>
+    <div class="tl-list" id="tl-list" aria-live="polite"></div></div>`);
+  const onKey=e=>{ if(e.key==='Escape'&&TL&&TL.m===m){e.stopPropagation(); e.preventDefault(); closeTrafficLog()} };
+  TL={sc,m,onKey};
+  document.addEventListener('keydown', onKey, true);
+  sc.onclick=closeTrafficLog;
+  document.body.append(sc,m);
+  const list=q('#tl-list',m), info=q('#tl-info',m), box=q('#tl-q',m), on=q('#tl-on',m);
+  let data=null, failed='', term='', seq=0;
+  const open=new Set();
+  const keyOf=t=>(t.cid||'')+'|'+t.ts;
+  const paint=()=>{
+    if(!m.isConnected) return;
+    if(on&&data) on.checked=!!data.enabled;
+    if(failed){info.textContent=''; list.innerHTML=`<div class="state">${esc(failed)}</div>`; return}
+    if(!data){info.textContent=''; list.innerHTML=`<div class="state">${esc(tr('table.loading'))}</div>`; return}
+    if(!data.available){info.textContent=''; list.innerHTML=`<div class="state">${esc(tr('tl.unavailable'))}</div>`; return}
+    info.textContent=trFill('tl.keeps',{n:data.entries.length, max:data.max, hours:data.ttl_hours});
+    if(!data.entries.length){
+      const text=term?tr('Nothing matches')+' “'+term+'”':tr(data.enabled?'tl.empty':'tl.off');
+      list.innerHTML=`<div class="state">${esc(text)}</div>`;
+      return;
+    }
+    list.innerHTML=data.entries.map((t,i)=>{
+      const b=traceBrief(t), isOpen=open.has(keyOf(t));
+      const stream=b.stream==='-'?tr('default'):b.stream;
+      const brief=[b.ip, b.country&&b.country.toUpperCase(), b.device].filter(Boolean).join(' · ');
+      return `<div class="tl-item${isOpen?' open':''}" data-i="${i}">
+        <button type="button" class="tl-head" aria-expanded="${isOpen}">
+          <span class="mono tl-when">${esc(whenSec(t.ts))}</span>
+          <span class="tl-brief ell">${esc(brief)}</span>
+          <span class="tl-out ell">${esc(stream)}${b.action?' → '+esc(typeLabel(b.action)):''}</span>${icon('down')}</button>
+        <div class="tl-body"${isOpen?'':' hidden'}>${isOpen?traceHTML(t)+`<div class="row" style="margin-top:12px"><div class="spacer"></div><button type="button" data-again>${icon('play')}${esc(tr('tl.again'))}</button></div>`:''}</div>
+      </div>`;
+    }).join('');
+    qa('.tl-item',list).forEach(el=>{
+      const t=data.entries[+el.dataset.i];
+      q('.tl-head',el).onclick=()=>{
+        const k=keyOf(t);
+        if(open.has(k)) open.delete(k); else open.add(k);
+        paint();
+      };
+      const again=q('[data-again]',el); if(again) again.onclick=()=>replayClick(t);
+    });
+  };
+  const load=async()=>{
+    const mine=++seq;
+    const qs=new URLSearchParams({limit:'200'});
+    if(term) qs.set('q',term);
+    try{
+      const res=await call('GET',base+'?'+qs.toString());
+      if(mine!==seq||!m.isConnected) return;
+      data=res; failed='';
+    }catch(e){
+      if(mine!==seq||!m.isConnected) return;
+      failed=e.message;
+    }
+    paint();
+  };
+  q('#tl-close',m).onclick=closeTrafficLog;
+  q('#tl-refresh',m).onclick=e=>busy(e.currentTarget, load);
+  bindSearch(box, v=>{term=v.trim(); load()});
+  if(on) on.onchange=async()=>{
+    const want=on.checked;
+    try{
+      const res=await call('PUT',base,{enabled:want});
+      const cur=groupById(id)||g;
+      setTrafficLogFlag(cur, !!res.enabled);
+      if(data) data.enabled=res.enabled;
+      toast(tr('Saved'));
+    }catch(e){on.checked=!want; toast(e.message,true)}
+    paint();
+  };
+  paint();
+  await load();
+  if(m.isConnected) box.focus();
 }
 
 /* ---------- stream editor (drawer) ---------- */
@@ -20890,6 +21170,31 @@ function paintLogDock(total){
     onReload:()=>loadLogs()
   });
 }
+/** loadClickPath fills the "Click path" section of a visit card with the path the engine stored for the click.
+ * A click whose path is gone, or was never recorded, gets an explanation instead.
+ * @param {HTMLElement} el the open visit card
+ * @param {object} x journal row of the visit; x.campaign_id and x.cid name the stored path
+ * @returns {Promise<void>}
+ */
+async function loadClickPath(el, x){
+  const box=q('#x-path .tl-pathbox',el); if(!box) return;
+  const say=text=>{ box.className='tl-pathbox hint'; box.textContent=text };
+  try{
+    const res=await call('GET','/api/campaigns/'+encodeURIComponent(x.campaign_id)+'/traffic-log/'+encodeURIComponent(x.cid));
+    if(!el.isConnected) return;
+    const list=res&&Array.isArray(res.entries)?res.entries:[];
+    if(!list.length){
+      say(res&&res.available?trFill('tl.path.none',{hours:res.click_ttl_hours}):tr('tl.unavailable'));
+      return;
+    }
+    box.className='tl-pathbox';
+    box.innerHTML=list.map(t=>`${list.length>1?`<div class="st">${esc(tr('tl.path.step'+(t.step?1:0)))}</div>`:''}${traceHTML(t)}`).join('')
+      +`<div class="row" style="margin-top:12px"><div class="spacer"></div><button type="button" data-again>${icon('play')}${esc(tr('tl.again'))}</button></div>`;
+    q('[data-again]',box).onclick=()=>replayClick(list[0]);
+  }catch(e){
+    if(el.isConnected) say(e.message);
+  }
+}
 function logDetail(x){
   const row=(k,v,mono)=>dash(v)||v===0?`<dt>${esc(k)}</dt><dd class="${mono?'mono':''}">${esc(v)}</dd>`:'';
   const rowH=(k,html)=>html?`<dt>${esc(k)}</dt><dd>${html}</dd>`:'';
@@ -20914,8 +21219,10 @@ function logDetail(x){
         ${row(fieldLabel('ad_campaign_id'),x.ad_campaign_id,1)}${row(fieldLabel('creative_id'),x.creative_id,1)}${row(fieldLabel('external_id'),x.external_id,1)}
         ${subs}
       </dl></div>
+      ${x.cid&&x.campaign_id?`<div class="sec" id="x-path"><div class="st">${tr('tl.path')}</div><div class="tl-pathbox muted">${esc(tr('table.loading'))}</div></div>`:''}
     </div></aside>`);
   drawer(el); q('[data-x]',el).onclick=closeDrawer;
+  loadClickPath(el,x);
 }
 
 /* ---------- CONVERSIONS ---------- */

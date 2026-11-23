@@ -503,7 +503,7 @@ func mergeCatalog[B any, T any](ctx context.Context, incoming []B, cm catalogMer
 // owner is the importing session UID for CreatedBy on new groups, or empty for root.
 // A group is replaced only when prev already lists its id. Otherwise the stored group is kept.
 // A replaced import keeps its stored number when the incoming row has none,
-// and always keeps the stored sticky_stream switch, which Keitaro does not carry.
+// and always keeps the stored sticky_stream and traffic_log_off switches, which Keitaro does not carry.
 // A new import keeps the number from the merge. Missing numbers are filled for ids in this import.
 // Losses are the bridge merge report. An error means a JSON conversion failed.
 func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, prev ktimport.Manifest, owner string, board string) ([]config.Group, []ktimport.Loss, error) {
@@ -550,6 +550,7 @@ func mergeImportedGroups(existing []config.Group, incoming []ktimport.Group, pre
 				cg.CreatedBy = old.CreatedBy
 			}
 			cg.StickyStream = old.StickyStream
+			cg.TrafficLogOff = old.TrafficLogOff
 			if cg.Notes == "" {
 				cg.Notes = old.Notes
 			}

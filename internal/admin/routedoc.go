@@ -166,6 +166,7 @@ func buildRouteDocs() map[string]routeDoc {
 		add(catalogRouteDocs(c))
 	}
 	add(campaignRouteDocs())
+	add(trafficLogRouteDocs())
 	add(statsRouteDocs())
 	add(journalRouteDocs())
 	add(keywordRouteDocs())

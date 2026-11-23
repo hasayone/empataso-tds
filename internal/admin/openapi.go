@@ -40,6 +40,7 @@ var pathParamDescriptions = map[string]queryParam{
 	"id":         {Description: "Record id.", RU: "Id записи.", UK: "Id запису."},
 	"group":      {Description: "Campaign id (the slug of #/flows/{slug}).", RU: "Id кампании (slug из #/flows/{slug}).", UK: "Id кампанії (slug із #/flows/{slug})."},
 	"name":       {Description: "Name of the stored item.", RU: "Имя сохранённого объекта.", UK: "Ім'я збереженого об'єкта."},
+	"cid":        {Description: "Click id, the cid of a visit.", RU: "Id клика, cid визита.", UK: "Id кліку, cid візиту."},
 	"message_id": {Description: "Id of one reply in a chat.", RU: "Id одного ответа в чате.", UK: "Id однієї відповіді в чаті."},
 	"path": {
 		Description: "Relative file path inside the landing directory; slashes are kept.",

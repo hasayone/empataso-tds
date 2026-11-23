@@ -237,6 +237,7 @@ var writeRouteGuard = map[string]string{
 	"PUT /api/groups/{id}":                      "validateGroupMacros, validateGroupParams",
 	"DELETE /api/groups/{id}":                   "removes a campaign",
 	"PUT /api/campaigns/{id}/postbacks":         "hiddenMacroUse on the template list",
+	"PUT /api/campaigns/{id}/traffic-log":       "one switch, no template",
 	"POST /api/spend":                           "amounts, no templates",
 	"DELETE /api/spend/{id}":                    "removes a row",
 	"POST /api/offers":                          "offerCheck",

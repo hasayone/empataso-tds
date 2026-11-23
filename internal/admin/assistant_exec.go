@@ -92,6 +92,10 @@ var aiCampaignHiddenFields = map[string]bool{
 	"postbacks": true, "postback_ids": true, "curl": true, "b_curl": true, "remote": true,
 }
 
+// aiSimulateHiddenFields lists, in lower case, the keys of a simulation answer no tool result shows:
+// the click path repeats the visitor the caller typed, referer included.
+var aiSimulateHiddenFields = map[string]bool{"trace": true}
+
 // aiCampaignHiddenPrefix is the start of every server-to-server key of a campaign.
 const aiCampaignHiddenPrefix = "s2s"
 
@@ -241,6 +245,10 @@ func (s *Server) aiShape(t aiTool, page aiCatalogQuery, body []byte, secrets []s
 	}
 	if t.Pattern == "GET /api/groups" {
 		v = aiStripKeys(v, aiCampaignHidden)
+	}
+	if t.Pattern == "POST /api/simulate" {
+		// The click path is the panel's view of the walk; the model reads "path".
+		v = aiStripFields(v, aiSimulateHiddenFields)
 	}
 	if t.catalog {
 		v = page.apply(v)

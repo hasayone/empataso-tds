@@ -1445,7 +1445,7 @@ func TestStreamThen(t *testing.T) {
 	}
 	must(t, html, `/api/s2s`, "shared postback catalog")
 	must(t, spaFunctionLine(html, "collectFlow"), `postback_ids`, "campaign stores chosen templates")
-	mustNot(t, html, `/api/campaigns/`, "campaign postback route is not used by the SPA")
+	mustNot(t, html, `+'/postbacks'`, "campaign postback route is not used by the SPA")
 	must(t, html, `class="types"`, "then modes keep the type tabs")
 	must(t, html, `data-then=`, "then mode switch")
 }

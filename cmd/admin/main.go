@@ -296,6 +296,7 @@ func connectRedis(cfg *admin.Config, log *slog.Logger) {
 	}
 	cfg.Sessions = store.NewRedisSessions(rdb)
 	cfg.Limiter = limiterAdapter{c: store.NewCounters(rdb)}
+	cfg.Traffic = store.NewTrafficLog(rdb, store.TrafficLogLimitsFromEnv())
 	cfg.LoginRateLimitShared = true
 	log.Info("redis connected", "addr", a)
 }

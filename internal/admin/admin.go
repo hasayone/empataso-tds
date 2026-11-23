@@ -124,7 +124,10 @@ type Config struct {
 	PasswordHash string // argon2id
 	Sessions     security.SessionStore
 	Stats        StatsProvider
-	Groups       GroupsStore
+	// Traffic reads the click paths of the campaign traffic log from Redis.
+	// Nil means the log is unavailable and its routes answer an empty list.
+	Traffic TrafficLogReader
+	Groups  GroupsStore
 	Offers       *JSONStore[config.Offer]
 	Boards       *JSONStore[config.Board]
 	S2S          *JSONStore[config.OutboundPostback]
@@ -741,6 +744,9 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "PUT /api/docs/settings", http.HandlerFunc(s.handleDocsSettingsPut))
 	s.handle(mux, "GET /api/campaigns/{id}/postbacks", http.HandlerFunc(s.handleCampaignPostbacksGet))
 	s.handle(mux, "PUT /api/campaigns/{id}/postbacks", http.HandlerFunc(s.handleCampaignPostbacksPut))
+	s.handle(mux, "GET /api/campaigns/{id}/traffic-log", http.HandlerFunc(s.handleTrafficLogGet))
+	s.handle(mux, "PUT /api/campaigns/{id}/traffic-log", http.HandlerFunc(s.handleTrafficLogPut))
+	s.handle(mux, "GET /api/campaigns/{id}/traffic-log/{cid}", http.HandlerFunc(s.handleTrafficLogClick))
 	s.handle(mux, "GET /api/s2s", http.HandlerFunc(s.handleS2SGet))
 	s.handle(mux, "PUT /api/s2s", http.HandlerFunc(s.handleS2SPut))
 

@@ -89,6 +89,10 @@ type Group struct {
 	// uniq_method=ip. It works only with Weight, in the engine's own mode (not the
 	// api), and a stream that no longer matches the visitor is drawn again.
 	StickyStream bool `json:"sticky_stream,omitempty"`
+	// TrafficLogOff, when true, stops the engine from recording the click path of
+	// this campaign. The default, false, records it. The admin flips it from the
+	// campaign's traffic log; the engine reads it on every click.
+	TrafficLogOff bool `json:"traffic_log_off,omitempty"`
 	// Num is the stable number shown in the campaign list. It is not the link.
 	Num int `json:"num,omitempty"`
 	// DomainID picks the parked host used as the public link base.

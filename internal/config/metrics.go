@@ -63,6 +63,9 @@ type EngineMetrics struct {
 	Spool     QueueMetrics     `json:"spool"`
 	RedisTrim RedisTrimMetrics `json:"redis_trim"`
 	Landing LandingMetrics `json:"landing"`
+	// TrafficLog counts the click paths written to Redis for the campaign
+	// traffic log. They are a diagnostic aid, so a loss is not alerted on.
+	TrafficLog TrafficLogMetrics `json:"traffic_log"`
 	// OriginLinkAdded is how many own 3xx locations received a path token.
 	// OriginLinkUnknown is how many pointed at an active campaign on a host
 	// that is not in the domain catalog. RootMissing is how many conversions
@@ -71,6 +74,14 @@ type EngineMetrics struct {
 	OriginLinkUnknown int64 `json:"origin_link_unknown_host"`
 	RootMissing       int64 `json:"root_missing"`
 	Previous            *PreviousRun   `json:"previous,omitempty"`
+}
+
+// TrafficLogMetrics counts click paths since StartedAt: Written reached Redis,
+// Dropped found the write queue full, Failed could not be packed or stored.
+type TrafficLogMetrics struct {
+	Written int64 `json:"written"`
+	Dropped int64 `json:"dropped"`
+	Failed  int64 `json:"failed"`
 }
 
 // LandingMetrics counts the engine's requests to the PHP sidecar that runs PHP

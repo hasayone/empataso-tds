@@ -74,6 +74,17 @@ type Deps struct {
 	// Roll returns an integer in [0, n). Nil uses math/rand. Weight selection
 	// and offer shares both call it so tests can force a branch.
 	Roll func(n int) int
+	// Seen, when set, is called once for every active stream the selection
+	// tried, with the first rule that turned the visitor away or "" when the
+	// stream matched. It builds the click path and costs one nil compare when unset.
+	Seen func(s *config.Stream, why string)
+}
+
+// seen reports one verdict to the Seen hook, if there is one.
+func (d Deps) seen(s *config.Stream, why string) {
+	if d.Seen != nil {
+		d.Seen(s, why)
+	}
 }
 
 // Select returns the stream that should serve the visitor.
@@ -91,7 +102,9 @@ func Select(g *config.Group, v Visitor, deps Deps) (*config.Stream, bool) {
 		if !s.Status {
 			continue
 		}
-		if matches(s, v, deps) {
+		why := Why(s, v, deps)
+		deps.seen(s, why)
+		if why == "" {
 			return s, true
 		}
 	}
@@ -107,7 +120,12 @@ func selectByWeight(g *config.Group, v Visitor, deps Deps) (*config.Stream, bool
 	var weights []int
 	for i := range g.Streams {
 		s := &g.Streams[i]
-		if !s.Status || !matches(s, v, probe) {
+		if !s.Status {
+			continue
+		}
+		why := Why(s, v, probe)
+		deps.seen(s, why)
+		if why != "" {
 			continue
 		}
 		w := s.Weight
@@ -133,6 +151,7 @@ func selectByWeight(g *config.Group, v Visitor, deps Deps) (*config.Stream, bool
 		if deps.Limiter == nil || !s.Rules.Limit.Enabled || deps.Limiter.Allowed(s.Name, s.Rules.Limit) {
 			return s, true
 		}
+		deps.seen(s, "limit")
 		matched = append(matched[:idx], matched[idx+1:]...)
 		weights = append(weights[:idx], weights[idx+1:]...)
 	}
@@ -595,7 +614,42 @@ func buildRegexp(raw string) *regexp.Regexp {
 func whyOr(s *config.Stream, v Visitor, deps Deps) string {
 	probe := deps
 	probe.Limiter = nil
+	probe.Seen = nil
 	r := s.Rules
+	checks := ruleChecks(r)
+	passed := false
+	first := ""
+	active := 0
+	for _, c := range checks {
+		if !c.on {
+			continue
+		}
+		active++
+		cp := *s
+		cp.FilterOr = false
+		cp.Rules = c.rule
+		if why := whyAnd(&cp, v, probe); why != "" {
+			if first == "" {
+				first = c.name
+			}
+			continue
+		}
+		passed = true
+		break
+	}
+	if active > 0 && !passed {
+		return first
+	}
+	if r.Limit.Enabled && deps.Limiter != nil && !deps.Limiter.Allowed(s.Name, r.Limit) {
+		return "limit"
+	}
+	return ""
+}
+
+// ruleChecks lists every condition of a stream as a check that holds only that
+// condition, with its rule key and whether it is configured. r is the stream's
+// rules. The order is the order the rule keys are reported in.
+func ruleChecks(r config.Rules) []ruleCheck {
 	checks := []ruleCheck{
 		{name: "lang", on: listOn(r.Lang), rule: config.Rules{Lang: r.Lang}},
 		{name: "country", on: listOn(r.Country), rule: config.Rules{Country: r.Country}},
@@ -624,34 +678,7 @@ func whyOr(s *config.Stream, v Visitor, deps Deps) string {
 		{name: "timezone", on: listOn(r.Timezone), rule: config.Rules{Timezone: r.Timezone}},
 		{name: "get", on: listOn(r.Query), rule: config.Rules{Query: r.Query}},
 	}
-	checks = append(checks, extraChecks(r)...)
-	passed := false
-	first := ""
-	active := 0
-	for _, c := range checks {
-		if !c.on {
-			continue
-		}
-		active++
-		cp := *s
-		cp.FilterOr = false
-		cp.Rules = c.rule
-		if why := whyAnd(&cp, v, probe); why != "" {
-			if first == "" {
-				first = c.name
-			}
-			continue
-		}
-		passed = true
-		break
-	}
-	if active > 0 && !passed {
-		return first
-	}
-	if r.Limit.Enabled && deps.Limiter != nil && !deps.Limiter.Allowed(s.Name, r.Limit) {
-		return "limit"
-	}
-	return ""
+	return append(checks, extraChecks(r)...)
 }
 
 // listOn reports whether a list filter is actually applied.

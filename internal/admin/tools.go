@@ -255,8 +255,10 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 	cats.Country = vi.Country
 
 	var path []simStep
+	var hops []router.Hop
 	for hop := 0; ; hop++ {
 		step := simStep{Group: grp.ID, Selected: "-", Redirect: grp.Redirect, Out: grp.Out, Streams: []simStream{}}
+		th := router.Hop{Group: grp.ID, Streams: []router.StreamCheck{}}
 		chosen, _ := router.Select(grp, v, deps)
 		if chosen != nil {
 			step.Selected = chosen.Name
@@ -277,11 +279,18 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 			if st.Status {
 				ss.Why = router.Why(st, v, deps)
 				ss.Match = ss.Why == ""
+				check := router.StreamCheck{Name: st.Name, Match: ss.Match}
+				if !ss.Match {
+					check.Why = router.WhyAll(st, v, deps)
+				}
+				th.Streams = append(th.Streams, check)
 			}
 			step.Streams = append(step.Streams, ss)
 		}
+		th.Selected = step.Selected
 		if step.Redirect != "group" {
 			path = append(path, step)
+			hops = append(hops, th)
 			break
 		}
 		next := find(strings.TrimSpace(step.Out))
@@ -297,11 +306,67 @@ func (s *Server) handleSimulate(w http.ResponseWriter, r *http.Request) {
 		}
 		path = append(path, step)
 		if step.Error != "" {
+			th.Error = "group_link"
+			hops = append(hops, th)
 			break
 		}
+		th.Link = next.ID
+		hops = append(hops, th)
 		grp, v.Subs = next, subsOf(next)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"visitor": vi, "unique": v.Unique, "lang": lang, "path": path})
+	last := path[len(path)-1]
+	trace := router.Trace{
+		TS: time.Now().UTC(), Source: router.TraceSimulation, Campaign: grp.ID, Name: grp.Name,
+		URL: simURL(req.Group, req.Visitor.Query), IP: vi.IP, Hops: hops, Stream: last.Selected,
+		Action: last.Redirect, Out: last.Out,
+		Visitor: simVisitor(vi, v, req.Visitor.UserAgent, strings.TrimSpace(req.Visitor.Referer), info),
+	}
+	if req.OfferStep {
+		trace.Step = 1
+	}
+	trace.Seal()
+	writeJSON(w, http.StatusOK, map[string]any{"visitor": vi, "unique": v.Unique, "lang": lang, "path": path, "trace": trace})
+}
+
+// simURL is the address a simulated visitor asked for: the campaign id with the
+// query as typed, secret values masked.
+func simURL(group, query string) string {
+	u := "/" + group
+	if q := strings.TrimPrefix(strings.TrimSpace(query), "?"); q != "" {
+		u += "?" + q
+	}
+	return router.MaskURL(u)
+}
+
+// simVisitor fills the visitor part of a simulated click path from what the
+// simulator worked out.
+//
+// vi is the resolved address, v the visitor the router saw, ua and ref the
+// request text and info the parsed User-Agent. Empty and "-" values stay empty.
+func simVisitor(vi visitorInfo, v router.Visitor, ua, ref string, info detect.Info) router.VisitorInfo {
+	clean := func(s string) string {
+		if s == router.Empty {
+			return ""
+		}
+		return s
+	}
+	out := router.VisitorInfo{
+		Country: clean(vi.Country), Region: clean(vi.Region), City: clean(vi.City), Timezone: clean(vi.Timezone),
+		ASN: vi.ASN, Org: clean(vi.Org), Operator: clean(vi.Operator),
+		Device: info.Device, OS: info.OS, OSVersion: info.OSVersion, Browser: info.Browser, BrowserVer: info.BrowserVer,
+		Brand: info.Brand, Model: info.Model, Lang: clean(v.Lang), Referer: ref, Keyword: v.Key, UserAgent: ua,
+		Proxy: vi.Proxy, Unique: v.Unique,
+	}
+	for i, s := range v.Subs {
+		if s == "" {
+			continue
+		}
+		if out.Subs == nil {
+			out.Subs = map[string]string{}
+		}
+		out.Subs[config.SubIDRuleKey(i+1)] = s
+	}
+	return out
 }
 
 // simDomain returns the referer host without "www." for the simulator, or

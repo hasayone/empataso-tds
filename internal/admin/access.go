@@ -233,6 +233,9 @@ func addCoreRoutes(m map[string]routeRule, open func() routeRule, rule func(sect
 	m["DELETE /api/groups/{id}"] = rule(secFlows)
 	m["GET /api/campaigns/{id}/postbacks"] = rule(secFlows)
 	m["PUT /api/campaigns/{id}/postbacks"] = rule(secFlows)
+	m["GET /api/campaigns/{id}/traffic-log"] = rule(secLogs)
+	m["GET /api/campaigns/{id}/traffic-log/{cid}"] = rule(secLogs)
+	m["PUT /api/campaigns/{id}/traffic-log"] = rule(secFlows)
 	m["GET /api/s2s"] = rule(secFlows)
 	m["PUT /api/s2s"] = routeRule{sec: secFlows, admin: true}
 	m["GET /api/spend"] = rule(secFlows)

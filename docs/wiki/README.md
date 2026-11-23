@@ -27,6 +27,7 @@
 
 - [Страна в настройках](country.md)
 - [Кампании](flows.md)
+- [Лог трафика](traffic-log.md)
 - [Журнал конверсий](conversions.md)
 - [Ключевые слова](keywords.md)
 - [Партнёрские сети](affiliate-networks.md)

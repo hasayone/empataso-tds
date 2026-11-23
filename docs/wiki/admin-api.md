@@ -243,11 +243,14 @@ nginx менять не нужно: в `deploy/nginx/emtds.conf` (по IP) и `e
 | `DELETE /api/groups/{id}` | Удалить одну кампанию. |  |
 | `DELETE /api/spend/{id}` | Удалить одну сохранённую запись расхода. |  |
 | `GET /api/campaigns/{id}/postbacks` | Получить исходящие постбек-шаблоны кампании. |  |
+| `GET /api/campaigns/{id}/traffic-log` | Получить последние пути кликов кампании. |  |
+| `GET /api/campaigns/{id}/traffic-log/{cid}` | Получить сохранённый путь одного клика. |  |
 | `GET /api/groups` | Список кампаний. |  |
 | `GET /api/s2s` | Получить серверные (S2S) постбек-шаблоны. |  |
 | `GET /api/spend` | Список сохранённых расходов кампаний. |  |
 | `POST /api/spend` | Сохранить расход кампании за период. |  |
 | `PUT /api/campaigns/{id}/postbacks` | Заменить исходящие постбек-шаблоны кампании. |  |
+| `PUT /api/campaigns/{id}/traffic-log` | Включить или выключить запись путей кликов кампании. |  |
 | `PUT /api/groups` | Заменить весь список кампаний. | `groups_replace` |
 | `PUT /api/groups/{id}` | Сохранить одну кампанию. |  |
 | `PUT /api/s2s` | Заменить серверные (S2S) постбек-шаблоны. |  |

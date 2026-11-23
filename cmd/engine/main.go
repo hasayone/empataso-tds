@@ -132,6 +132,7 @@ func main() {
 	// Redis counters (phase 4): uniq/firewall/limit. Optional. Short timeouts:
 	// every counter fails open, so a slow Redis costs a click milliseconds.
 	var counters *store.Counters
+	var trafficStore *store.TrafficLog
 	if a := config.Env("EMTDS_REDIS_ADDR"); a != "" {
 		rt := store.EngineRedisTimeouts()
 		password := config.Env("EMTDS_REDIS_PASSWORD")
@@ -144,6 +145,7 @@ func main() {
 			rdb = store.NewRedisClient(a, password, 0, rt)
 		}
 		counters = store.NewCounters(rdb)
+		trafficStore = store.NewTrafficLog(rdb, store.TrafficLogLimitsFromEnv())
 		uniqMax, uerr := store.UniqMaxFromEnv()
 		if uerr != nil {
 			log.Warn("uniqueness window ceiling", "err", uerr)
@@ -282,6 +284,9 @@ func main() {
 	}
 
 	d.goBG(func() { d.serveOutbound(ctx) })
+	if d.traffic = newTrafficLogger(trafficStore, router.Deps{IP: lists}, log); d.traffic != nil {
+		d.traffic.run(ctx, d.goBG)
+	}
 	// The deferred Close runs after the log buffer is closed, so the last
 	// snapshot carries the final loss counters.
 	collectMetrics, metricsFile := d.startMetrics(log, time.Now())
