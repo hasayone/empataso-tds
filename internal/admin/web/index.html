@@ -1384,6 +1384,7 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   .tl-bar h3{margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .tl-list{flex:1;min-height:140px;overflow:auto;border:1px solid var(--border);border-radius:10px}
   .tl-item+.tl-item{border-top:1px solid var(--border)}
+  .tl-line{display:flex;align-items:center;padding-right:8px}.tl-line .tl-head{flex:1;min-width:0}.tl-again{flex:none}
   .tl-head{display:grid;grid-template-columns:auto minmax(0,1fr) minmax(0,auto) auto;align-items:center;gap:12px;width:100%;height:auto;min-height:38px;padding:8px 12px;border:0;border-radius:0;background:none;box-shadow:none;color:var(--fg);font:inherit;font-size:13px;text-align:left;cursor:pointer}
   .tl-head:hover{background:var(--accent-soft)}
   .tl-head svg:last-child{transition:transform .15s}
@@ -17064,11 +17065,11 @@ async function openTrafficLog(g){
       const stream=b.stream==='-'?tr('default'):b.stream;
       const brief=[b.ip, b.country&&b.country.toUpperCase(), b.device].filter(Boolean).join(' · ');
       return `<div class="tl-item${isOpen?' open':''}" data-i="${i}">
-        <button type="button" class="tl-head" aria-expanded="${isOpen}">
+        <div class="tl-line"><button type="button" class="tl-head" aria-expanded="${isOpen}">
           <span class="mono tl-when">${esc(whenSec(t.ts))}</span>
           <span class="tl-brief ell">${esc(brief)}</span>
-          <span class="tl-out ell">${esc(stream)}${b.action?' → '+esc(typeLabel(b.action)):''}</span>${icon('down')}</button>
-        <div class="tl-body"${isOpen?'':' hidden'}>${isOpen?traceHTML(t)+`<div class="row" style="margin-top:12px"><div class="spacer"></div><button type="button" data-again>${icon('play')}${esc(tr('tl.again'))}</button></div>`:''}</div>
+          <span class="tl-out ell">${esc(stream)}${b.action?' → '+esc(typeLabel(b.action)):''}</span>${icon('down')}</button><button type="button" class="icon sm ghost tl-again" data-again title="${esc(tr('tl.again'))}" aria-label="${esc(tr('tl.again'))}">${icon('target')}</button></div>
+        <div class="tl-body"${isOpen?'':' hidden'}>${isOpen?traceHTML(t):''}</div>
       </div>`;
     }).join('');
     qa('.tl-item',list).forEach(el=>{
@@ -21189,7 +21190,7 @@ async function loadClickPath(el, x){
     }
     box.className='tl-pathbox';
     box.innerHTML=list.map(t=>`${list.length>1?`<div class="st">${esc(tr('tl.path.step'+(t.step?1:0)))}</div>`:''}${traceHTML(t)}`).join('')
-      +`<div class="row" style="margin-top:12px"><div class="spacer"></div><button type="button" data-again>${icon('play')}${esc(tr('tl.again'))}</button></div>`;
+      +`<div class="row" style="margin-top:12px"><div class="spacer"></div><button type="button" data-again>${icon('target')}${esc(tr('tl.again'))}</button></div>`;
     q('[data-again]',box).onclick=()=>replayClick(list[0]);
   }catch(e){
     if(el.isConnected) say(e.message);

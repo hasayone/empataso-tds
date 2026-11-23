@@ -52,6 +52,7 @@ func TestTrafficLogLogicWiring(t *testing.T) {
 		"loadClickPath(el,x)",
 		"replayClick(list[0])",
 		"replayClick(t)",
+		`class="icon sm ghost tl-again" data-again`,
 		"SIM.trace?",
 		"TV.uaRaw||UAS[TV.ua]",
 		"if(TESTER_RUN){TESTER_RUN=false; run()}",
