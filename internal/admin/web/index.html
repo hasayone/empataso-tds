@@ -26994,7 +26994,7 @@ async function offers(arg,live){
       onPaint:()=>{if(live()) paintTable()}
     });
     qa('[data-oedit]',grid).forEach(row=>row.onclick=e=>{
-      if(e.target.closest('[data-omore],[data-otoggle],.pick,[data-ogeo]')) return;
+      if(e.target.closest('[data-omore],[data-otoggle],[data-ogeo],.pick')) return;
       const o=(rows||[]).find(x=>String(x.id)===row.dataset.oedit);
       if(o&&canEdit(ME,'offers',o)) openOffer(row.dataset.oedit);
     });
