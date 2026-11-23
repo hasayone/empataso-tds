@@ -79,3 +79,55 @@ func (d *engineDeps) sourceReads(grp *config.Group, q url.Values, v *router.Visi
 	}
 	return subs, config.SourceExtras(q, src)
 }
+
+// collectedClick is the sub ids and extra fields already gathered for one click.
+// The keyword is stored on the visitor, not here. An empty field is not collected.
+type collectedClick struct {
+	subs   [config.MaxSubID]string
+	extras config.Extras
+}
+
+// fillCollected reads grp's traffic source from q and fills only the keyword,
+// sub ids and extras that are still empty.
+//
+// grp is the campaign whose parameter names are applied to q. q is the request
+// query. v is the visitor and is updated: Key and Subs become the merged
+// values. prev holds the sub ids and extras already collected on this chain.
+// apiMode and apiKey are the same arguments as for sourceReads. A value already
+// collected stays, even when grp's mapping reads a different value or reads
+// nothing. A field that is still empty takes grp's value when that value is
+// non-empty. It returns the merged sub ids and extras. It does not fail.
+func (d *engineDeps) fillCollected(grp *config.Group, q url.Values, v *router.Visitor, prev collectedClick, apiMode bool, apiKey string) collectedClick {
+	prevKey := v.Key
+	nextSubs, nextExtras := d.sourceReads(grp, q, v, apiMode, apiKey)
+	if prevKey != "" {
+		v.Key = prevKey
+	}
+	var subs [config.MaxSubID]string
+	for i := range subs {
+		if prev.subs[i] != "" {
+			subs[i] = prev.subs[i]
+			continue
+		}
+		subs[i] = nextSubs[i]
+	}
+	v.Subs = subs
+	return collectedClick{
+		subs: subs,
+		extras: config.Extras{
+			Site:         keepCollected(prev.extras.Site, nextExtras.Site),
+			AdCampaignID: keepCollected(prev.extras.AdCampaignID, nextExtras.AdCampaignID),
+			CreativeID:   keepCollected(prev.extras.CreativeID, nextExtras.CreativeID),
+			ExternalID:   keepCollected(prev.extras.ExternalID, nextExtras.ExternalID),
+		},
+	}
+}
+
+// keepCollected returns prev when it is already set and next otherwise.
+// prev and next are one click field. There is no error.
+func keepCollected(prev, next string) string {
+	if prev != "" {
+		return prev
+	}
+	return next
+}

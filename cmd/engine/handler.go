@@ -403,6 +403,16 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	// that finally served them.
 	now := time.Now()
 	originID, originName, chainRoot, issued := d.resolveOrigin(query, grp, apiMode, apiReq, now)
+	// A redirect from another campaign of this tracker names that campaign in
+	// origin. Its mapping already collected the click; this campaign fills only
+	// the fields that mapping left empty.
+	if !apiMode && strings.TrimSpace(query.Get("origin")) != "" && originID != "" && grp != nil && originID != grp.ID && d.groups != nil {
+		if og, ok := d.groups.Get(originID); ok && og != nil && og.Status {
+			baseSubs, baseExtras := d.sourceReads(og, query, &v, apiMode, apiKey)
+			kept := d.fillCollected(grp, query, &v, collectedClick{subs: baseSubs, extras: baseExtras}, apiMode, apiKey)
+			subs, extras = kept.subs, kept.extras
+		}
+	}
 
 	var (
 		streamName, redirect, outRaw, ctype string
@@ -466,7 +476,10 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			via = grp.ID + "/" + streamName
 		}
 		grp = next
-		subs, extras = d.sourceReads(grp, query, &v, apiMode, apiKey) // the new group's own source
+		// Keep what the entry campaign collected. This campaign's mapping fills
+		// only a keyword, sub id or extra that is still empty.
+		kept := d.fillCollected(grp, query, &v, collectedClick{subs: subs, extras: extras}, apiMode, apiKey)
+		subs, extras = kept.subs, kept.extras
 	}
 
 	// 4.5) Bot detection by the selected stream's toggles (after selection).
@@ -645,6 +658,16 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			Operator: operator, Bot: bot, Uniq: b2yn(unique), Lang: v.Lang, Mac: mac})
 		if redirect == "http_redirect" {
 			res.Location = d.withOrigin(res.Location, originTok)
+			// Link names belong to the campaign that first collected the click.
+			// A path token already names that campaign; otherwise it is the one
+			// the visitor entered on this request.
+			named := entered
+			if originID != "" && entered != nil && originID != entered.ID && d.groups != nil {
+				if og, ok := d.groups.Get(originID); ok && og != nil && og.Status {
+					named = og
+				}
+			}
+			res.Location = d.carryClickParams(res.Location, named, v.Key, subs, extras)
 		}
 	}
 

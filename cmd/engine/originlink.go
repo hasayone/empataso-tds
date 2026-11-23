@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -125,4 +126,105 @@ func setOriginQuery(body, token string) string {
 		rest = next
 	}
 	return body + "&" + pair
+}
+
+// carryClickParams adds the collected click values to a redirect that stays on
+// this tracker, under the link names of the campaign that received them.
+//
+// location is the Location value after the path token is applied. grp is the
+// campaign the visitor entered; its parameter map names the query keys, and
+// the placeholders stored for its link are not written. keyword, subs and
+// extras are the values collected for this click. A relative address, a foreign
+// host and an address whose first path segment is not an active campaign are
+// returned unchanged. An empty value is not written. A query key that is
+// already present is left as it is, including when its value is empty, and
+// origin is never replaced. The fragment stays where it is. It does not fail.
+func (d *engineDeps) carryClickParams(location string, grp *config.Group, keyword string, subs [config.MaxSubID]string, extras config.Extras) string {
+	if d == nil || grp == nil || location == "" {
+		return location
+	}
+	body, frag := location, ""
+	if i := strings.IndexByte(location, '#'); i >= 0 {
+		body, frag = location[:i], location[i:]
+	}
+	if !strings.HasPrefix(body, "http://") && !strings.HasPrefix(body, "https://") {
+		return location
+	}
+	u, err := url.Parse(body)
+	if err != nil || u.Host == "" {
+		return location
+	}
+	seg := firstCampaignSegment(u.Path)
+	if seg == "" || d.groups == nil {
+		return location
+	}
+	g, ok := d.groups.Get(seg)
+	if !ok || g == nil || !g.Status {
+		return location
+	}
+	if !d.ownHost(config.NormalizeHTTPHost(u.Host)) {
+		return location
+	}
+	have, err := url.ParseQuery(u.RawQuery)
+	if err != nil {
+		return location
+	}
+	src, _ := d.sourceOf(grp)
+	src = config.EffectiveSource(grp, src)
+	seen := make(map[string]struct{}, len(have))
+	for name := range have {
+		seen[name] = struct{}{}
+	}
+	add := make([]string, 0, 4)
+	put := func(field, value string) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return
+		}
+		name := clickLinkName(src, field)
+		if name == "" || name == "origin" {
+			return
+		}
+		if _, taken := seen[name]; taken {
+			return
+		}
+		seen[name] = struct{}{}
+		add = append(add, url.QueryEscape(name)+"="+url.QueryEscape(value))
+	}
+	put("keyword", keyword)
+	for i := 0; i < config.MaxSubID; i++ {
+		put("sub_id_"+strconv.Itoa(i+1), subs[i])
+	}
+	put("site", extras.Site)
+	put("ad_campaign_id", extras.AdCampaignID)
+	put("creative_id", extras.CreativeID)
+	put("external_id", extras.ExternalID)
+	if len(add) == 0 {
+		return location
+	}
+	joined := strings.Join(add, "&")
+	switch {
+	case !strings.Contains(body, "?"):
+		body += "?" + joined
+	case strings.HasSuffix(body, "?") || strings.HasSuffix(body, "&"):
+		body += joined
+	default:
+		body += "&" + joined
+	}
+	return body + frag
+}
+
+// clickLinkName is the query key a campaign writes for one collected field.
+//
+// src is the campaign's effective traffic source and may be nil. field is
+// keyword, sub_id_N or an extra click field. A non-empty mapped name is the
+// key; otherwise field itself is the key. Link placeholders are not read.
+// There is no error.
+func clickLinkName(src *config.TrafficSource, field string) string {
+	if src != nil {
+		if mapped := strings.TrimSpace(src.Parameters[field]); mapped != "" {
+			return mapped
+		}
+	}
+	return field
 }

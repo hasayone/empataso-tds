@@ -6,9 +6,10 @@ import (
 	"github.com/hasayone/empataso-tds/internal/config"
 )
 
-// After redirect=group the keyword is read through the serving group's source:
-// the entry group's mapped keyword does not leak, the plain q stays as the base.
-func TestKeywordRecomputedOnGroupHop(t *testing.T) {
+// redirect=group keeps the keyword the entry campaign already collected.
+// A different keyword name on the next campaign does not replace it, and a
+// missing name there does not fall back to q once a keyword was collected.
+func TestKeywordKeptAcrossGroupHop(t *testing.T) {
 	gg := linked(
 		&config.Group{ID: "a", Status: true, SourceID: "sa", Redirect: "stop", Streams: []config.Stream{link("to_b", "b", config.Rules{})}},
 		&config.Group{ID: "b", Status: true, SourceID: "sb", Redirect: "show_text", Out: "B"},
@@ -23,15 +24,15 @@ func TestKeywordRecomputedOnGroupHop(t *testing.T) {
 	if len(ins.events) != 2 {
 		t.Fatalf("%d events, want 2", len(ins.events))
 	}
-	got := map[string]bool{ins.events[0].Keyword: true, ins.events[1].Keyword: true}
-	if !got["serving-kw"] || !got["base"] || len(got) != 2 {
-		t.Errorf("keywords = %v, want serving-kw and base (never entry-kw)", got)
+	if ins.events[0].Keyword != "entry-kw" || ins.events[1].Keyword != "entry-kw" {
+		t.Errorf("keywords = %q %q, want entry-kw both times", ins.events[0].Keyword, ins.events[1].Keyword)
 	}
 }
 
-// After redirect=group the macros and the click log carry the sub ids and
-// extras read through the serving group's source, not the entry group's.
-func TestSourceReadsRecomputedOnGroupHopForMacrosAndLog(t *testing.T) {
+// redirect=group keeps the sub ids and extras the entry campaign collected.
+// Macros of a later redirect expand those values. A foreign host is not given
+// the tracker's own query names.
+func TestSourceReadsKeptAcrossGroupHopForMacrosAndLog(t *testing.T) {
 	gg := linked(
 		&config.Group{ID: "a", Status: true, SourceID: "sa", Redirect: "stop", Streams: []config.Stream{link("to_b", "b", config.Rules{})}},
 		&config.Group{ID: "b", Status: true, SourceID: "sb", Redirect: "http_redirect", Out: "https://offer.example/go?s={sub_id_1}"},
@@ -42,13 +43,13 @@ func TestSourceReadsRecomputedOnGroupHopForMacrosAndLog(t *testing.T) {
 	))
 	rec := do(t, h, "/a?a1=entry&b1=serving&asite=entry-site&bsite=serving-site", "8.8.8.8", chrome)
 	stop()
-	if loc := rec.Header().Get("Location"); loc != "https://offer.example/go?s=serving" {
-		t.Errorf("macro read the entry group's parameter: Location = %q", loc)
+	if loc := rec.Header().Get("Location"); loc != "https://offer.example/go?s=entry" {
+		t.Errorf("Location = %q, want the entry sub id and no added query", loc)
 	}
 	if len(ins.events) != 1 {
 		t.Fatalf("%d events, want 1", len(ins.events))
 	}
-	if ev := ins.events[0]; ev.Subs[0] != "serving" || ev.Site != "serving-site" {
-		t.Errorf("event sub_id_1=%q site=%q, want the serving group's values", ev.Subs[0], ev.Site)
+	if ev := ins.events[0]; ev.Subs[0] != "entry" || ev.Site != "entry-site" {
+		t.Errorf("event sub_id_1=%q site=%q, want the entry campaign's values", ev.Subs[0], ev.Site)
 	}
 }

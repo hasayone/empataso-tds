@@ -343,10 +343,10 @@ func TestKeywordAliasSkipsNamesBoundToOtherFields(t *testing.T) {
 	}
 }
 
-// After redirect=group the base keyword is chosen again by the serving group's
-// source: a name the entry group binds is free in the serving group, and a name
-// only the serving group binds does not reach the keyword.
-func TestKeywordAliasRecomputedOnGroupHop(t *testing.T) {
+// redirect=group keeps a keyword or sub id that was already collected and
+// fills only the field that is still empty. A name bound on one campaign of
+// the chain is not dropped when the other campaign reads it differently.
+func TestKeywordAliasKeptAcrossGroupHop(t *testing.T) {
 	gg := linked(
 		&config.Group{ID: "free2bound", Status: true, Redirect: "stop", Streams: []config.Stream{link("to", "bound", config.Rules{})}},
 		&config.Group{ID: "bound", Status: true, SourceID: "sbound", Redirect: "show_text", Out: "x"},
@@ -356,11 +356,11 @@ func TestKeywordAliasRecomputedOnGroupHop(t *testing.T) {
 	sources := []config.TrafficSource{{ID: "sbound", Parameters: map[string]string{"sub_id_1": "utm_term"}}}
 
 	e := clickAt(t, gg, sources, "/free2bound?utm_term=T")
-	if e.Keyword != "" || e.Subs[0] != "T" {
-		t.Errorf("entry without a source, serving group binds utm_term: keyword %q sub_id_1 %q, want empty and T", e.Keyword, e.Subs[0])
+	if e.Keyword != "T" || e.Subs[0] != "T" {
+		t.Errorf("entry keyword, serving group binds utm_term: keyword %q sub_id_1 %q, want T and T", e.Keyword, e.Subs[0])
 	}
 	e = clickAt(t, gg, sources, "/bound2free?utm_term=T")
-	if e.Keyword != "T" || e.Subs[0] != "" {
-		t.Errorf("entry binds utm_term, serving group has no source: keyword %q sub_id_1 %q, want T and empty", e.Keyword, e.Subs[0])
+	if e.Keyword != "T" || e.Subs[0] != "T" {
+		t.Errorf("entry sub id, serving group has no source: keyword %q sub_id_1 %q, want T and T", e.Keyword, e.Subs[0])
 	}
 }

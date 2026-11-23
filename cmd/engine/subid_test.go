@@ -63,8 +63,10 @@ func TestSubIDRuleWithoutSourceReadsOwnName(t *testing.T) {
 	}
 }
 
-// After redirect=group the sub ids are read again through the new group's source.
-func TestSubIDRecomputedOnGroupHop(t *testing.T) {
+// redirect=group keeps a sub id the entry campaign already collected.
+// The next campaign's mapping fills a sub id that is still empty and does not
+// replace a collected value, even with a different non-empty read.
+func TestSubIDKeptAcrossGroupHop(t *testing.T) {
 	gg := linked(
 		&config.Group{ID: "a", Status: true, SourceID: "sa", Redirect: "stop", Streams: []config.Stream{link("to_b", "b", config.Rules{})}},
 		&config.Group{ID: "b", Status: true, SourceID: "sb", Redirect: "show_text", Out: "B DEFAULT",
@@ -74,10 +76,13 @@ func TestSubIDRecomputedOnGroupHop(t *testing.T) {
 		config.TrafficSource{ID: "sa", Parameters: map[string]string{"sub_id_1": "sub1"}},
 		config.TrafficSource{ID: "sb", Parameters: map[string]string{"sub_id_1": "x"}},
 	))
-	if got := do(t, h, "/a?x=vip&sub1=other", "8.8.8.8", chrome).Body.String(); got != "B VIP" {
-		t.Errorf("new group's own parameter: body = %q, want B VIP", got)
+	if got := do(t, h, "/a?x=vip&sub1=other", "8.8.8.8", chrome).Body.String(); got != "B DEFAULT" {
+		t.Errorf("collected sub id replaced: body = %q, want B DEFAULT", got)
 	}
-	if got := do(t, h, "/a?sub1=vip", "8.8.8.8", chrome).Body.String(); got != "B DEFAULT" {
-		t.Errorf("entry group's parameter must not leak into the next group: body = %q, want B DEFAULT", got)
+	if got := do(t, h, "/a?sub1=vip", "8.8.8.8", chrome).Body.String(); got != "B VIP" {
+		t.Errorf("collected sub id cleared: body = %q, want B VIP", got)
+	}
+	if got := do(t, h, "/a?x=vip", "8.8.8.8", chrome).Body.String(); got != "B VIP" {
+		t.Errorf("empty sub id not filled: body = %q, want B VIP", got)
 	}
 }
