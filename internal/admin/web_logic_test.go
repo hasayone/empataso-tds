@@ -152,6 +152,20 @@ eq(dayList([true,true,false,true,false,false,false]), 'Mon Wed Sun', 'Monday fir
 eq(macroHTML('go [KEY] &amp; [PAR-1] [RANDNUM-1-9] [()COUNTRY()]'),
   'go <span class="mac">[KEY]</span> &amp; <span class="mac">[PAR-1]</span> <span class="mac">[RANDNUM-1-9]</span> <span class="mac">[()COUNTRY()]</span>', 'macros');
 eq(macroHTML('[&quot;a&quot;] [lower] [1]'), '[&quot;a&quot;] [lower] [1]', 'not macros');
+const mac='<span class="mac">';
+const url='https://emaso.online/middleware?subid=[CID]&bundle_id={bundle_id}&country=[COUNTRY]&target_keys={target_keys}&x={not_a_macro}';
+const painted=macroHTML(url, ['bundle_id','target_keys']);
+eq(painted.includes(mac+'{bundle_id}</span>'), true, 'a known alias in braces uses the CID class');
+eq(painted.includes(mac+'{target_keys}</span>'), true, 'target_keys in the known list uses the CID class');
+eq(painted.includes(mac+'[CID]</span>'), true, 'a square macro keeps its class');
+eq(painted.includes(mac+'[COUNTRY]</span>'), true, 'COUNTRY keeps its class beside a curly alias');
+eq(painted.includes('{not_a_macro}'), true, 'an unknown brace name stays in the text');
+eq(painted.includes(mac+'{not_a_macro}</span>'), false, 'an unknown brace name is not coloured');
+eq(macroHTML('{keyword} {sub_id_1} {sub_id_30}'), mac+'{keyword}</span> '+mac+'{sub_id_1}</span> '+mac+'{sub_id_30}</span>', 'engine curly names are coloured without an alias list');
+eq(macroHTML('{bundle_id} {target_keys} {not_a_macro}'), mac+'{bundle_id}</span> '+mac+'{target_keys}</span> {not_a_macro}', 'bundle_id and target_keys are known, an unknown name is not');
+eq(macroHTML('{Keyword} {SUBID} {sub_id_31} {pack}'), '{Keyword} {SUBID} {sub_id_31} {pack}', 'wrong case, sub_id_31 and an alias that is not listed stay plain');
+eq(macroHTML('&amp; {subid} {{income}}'), '&amp; '+mac+'{subid}</span> {{income}}', 'an entity stays, and a doubled brace is not a macro');
+eq(campaignQueryAliases({parameters:{sub_id_1:'bundle_id', sub_id_2:'target_keys'}, cost_param:'cost'}, [{id:'s', parameters:{keyword:'utm_term'}}]).join(','), 'bundle_id,target_keys,cost', 'aliases are the campaign query names');
 
 eq(nameSortKey('⚡️ 711 Casino'), '711 Casino', 'emoji before a name');
 eq(nameSortKey('❌ SpinDog - Play'), 'SpinDog - Play', 'cross before a name');
@@ -2571,6 +2585,10 @@ func TestFlowOfferLineFits(t *testing.T) {
 	must(t, html, ".frow{grid-template-columns:56px minmax(240px,1fr) 84px minmax(280px,.8fr)}", "the medium grid keeps the trunk gap and the card width")
 	must(t, html, ".frow{grid-template-columns:54px minmax(0,1fr);row-gap:8px}", "the narrow grid keeps the trunk gap")
 	must(t, html, ".entry{margin-left:12px}", "the entry does not touch the canvas edge on a narrow screen")
+	must(t, html, ".entry{grid-column:1/3;justify-self:start;margin-left:14px;display:inline-flex;align-items:center;gap:10px;height:40px;padding:0 14px;", "a wide screen keeps the visitor chip")
+	phone := spaBetween(html, "@media (max-width:760px){", "th .link{font:inherit;")
+	must(t, phone, ".canvas .entry{height:32px;padding:0 8px;gap:6px;font-size:10px}", "the visitor chip is 4px smaller on a phone")
+	must(t, phone, ".canvas .entry .ell{overflow:visible;text-overflow:clip", "the campaign id is not cut on a phone")
 }
 
 // TestKeywordStatsLogic runs csvTable, the keyword cell, the sparkline and the totals of the keyword

@@ -338,14 +338,33 @@ func campaignCoreDocs() map[string]routeDoc {
 				Summary:     "Список кампаній.",
 				Description: "Повертає всі кампанії (групи), доступні викликачу, разом із потоками.",
 			},
-			Query: []queryParam{strQ("shared", "1 returns {groups, lists, refs}: every long list filter of a stream (1 KB of text or more) is cut down to its flag, "+
-				"lists holds each distinct one once as {raw, values}, and each refs entry [group index, stream index, rules key, lists index] puts it back.").
-				loc("1 возвращает {groups, lists, refs}: каждый длинный списочный фильтр потока (от 1 КБ текста) урезан до флага, "+
-					"lists хранит каждый различный список один раз как {raw, values}, а запись refs [индекс кампании, индекс потока, ключ в rules, индекс в lists] возвращает его на место.",
-					"1 повертає {groups, lists, refs}: кожен довгий списковий фільтр потоку (від 1 КБ тексту) урізано до прапорця, "+
-						"lists зберігає кожен різний список один раз як {raw, values}, а запис refs [індекс кампанії, індекс потоку, ключ у rules, індекс у lists] повертає його на місце.")},
+			Query: []queryParam{
+				strQ("shared", "1 returns {groups, lists, refs}: every long list filter of a stream (1 KB of text or more) is cut down to its flag, "+
+					"lists holds each distinct one once as {raw, values}, and each refs entry [group index, stream index, rules key, lists index] puts it back.").
+					loc("1 возвращает {groups, lists, refs}: каждый длинный списочный фильтр потока (от 1 КБ текста) урезан до флага, "+
+						"lists хранит каждый различный список один раз как {raw, values}, а запись refs [индекс кампании, индекс потока, ключ в rules, индекс в lists] возвращает его на место.",
+						"1 повертає {groups, lists, refs}: кожен довгий списковий фільтр потоку (від 1 КБ тексту) урізано до прапорця, "+
+							"lists зберігає кожен різний список один раз як {raw, values}, а запис refs [індекс кампанії, індекс потоку, ключ у rules, індекс у lists] повертає його на місце."),
+				strQ("summary", "1 returns the short rows the campaigns list paints: id, name, status, number, folder, source, aliases, domain, section, the campaign link when it points at another campaign, and each stream as name, status and out.redirect. out.out is set only when that redirect is group. Rules, notes, parameters and long URLs are left out. summary wins over shared.").
+					loc("1 возвращает короткие строки списка кампаний: id, имя, статус, номер, папка, источник, алиасы, домен, раздел, ссылка на другую кампанию, если она есть, и у каждого потока имя, статус и out.redirect. out.out есть только когда назначение — другая кампания. Правил, заметок, параметров и длинных URL нет. summary важнее shared.",
+						"1 повертає короткі рядки списку кампаній: id, ім'я, статус, номер, папка, джерело, аліаси, домен, розділ, посилання на іншу кампанію, якщо воно є, і в кожного потоку ім'я, статус і out.redirect. out.out є лише коли призначення — інша кампанія. Правил, нотаток, параметрів і довгих URL немає. summary важливіше за shared."),
+			},
 			Response: []any{campaignSample},
 			Errors:   []int{500},
+		},
+		"GET /api/groups/{id}": {
+			ID: "get_campaign", Summary: "Read one campaign.", MCP: mcpRead,
+			Description: "Returns one campaign the caller may see, with its streams and rules. An unknown id and a campaign the caller may not see answer 404.",
+			RU: docText{
+				Summary:     "Одна кампания.",
+				Description: "Возвращает одну кампанию, доступную вызывающему, вместе с потоками и правилами. Неизвестный id и кампания, которую вызывающий не видит, дают 404.",
+			},
+			UK: docText{
+				Summary:     "Одна кампанія.",
+				Description: "Повертає одну кампанію, доступну викликачу, разом із потоками і правилами. Невідомий id і кампанія, яку викликач не бачить, дають 404.",
+			},
+			Response: campaignSample,
+			Errors:   []int{404, 500},
 		},
 		"PUT /api/groups": {
 			ID: "replace_campaigns", Summary: "Replace the whole campaign list.",

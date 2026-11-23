@@ -558,24 +558,28 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   body.has-pagehover main{padding-bottom:120px}
   body.has-pagehover .savebar{bottom:48px}
   body.has-pagehover{--edge-b:48px}
-  /* Up to 760px the totals and the pager share one low row and scroll sideways.
-     A focused campaign search hides the dock so the list stays above the keyboard. A wide screen keeps the wrapped totals. */
+  /* Up to 760px the totals wrap into a few compact rows so every label and
+     number stays visible, without a sideways scroll. Export is a download icon
+     on the pager row; a wide screen keeps the word. A focused campaign search
+     hides the whole dock. The visitor chip is 4px smaller than the 14px page text. */
   @media (max-width:760px){
-    .flowdock{display:flex;flex-wrap:nowrap;align-items:center;overflow-x:auto;scrollbar-width:none}
-    .flowdock::-webkit-scrollbar{height:0}
-    .flowsum{flex:none;flex-wrap:nowrap;gap:0 10px;align-items:center;padding:4px 10px;border-bottom:0;width:auto}
-    .flowsum .sumi{flex-direction:row;align-items:baseline;gap:4px;min-width:0;flex:none;white-space:nowrap}
-    .flowsum .sumi .hint{font-size:12px;line-height:1.2;max-width:none;white-space:nowrap}
+    .flowdock{display:flex;flex-direction:column;align-items:stretch;overflow:visible}
+    .flowsum{flex:none;display:flex;flex-wrap:wrap;align-items:baseline;align-content:flex-start;gap:2px 8px;width:100%;max-width:100%;min-width:0;padding:3px 8px;border-bottom:1px solid var(--border);box-sizing:border-box}
+    .flowsum .sumi{flex:none;flex-direction:row;align-items:baseline;gap:4px;min-width:max-content;white-space:nowrap}
+    .flowsum .sumi .hint{font-size:12px;line-height:1.3;max-width:none;white-space:nowrap}
     .flowsum .sumi b{font-size:12px}
-    .flowdock .flowpage{flex:none;flex-wrap:nowrap;gap:6px;padding:4px 8px;width:auto}
-    .flowdock .flowpager{flex:none;flex-wrap:nowrap;gap:4px}
-    .flowdock .flowpage .spacer{flex:0 0 8px}
-    .flowdock .flowpage>button{flex:none}
-    .flowdock .flowpage button,.flowdock .flowpage select,.flowdock .flowpage input{height:26px;font-size:12px}
-    .flowdock .flowpage .hint{font-size:12px;line-height:1.2;white-space:nowrap}
-    body.has-flowdock main,body.has-pager main{padding-bottom:44px}
-    body.has-flowdock .savebar,body.has-pager .savebar{bottom:40px}
-    body.has-flowdock,body.has-pager{--edge-b:40px}
+    .flowdock .flowpage{display:flex;flex-wrap:nowrap;align-items:center;gap:6px;width:100%;max-width:100%;padding:4px 8px;overflow:visible;box-sizing:border-box}
+    .flowdock .flowpager{flex:1 1 auto;flex-wrap:wrap;min-width:0;gap:4px 6px}
+    .flowdock .flowpage>button{flex:none;width:28px;min-width:28px;height:28px;padding:0;gap:0}
+    .flowdock .flowpage>button .exp-lbl,.flowdock .flowpage>button .exp-caret{display:none}
+    .flowdock .flowpage button,.flowdock .flowpage select,.flowdock .flowpage input{height:28px;font-size:13px}
+    .flowdock .flowpage .hint{font-size:13px;line-height:1.35;white-space:nowrap}
+    .canvas .entry{height:32px;padding:0 8px;gap:6px;font-size:10px}
+    .canvas .entry .ell{overflow:visible;text-overflow:clip;max-width:none}
+    .canvas .entry .num{flex:none}
+    body.has-flowdock main,body.has-pager main{padding-bottom:112px}
+    body.has-flowdock .savebar,body.has-pager .savebar{bottom:104px}
+    body.has-flowdock,body.has-pager{--edge-b:104px}
     body.dock-search .flowdock{display:none}
     body.dock-search.has-flowdock main{padding-bottom:16px}
     body.dock-search.has-flowdock .savebar{bottom:12px}
@@ -823,7 +827,7 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   .savebar .dchip.more{font-weight:600}
 
   /* ---- dashboard ---- */
-  .kpis{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:12px;margin-bottom:14px}
+  .kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
   .kpi{padding:10px 12px;min-width:0} .kpi .l{font-size:12px;color:var(--muted);font-weight:550;display:flex;justify-content:space-between;gap:6px;min-width:0} .kpi .l span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .kpi .v{font-size:clamp(15px,1.3vw,19px);font-weight:650;letter-spacing:-.02em;line-height:1.2;margin-top:6px;font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:flex-start;gap:4px;min-width:0}
   .kpi .vn{overflow:hidden;text-overflow:ellipsis}
@@ -1338,6 +1342,8 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   .canvas.compact #compact svg{transform:rotate(180deg)}
   .canvas-traffic{right:40px}
   .canvas-traffic[aria-pressed="true"]{color:var(--accent);border-color:var(--accent)}
+  button.canvas-traffic.icon.sm:not([data-traffic="off"]){width:auto;max-width:min(9.5em,calc(100% - 56px));padding:0 7px 0 6px;gap:4px}
+  .canvas-traffic .traf-w{font-size:12px;font-weight:600;line-height:1;white-space:nowrap}
   .grip.lock{cursor:not-allowed;opacity:.4}
   .grip.lock:hover{background:none;color:var(--subtle)}
   .node .trafbar{position:absolute;left:10px;right:10px;bottom:3px;height:4px;border-radius:2px;background:var(--border-strong);overflow:hidden;pointer-events:none}
@@ -1647,14 +1653,13 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   .login{width:360px;max-width:100%;padding:26px}
 
   @media(max-width:1180px){
-    .kpis{grid-auto-flow:row;grid-template-columns:repeat(3,minmax(0,1fr))}
     .frow{grid-template-columns:56px minmax(240px,1fr) 84px minmax(280px,.8fr)}
     .tester .grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   }
   @media(max-width:820px){
     main{padding:16px 14px 96px;--main-pad:14px} .top{padding:0 10px;gap:2px} .top .right{gap:4px;padding-left:4px} .brand{margin-right:4px}
     .brand span{display:none} .nav a{padding:0 9px}
-    .kpis{grid-auto-flow:row;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px} .kpi{padding:10px} .kpi .v{font-size:clamp(12px,3.6vw,18px)} .g2,.g3,.types{grid-template-columns:1fr}
+    .kpis{gap:8px} .kpi{padding:10px} .kpi .v{font-size:clamp(12px,3.6vw,18px)} .g2,.g3,.types{grid-template-columns:1fr}
     .canvas{padding:18px 12px 22px 0}
     .frow{grid-template-columns:54px minmax(0,1fr);row-gap:8px}
     .flowlbl{display:none} .dest{grid-column:2/3} .entry{margin-left:12px}
@@ -1667,13 +1672,6 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
     .legend .lg:nth-child(-n+2) .lg-name{left:0;transform:none}
     .legend .lg:nth-last-child(-n+2) .lg-name{left:auto;right:0;transform:none}
     .legend .lg:hover .lg-name,.legend .lg:active .lg-name,.legend .lg:focus-visible .lg-name{opacity:1}
-  }
-  /* Up to 760px the summary counters are one low row and scroll sideways. A wider screen keeps the grid. */
-  @media (max-width:760px){
-    .kpis{display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;scrollbar-width:none;margin-bottom:10px}
-    .kpis::-webkit-scrollbar{height:0}
-    .kpis>.kpi{flex:0 0 auto;width:auto;min-width:96px;padding:6px 10px}
-    .kpis>.kpi .v{margin-top:2px}
   }
   @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -7351,13 +7349,16 @@ function offerSortValue(o, k, m, netLabel){
 }
 /**
  * dockHTML is the fixed bottom block: summary row, pager and export button.
+ * The button keeps the Export name for assistive tech. On a narrow screen the
+ * visible word is hidden and the download icon stays on the pager row.
  * @param {string} prefix id prefix for sum and page elements (flow → flowsum, flowpage)
  * @param {string} [exportBtnId] export button id when it is not prefix+export
  * @returns {string} dock markup
  */
 function dockHTML(prefix, exportBtnId){
   const exp=exportBtnId||(`${prefix}export`);
-  return `<div class="flowdock"><div id="${prefix}sum" class="flowsum"></div><div class="flowpage"><div id="${prefix}page" class="flowpager"></div><div class="spacer"></div><button type="button" id="${exp}" aria-haspopup="menu">${icon('download')}${tr('Export')}${icon('down')}</button></div></div>`;
+  const label=tr('Export');
+  return `<div class="flowdock"><div id="${prefix}sum" class="flowsum"></div><div class="flowpage"><div id="${prefix}page" class="flowpager"></div><div class="spacer"></div><button type="button" id="${exp}" aria-haspopup="menu" aria-label="${esc(label)}" title="${esc(label)}">${icon('download')}<span class="exp-lbl">${esc(label)}</span><span class="exp-caret">${icon('down')}</span></button></div></div>`;
 }
 /**
  * pagerPages lists the page numbers a numbered pager shows: the first, the last and span pages on each side of the current one.
@@ -10045,8 +10046,65 @@ function capFirst(s){
   if(!s) return s;
   return s.charAt(0).toUpperCase()+s.slice(1);
 }
-// Macros in an already escaped output stand out from the text around them.
-const macroHTML=(h)=>String(h).replace(/\[(?:\(\))?[A-Z][A-Z0-9_]*(?:\(\))?(?:-[^\]\s<>]*)?\]/g,'<span class="mac">$&</span>');
+/** curlyMacroName reports whether a name in braces is one Expand fills.
+ * name is the text between the braces, case-sensitive, the same way a square macro matches only its own letters.
+ * extra is the incoming query names of this campaign (bundle_id, target_keys); a name that is not a render macro and not in extra is plain text.
+ * Built-in names are subid, root_subid, country, keyword, status, payout, offer, origin, sub_id_1..sub_id_30, and the click-query names bundle_id and target_keys.
+ * @param {string} name text between braces
+ * @param {string[]|function():string[]} [extra] parameter aliases, or a function that returns them
+ * @returns {boolean} true when the engine expands {name}
+ */
+function curlyMacroName(name, extra){
+  if(name==='subid'||name==='root_subid'||name==='country'||name==='keyword'||name==='status'||name==='payout'||name==='offer'||name==='origin'||name==='bundle_id'||name==='target_keys') return true;
+  const sub=/^sub_id_(\d+)$/.exec(name);
+  if(sub){
+    const n=+sub[1];
+    if(String(n)===sub[1]&&n>=1&&n<=(typeof SUBID_MAX==='number'?SUBID_MAX:30)) return true;
+  }
+  const list=typeof extra==='function'?extra():extra;
+  return Array.isArray(list)&&list.indexOf(name)>=0;
+}
+/** campaignQueryAliases lists the incoming query names a campaign reads, the names Expand looks up in the click.
+ * g is the campaign. sources is the traffic-source catalog; the source fills a name the campaign does not override.
+ * A blank override removes the source name. cost and currency names are included. A name that is not a query token is dropped.
+ * @param {object|null} g campaign
+ * @param {object[]} [sources] traffic sources
+ * @returns {string[]} alias names, each once, in map order
+ */
+function campaignQueryAliases(g, sources){
+  const names=[], seen=new Set();
+  const add=v=>{
+    v=String(v==null?'':v).trim();
+    if(!/^[A-Za-z0-9_-]{1,24}$/.test(v)||seen.has(v)) return;
+    seen.add(v); names.push(v);
+  };
+  const list=Array.isArray(sources)?sources:[];
+  const src=g&&g.source_id?list.find(s=>s&&String(s.id)===String(g.source_id)):null;
+  const map=Object.assign({}, (src&&src.parameters)||{});
+  const over=(g&&g.parameters)||{};
+  Object.keys(over).forEach(k=>{
+    const v=String(over[k]??'').trim();
+    if(v) map[k]=v; else delete map[k];
+  });
+  Object.keys(map).forEach(k=>add(map[k]));
+  if(g){ add(g.cost_param); add(g.currency_param); }
+  return names;
+}
+/** macroHTML wraps engine macros in an already escaped address so they take the accent colour of [CID].
+ * h is escaped HTML. extra is the campaign's incoming query names; {bundle_id} and {target_keys} are always coloured, another alias only when it is in extra.
+ * An unknown name, a wrong letter case and {{income}} stay plain text. Entities already in h are not touched.
+ * @param {string} h escaped address
+ * @param {string[]|function():string[]} [extra] parameter aliases
+ * @returns {string} HTML; text outside a macro is unchanged
+ */
+function macroHTML(h, extra){
+  const s=String(h).replace(/\[(?:\(\))?[A-Z][A-Z0-9_]*(?:\(\))?(?:-[^\]\s<>]*)?\]/g,'<span class="mac">$&</span>');
+  return s.replace(/\{([A-Za-z0-9_-]{1,24})\}/g,(full,name,off,str)=>{
+    if(str.charAt(off-1)==='{'||str.charAt(off+full.length)==='}') return full;
+    if(!curlyMacroName(name, extra)) return full;
+    return '<span class="mac">{'+name+'}</span>';
+  });
+}
 const COUNTRY_PACK=[
 'ad|Andorra|Андорра|Андорра',
 'ae|United Arab Emirates|ОАЭ|ОАЕ',
@@ -13263,7 +13321,7 @@ en:{
 'users.board.main':'Main section «{name}»','users.board.main.hint':'Membership in other sections does not clear this mark.','users.board.all':'All sections: this account sees every section.','users.board.member':'Also by membership: {list}.','users.board.member.none':'No membership in other sections; members are set in Section settings.','users.board.empty':'Without the main section and without membership the user sees no section.','board.none':'You have no access to any section. Ask an administrator to add you to one.','board.people.main':'Membership adds this section to the user. The main section is set in the user card and does not change here.','board.main':'Default','board.switch':'Section','board.sections':'Sections','board.settings':'Section settings','board.create':'New section name','board.import':'Import from Default','board.empty':'Nothing to copy from the default view yet.','board.page.title':'Sections','board.add':'Create section','board.icon':'Icon','board.recent':'Recent','board.all':'All icons','board.colors':'Color','board.name':'Name','board.id':'ID','board.delete':'Delete','board.move':'Move','board.delete.confirm':'Delete this section?','board.inuse':'This section still has records','board.saved':'Saved','board.expand':'Composition and members','board.include':'Section view','board.include_all':'Show contents of all sections','board.collapse':'Hide details','board.compose.title':'Composition','board.compose.folders':'folders','board.compose.partners':'Partner groups','board.compose.save':'Save composition','board.compose.saved':'Composition saved','board.compose.addid':'Add ID','board.compose.add':'Add','board.compose.search':'Search by ID or name','err.csrf':'The session is out of date. Refresh the page.','board.people.title':'Members','board.people.role':'Role','board.people.add':'Add member','board.people.remove':'Remove','board.people.save':'Save members','board.people.saved':'Members saved','board.role.read':'Read','board.role.edit':'Edit','board.role.created':'Created only',
 'period.today':'Today','period.yesterday':'Yesterday','period.week':'This week','period.7d':'Last 7 days','period.month':'This month','period.prevmonth':'Previous month','period.30d':'Last 30 days','period.year':'This year','period.all':'All time','period.dates':'Date range','period.times':'Time range','period.need':'Pick both ends of the range',
 'settings.country':'Country','settings.lang':'Interface language','settings.search':'Find a country','settings.geo':'Default source for a new campaign','settings.geo.cf':'CDN header','settings.geo.db':'Geo database','settings.hint':'Search matches the code and the English, Russian and Ukrainian names at once.','settings.tz':'Statistics timezone','settings.tz.find':'Find a timezone','settings.tz.hint':'Periods and times in reports use this zone. The visitor’s own zone is unchanged.',
-'flows.title':'Campaigns','dirty.title':'Unsaved changes:','dirty.flow':'Campaign','dirty.removed':'Removed: {n}','dirty.all':'Show all','dirty.less':'Fold','flow.tabs':'Campaign sections','flow.tab.notes':'Notes','flow.notes.ph':'Notes about this campaign','lnk.pb.old':'Old pixel ?pb=','lnk.pb.old.hint':'Legacy only: it needs the EMTDS_POSTBACK_KEY key, reads just cid, profit and status, and always answers 200. Give new networks the address below.','lnk.pb.net':'Network postback','lnk.pb.net.hint':'The main address: the network calls it itself and puts the click id, status and payout in place of {subid}, {status} and {payout}.','flt.c.eq':'equals','flt.c.ne':'not equal','flt.c.in':'in list','flt.c.nin':'not in list','flt.c.contains':'contains','flt.c.not_contains':'does not contain','par.hint':'Name in the link is how the traffic source calls this field in the campaign address; the engine reads it. Token is the source macro that stands for the value, for example {keyword}; the engine does not expand it, it only goes into the link.','flow.compact':'Compact view','flow.expanded':'Detailed view','flow.traffic.off':'Sorting: off','flow.traffic.desc':'Order by traffic: most first','flow.traffic.asc':'Order by traffic: fewest first','flow.traffic.lock':'Turn off sorting to change the order','flow.revenue.asc':'Order by revenue: least first','flow.revenue.desc':'Order by revenue: most first','flows.table':'Table','flows.cards':'Cards','flows.search':'Search campaigns and streams…','flows.new':'New campaign','flows.bulk.on':'Enable','flows.bulk.off':'Disable','flows.bulk.dup':'Duplicate','flows.bulk.del':'Delete','flows.bulk.n':'selected','flows.col.id':'Campaign','flows.col.num':'ID','flows.col.name':'Campaign name','flows.col.url':'URL','flows.col.streams':'Streams','flows.page':'Per page','flows.page.custom':'Custom','flows.state':'State','flows.state.all':'All','flows.state.on':'On','flows.state.off':'Off','flows.state.hits':'With visits','flows.state.any':'All states','flows.source.all':'All sources','flows.nosource':'No source','flows.nofolder':'No group','flows.sum':'Total','flows.sum.sel':'Selected','flows.visits':'visits','flows.bots':'bots','flows.conv':'conv','flows.profit':'profit','flows.nostreams':'No streams — every visitor gets the default','flows.more':'more','flows.streams':'streams','flows.logs':'Logs','flows.log.clicks':'Click log','flows.log.conv':'Conversion log','tester.ip':'IP address','tester.country':'Country','tester.lang':'Language','tester.referer':'Referer','tester.key':'Keyword','tester.query':'URL parameters','tester.hint':'Uses the campaigns on screen, saved or not. Impression limits, bot checks and the antiflood depend on live traffic and are not simulated.','src.title':'Traffic sources','src.new':'New source','src.our':'Our name','src.theirs':'Name in the link','src.empty':'No sources yet','src.link':'Campaign link','log.traffic':'Traffic','log.postbacks':'Postbacks and S2S','log.system':'System','log.outcome':'Outcome','log.direction':'Direction','rep.title':'Report','rep.csv':'Download CSV','rep.empty':'Nothing in this period',
+'flows.title':'Campaigns','dirty.title':'Unsaved changes:','dirty.flow':'Campaign','dirty.removed':'Removed: {n}','dirty.all':'Show all','dirty.less':'Fold','flow.tabs':'Campaign sections','flow.tab.notes':'Notes','flow.notes.ph':'Notes about this campaign','lnk.pb.old':'Old pixel ?pb=','lnk.pb.old.hint':'Legacy only: it needs the EMTDS_POSTBACK_KEY key, reads just cid, profit and status, and always answers 200. Give new networks the address below.','lnk.pb.net':'Network postback','lnk.pb.net.hint':'The main address: the network calls it itself and puts the click id, status and payout in place of {subid}, {status} and {payout}.','flt.c.eq':'equals','flt.c.ne':'not equal','flt.c.in':'in list','flt.c.nin':'not in list','flt.c.contains':'contains','flt.c.not_contains':'does not contain','par.hint':'Name in the link is how the traffic source calls this field in the campaign address; the engine reads it. Token is the source macro that stands for the value, for example {keyword}; the engine does not expand it, it only goes into the link.','flow.compact':'Compact view','flow.expanded':'Detailed view','flow.traffic.off':'Sorting: off','flow.traffic.desc':'Order by traffic: most first','flow.traffic.asc':'Order by traffic: fewest first','flow.traffic.lock':'Turn off sorting to change the order','flow.revenue.asc':'Order by revenue: least first','flow.revenue.desc':'Order by revenue: most first','flow.traffic.word':'traffic','flow.revenue.word':'revenue','flows.table':'Table','flows.cards':'Cards','flows.search':'Search campaigns and streams…','flows.new':'New campaign','flows.bulk.on':'Enable','flows.bulk.off':'Disable','flows.bulk.dup':'Duplicate','flows.bulk.del':'Delete','flows.bulk.n':'selected','flows.col.id':'Campaign','flows.col.num':'ID','flows.col.name':'Campaign name','flows.col.url':'URL','flows.col.streams':'Streams','flows.page':'Per page','flows.page.custom':'Custom','flows.state':'State','flows.state.all':'All','flows.state.on':'On','flows.state.off':'Off','flows.state.hits':'With visits','flows.state.any':'All states','flows.source.all':'All sources','flows.nosource':'No source','flows.nofolder':'No group','flows.sum':'Total','flows.sum.sel':'Selected','flows.visits':'visits','flows.bots':'bots','flows.conv':'conv','flows.profit':'profit','flows.nostreams':'No streams — every visitor gets the default','flows.more':'more','flows.streams':'streams','flows.logs':'Logs','flows.log.clicks':'Click log','flows.log.conv':'Conversion log','tester.ip':'IP address','tester.country':'Country','tester.lang':'Language','tester.referer':'Referer','tester.key':'Keyword','tester.query':'URL parameters','tester.hint':'Uses the campaigns on screen, saved or not. Impression limits, bot checks and the antiflood depend on live traffic and are not simulated.','src.title':'Traffic sources','src.new':'New source','src.our':'Our name','src.theirs':'Name in the link','src.empty':'No sources yet','src.link':'Campaign link','log.traffic':'Traffic','log.postbacks':'Postbacks and S2S','log.system':'System','log.outcome':'Outcome','log.direction':'Direction','rep.title':'Report','rep.csv':'Download CSV','rep.empty':'Nothing in this period',
 'conv.title':'Conversions','conv.subid':'Subid','conv.status':'Status','conv.lead':'Lead','conv.sale':'Sale','conv.campaign':'Campaign','conv.stream':'Stream','conv.offer':'Offer','conv.landing':'Landing','conv.network':'Network','conv.source':'Source','conv.columns':'Columns','conv.all':'All',
 'net.title':'Networks','net.create':'New network','net.name':'Name','net.label':'Name','net.tpl.ph':'Choose a template','net.tpl.notes':'Template instructions (read-only)','net.tpl.conv':'Statuses of the network (the tracker does not map them)','net.tpl.edit':'Edit template','net.tpl.add':'New template','net.tpl.edited':'The template has your edits.','net.tpl.ed.ins':'Instructions','net.tpl.ed.hint':'An empty field keeps the catalog value. {origin} stands for the address of this tracker.','net.tpl.ed.reset':'Reset to catalog','net.tpl.ed.del':'Delete template','net.tpl.state.none':'The settings of this template were not extracted. Fill the fields in by hand.','net.tpl.state.partial':'Only some fields of this template are known. Fill the rest by hand.','net.pb.help.t':'Postback variables','net.pb.help.a':'Parameters the tracker reads in its postback address. The network macro in braces goes in as the value, for example subid={sub1}.','net.pb.help.subid':'click id; also clickid, cid','net.pb.help.status':'lead, sale or rejected; also type, goal','net.pb.help.payout':'payout amount; also profit, sum','net.pb.help.depsum':'deposit amount, not the payout; also DepSum','net.pb.help.tid':'network transaction id','net.pb.help.key':'secret key, only when the server requires it','net.param.help.t':'Offer parameters','net.param.help.a':'Parameters to add to all offers.','net.param.help.req':'Required','net.param.help.ex1':'your_sub1={subid}','net.param.help.opt':'Optional:','net.param.help.ex2':'your_sub2={campaign_name}&...','net.url':'Postback URL','net.param':'Offer parameters','net.template':'Template','net.save':'Save','net.empty':'No networks yet','net.copy':'Copy','net.hint':'A note for the partner cabinet. The tracker does not call this URL.','net.export.csv':'Network CSV','net.export.html':'Network HTML','net.export.off.csv':'Offers of this network CSV','net.export.off.html':'Offers of this network HTML',
 'off.title':'Offers','off.new':'New offer','off.name':'Name','off.group':'Group','off.url':'URL','off.land':'Landing','off.empty':'No offers yet','off.tabs':'Offer sections','off.tab.main':'Main','off.tab.settings':'Settings','off.tab.values':'Values','off.tab.notes':'Notes','off.tab.action':'Action','off.action':'Action','off.action.help':'Empty keeps the URL redirect. 404, text, HTML and do nothing replace it.','off.action.url':'Redirect to URL','off.action.404':'Show 404','off.action.text':'Show as text','off.action.html':'Show as HTML','off.action.none':'Do nothing','off.action.body':'Content','off.action.empty':'Enter the text','off.fallback':'Alternative offer','off.fallback.none':'No alternative','off.fallback.help':'A stopped offer, or one whose daily or total limit is used up, sends the click here. The click is counted on that offer. If that offer is stopped or full too, its alternative is tried. A loop ends. With none, this offer is skipped.','flow.offer.stopped':'Offer is stopped','off.macro.open':'Macros','off.countries':'Countries','off.countries.ph':'All countries','off.countries.help':'Empty: the offer takes visitors from any country. With countries: the rotation skips this offer for a click from another country.','off.paytype':'Payout type','off.paytype.cpa':'CPA (per action)','off.paytype.cpc':'CPC (per click)','off.paytype.help':'CPA writes the amount on the conversion. CPC writes that amount as the revenue of the click and does not put it on the conversion.','off.upsell':'Upsells','off.upsell.on':'On','off.upsell.off':'Off','off.status.on':'Enabled','off.status.off':'Disabled','off.upsell.help':'On: a postback with a new tid on the same click is another sale. Off: repeating the click without a new tid does not add a sale.','off.capmode':'Conversion cap','off.capmode.yes':'Yes','off.capmode.no':'No','off.capmode.help':'Yes shows the daily limit, the total limit, the time zone and one alternative offer. No hides them. A saved limit stays.','off.tz':'Time zone','off.tz.help':'The day of the daily limit ends at midnight in this zone. An offer without a zone shows the same zone as the rest of the statistics, and saving stores it.','off.macro.search':'Find a macro…','off.macro.none':'No such macro','stream.macro.open':'Macros','stream.macro.click':'Click','stream.macro.visitor':'Visitor','stream.macro.params':'Link parameters','stream.macro.other':'Other','stream.macro.rand':'Random values and lines from a file are typed by hand: [RANDNUM-a-b], [RANDLINE-(file)-n].','off.macro.main':'Click','off.macro.sub':'Sub ID','off.macro.values':'Offer values','off.values.hint':'The engine puts the encoded value in place of {offer_value:name} in the offer URL. A row without a name is not saved. Names do not repeat.','off.values.name':'Name','off.values.value':'Value','off.values.add':'Add a value','off.values.del':'Delete the value','off.notes.ph':'Notes about this offer','off.cap':'Daily conversion cap','off.cap.on':'On','off.cap.n':'Number of conversions','off.cap.help':'The day is counted in the time zone of this offer. Off: the limit does not apply and the number stays. A used-up limit sends the click to the alternative offer. Rejections are not counted.','off.cap.bad':'Enter a number of conversions from 1','off.cap.offer':'When the limit is used up','off.cap.skip':'Skip this offer','off.total':'Total conversion cap','off.total.on':'On','off.total.n':'Number of conversions','off.total.help':'All leads and sales of this offer, for all time. A rejection is not counted. Off: the limit does not apply and the number stays. A used-up limit sends the click to the alternative offer.','off.del.one':'Delete offer {n}?','off.payout':'Payout','off.currency':'Currency','off.payout.param':'payout parameter','off.payout.help':'On: a conversion takes its payout from the payout parameter of the postback; when it is missing or empty, the amount in this row is used. The amount is used only in USD and never for rejected conversions. Off: nothing is substituted.','off.again':'Add another','off.allnets':'All networks','cat.pick.page':'Select all on this page','cat.pick.row':'Select row','net.del.many':'Delete {n} networks?','off.del.many':'Delete {n} offers?','off.allgroups':'All groups','off.search':'Search offers…','land.search':'Search landings…','net.search':'Search networks…','src.search':'Search sources…','dom.search':'Search domains…','cat.groups.search':'Search group…','grp.create':'Create group','off.visits':'Visits','off.conv':'Conv','off.revenue':'Revenue','col.clicks':'Clicks','col.day':'Date','col.leads':'Leads','col.sales':'Sales','col.rej':'Rejected','col.rej.hint':'Postbacks with status rejected','money.nocost':'No cost recorded: set the price parameter on the campaign or add a cost entry','then.mode.offers':'Landings and offers','then.mode.url':'Direct URL','then.mode.action':'Action','share.label':'Share, %','share.move':'Drag to change the order (arrow keys on the handle also move it)','share.hint':'Share of visitors sent to this row. One list may add up to 100 at most.','share.dead':'gets no traffic','s2s.global':'Shared templates','s2s.global.empty':'No shared templates yet','s2s.global.edit':'Shared templates…','col.cr':'CR','col.uepc':'uEPC','col.epc':'EPC','col.cpc':'CPC','col.revenue':'Revenue','col.cost':'Cost','col.profit':'Profit','col.depsum':'depSum','col.roi':'ROI','col.crok':'CR confirmed','col.crrej':'CR rejected','col.crlead':'CR leads','col.ucr':'CR of uniques','col.uniqpct':'Unique %','col.approve':'Approve %','col.ec':'Revenue per conversion','col.ecpm':'Revenue per 1000 clicks','col.uniq':'Unique','col.conv':'Conversions','col.spend':'Update cost','bot.title':'Bot protection','bot.save':'Save protection','bot.hint':'User-Agent is the browser string, not a country. Names of crawlers are lines in Lists, file signature_ua.dat, one substring per line.','bot.bl':'Blacklist','bot.bl.hint':'One full User-Agent per line. The match is exact.','bot.bl.save':'Save blacklist','bot.proxy.default':'Proxy check: default.','bot.proxy.wait':'Proxy check: default; it turns on once the iCloud Private Relay list is downloaded (Automation → ip_lists).','bot.proxy.reset':'Reset proxy check to default','pb.title':'Postbacks','pb.hint':'These URLs belong to this tracker. Paste them into the partner cabinet. The tracker does not call them.','pb.lead':'Lead','pb.sale':'Sale','pb.rejected':'Rejected','pb.copy':'Copy','pb.copyall':'Copy all','pb.docs':'Documentation','pb.url':'Postback URL','pb.host':'Host','pb.copy.url':'Copy','pb.nokey':'No postback key is needed: the click id in subid is enough. Replace each REPLACE with the macro of your network.','pb.local':'This is a local address. On the server the host is a link domain or the admin host.',
@@ -13363,7 +13421,7 @@ ru:{
 'users.board.main':'Основной раздел «{name}»','users.board.main.hint':'Участие в других разделах эту отметку не снимает.','users.board.all':'Все разделы: аккаунт видит каждый раздел.','users.board.member':'Также по участию: {list}.','users.board.member.none':'Нет участия в других разделах; участников задают в настройках разделов.','users.board.empty':'Без основного раздела и без участия пользователь не увидит ни одного раздела.','board.none':'У вас нет доступа ни к одному разделу. Попросите администратора добавить вас в раздел.','board.people.main':'Участие добавляет пользователю этот раздел. Основной раздел задаётся в карточке пользователя и здесь не меняется.','board.main':'По умолчанию','board.switch':'Раздел','board.sections':'Разделы','board.settings':'Настройки разделов','board.create':'Имя нового раздела','board.import':'Импорт из вида по умолчанию','board.empty':'В виде по умолчанию пока нечего копировать.','board.page.title':'Разделы','board.add':'Создать раздел','board.icon':'Иконка','board.recent':'Недавние','board.all':'Все иконки','board.colors':'Цвет','board.name':'Имя','board.id':'ID','board.delete':'Удалить','board.move':'Переместить','board.delete.confirm':'Удалить этот раздел?','board.inuse':'В разделе есть записи','board.saved':'Сохранено','board.expand':'Состав и участники','board.include':'Вид раздела','board.include_all':'Отображать содержимое всех разделов','board.collapse':'Свернуть','board.compose.title':'Состав','board.compose.folders':'папки','board.compose.partners':'Группы партнёров','board.compose.save':'Сохранить состав','board.compose.saved':'Состав сохранён','board.compose.addid':'Добавить id','board.compose.add':'Добавить','board.compose.search':'Поиск по id или имени','err.csrf':'Сессия устарела. Обновите страницу.','board.people.title':'Участники','board.people.role':'Роль','board.people.add':'Добавить участника','board.people.remove':'Убрать','board.people.save':'Сохранить участников','board.people.saved':'Участники сохранены','board.role.read':'Чтение','board.role.edit':'Редактирование','board.role.created':'Только свои',
 'period.today':'Сегодня','period.yesterday':'Вчера','period.week':'Текущая неделя','period.7d':'Последние 7 дней','period.month':'Текущий месяц','period.prevmonth':'Предыдущий месяц','period.30d':'Последние 30 дней','period.year':'Текущий год','period.all':'За всё время','period.dates':'Интервал дат','period.times':'Интервал времени','period.need':'Укажите оба края интервала',
 'settings.country':'Страна','settings.lang':'Язык интерфейса','settings.search':'Найти страну','settings.geo':'Источник страны для новой кампании','settings.geo.cf':'Заголовок CDN','settings.geo.db':'Гео-база','settings.hint':'Поиск сразу по коду и по английскому, русскому и украинскому имени.','settings.tz':'Часовой пояс статистики','settings.tz.find':'Найти часовой пояс','settings.tz.hint':'Периоды и время в отчётах считаются в этом поясе. Пояс самого посетителя не меняется.',
-'flows.title':'Кампании','dirty.title':'Несохранённые изменения:','dirty.flow':'Кампания','dirty.removed':'Удалено: {n}','dirty.all':'Показать все','dirty.less':'Свернуть','flow.tabs':'Разделы кампании','flow.tab.notes':'Заметки','flow.notes.ph':'Заметки об этой кампании','lnk.pb.old':'Старый пиксель ?pb=','lnk.pb.old.hint':'Только для старых связок: нужен ключ EMTDS_POSTBACK_KEY, читает лишь cid, profit и status, на любой запрос отвечает 200. Новым сетям давайте адрес ниже.','lnk.pb.net':'Постбек от сети','lnk.pb.net.hint':'Основной адрес: сеть сама вызывает его и подставляет вместо {subid}, {status} и {payout} id клика, статус и выплату.','flt.c.eq':'равно','flt.c.ne':'не равно','flt.c.in':'из списка','flt.c.nin':'не из списка','flt.c.contains':'содержит','flt.c.not_contains':'не содержит','par.hint':'Имя в ссылке — как источник называет это поле в адресе кампании; движок читает его. Токен — макрос источника вместо значения, например {keyword}; движок его не раскрывает, он только попадает в ссылку.','flow.compact':'Компактный вид','flow.expanded':'Подробный вид','flow.traffic.off':'Сортировка: выкл','flow.traffic.desc':'Сортировка по трафику: больше сверху','flow.traffic.asc':'Сортировка по трафику: меньше сверху','flow.traffic.lock':'Выключите сортировку, чтобы менять порядок','flow.revenue.asc':'Сортировка по доходу: меньше сверху','flow.revenue.desc':'Сортировка по доходу: больше сверху','flows.table':'Таблица','flows.cards':'Карточки','flows.search':'Поиск кампаний и потоков…','flows.new':'Новая кампания','flows.bulk.on':'Включить','flows.bulk.off':'Выключить','flows.bulk.dup':'Дублировать','flows.bulk.del':'Удалить','flows.bulk.n':'выбрано','flows.col.id':'Кампания','flows.col.num':'ID','flows.col.name':'Имя кампании','flows.col.url':'URL','flows.col.streams':'Потоки','flows.page':'На странице','flows.page.custom':'Своё','flows.state':'Состояние','flows.state.all':'Все','flows.state.on':'Включённые','flows.state.off':'Выключенные','flows.state.hits':'С визитами','flows.state.any':'Все состояния','flows.source.all':'Все источники','flows.nosource':'Без источника','flows.nofolder':'Без группы','flows.sum':'Всего','flows.sum.sel':'Выбранные','flows.visits':'визиты','flows.bots':'боты','flows.conv':'конверсии','flows.profit':'прибыль','flows.nostreams':'Нет потоков — каждый посетитель получает ответ по умолчанию','flows.more':'ещё','flows.streams':'потоков','flows.logs':'Логи','flows.log.clicks':'Лог кликов','flows.log.conv':'Лог конверсий','tester.ip':'IP-адрес','tester.country':'Страна','tester.lang':'Язык','tester.referer':'Реферер','tester.key':'Ключевое слово','tester.query':'Параметры URL','tester.hint':'Берёт кампании с экрана, сохранённые или нет. Лимиты показов, проверка ботов и антифлуд зависят от живого трафика и здесь не считаются.','src.title':'Источники трафика','src.new':'Новый источник','src.our':'Имя у нас','src.theirs':'Имя в ссылке','src.empty':'Источников пока нет','src.link':'Ссылка кампании','log.traffic':'Трафик','log.postbacks':'Postbacks и S2S','log.system':'Системный','log.outcome':'Исход','log.direction':'Направление','rep.title':'Отчёт','rep.csv':'Скачать CSV','rep.empty':'За этот период пусто',
+'flows.title':'Кампании','dirty.title':'Несохранённые изменения:','dirty.flow':'Кампания','dirty.removed':'Удалено: {n}','dirty.all':'Показать все','dirty.less':'Свернуть','flow.tabs':'Разделы кампании','flow.tab.notes':'Заметки','flow.notes.ph':'Заметки об этой кампании','lnk.pb.old':'Старый пиксель ?pb=','lnk.pb.old.hint':'Только для старых связок: нужен ключ EMTDS_POSTBACK_KEY, читает лишь cid, profit и status, на любой запрос отвечает 200. Новым сетям давайте адрес ниже.','lnk.pb.net':'Постбек от сети','lnk.pb.net.hint':'Основной адрес: сеть сама вызывает его и подставляет вместо {subid}, {status} и {payout} id клика, статус и выплату.','flt.c.eq':'равно','flt.c.ne':'не равно','flt.c.in':'из списка','flt.c.nin':'не из списка','flt.c.contains':'содержит','flt.c.not_contains':'не содержит','par.hint':'Имя в ссылке — как источник называет это поле в адресе кампании; движок читает его. Токен — макрос источника вместо значения, например {keyword}; движок его не раскрывает, он только попадает в ссылку.','flow.compact':'Компактный вид','flow.expanded':'Подробный вид','flow.traffic.off':'Сортировка: выкл','flow.traffic.desc':'Сортировка по трафику: больше сверху','flow.traffic.asc':'Сортировка по трафику: меньше сверху','flow.traffic.lock':'Выключите сортировку, чтобы менять порядок','flow.revenue.asc':'Сортировка по доходу: меньше сверху','flow.revenue.desc':'Сортировка по доходу: больше сверху','flow.traffic.word':'трафик','flow.revenue.word':'доход','flows.table':'Таблица','flows.cards':'Карточки','flows.search':'Поиск кампаний и потоков…','flows.new':'Новая кампания','flows.bulk.on':'Включить','flows.bulk.off':'Выключить','flows.bulk.dup':'Дублировать','flows.bulk.del':'Удалить','flows.bulk.n':'выбрано','flows.col.id':'Кампания','flows.col.num':'ID','flows.col.name':'Имя кампании','flows.col.url':'URL','flows.col.streams':'Потоки','flows.page':'На странице','flows.page.custom':'Своё','flows.state':'Состояние','flows.state.all':'Все','flows.state.on':'Включённые','flows.state.off':'Выключенные','flows.state.hits':'С визитами','flows.state.any':'Все состояния','flows.source.all':'Все источники','flows.nosource':'Без источника','flows.nofolder':'Без группы','flows.sum':'Всего','flows.sum.sel':'Выбранные','flows.visits':'визиты','flows.bots':'боты','flows.conv':'конверсии','flows.profit':'прибыль','flows.nostreams':'Нет потоков — каждый посетитель получает ответ по умолчанию','flows.more':'ещё','flows.streams':'потоков','flows.logs':'Логи','flows.log.clicks':'Лог кликов','flows.log.conv':'Лог конверсий','tester.ip':'IP-адрес','tester.country':'Страна','tester.lang':'Язык','tester.referer':'Реферер','tester.key':'Ключевое слово','tester.query':'Параметры URL','tester.hint':'Берёт кампании с экрана, сохранённые или нет. Лимиты показов, проверка ботов и антифлуд зависят от живого трафика и здесь не считаются.','src.title':'Источники трафика','src.new':'Новый источник','src.our':'Имя у нас','src.theirs':'Имя в ссылке','src.empty':'Источников пока нет','src.link':'Ссылка кампании','log.traffic':'Трафик','log.postbacks':'Postbacks и S2S','log.system':'Системный','log.outcome':'Исход','log.direction':'Направление','rep.title':'Отчёт','rep.csv':'Скачать CSV','rep.empty':'За этот период пусто',
 'conv.title':'Конверсии','conv.subid':'Subid','conv.status':'Статус','conv.lead':'Лид','conv.sale':'Продажа','conv.campaign':'Кампания','conv.stream':'Поток','conv.offer':'Оффер','conv.landing':'Лендинг','conv.network':'Сеть','conv.source':'Источник','conv.columns':'Столбцы','conv.all':'Все',
 'net.title':'Сети','net.create':'Новая сеть','net.name':'Имя','net.label':'Название','net.tpl.ph':'Выберите шаблон','net.tpl.notes':'Инструкция шаблона (только чтение)','net.tpl.conv':'Статусы сети (трекер их не сопоставляет)','net.tpl.edit':'Править шаблон','net.tpl.add':'Новый шаблон','net.tpl.edited':'В шаблоне есть ваши правки.','net.tpl.ed.ins':'Инструкция','net.tpl.ed.hint':'Пустое поле оставляет значение каталога. {origin} — адрес этого трекера.','net.tpl.ed.reset':'Сбросить к каталогу','net.tpl.ed.del':'Удалить шаблон','net.tpl.state.none':'Параметры этого шаблона не извлечены. Заполните поля вручную.','net.tpl.state.partial':'У шаблона известна только часть полей. Остальные заполните вручную.','net.pb.help.t':'Переменные постбека','net.pb.help.a':'Параметры, которые трекер читает в своём адресе постбека. Макрос сети в фигурных скобках ставится как значение, например subid={sub1}.','net.pb.help.subid':'id клика; также clickid, cid','net.pb.help.status':'lead, sale или rejected; также type, goal','net.pb.help.payout':'сумма выплаты; также profit, sum','net.pb.help.depsum':'сумма депозита, не выплата; также DepSum','net.pb.help.tid':'id транзакции сети','net.pb.help.key':'секретный ключ, только если сервер его требует','net.param.help.t':'Параметры оффера','net.param.help.a':'Параметры, которые нужно добавлять ко всем офферам.','net.param.help.req':'Обязательно','net.param.help.ex1':'ваш_sub1={subid}','net.param.help.opt':'Опционально:','net.param.help.ex2':'ваш_sub2={campaign_name}&...','net.url':'Postback URL','net.param':'Параметры оффера','net.template':'Шаблон','net.save':'Сохранить','net.empty':'Сетей пока нет','net.copy':'Копировать','net.hint':'Заметка для кабинета сети. Трекер этот адрес не вызывает.','net.export.csv':'Партнёрка CSV','net.export.html':'Партнёрка HTML','net.export.off.csv':'Офферы этой партнёрки CSV','net.export.off.html':'Офферы этой партнёрки HTML',
 'off.title':'Офферы','off.new':'Новый оффер','off.name':'Имя','off.group':'Группа','off.url':'URL','off.land':'Лендинг','off.empty':'Офферов пока нет','off.tabs':'Разделы оффера','off.tab.main':'Основные','off.tab.settings':'Настройки','off.tab.values':'Значения','off.tab.notes':'Заметки','off.tab.action':'Действие','off.action':'Действие','off.action.help':'Пусто — редирект по URL. 404, текст, HTML и «ничего не делать» заменяют его.','off.action.url':'Редирект по URL','off.action.404':'Показать ошибку 404','off.action.text':'Показать как текст','off.action.html':'Показать как HTML','off.action.none':'Ничего не делать','off.action.body':'Содержимое','off.action.empty':'Введите текст','off.fallback':'Альтернативный оффер','off.fallback.none':'Без альтернативы','off.fallback.help':'Остановленный оффер и оффер с исчерпанным суточным или общим лимитом отдают клик сюда. Клик считается на нём. Если и он остановлен или исчерпан, берётся его альтернатива. Цикл обрывается. Если альтернативы нет, оффер пропускается.','flow.offer.stopped':'Оффер остановлен','off.macro.open':'Макросы','off.countries':'Страны','off.countries.ph':'Все страны','off.countries.help':'Пусто — оффер для всех стран. Если страны заданы, ротация не выберет оффер для клика из другой страны.','off.paytype':'Тип выплат','off.paytype.cpa':'CPA (за действие)','off.paytype.cpc':'CPC (за клик)','off.paytype.help':'CPA пишет сумму в конверсию. CPC пишет эту сумму доходом клика и не ставит её в конверсию.','off.upsell':'Допродажи','off.upsell.on':'Включено','off.upsell.off':'Отключено','off.status.on':'Включено','off.status.off':'Отключено','off.upsell.help':'Включено: постбек с новым tid по тому же клику — ещё одна продажа. Выключено: повтор клика без нового tid продажу не добавляет.','off.capmode':'Лимит конверсий','off.capmode.yes':'Да','off.capmode.no':'Нет','off.capmode.help':'Да показывает суточный лимит, общий лимит, часовой пояс и один альтернативный оффер. Нет прячет их. Сохранённый лимит остаётся.','off.tz':'Часовой пояс','off.tz.help':'Сутки дневного лимита кончаются в полночь этого пояса. Если пояс ещё не задан, показан тот же, что у остальной статистики, и сохранение его записывает.','off.macro.search':'Найти макрос…','off.macro.none':'Такого макроса нет','stream.macro.open':'Макросы','stream.macro.click':'Клик','stream.macro.visitor':'Посетитель','stream.macro.params':'Параметры ссылки','stream.macro.other':'Прочее','stream.macro.rand':'Случайные значения и строки из файла вписываются вручную: [RANDNUM-a-b], [RANDLINE-(файл)-n].','off.macro.main':'Клик','off.macro.sub':'Sub ID','off.macro.values':'Значения оффера','off.values.hint':'Движок подставит значение вместо {offer_value:имя} в URL оффера, закодировав его. Строка без имени не сохраняется. Имена не повторяются.','off.values.name':'Имя','off.values.value':'Значение','off.values.add':'Добавить значение','off.values.del':'Удалить значение','off.notes.ph':'Заметки об этом оффере','off.cap':'Лимит конверсий в сутки','off.cap.on':'Включён','off.cap.n':'Число конверсий','off.cap.help':'Сутки считаются в часовом поясе этого оффера. Выключен — лимит не действует, число сохраняется. Исчерпанный лимит отдаёт клик альтернативному офферу. Отказы не считаются.','off.cap.bad':'Укажите число конверсий от 1','off.cap.offer':'Когда лимит исчерпан','off.cap.skip':'Пропустить оффер','off.total':'Общий лимит конверсий','off.total.on':'Включён','off.total.n':'Число конверсий','off.total.help':'Все лиды и продажи этого оффера за всё время. Отказ не считается. Выключен — лимит не действует, число сохраняется. Исчерпанный лимит отдаёт клик альтернативному офферу.','off.del.one':'Удалить оффер {n}?','off.payout':'Выплата','off.currency':'Валюта','off.payout.param':'Параметр payout','off.payout.help':'Включено: выплата конверсии берётся из параметра payout постбека; если его нет или он пуст, ставится сумма из этой строки. Сумма подставляется только в USD и никогда у отклонённых конверсий. Выключено: ничего не подставляется.','off.again':'Добавить ещё','off.allnets':'Все сети','cat.pick.page':'Выбрать все на этой странице','cat.pick.row':'Выбрать строку','net.del.many':'Удалить сетей: {n}?','off.del.many':'Удалить офферов: {n}?','off.allgroups':'Все группы','off.search':'Поиск офферов…','land.search':'Поиск лендингов…','net.search':'Поиск сетей…','src.search':'Поиск источников…','dom.search':'Поиск доменов…','cat.groups.search':'Поиск группы…','grp.create':'Создать группу','off.visits':'Визиты','off.conv':'Конверсии','off.revenue':'Доход','col.clicks':'Клики','col.day':'Дата','col.leads':'Лиды','col.sales':'Продажи','col.rej':'Отклонённые','col.rej.hint':'Постбеки со статусом rejected','money.nocost':'Расход не записан: задайте параметр цены в кампании или внесите расход','then.mode.offers':'Лендинги и офферы','then.mode.url':'Прямой URL','then.mode.action':'Действие','share.label':'Доля, %','share.move':'Перетащите, чтобы сменить порядок (стрелки на ручке тоже двигают)','share.hint':'Доля посетителей, которые попадут на эту строку. Сумма одного списка — не больше 100.','share.dead':'не получает трафик','s2s.global':'Общие шаблоны','s2s.global.empty':'Общих шаблонов пока нет','s2s.global.edit':'Общие шаблоны…','col.cr':'CR','col.uepc':'uEPC','col.epc':'EPC','col.cpc':'CPC','col.revenue':'Доход','col.cost':'Расход','col.profit':'Прибыль','col.depsum':'depSum','col.roi':'ROI','col.crok':'CR подтв.','col.crrej':'CR режима','col.crlead':'CR лидов','col.ucr':'CR от уников','col.uniqpct':'Уники %','col.approve':'Аппрув %','col.ec':'Доход с конверсии','col.ecpm':'Доход с 1000 кликов','col.uniq':'Уники','col.conv':'Конверсии','col.spend':'Расход','bot.title':'Защита от ботов','bot.save':'Сохранить набор','bot.hint':'User-Agent — строка браузера, не страна. Имена краулеров дописывают в «Списках», файл signature_ua.dat, одна подстрока на строку.','bot.bl':'Чёрный список','bot.bl.hint':'Одна полная строка User-Agent на линию. Совпадение точное.','bot.bl.save':'Сохранить список','bot.proxy.default':'Проверка прокси: по умолчанию.','bot.proxy.wait':'Проверка прокси: по умолчанию; включится после загрузки списка iCloud Private Relay (Автоматизация → ip_lists).','bot.proxy.reset':'Сбросить проверку прокси к умолчанию','pb.title':'Постбеки','pb.hint':'Это адреса этого трекера. Их вставляют в кабинет партнёрской сети. Трекер сам по ним не ходит.','pb.lead':'Лид','pb.sale':'Продажа','pb.rejected':'Отклонено','pb.copy':'Копировать','pb.copyall':'Копировать все','pb.docs':'Документация','pb.url':'Postback URL','pb.host':'Хост','pb.copy.url':'Скопировать','pb.nokey':'Ключ постбека не нужен: достаточно id клика в subid. Каждое REPLACE замените макросом вашей сети.','pb.local':'Это локальный адрес. На сервере хост — домен для ссылок или хост админки.',
@@ -13463,7 +13521,7 @@ uk:{
 'users.board.main':'Основний розділ «{name}»','users.board.main.hint':'Участь в інших розділах цю позначку не знімає.','users.board.all':'Усі розділи: акаунт бачить кожен розділ.','users.board.member':'Також за участю: {list}.','users.board.member.none':'Немає участі в інших розділах; учасників задають у налаштуваннях розділів.','users.board.empty':'Без основного розділу і без участі користувач не побачить жодного розділу.','board.none':'У вас немає доступу до жодного розділу. Попросіть адміністратора додати вас до розділу.','board.people.main':'Участь додає користувачу цей розділ. Основний розділ задається в картці користувача і тут не змінюється.','board.main':'За замовчуванням','board.switch':'Розділ','board.sections':'Розділи','board.settings':'Налаштування розділів','board.create':'Назва нового розділу','board.import':'Імпорт із виду за замовчуванням','board.empty':'У виді за замовчуванням поки нічого копіювати.','board.page.title':'Розділи','board.add':'Створити розділ','board.icon':'Іконка','board.recent':'Нещодавні','board.all':'Усі іконки','board.colors':'Колір','board.name':'Назва','board.id':'ID','board.delete':'Видалити','board.move':'Перемістити','board.delete.confirm':'Видалити цей розділ?','board.inuse':'У розділі є записи','board.saved':'Збережено','board.expand':'Склад і учасники','board.include':'Вид розділу','board.include_all':'Показувати вміст усіх розділів','board.collapse':'Згорнути','board.compose.title':'Склад','board.compose.folders':'папки','board.compose.partners':'Групи партнерів','board.compose.save':'Зберегти склад','board.compose.saved':'Склад збережено','board.compose.addid':'Додати id','board.compose.add':'Додати','board.compose.search':'Пошук за id або імʼям','err.csrf':'Сесія застаріла. Оновіть сторінку.','board.people.title':'Учасники','board.people.role':'Роль','board.people.add':'Додати учасника','board.people.remove':'Прибрати','board.people.save':'Зберегти учасників','board.people.saved':'Учасників збережено','board.role.read':'Читання','board.role.edit':'Редагування','board.role.created':'Лише свої',
 'period.today':'Сьогодні','period.yesterday':'Вчора','period.week':'Поточний тиждень','period.7d':'Останні 7 днів','period.month':'Поточний місяць','period.prevmonth':'Попередній місяць','period.30d':'Останні 30 днів','period.year':'Поточний рік','period.all':'За весь час','period.dates':'Інтервал дат','period.times':'Інтервал часу','period.need':'Вкажіть обидва краї інтервалу',
 'settings.country':'Країна','settings.lang':'Мова інтерфейсу','settings.search':'Знайти країну','settings.geo':'Джерело країни для нової кампанії','settings.geo.cf':'Заголовок CDN','settings.geo.db':'Гео-база','settings.hint':'Пошук одразу за кодом і за англійською, російською та українською назвою.','settings.tz':'Часовий пояс статистики','settings.tz.find':'Знайти часовий пояс','settings.tz.hint':'Періоди й час у звітах рахуються в цьому поясі. Пояс самого відвідувача не змінюється.',
-'flows.title':'Кампанії','dirty.title':'Незбережені зміни:','dirty.flow':'Кампанія','dirty.removed':'Видалено: {n}','dirty.all':'Показати всі','dirty.less':'Згорнути','flow.tabs':'Розділи кампанії','flow.tab.notes':'Нотатки','flow.notes.ph':'Нотатки про цю кампанію','lnk.pb.old':'Старий піксель ?pb=','lnk.pb.old.hint':'Лише для старих схем: потрібен ключ EMTDS_POSTBACK_KEY, читає тільки cid, profit і status, на будь-який запит відповідає 200. Новим мережам давайте адресу нижче.','lnk.pb.net':'Постбек від мережі','lnk.pb.net.hint':'Основна адреса: мережа сама викликає її і підставляє замість {subid}, {status} і {payout} id кліку, статус і виплату.','flt.c.eq':'дорівнює','flt.c.ne':'не дорівнює','flt.c.in':'зі списку','flt.c.nin':'не зі списку','flt.c.contains':'містить','flt.c.not_contains':'не містить','par.hint':'Назва в посиланні — як джерело називає це поле в адресі кампанії; рушій читає її. Токен — макрос джерела замість значення, наприклад {keyword}; рушій його не розкриває, він лише потрапляє в посилання.','flow.compact':'Компактний вигляд','flow.expanded':'Докладний вигляд','flow.traffic.off':'Сортування: вимк','flow.traffic.desc':'Сортування за трафіком: більше зверху','flow.traffic.asc':'Сортування за трафіком: менше зверху','flow.traffic.lock':'Вимкніть сортування, щоб змінювати порядок','flow.revenue.asc':'Сортування за доходом: менше зверху','flow.revenue.desc':'Сортування за доходом: більше зверху','flows.table':'Таблиця','flows.cards':'Картки','flows.search':'Пошук кампаній і потоків…','flows.new':'Нова кампанія','flows.bulk.on':'Увімкнути','flows.bulk.off':'Вимкнути','flows.bulk.dup':'Дублювати','flows.bulk.del':'Видалити','flows.bulk.n':'обрано','flows.col.id':'Кампанія','flows.col.num':'ID','flows.col.name':'Назва кампанії','flows.col.url':'URL','flows.col.streams':'Потоки','flows.page':'На сторінці','flows.page.custom':'Своє','flows.state':'Стан','flows.state.all':'Усі','flows.state.on':'Увімкнені','flows.state.off':'Вимкнені','flows.state.hits':'З візитами','flows.state.any':'Усі стани','flows.source.all':'Усі джерела','flows.nosource':'Без джерела','flows.nofolder':'Без групи','flows.sum':'Разом','flows.sum.sel':'Обрані','flows.visits':'візити','flows.bots':'боти','flows.conv':'конверсії','flows.profit':'прибуток','flows.nostreams':'Немає потоків — кожен відвідувач отримує відповідь за замовчуванням','flows.more':'ще','flows.streams':'потоків','flows.logs':'Журнали','flows.log.clicks':'Лог кліків','flows.log.conv':'Лог конверсій','tester.ip':'IP-адреса','tester.country':'Країна','tester.lang':'Мова','tester.referer':'Реферер','tester.key':'Ключове слово','tester.query':'Параметри URL','tester.hint':'Бере кампанії з екрана, збережені чи ні. Ліміти показів, перевірка ботів і антифлуд залежать від живого трафіку і тут не рахуються.','src.title':'Джерела трафіку','src.new':'Нове джерело','src.our':'Ім’я у нас','src.theirs':'Ім’я в посиланні','src.empty':'Джерел ще немає','src.link':'Посилання кампанії','log.traffic':'Трафік','log.postbacks':'Postbacks і S2S','log.system':'Системний','log.outcome':'Результат','log.direction':'Напрям','rep.title':'Звіт','rep.csv':'Завантажити CSV','rep.empty':'За цей період порожньо',
+'flows.title':'Кампанії','dirty.title':'Незбережені зміни:','dirty.flow':'Кампанія','dirty.removed':'Видалено: {n}','dirty.all':'Показати всі','dirty.less':'Згорнути','flow.tabs':'Розділи кампанії','flow.tab.notes':'Нотатки','flow.notes.ph':'Нотатки про цю кампанію','lnk.pb.old':'Старий піксель ?pb=','lnk.pb.old.hint':'Лише для старих схем: потрібен ключ EMTDS_POSTBACK_KEY, читає тільки cid, profit і status, на будь-який запит відповідає 200. Новим мережам давайте адресу нижче.','lnk.pb.net':'Постбек від мережі','lnk.pb.net.hint':'Основна адреса: мережа сама викликає її і підставляє замість {subid}, {status} і {payout} id кліку, статус і виплату.','flt.c.eq':'дорівнює','flt.c.ne':'не дорівнює','flt.c.in':'зі списку','flt.c.nin':'не зі списку','flt.c.contains':'містить','flt.c.not_contains':'не містить','par.hint':'Назва в посиланні — як джерело називає це поле в адресі кампанії; рушій читає її. Токен — макрос джерела замість значення, наприклад {keyword}; рушій його не розкриває, він лише потрапляє в посилання.','flow.compact':'Компактний вигляд','flow.expanded':'Докладний вигляд','flow.traffic.off':'Сортування: вимк','flow.traffic.desc':'Сортування за трафіком: більше зверху','flow.traffic.asc':'Сортування за трафіком: менше зверху','flow.traffic.lock':'Вимкніть сортування, щоб змінювати порядок','flow.revenue.asc':'Сортування за доходом: менше зверху','flow.revenue.desc':'Сортування за доходом: більше зверху','flow.traffic.word':'трафік','flow.revenue.word':'дохід','flows.table':'Таблиця','flows.cards':'Картки','flows.search':'Пошук кампаній і потоків…','flows.new':'Нова кампанія','flows.bulk.on':'Увімкнути','flows.bulk.off':'Вимкнути','flows.bulk.dup':'Дублювати','flows.bulk.del':'Видалити','flows.bulk.n':'обрано','flows.col.id':'Кампанія','flows.col.num':'ID','flows.col.name':'Назва кампанії','flows.col.url':'URL','flows.col.streams':'Потоки','flows.page':'На сторінці','flows.page.custom':'Своє','flows.state':'Стан','flows.state.all':'Усі','flows.state.on':'Увімкнені','flows.state.off':'Вимкнені','flows.state.hits':'З візитами','flows.state.any':'Усі стани','flows.source.all':'Усі джерела','flows.nosource':'Без джерела','flows.nofolder':'Без групи','flows.sum':'Разом','flows.sum.sel':'Обрані','flows.visits':'візити','flows.bots':'боти','flows.conv':'конверсії','flows.profit':'прибуток','flows.nostreams':'Немає потоків — кожен відвідувач отримує відповідь за замовчуванням','flows.more':'ще','flows.streams':'потоків','flows.logs':'Журнали','flows.log.clicks':'Лог кліків','flows.log.conv':'Лог конверсій','tester.ip':'IP-адреса','tester.country':'Країна','tester.lang':'Мова','tester.referer':'Реферер','tester.key':'Ключове слово','tester.query':'Параметри URL','tester.hint':'Бере кампанії з екрана, збережені чи ні. Ліміти показів, перевірка ботів і антифлуд залежать від живого трафіку і тут не рахуються.','src.title':'Джерела трафіку','src.new':'Нове джерело','src.our':'Ім’я у нас','src.theirs':'Ім’я в посиланні','src.empty':'Джерел ще немає','src.link':'Посилання кампанії','log.traffic':'Трафік','log.postbacks':'Postbacks і S2S','log.system':'Системний','log.outcome':'Результат','log.direction':'Напрям','rep.title':'Звіт','rep.csv':'Завантажити CSV','rep.empty':'За цей період порожньо',
 'conv.title':'Конверсії','conv.subid':'Subid','conv.status':'Статус','conv.lead':'Лід','conv.sale':'Продаж','conv.campaign':'Кампанія','conv.stream':'Потік','conv.offer':'Офер','conv.landing':'Лендінг','conv.network':'Мережа','conv.source':'Джерело','conv.columns':'Стовпці','conv.all':'Усі',
 'net.title':'Мережі','net.create':'Нова мережа','net.name':'Назва','net.label':'Назва','net.tpl.ph':'Оберіть шаблон','net.tpl.notes':'Інструкція шаблону (лише читання)','net.tpl.conv':'Статуси мережі (трекер їх не зіставляє)','net.tpl.edit':'Редагувати шаблон','net.tpl.add':'Новий шаблон','net.tpl.edited':'У шаблоні є ваші правки.','net.tpl.ed.ins':'Інструкція','net.tpl.ed.hint':'Порожнє поле залишає значення каталогу. {origin} — адреса цього трекера.','net.tpl.ed.reset':'Скинути до каталогу','net.tpl.ed.del':'Видалити шаблон','net.tpl.state.none':'Параметри цього шаблону не отримано. Заповніть поля вручну.','net.tpl.state.partial':'У шаблону відома лише частина полів. Решту заповніть вручну.','net.pb.help.t':'Змінні постбеку','net.pb.help.a':'Параметри, які трекер читає у своїй адресі постбеку. Макрос мережі у фігурних дужках ставиться як значення, наприклад subid={sub1}.','net.pb.help.subid':'id кліка; також clickid, cid','net.pb.help.status':'lead, sale або rejected; також type, goal','net.pb.help.payout':'сума виплати; також profit, sum','net.pb.help.depsum':'сума депозиту, не виплата; також DepSum','net.pb.help.tid':'id транзакції мережі','net.pb.help.key':'секретний ключ, лише якщо сервер його вимагає','net.param.help.t':'Параметри офера','net.param.help.a':'Параметри, які потрібно додавати до всіх оферів.','net.param.help.req':'Обов’язково','net.param.help.ex1':'ваш_sub1={subid}','net.param.help.opt':'Опційно:','net.param.help.ex2':'ваш_sub2={campaign_name}&...','net.url':'Postback URL','net.param':'Параметри офера','net.template':'Шаблон','net.save':'Зберегти','net.empty':'Мереж ще немає','net.copy':'Копіювати','net.hint':'Нотатка для кабінету мережі. Трекер цю адресу не викликає.','net.export.csv':'Мережа CSV','net.export.html':'Мережа HTML','net.export.off.csv':'Офери цієї мережі CSV','net.export.off.html':'Офери цієї мережі HTML',
 'off.title':'Офери','off.new':'Новий офер','off.name':'Назва','off.group':'Група','off.url':'URL','off.land':'Лендінг','off.empty':'Оферів ще немає','off.tabs':'Розділи офера','off.tab.main':'Основні','off.tab.settings':'Налаштування','off.tab.values':'Значення','off.tab.notes':'Нотатки','off.tab.action':'Дія','off.action':'Дія','off.action.help':'Порожньо — редирект за URL. 404, текст, HTML і «нічого не робити» замінюють його.','off.action.url':'Редирект за URL','off.action.404':'Показати помилку 404','off.action.text':'Показати як текст','off.action.html':'Показати як HTML','off.action.none':'Нічого не робити','off.action.body':'Вміст','off.action.empty':'Введіть текст','off.fallback':'Альтернативний офер','off.fallback.none':'Без альтернативи','off.fallback.help':'Зупинений офер і офер з вичерпаним добовим чи загальним лімітом віддають клік сюди. Клік рахується на ньому. Якщо і він зупинений чи вичерпаний, береться його альтернатива. Цикл обривається. Якщо альтернативи немає, офер пропускається.','flow.offer.stopped':'Офер зупинено','off.macro.open':'Макроси','off.countries':'Країни','off.countries.ph':'Усі країни','off.countries.help':'Порожньо — офер для всіх країн. Якщо країни задано, ротація не вибере офер для кліку з іншої країни.','off.paytype':'Тип виплат','off.paytype.cpa':'CPA (за дію)','off.paytype.cpc':'CPC (за клік)','off.paytype.help':'CPA пише суму в конверсію. CPC пише цю суму доходом кліку і не ставить її в конверсію.','off.upsell':'Допродажі','off.upsell.on':'Увімкнено','off.upsell.off':'Вимкнено','off.status.on':'Увімкнено','off.status.off':'Вимкнено','off.upsell.help':'Увімкнено: постбек з новим tid по тому самому кліку — ще один продаж. Вимкнено: повтор кліку без нового tid продаж не додає.','off.capmode':'Ліміт конверсій','off.capmode.yes':'Так','off.capmode.no':'Ні','off.capmode.help':'Так показує добовий ліміт, загальний ліміт, часовий пояс і один альтернативний офер. Ні ховає їх. Збережений ліміт лишається.','off.tz':'Часовий пояс','off.tz.help':'Доба денного ліміту закінчується опівночі цього поясу. Якщо пояс ще не задано, показано той самий, що в решти статистики, і збереження його записує.','off.macro.search':'Знайти макрос…','off.macro.none':'Такого макросу немає','stream.macro.open':'Макроси','stream.macro.click':'Клік','stream.macro.visitor':'Відвідувач','stream.macro.params':'Параметри посилання','stream.macro.other':'Інше','stream.macro.rand':'Випадкові значення і рядки з файлу вписуються вручну: [RANDNUM-a-b], [RANDLINE-(файл)-n].','off.macro.main':'Клік','off.macro.sub':'Sub ID','off.macro.values':'Значення офера','off.values.hint':'Рушій підставить значення замість {offer_value:імʼя} в URL офера, закодувавши його. Рядок без імені не зберігається. Імена не повторюються.','off.values.name':'Імʼя','off.values.value':'Значення','off.values.add':'Додати значення','off.values.del':'Видалити значення','off.notes.ph':'Нотатки про цей офер','off.cap':'Ліміт конверсій на добу','off.cap.on':'Увімкнено','off.cap.n':'Кількість конверсій','off.cap.help':'Доба рахується в часовому поясі цього офера. Вимкнено — ліміт не діє, число лишається. Вичерпаний ліміт віддає клік альтернативному оферу. Відмови не рахуються.','off.cap.bad':'Вкажіть кількість конверсій від 1','off.cap.offer':'Коли ліміт вичерпано','off.cap.skip':'Пропустити офер','off.total':'Загальний ліміт конверсій','off.total.on':'Увімкнено','off.total.n':'Кількість конверсій','off.total.help':'Усі ліди і продажі цього офера за весь час. Відмова не рахується. Вимкнено — ліміт не діє, число лишається. Вичерпаний ліміт віддає клік альтернативному оферу.','off.del.one':'Видалити офер {n}?','off.payout':'Виплата','off.currency':'Валюта','off.payout.param':'Параметр payout','off.payout.help':'Увімкнено: виплата конверсії береться з параметра payout постбеку; якщо його немає або він порожній, ставиться сума з цього рядка. Сума підставляється лише в USD і ніколи для відхилених конверсій. Вимкнено: нічого не підставляється.','off.again':'Додати ще','off.allnets':'Усі мережі','cat.pick.page':'Вибрати все на цій сторінці','cat.pick.row':'Вибрати рядок','net.del.many':'Видалити мереж: {n}?','off.del.many':'Видалити оферів: {n}?','off.allgroups':'Усі групи','off.search':'Пошук оферів…','land.search':'Пошук лендингів…','net.search':'Пошук мереж…','src.search':'Пошук джерел…','dom.search':'Пошук доменів…','cat.groups.search':'Пошук групи…','grp.create':'Створити групу','off.visits':'Візити','off.conv':'Конверсії','off.revenue':'Дохід','col.clicks':'Кліки','col.day':'Дата','col.leads':'Ліди','col.sales':'Продажі','col.rej':'Відхилені','col.rej.hint':'Постбеки зі статусом rejected','money.nocost':'Витрату не записано: задайте параметр ціни в кампанії або внесіть витрату','then.mode.offers':'Лендінги й офери','then.mode.url':'Прямий URL','then.mode.action':'Дія','share.label':'Частка, %','share.move':'Перетягніть, щоб змінити порядок (стрілки на ручці теж рухають)','share.hint':'Частка відвідувачів, які потраплять на цей рядок. Сума одного списку — не більше 100.','share.dead':'не отримує трафік','s2s.global':'Спільні шаблони','s2s.global.empty':'Спільних шаблонів ще немає','s2s.global.edit':'Спільні шаблони…','col.cr':'CR','col.uepc':'uEPC','col.epc':'EPC','col.cpc':'CPC','col.revenue':'Дохід','col.cost':'Витрата','col.profit':'Прибуток','col.depsum':'depSum','col.roi':'ROI','col.crok':'CR підтв.','col.crrej':'CR режиму','col.crlead':'CR лідів','col.ucr':'CR від унікальних','col.uniqpct':'Унікальні %','col.approve':'Апрув %','col.ec':'Дохід з конверсії','col.ecpm':'Дохід з 1000 кліків','col.uniq':'Уніки','col.conv':'Конверсії','col.spend':'Витрата','bot.title':'Захист від ботів','bot.save':'Зберегти набір','bot.hint':'User-Agent — рядок браузера, не країна. Імена краулерів дописують у «Списках», файл signature_ua.dat, один підрядок на рядок.','bot.bl':'Чорний список','bot.bl.hint':'Один повний рядок User-Agent на лінію. Збіг точний.','bot.bl.save':'Зберегти список','bot.proxy.default':'Перевірка проксі: за замовчуванням.','bot.proxy.wait':'Перевірка проксі: за замовчуванням; увімкнеться після завантаження списку iCloud Private Relay (Автоматизація → ip_lists).','bot.proxy.reset':'Скинути перевірку проксі до замовчування','pb.title':'Постбеки','pb.hint':'Це адреси цього трекера. Їх вставляють у кабінет партнерської мережі. Трекер сам по них не ходить.','pb.lead':'Лід','pb.sale':'Продаж','pb.rejected':'Відхилено','pb.copy':'Копіювати','pb.copyall':'Копіювати всі','pb.docs':'Документація','pb.url':'Postback URL','pb.host':'Хост','pb.copy.url':'Скопіювати','pb.nokey':'Ключ постбека не потрібен: достатньо id кліку в subid. Кожне REPLACE замініть макросом вашої мережі.','pb.local':'Це локальна адреса. На сервері хост — домен для посилань або хост адмінки.',
@@ -14056,7 +14114,11 @@ function flowDestMarks(out, named){
   return `<span class="badges" title="${esc(tip)}">${shown.map(badge).join('')}${more}${zero}</span>`;
 }
 // An output on the canvas: one text, or its variants one per line.
-function outHTML(red,out,rows){
+function outHTML(red,out,rows,aliases){
+  if(aliases==null&&typeof campaignQueryAliases==='function'){
+    aliases=campaignQueryAliases(typeof CUR!=='undefined'?CUR:null, typeof SOURCES!=='undefined'?SOURCES:[]);
+  }
+  const paint=v=>macroHTML(esc(firstLine(v)), aliases);
   if(red==='landing'){
     const names=outLabel('landing',rows);
     return names?`<div class="out" title="${esc(names)}">${esc(names)}</div>`:'';
@@ -14064,9 +14126,9 @@ function outHTML(red,out,rows){
   if(NOOUT.has(red))return '';
   const vs=splitVariants(out);
   if(!vs.length)return '<div class="out"><span class="subtle">'+esc(tr('out.empty'))+'</span></div>';
-  if(vs.length===1)return `<div class="out" title="${esc(vs[0])}">${macroHTML(esc(firstLine(vs[0])))}</div>`;
+  if(vs.length===1)return `<div class="out" title="${esc(vs[0])}">${paint(vs[0])}</div>`;
   const cut=vs.length>3?2:3;
-  return `<div class="vl">${vs.slice(0,cut).map((v,i)=>`<div title="${esc(v)}"><i>${i+1}</i><span>${macroHTML(esc(firstLine(v)))}</span></div>`).join('')}${vs.length>cut?`<div><i></i><span>+ ${vs.length-cut} ${tr('flows.more')}</span></div>`:''}</div>`;
+  return `<div class="vl">${vs.slice(0,cut).map((v,i)=>`<div title="${esc(v)}"><i>${i+1}</i><span>${paint(v)}</span></div>`).join('')}${vs.length>cut?`<div><i></i><span>+ ${vs.length-cut} ${tr('flows.more')}</span></div>`:''}</div>`;
 }
 /** flowDestURL is the address under a stream destination.
  * o is the stream output. A stream with an offer or landing that receives traffic
@@ -14436,13 +14498,19 @@ const groupById=(id)=>(GROUPS||[]).find(g=>g.id===id||(g.aliases||[]).includes(i
 /** GROUPS_LOAD is the GET /api/groups request in flight with its section: {board, rows}, so pages of one
  * section that ask at once share one download. */
 let GROUPS_LOAD=null;
-/** ensureGroups loads the campaigns into GROUPS once, or again on refresh while nothing is unsaved.
+/** GROUPS_LIST is true while GROUPS holds the short rows of GET /api/groups?summary=1.
+ * LIST_ROWS is the short row objects that still have no rules. */
+let GROUPS_LIST=false;
+const LIST_ROWS=new WeakSet();
+/** ensureGroups loads the full campaigns into GROUPS once, or again on refresh while nothing is unsaved.
+ * Short list rows are not the full campaigns: they are dropped and the shared list is read, unless an edit is unsaved.
  * An answer for a section the tab has left is dropped and the list is read for the current section.
  * @param {boolean} [refresh] read the list again when there is no unsaved campaign edit
  * @returns {Promise<object[]>} GROUPS
  * @throws {Error} the request error
  */
 async function ensureGroups(refresh){
+  if(GROUPS_LIST&&!flowsDirty()){GROUPS=null; GROUPS_LIST=false}
   if(GROUPS===null||(refresh&&!flowsDirty())){
     const board=boardEffectiveId();
     if(!GROUPS_LOAD||GROUPS_LOAD.board!==board){
@@ -14453,9 +14521,55 @@ async function ensureGroups(refresh){
     if(board!==boardEffectiveId()) return ensureGroups(refresh);
     if(refresh&&flowsDirty()) return GROUPS;
     GROUPS=gs;
+    GROUPS_LIST=false;
     snapshotGroups();
   }
   return GROUPS;
+}
+/** ensureFlowList loads the short campaign rows the campaigns list paints.
+ * A list already in memory is kept until refresh, and refresh waits while an edit is unsaved.
+ * The short row has stream heads and no rules; ensureGroupFull reads one campaign before it is edited or saved.
+ * @param {boolean} [refresh] read the short rows again when nothing is unsaved
+ * @returns {Promise<object[]>} GROUPS
+ * @throws {Error} the request error
+ */
+async function ensureFlowList(refresh){
+  if(refresh&&flowsDirty()) return GROUPS;
+  if(GROUPS&&!refresh) return GROUPS;
+  const rows=await call('GET','/api/groups?summary=1');
+  const list=Array.isArray(rows)?rows:[];
+  GROUPS=list;
+  GROUPS_LIST=true;
+  for(const g of list) LIST_ROWS.add(g);
+  snapshotGroups();
+  return GROUPS;
+}
+/** ensureGroupFull replaces a short list row with the stored campaign.
+ * g is the campaign object. A row that is already complete is left as it is.
+ * A status, folder, number or name changed on the short row is put back onto the stored campaign and marked unsaved.
+ * @param {object} g campaign
+ * @returns {Promise<object>} g
+ * @throws {Error} the request error, or when the campaign is missing
+ */
+async function ensureGroupFull(g){
+  if(!g||!LIST_ROWS.has(g)) return g;
+  const edited=DIRTY.has(g)||(SNAP.has(g)&&SNAP.get(g).json!==groupJSON(g));
+  const status=!!g.status, folder=g.folder, num=g.num, name=g.name||'';
+  const full=await call('GET','/api/groups/'+encodeURIComponent(g.id));
+  if(!full||typeof full!=='object'||!full.id) throw new Error('not found');
+  for(const k of Object.keys(g)) delete g[k];
+  Object.assign(g, full);
+  if(!Array.isArray(g.streams)) g.streams=[];
+  LIST_ROWS.delete(g);
+  SNAP.set(g,{id:g.id,json:groupJSON(g)});
+  if(!edited) return g;
+  let touch=false;
+  if(!!g.status!==status){g.status=status; touch=true}
+  if(String(g.folder||'')!==String(folder||'')){if(folder) g.folder=folder; else delete g.folder; touch=true}
+  if((+g.num||0)!==(+num||0)){g.num=num; touch=true}
+  if((g.name||'')!==name){g.name=name; touch=true}
+  if(touch) markDirty(g);
+  return g;
 }
 /** fetchGroupRows reads the campaigns in the shared form and puts the long list filters back.
  * @param {object} [opts] call options, for example the board override
@@ -14592,6 +14706,7 @@ const FLOW_WHOLE_MAX=500;
  */
 async function saveFlows(){
   await flushIPDraft();
+  for(const g of [...DIRTY]){if(LIST_ROWS.has(g)) await ensureGroupFull(g)}
   const ids=GROUPS.map(g=>(g.id||'').trim());
   if(ids.some(x=>!x))throw new Error('Every flow needs an ID');
   const dup=ids.find((x,i)=>ids.indexOf(x)!==i);
@@ -14764,6 +14879,7 @@ async function newFlow(folder){
  * @returns {Promise<object|undefined>} the copy when stay is set
  */
 async function duplicateFlow(g, stay){
+  await ensureGroupFull(g);
   ensureNums(true);
   const taken=await takenCampaignIds();
   const c=clone(g);
@@ -15063,7 +15179,7 @@ async function flows(arg,live){
     if(v){document.body.classList.add('has-flowdock'); v.innerHTML=flowsListWait()}
   }
   const keep=flowsTakeKeep();
-  const loaded=await Promise.all([ensureGroups(!keep),loadPerf(),loadMoney(),ensureDomains(),get('/api/traffic-sources',[])]);
+  const loaded=await Promise.all([ensureFlowList(!keep),loadPerf(),loadMoney(),ensureDomains(),get('/api/traffic-sources',[])]);
   FLOW_SOURCES=Array.isArray(loaded[4])?loaded[4]:[];
   ensureNums();
   if(!live())return;
@@ -15090,7 +15206,7 @@ async function flows(arg,live){
   const nf=q('#newflow'); if(nf) nf.onclick=newFlow;
   const reload=()=>busy(q('#flow-refresh'), async()=>{
     try{
-      const loaded=await Promise.all([ensureGroups(true),loadPerf(true),loadMoney(),ensureDomains(),get('/api/traffic-sources',[])]);
+      const loaded=await Promise.all([ensureFlowList(true),loadPerf(true),loadMoney(),ensureDomains(),get('/api/traffic-sources',[])]);
       FLOW_SOURCES=Array.isArray(loaded[4])?loaded[4]:[];
       paintFlowCards();
     }catch(e){toast(e.message,true)}
@@ -15210,6 +15326,7 @@ async function setCampaignFolder(list, label){
   const name=String(label||'').trim();
   const apply=o=>{ if(name) o.folder=name; else delete o.folder; };
   for(const g of list){
+    await ensureGroupFull(g);
     const prev=SNAP.get(g);
     const renamed=!!(prev&&prev.id!==g.id);
     if(!prev||renamed||!g.id){
@@ -15261,6 +15378,7 @@ async function clearCampaignFolder(name){
   if(!label) return;
   const mine=(Array.isArray(GROUPS)?GROUPS:[]).filter(g=>String(g&&g.folder||'').trim()===label);
   for(const g of mine){
+    await ensureGroupFull(g);
     const prev=SNAP.get(g);
     const renamed=!!(prev&&prev.id!==g.id);
     if(!prev||renamed||!g.id){
@@ -16288,7 +16406,7 @@ function paintFlowCards(){
         if(pageAllowed(ME,'logs')) items.push({label:tr('flows.log.traffic'),icon:'logs',on:()=>openTrafficLog(g)});
         if(edit){
           items.push({label:tr('col.spend'),icon:'conversions',on:()=>spendDialog(g.id)},
-            {label:g.status?tr('Turn off'):tr('Turn on'),icon:'play',on:()=>{g.status=!g.status;markDirty(g);paintFlowCards()}},
+            {label:g.status?tr('Turn off'):tr('Turn on'),icon:'play',on:async()=>{await ensureGroupFull(g); g.status=!g.status; markDirty(g); paintFlowCards()}},
             {label:tr('Duplicate'),icon:'dup',on:()=>duplicateFlow(g)},'-',
             {label:tr('Delete'),icon:'trash',danger:true,on:()=>deleteFlow(g)});
         }
@@ -16348,8 +16466,8 @@ function paintFlowCards(){
       };
     });
     const picked=()=>GROUPS.filter(g=>FLOW_PICK.has(g.id));
-    const bon=q('#bulk-on',grid); if(bon) bon.onclick=()=>{const list=picked(); list.forEach(g=>{g.status=true}); FLOW_PICK.clear(); markDirty(list); paintFlowCards()};
-    const boff=q('#bulk-off',grid); if(boff) boff.onclick=()=>{const list=picked(); list.forEach(g=>{g.status=false}); FLOW_PICK.clear(); markDirty(list); paintFlowCards()};
+    const bon=q('#bulk-on',grid); if(bon) bon.onclick=async()=>{const list=picked(); for(const g of list) await ensureGroupFull(g); list.forEach(g=>{g.status=true}); FLOW_PICK.clear(); markDirty(list); paintFlowCards()};
+    const boff=q('#bulk-off',grid); if(boff) boff.onclick=async()=>{const list=picked(); for(const g of list) await ensureGroupFull(g); list.forEach(g=>{g.status=false}); FLOW_PICK.clear(); markDirty(list); paintFlowCards()};
     const bdup=q('#bulk-dup',grid); if(bdup) bdup.onclick=async()=>{const list=picked(); for(const g of list) await duplicateFlow(g,true); FLOW_PICK.clear(); paintFlowCards()};
     const bgrp=q('#bulk-group',grid); if(bgrp) bgrp.onclick=()=>{const list=picked().filter(g=>canEdit(ME,'campaigns',g)); if(list.length) openFlowFolderPick(list)};
     const bdel=q('#bulk-del',grid); if(bdel) bdel.onclick=async()=>{
@@ -16427,10 +16545,12 @@ async function flowPage(id,live){
     const v=view();
     if(v) v.innerHTML=flowPageWait(id);
   }
-  await Promise.all([ensureGroups(),loadPerf(),loadMoney(),ensureDomains(),ensureCatalogs()]);
+  await Promise.all([ensureFlowList(),loadPerf(),loadMoney(),ensureDomains(),ensureCatalogs()]);
   if(!live())return;
   const g=groupById(id);
   if(!g){view().innerHTML=`<div class="state">${tr('There is no flow')} “${esc(id)}”. <a href="#/flows">${tr('All flows')}</a></div>`;return}
+  await ensureGroupFull(g);
+  if(!live())return;
   await loadPerfFor(g);
   if(!live())return;
   if(CUR!==g){SIM=null;CUR=g;IP_DRAFT=null;IP_PENDING=false;IP_REQ='';IP_IDX=-1}
@@ -16440,16 +16560,29 @@ async function flowPage(id,live){
   if(OPEN_SETTINGS){OPEN_SETTINGS=false;openFlowSettings()}
 }
 /**
+ * flowTrafficWord is the short label beside the canvas order icon.
+ * Off has no word. Visit orders say traffic. Revenue orders say revenue.
+ * @param {*} mode order from FLOW_TRAFFIC_MODES
+ * @returns {string} translated word, or empty when sorting is off
+ */
+function flowTrafficWord(mode){
+  mode=flowTrafficMode(mode);
+  if(!mode) return '';
+  return tr(mode.startsWith('rev') ? 'flow.revenue.word' : 'flow.traffic.word');
+}
+/**
  * flowTrafficButton renders the canvas toggle of the visual stream order for the current FLOW_TRAFFIC.
- * Off is unpressed. The title and the aria-label name the current mode.
- * @returns {string} button HTML with the icon and title of the current order
+ * Off is unpressed and shows only the icon. Traffic and revenue orders add their short word.
+ * The title and the aria-label name the current mode.
+ * @returns {string} button HTML with the icon, the word when an order is on, and the title of that order
  */
 function flowTrafficButton(){
   const mode=flowTrafficMode(FLOW_TRAFFIC);
   const key=mode||'off';
   const title=tr(FLOW_TRAFFIC_TITLE[key]);
   const glyph=mode.endsWith('asc')?'sortasc':mode.endsWith('desc')?'sortdesc':'sortoff';
-  return `<button type="button" class="icon sm ghost canvas-toggle canvas-traffic" id="ftraffic" title="${esc(title)}" aria-label="${esc(title)}" aria-pressed="${mode?'true':'false'}" data-traffic="${key}">${icon(glyph)}</button>`;
+  const word=flowTrafficWord(mode);
+  return `<button type="button" class="icon sm ghost canvas-toggle canvas-traffic" id="ftraffic" title="${esc(title)}" aria-label="${esc(title)}" aria-pressed="${mode?'true':'false'}" data-traffic="${key}">${icon(glyph)}${word?`<span class="traf-w">${esc(word)}</span>`:''}</button>`;
 }
 /** FLOW_TRAFFIC_TITLE maps a canvas order ('off' for none) to its tr key. */
 const FLOW_TRAFFIC_TITLE={off:'flow.traffic.off', asc:'flow.traffic.asc', desc:'flow.traffic.desc', 'rev-asc':'flow.revenue.asc', 'rev-desc':'flow.revenue.desc'};
@@ -16947,6 +17080,8 @@ function paintTester(){
     read();
     if(!TV.ip){toast(tr('tester.needip'),true);q('#tv_ip').focus();return}
     try{
+      const simList=simGroups(GROUPS, CUR&&CUR.id);
+      for(const g of simList) await ensureGroupFull(g);
       SIM=await call('POST','/api/simulate',{groups:simGroups(GROUPS, CUR&&CUR.id),group:CUR.id,visitor:{ip:TV.ip,useragent:TV.uaRaw||UAS[TV.ua],referer:TV.referer,lang:TV.lang,key:TV.key,query:TV.query,country:TV.country,repeat:TV.repeat}});
       if(flowCanvasOpen()) renderFlow();
     }catch(e){toast(e.message,true)}
@@ -17354,16 +17489,17 @@ function bindStreamMacros(body){
     const find=q('.macro-find',node); if(find) find.focus();
   };
 }
-/** bindStreamURLHighlight colours macros in the URL variants of a stream. Braces and square brackets such as
- * [SUBID] and [PAR-1] take the accent colour on the same layer as an offer address. A text variant is left alone.
- * The value read from the field stays plain text.
+/** bindStreamURLHighlight colours macros in the URL variants of a stream. Square brackets such as
+ * [SUBID] and [PAR-1], and a curly name the engine expands, take the accent colour on the same layer as an offer address.
+ * An unknown name in braces stays plain. A text variant is left alone. The value read from the field stays plain text.
  * @param {Element|null} root the stream drawer body, or the variants box when a row was just added
  * @returns {void}
  */
 function bindStreamURLHighlight(root){
   const box=root&&root.id==='s_outv'?root:q('#s_outv',root||document);
   if(!box||box.dataset.multi==='1') return;
-  qa('input.mono',box).forEach(el=>bindMacroOverlay(el,true));
+  const known=()=>campaignQueryAliases(typeof CUR!=='undefined'?CUR:null, typeof SOURCES!=='undefined'?SOURCES:[]);
+  qa('input.mono',box).forEach(el=>bindMacroOverlay(el,true,known));
 }
 /** thenURLField is the URL or text output, macros and curl rewrite.
  * @param {object} o stream output
@@ -25077,23 +25213,39 @@ function netTplFields(t){
  * braceMacroHTML is the text of an address as escaped HTML with every network macro, such as {sub1}, {payout} or
  * {{income}}, wrapped in a span of class hl-v. When squares is true, a macro in square brackets such as [SUBID] or
  * [PAR-1] is wrapped the same way. Other text is only escaped, so nothing in the text can become markup.
+ * When known is passed, only a curly name Expand fills, or one of those aliases, is wrapped; an unknown name stays
+ * plain text, and the span is still hl-v, the same colour a square macro already uses in this layer.
  * A text that ends with a line break gets one space more, the way a textarea keeps room for its last empty line.
  * @param {*} text address as typed; null and undefined count as empty
  * @param {boolean} [squares] also colour macros in square brackets; omitted leaves them as plain text
+ * @param {string[]|function():string[]} [known] campaign query aliases; omitted colours every brace macro
  * @returns {string} HTML for the layer under the field
  */
-function braceMacroHTML(text, squares){
-  const s=String(text==null?'':text), re=squares?/\{+[^{}\s]+\}+|\[[^\[\]\s]+\]/g:/\{+[^{}\s]+\}+/g;
+function braceMacroHTML(text, squares, known){
+  const s=String(text==null?'':text);
+  const re=known
+    ?(squares?/\{[A-Za-z0-9_-]{1,24}\}|\[[^\[\]\s]+\]/g:/\{[A-Za-z0-9_-]{1,24}\}/g)
+    :(squares?/\{+[^{}\s]+\}+|\[[^\[\]\s]+\]/g:/\{+[^{}\s]+\}+/g);
   let out='', at=0, m;
   while((m=re.exec(s))){
-    out+=esc(s.slice(at,m.index))+'<span class="hl-v">'+esc(m[0])+'</span>';
-    at=m.index+m[0].length;
+    const tok=m[0];
+    if(known&&tok.charAt(0)==='{'){
+      const edge=s.charAt(m.index-1)==='{'||s.charAt(m.index+tok.length)==='}';
+      if(edge||!curlyMacroName(tok.slice(1,-1), known)){
+        out+=esc(s.slice(at,m.index+tok.length));
+        at=m.index+tok.length;
+        continue;
+      }
+    }
+    out+=esc(s.slice(at,m.index))+'<span class="hl-v">'+esc(tok)+'</span>';
+    at=m.index+tok.length;
   }
   return out+esc(s.slice(at))+(s.endsWith('\n')?' ':'');
 }
 /**
- * bindMacroOverlay colours the macros inside a text field. Braces are always coloured; square brackets are coloured
- * when squares is true, which the stream URL field asks for. The field keeps its own text, selection, caret,
+ * bindMacroOverlay colours the macros inside a text field. Braces are coloured; square brackets are coloured
+ * when squares is true, which the stream URL field asks for. known limits braces to engine macros and those aliases.
+ * The field keeps its own text, selection, caret,
  * scrolling and height; its text is made transparent and a copy of the text lies under it with the macros in the
  * accent colour. The copy follows typing, scrolling, resizing and a value set from code. A textarea also takes the
  * width of its scroll bar off the copy so both wrap at the same places; a one-line input keeps the copy scrolled
@@ -25101,9 +25253,10 @@ function braceMacroHTML(text, squares){
  * does nothing.
  * @param {HTMLTextAreaElement|HTMLInputElement|null} ta field to colour, may be missing
  * @param {boolean} [squares] also colour macros in square brackets
+ * @param {string[]|function():string[]} [known] campaign query aliases; omitted colours every brace macro
  * @returns {void}
  */
-function bindMacroOverlay(ta, squares){
+function bindMacroOverlay(ta, squares, known){
   if(!ta||ta.dataset.hl) return;
   ta.dataset.hl='1';
   const one=ta.tagName==='INPUT';
@@ -25113,7 +25266,8 @@ function bindMacroOverlay(ta, squares){
   wrap.append(back, ta);
   const follow=()=>{back.scrollLeft=ta.scrollLeft};
   const sync=()=>{
-    back.innerHTML=braceMacroHTML(ta.value, squares);
+    const extra=typeof known==='function'?known():known;
+    back.innerHTML=braceMacroHTML(ta.value, squares, extra);
     if(one){follow(); return}
     const bw=parseFloat(getComputedStyle(ta).borderLeftWidth)||0;
     back.style.setProperty('--sb', Math.max(0, ta.offsetWidth-ta.clientWidth-2*bw)+'px');

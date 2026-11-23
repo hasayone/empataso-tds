@@ -87,7 +87,7 @@
 | `bot_protection` | Настройки ботов |
 | `settings` | `PUT /api/ui` |
 
-Без привязки к разделу (`secAny`), но только для авторизованной сессии: `GET /api/me`, `GET` и `PUT /api/me/views`, `POST /api/password`, `POST /api/logout`, `GET /api/notices`, `GET /api/log-fields`, `GET /api/ui`, `GET /api/openapi.json`, `GET /api/groups`, `GET /api/boards`, `POST /api/boards/import`, `POST /api/boards/move`.
+Без привязки к разделу (`secAny`), но только для авторизованной сессии: `GET /api/me`, `GET` и `PUT /api/me/views`, `POST /api/password`, `POST /api/logout`, `GET /api/notices`, `GET /api/log-fields`, `GET /api/ui`, `GET /api/openapi.json`, `GET /api/groups`, `GET /api/groups/{id}`, `GET /api/boards`, `POST /api/boards/import`, `POST /api/boards/move`.
 
 ## Гранты по ресурсам
 

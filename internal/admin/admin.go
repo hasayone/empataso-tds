@@ -713,6 +713,7 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "POST /api/boards/import", http.HandlerFunc(s.handleBoardImportPost))
 	s.handle(mux, "POST /api/boards/move", http.HandlerFunc(s.handleBoardMovePost))
 	s.handle(mux, "GET /api/groups", http.HandlerFunc(s.handleGroupsGet))
+	s.handle(mux, "GET /api/groups/{id}", http.HandlerFunc(s.handleGroupGet))
 	s.handle(mux, "PUT /api/groups", http.HandlerFunc(s.handleGroupsSave))
 	s.handle(mux, "PUT /api/groups/{id}", http.HandlerFunc(s.handleGroupPut))
 	s.handle(mux, "DELETE /api/groups/{id}", http.HandlerFunc(s.handleGroupDelete))

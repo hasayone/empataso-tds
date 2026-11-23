@@ -212,6 +212,7 @@ func addCoreRoutes(m map[string]routeRule, open func() routeRule, rule func(sect
 	m["GET /api/openapi.json"] = open()
 	m["GET /api/postman.json"] = open()
 	m["GET /api/groups"] = open()
+	m["GET /api/groups/{id}"] = open()
 	m["GET /api/boards"] = open()
 	m["POST /api/boards"] = routeRule{sec: secAny, admin: true}
 	m["PUT /api/boards/order"] = routeRule{sec: secAny, admin: true}

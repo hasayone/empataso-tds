@@ -13,9 +13,10 @@ import (
 )
 
 // handleGroupsGet answers every campaign the caller may see, with its streams, or with
-// ?shared=1 the same list with the long stream filters shared. A request of the assistant tool
-// carries an aiCampaignView in its context and gets the summary rows of that view instead.
-// A missing store gives an empty list; a store failure is 500.
+// ?shared=1 the same list with the long stream filters shared. ?summary=1 answers the
+// short rows the campaigns list paints (groupListRows), without rules or notes.
+// A request of the assistant tool carries an aiCampaignView in its context and gets
+// the summary rows of that view instead. A missing store gives an empty list; a store failure is 500.
 func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Groups == nil {
 		writeJSON(w, http.StatusOK, []config.Group{})
@@ -26,6 +27,49 @@ func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "groups error")
 		return
 	}
+	filtered := s.visibleGroups(r, groups)
+	if view, ok := r.Context().Value(aiCampaignViewKey{}).(aiCampaignView); ok {
+		writeJSON(w, http.StatusOK, view.rows(filtered))
+		return
+	}
+	if r.URL.Query().Get("summary") == "1" {
+		writeJSON(w, http.StatusOK, groupListRows(filtered))
+		return
+	}
+	if r.URL.Query().Get("shared") == "1" {
+		writeJSON(w, http.StatusOK, shareGroupLists(filtered))
+		return
+	}
+	writeJSON(w, http.StatusOK, filtered)
+}
+
+// handleGroupGet answers one campaign the caller may see, with its streams and rules.
+// The path id is the campaign id. A missing store, an unknown id and a campaign the
+// caller may not see answer 404 "not found". A store failure is 500.
+func (s *Server) handleGroupGet(w http.ResponseWriter, r *http.Request) {
+	if s.cfg.Groups == nil {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	id := r.PathValue("id")
+	groups, err := s.cfg.Groups.List(r.Context())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "groups error")
+		return
+	}
+	for _, g := range s.visibleGroups(r, groups) {
+		if g.ID == id {
+			writeJSON(w, http.StatusOK, g)
+			return
+		}
+	}
+	writeErr(w, http.StatusNotFound, "not found")
+}
+
+// visibleGroups keeps the campaigns of groups that r's caller may see.
+// A campaign of another section, or one the caller's role does not include, is left out.
+// It returns a non-nil slice. It does not fail.
+func (s *Server) visibleGroups(r *http.Request, groups []config.Group) []config.Group {
 	v := s.viewerFrom(r.Context())
 	filtered := make([]config.Group, 0, len(groups))
 	for _, g := range groups {
@@ -36,15 +80,7 @@ func (s *Server) handleGroupsGet(w http.ResponseWriter, r *http.Request) {
 			filtered = append(filtered, g)
 		}
 	}
-	if view, ok := r.Context().Value(aiCampaignViewKey{}).(aiCampaignView); ok {
-		writeJSON(w, http.StatusOK, view.rows(filtered))
-		return
-	}
-	if r.URL.Query().Get("shared") == "1" {
-		writeJSON(w, http.StatusOK, shareGroupLists(filtered))
-		return
-	}
-	writeJSON(w, http.StatusOK, filtered)
+	return filtered
 }
 
 // maxFolderRunes is the longest campaign folder label the admin accepts.

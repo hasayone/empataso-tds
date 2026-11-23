@@ -25,8 +25,8 @@ func TestSPAReadsGroupsShared(t *testing.T) {
 		switch query := lit[len("'/api/groups") : len(lit)-1]; {
 		case query == "" && !strings.HasSuffix(before, "call('PUT',"):
 			t.Errorf("plain GET /api/groups in SPA after %q", before)
-		case query != "" && query != "?shared=1":
-			t.Errorf("GET /api/groups%s is not the shared form", query)
+		case query != "" && query != "?shared=1" && query != "?summary=1":
+			t.Errorf("GET /api/groups%s is not the shared form or the list summary", query)
 		}
 	}
 	if found == 0 {

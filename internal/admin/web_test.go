@@ -304,7 +304,7 @@ func TestDashboardPerfControls(t *testing.T) {
 	mustNot(t, dash, `tr('Bots'),pct(bots,total),'warn'`, "bots KPI without warn tone")
 }
 
-// TestDashboardKPIMoney — money tiles use moneyText, tiles are ordered clicks→money→rates, and the grid is one row on desktop.
+// TestDashboardKPIMoney — money tiles use moneyText, tiles are ordered clicks→money→rates, and the grid is four tiles per row.
 func TestDashboardKPIMoney(t *testing.T) {
 	html := spaSource()
 	pure := spaBetween(html, "// ---- pure: begin ----", "// ---- pure: end ----")
@@ -326,9 +326,10 @@ func TestDashboardKPIMoney(t *testing.T) {
 		}
 		last = p
 	}
-	must(t, html, ".kpis{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr)", "one KPI row on desktop")
-	must(t, html, ".kpi .v{font-size:clamp(15px,1.3vw,19px)", "KPI value fits nine tiles in the page container")
-	must(t, html, ".kpis{grid-auto-flow:row;grid-template-columns:repeat(3,minmax(0,1fr))}", "three KPI tiles per row on small screens")
+	must(t, html, ".kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}", "four KPI tiles per row")
+	must(t, html, ".kpi .v{font-size:clamp(15px,1.3vw,19px)", "KPI value fits the page container")
+	mustNot(t, html, ".kpis{display:flex;flex-wrap:nowrap;", "KPI tiles are not one scrolling row")
+	mustNot(t, html, ".kpis{grid-template-columns:repeat(3,minmax(0,1fr))}", "three-per-row KPI grid")
 	mustNot(t, html, ".kpis{grid-template-columns:repeat(2,minmax(0,1fr))}", "two-per-row KPI grid")
 }
 
@@ -1471,7 +1472,7 @@ func TestSPAFlowTrafficOrder(t *testing.T) {
 	must(t, html, "tb.onclick=toggleFlowTraffic", "traffic order button wired")
 	must(t, html, `const FLOW_TRAFFIC_MODES=['','asc','desc','rev-asc','rev-desc']`, "order cycle is off, traffic, then revenue")
 	must(t, html, "let FLOW_TRAFFIC=''", "canvas order starts off")
-	for _, key := range []string{"flow.traffic.off", "flow.traffic.desc", "flow.traffic.asc", "flow.traffic.lock", "flow.revenue.asc", "flow.revenue.desc"} {
+	for _, key := range []string{"flow.traffic.off", "flow.traffic.desc", "flow.traffic.asc", "flow.traffic.lock", "flow.revenue.asc", "flow.revenue.desc", "flow.traffic.word", "flow.revenue.word"} {
 		if n := strings.Count(html, "'"+key+"':"); n != 3 {
 			t.Errorf("%s: %d dictionary entries, want one per language", key, n)
 		}

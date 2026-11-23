@@ -89,6 +89,93 @@ func TestShareGroupListsSize(t *testing.T) {
 	}
 }
 
+// TestGroupSummarySkipsImportedLists checks the campaigns-list rows: repeated device lists, notes
+// and a long offer URL stay out, a link to another campaign stays, and the JSON is far smaller
+// than the stored campaigns.
+func TestGroupSummarySkipsImportedLists(t *testing.T) {
+	models := importedModels(300)
+	groups := importedGroups(40, models)
+	groups[0].Notes = "operator note"
+	groups[0].Streams[0].Out = config.Output{Redirect: "http_redirect", Out: "https://offer.example/path"}
+	groups[1].Redirect = "group"
+	groups[1].Out = "c0"
+	groups[1].Streams[1].Out = config.Output{Redirect: "group", Out: "c0"}
+	rows := groupListRows(groups)
+	b, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	for _, leak := range []string{"Vendor Phone", "operator note", "offer.example", "US,DE"} {
+		if strings.Contains(text, leak) {
+			t.Fatalf("summary contains %q", leak)
+		}
+	}
+	link := rows[1].Streams[1].Out
+	if rows[1].Out != "c0" || link == nil || link.Redirect != "group" || link.Out != "c0" {
+		t.Fatalf("group link = %+v stream %+v", rows[1], rows[1].Streams[1])
+	}
+	offer := rows[0].Streams[0].Out
+	if len(rows[0].Streams) != 3 || rows[0].Streams[0].Name != "models" || !rows[0].Streams[0].Status || offer == nil || offer.Redirect != "http_redirect" || offer.Out != "" {
+		t.Fatalf("stream heads = %+v", rows[0].Streams)
+	}
+	plain, err := json.Marshal(groups)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) > len(plain)/5 {
+		t.Fatalf("summary %d bytes, plain %d", len(b), len(plain))
+	}
+}
+
+// TestGroupsGetSummary checks ?summary=1 on GET /api/groups and GET /api/groups/{id}.
+// The list row drops the imported model list. The one-campaign read returns it.
+func TestGroupsGetSummary(t *testing.T) {
+	srv, groups, _ := catalogServer(t)
+	groups.list[0].Streams[0].Rules.Model = importedModels(80)
+	groups.list[0].Notes = "keep me"
+	c := newClient(t)
+	if code, _ := login(t, c, srv.URL, "admin", "p@ss"); code != http.StatusOK {
+		t.Fatalf("login %d", code)
+	}
+	resp, err := c.Get(srv.URL + "/api/groups?summary=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rows []groupListRow
+	if err := json.NewDecoder(resp.Body).Decode(&rows); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	raw, err := json.Marshal(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || len(rows[0].Streams) == 0 || strings.Contains(string(raw), "Vendor Phone") || strings.Contains(string(raw), "keep me") {
+		t.Fatalf("summary rows = %+v", rows)
+	}
+	resp, err = c.Get(srv.URL + "/api/groups/" + groups.list[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var one config.Group
+	if err := json.NewDecoder(resp.Body).Decode(&one); err != nil {
+		t.Fatal(err)
+	}
+	if one.Notes != "keep me" || len(one.Streams[0].Rules.Model.Values) != 80 {
+		t.Fatalf("one campaign lost rules or notes: notes %q values %d", one.Notes, len(one.Streams[0].Rules.Model.Values))
+	}
+	resp404, err := c.Get(srv.URL + "/api/groups/missing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp404.Body.Close()
+	if resp404.StatusCode != http.StatusNotFound {
+		t.Fatalf("missing campaign %d", resp404.StatusCode)
+	}
+}
+
 // TestGroupsGetShared checks GET /api/groups: the plain answer stays an array and ?shared=1 returns groups, lists and refs.
 func TestGroupsGetShared(t *testing.T) {
 	srv, groups, _ := catalogServer(t)
