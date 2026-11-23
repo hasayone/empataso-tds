@@ -447,7 +447,11 @@ func (s *Server) runBoardImport(ctx context.Context, v viewer, from, to string, 
 			return out, http.StatusInternalServerError, "copy error"
 		}
 		oldID := g.ID
-		copyG.ID = nextCampaignID(append(groups, copiedGroups...))
+		newID, err := nextCampaignID(append(groups, copiedGroups...))
+		if err != nil {
+			return out, http.StatusInternalServerError, "an id cannot be generated"
+		}
+		copyG.ID = newID
 		copyG.BoardID = to
 		copyG.Num = 0
 		copyG.Aliases = nil
@@ -935,24 +939,12 @@ func campaignBoardMap(groups []config.Group) map[string]string {
 	return m
 }
 
-func nextCampaignID(groups []config.Group) string {
-	taken := map[string]bool{}
-	for _, g := range groups {
-		taken[g.ID] = true
-		for _, a := range g.Aliases {
-			if a != "" {
-				taken[a] = true
-			}
-		}
-	}
-	n := len(groups) + 1
-	for {
-		id := "flow" + strconv.Itoa(n)
-		if !taken[id] {
-			return id
-		}
-		n++
-	}
+// nextCampaignID returns a slug for a campaign copied onto another section.
+// groups is the list the copy joins, including copies already made in this pass.
+// The slug is campaignIDLen characters from campaignIDAlphabet and is not an id
+// or alias in groups. It returns an error when a slug cannot be drawn.
+func nextCampaignID(groups []config.Group) (string, error) {
+	return freshCampaignID(campaignIDSet(groups))
 }
 
 // copyLandingFiles duplicates a local landing tree when the store is set.

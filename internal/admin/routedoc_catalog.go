@@ -351,18 +351,21 @@ func campaignCoreDocs() map[string]routeDoc {
 			ID: "replace_campaigns", Summary: "Replace the whole campaign list.",
 			Description: "Replaces the campaigns of the current section with the array in the body; a campaign left out of the array is removed. " +
 				"Needs the groups_replace key action. The answer is {\"status\":\"saved\"}. " +
-				"Sending an empty array when stored campaigns exist returns 409; use DELETE /api/groups/{id} to remove them one by one.",
+				"Sending an empty array when stored campaigns exist returns 409; use DELETE /api/groups/{id} to remove them one by one. " +
+				"A new campaign whose id is empty or a sequential stub (flow_0000, flow_0001, or flow followed by digits) is stored under a random 9-character id. An id the caller set is kept. A campaign already stored keeps its id.",
 			RU: docText{
 				Summary: "Заменить весь список кампаний.",
 				Description: "Заменяет кампании текущего раздела массивом из тела; кампания, которой нет в массиве, удаляется. " +
 					"Нужна галочка ключа groups_replace. Ответ — {\"status\":\"saved\"}. " +
-					"Пустой массив при наличии сохранённых кампаний даёт 409; удаляйте по одной через DELETE /api/groups/{id}.",
+					"Пустой массив при наличии сохранённых кампаний даёт 409; удаляйте по одной через DELETE /api/groups/{id}. " +
+					"Новая кампания с пустым id или с заглушкой (flow_0000, flow_0001 или flow и цифры) сохраняется под случайным id из 9 знаков. Заданный вызывающим id остаётся. Уже сохранённая кампания сохраняет свой id.",
 			},
 			UK: docText{
 				Summary: "Замінити весь список кампаній.",
 				Description: "Замінює кампанії поточного розділу масивом із тіла; кампанія, якої немає в масиві, видаляється. " +
 					"Потрібна позначка ключа groups_replace. Відповідь — {\"status\":\"saved\"}. " +
-					"Порожній масив за наявності збережених кампаній дає 409; видаляйте по одній через DELETE /api/groups/{id}.",
+					"Порожній масив за наявності збережених кампаній дає 409; видаляйте по одній через DELETE /api/groups/{id}. " +
+					"Нова кампанія з порожнім id або з заглушкою (flow_0000, flow_0001 чи flow і цифри) зберігається під випадковим id із 9 знаків. Заданий викликачем id лишається. Уже збережена кампанія зберігає свій id.",
 			},
 			Body:     campaignListBody,
 			Example:  []any{campaignSample},
@@ -374,6 +377,7 @@ func campaignCoreDocs() map[string]routeDoc {
 			Description: "Replaces the campaign with this id, or adds it when it is new. " +
 				"A different id in the body renames the stored campaign in one write: its place, section, owner and number stay, " +
 				"and campaign links of other campaigns follow the new id. Clicks already logged keep the old id. " +
+				"A new campaign whose id is empty or a sequential stub (flow_0000, flow_0001, or flow followed by digits) is stored under a random 9-character id; an id the caller set and a campaign already stored keep theirs. " +
 				"A taken id answers 409; an id with spaces, /, ? or # answers 400; renaming a missing campaign answers 404. " +
 				"A new campaign, such as a copy, whose default or stream (without offers and landings) still sends the click to a campaign link of the old Keitaro tracker " +
 				"is saved with that destination as a link to the campaign of the same key here; the answer then also lists those campaigns under \"relinked\".",
@@ -382,6 +386,7 @@ func campaignCoreDocs() map[string]routeDoc {
 				Description: "Заменяет кампанию с этим id или добавляет её, если такой ещё нет. " +
 					"Другой id в теле переименовывает сохранённую кампанию одной записью: место, раздел, владелец и номер сохраняются, " +
 					"ссылки других кампаний на неё переходят на новый id. Уже записанные клики остаются под старым id. " +
+					"Новая кампания с пустым id или с заглушкой (flow_0000, flow_0001 или flow и цифры) сохраняется под случайным id из 9 знаков; заданный вызывающим id и уже сохранённая кампания остаются при своём. " +
 					"Занятый id — 409, id с пробелом, /, ? или # — 400, переименование несуществующей кампании — 404. " +
 					"Новая кампания, например копия, у которой умолчание или поток (без офферов и лендингов) всё ещё ведёт клик на ссылку кампании старого трекера Keitaro, " +
 					"сохраняется с этим адресом как ссылкой на кампанию с тем же ключом здесь; тогда в ответе эти кампании перечислены ещё и в \"relinked\".",
@@ -391,6 +396,7 @@ func campaignCoreDocs() map[string]routeDoc {
 				Description: "Замінює кампанію з цим id або додає її, якщо такої ще немає. " +
 					"Інший id у тілі перейменовує збережену кампанію одним записом: місце, розділ, власник і номер зберігаються, " +
 					"посилання інших кампаній на неї переходять на новий id. Уже записані кліки лишаються під старим id. " +
+					"Нова кампанія з порожнім id або з заглушкою (flow_0000, flow_0001 чи flow і цифри) зберігається під випадковим id із 9 знаків; заданий викликачем id і вже збережена кампанія лишаються при своєму. " +
 					"Зайнятий id — 409, id із пробілом, /, ? або # — 400, перейменування неіснуючої кампанії — 404. " +
 					"Нова кампанія, наприклад копія, у якої типове значення або потік (без офферів і лендингів) досі веде клік на посилання кампанії старого трекера Keitaro, " +
 					"зберігається з цією адресою як посиланням на кампанію з тим самим ключем тут; тоді у відповіді ці кампанії перелічено ще й у \"relinked\".",

@@ -97,8 +97,10 @@ func (s *Server) aiChgVisible(sctx context.Context, spec aiChgResource, m map[st
 	return v.admin || v.canSee(spec.res, ref{id: str("id"), label: str(spec.label), owner: str("created_by"), board: str("board_id")})
 }
 
-// aiChgNextFlowID returns a campaign id that no campaign holds as id or alias: flow<N>, with N
-// counted up from the number of campaigns plus one, as the panel names a new campaign.
+// aiChgNextFlowID returns a campaign id that no campaign holds as id or alias.
+// The id is campaignIDLen characters from campaignIDAlphabet, the same slug a new
+// campaign in the panel receives. It returns a 500 error when the list cannot be
+// read or a slug cannot be drawn.
 func (s *Server) aiChgNextFlowID(ctx context.Context) (string, error) {
 	var list []config.Group
 	if s.cfg.Groups != nil {
@@ -107,12 +109,11 @@ func (s *Server) aiChgNextFlowID(ctx context.Context) (string, error) {
 			return "", aiPlainError(http.StatusInternalServerError, "read error")
 		}
 	}
-	for n := len(list) + 1; ; n++ {
-		id := "flow" + strconv.Itoa(n)
-		if _, taken := findGroup(list, id); !taken && !aliasTakenAmong(list, "", id) {
-			return id, nil
-		}
+	id, err := freshCampaignID(campaignIDSet(list))
+	if err != nil {
+		return "", aiPlainError(http.StatusInternalServerError, "an id cannot be generated")
 	}
+	return id, nil
 }
 
 // aiChgDeps lists the records that link to the stored record of a resource: the campaigns that use
@@ -374,12 +375,12 @@ func aiChgCheckProposed(spec aiChgResource, op string, patch map[string]any) err
 }
 
 // aiChgFreeID returns the id a created record will have. id is the id the model named, or "".
-// A campaign without an id gets a free flow<N> id; a catalog record without one gets "" and the
+// A campaign without an id gets a free random slug; a catalog record without one gets "" and the
 // catalog hands one out at the write. A named or chosen id must be free: not the id of a stored
 // record and, for a campaign, not the alias of another one (409 ai_conflict). A list that
 // cannot be read is a 500 error.
 func (s *Server) aiChgFreeID(ctx context.Context, spec aiChgResource, id string) (string, error) {
-	if id == "" && spec.name == "campaigns" {
+	if spec.name == "campaigns" && placeholderCampaignID(id) {
 		next, err := s.aiChgNextFlowID(ctx)
 		if err != nil {
 			return "", err

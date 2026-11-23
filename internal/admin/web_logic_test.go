@@ -3285,3 +3285,96 @@ function go(p){ gone.push(p); }
 		t.Errorf("campaign copy id checks failed:\n%s", out)
 	}
 }
+
+// TestNewCampaignId runs a new campaign and a copy under node.
+// Each id is 9 characters from CAMPAIGN_ID_ALPHABET, never flow_0000 or flow_0001.
+// Two creates differ, and two copies differ. A folder passed to newFlow is stored.
+// It skips when node is absent and fails with the node output when a check does not hold.
+func TestNewCampaignId(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the new campaign id checks")
+	}
+	html := spaSource()
+	body := spaFunctionLine(html, "newFlow")
+	if body == "" {
+		t.Fatal("newFlow not found in SPA")
+	}
+	if strings.Contains(body, "'flow'+") || strings.Contains(body, "flows/flow") {
+		t.Fatal("newFlow still builds a sequential id")
+	}
+	if !strings.Contains(body, "freshCampaignId") {
+		t.Fatal("newFlow does not use freshCampaignId")
+	}
+	var src strings.Builder
+	for _, prefix := range []string{
+		"const DEFAULT_ANSWER=",
+		"const DEFAULT_UNIQ_BY=",
+		"const CAMPAIGN_ID_ALPHABET=",
+		"const CAMPAIGN_ID_LEN=",
+		"let CAMPAIGN_ID_BOARDS=",
+		"let CAMPAIGN_ID_BOARD=",
+	} {
+		line := spaConstLine(html, prefix)
+		if line == "" {
+			t.Fatalf("%s not found", prefix)
+		}
+		src.WriteString(line + "\n")
+	}
+	for _, name := range []string{"randomCampaignId", "freshCampaignId", "addCampaignIds", "boardWideOn", "takenCampaignIds", "newFlow", "duplicateFlow"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found", name)
+		}
+		if strings.Contains(html, "async function "+name+"(") {
+			fn = "async " + fn
+		}
+		src.WriteString(fn + "\n")
+	}
+	src.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g !== w) { failed++; console.log('FAIL ' + what + '\n  got  ' + g + '\n  want ' + w); }
+};
+let GROUPS = [];
+let BOARDS = {items:[{id:'main', include_all:true}]};
+function boardNormId(id){ const s=id==null?'':String(id).trim(); return s==='main'?'':s; }
+function boardEffectiveId(){ return ''; }
+function ensureNums(){}
+function nextNum(){ return 7; }
+function defaultGeo(){ return 'db'; }
+function markDirty(){}
+function clone(o){ return JSON.parse(JSON.stringify(o)); }
+const gone = [];
+function go(p){ gone.push(p); }
+const slug = id => typeof id === 'string' && id.length === CAMPAIGN_ID_LEN && [...id].every(ch => CAMPAIGN_ID_ALPHABET.includes(ch)) && !/^flow_?\d+$/.test(id);
+(async () => {
+  await newFlow();
+  await newFlow('Offers');
+  eq(GROUPS.length, 2, 'two new campaigns');
+  eq(slug(GROUPS[0].id), true, 'first id ' + GROUPS[0].id);
+  eq(slug(GROUPS[1].id), true, 'second id ' + GROUPS[1].id);
+  eq(GROUPS[0].id === GROUPS[1].id, false, 'two creates differ');
+  eq(GROUPS[0].id === 'flow_0000' || GROUPS[1].id === 'flow_0000', false, 'neither create is flow_0000');
+  eq(GROUPS[1].folder, 'Offers', 'the folder is stored');
+  eq(gone[0], 'flows/' + encodeURIComponent(GROUPS[0].id), 'the route is the slug');
+  const src = GROUPS[0];
+  const a = await duplicateFlow(src, true);
+  const b = await duplicateFlow(src, true);
+  eq(slug(a.id), true, 'first copy ' + a.id);
+  eq(slug(b.id), true, 'second copy ' + b.id);
+  eq(a.id === b.id, false, 'two copies differ');
+  eq(a.id === src.id || b.id === src.id, false, 'a copy is not the source');
+  eq(a.id === 'flow_0000' || b.id === 'flow_0001', false, 'a copy is not a sequential stub');
+  if (failed) process.exit(1);
+})().catch(e => { console.log('FAIL ' + (e && e.stack || e)); process.exit(1); });
+`)
+	f := filepath.Join(t.TempDir(), "new-id.js")
+	if err := os.WriteFile(f, []byte(src.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("new campaign id checks failed:\n%s", out)
+	}
+}

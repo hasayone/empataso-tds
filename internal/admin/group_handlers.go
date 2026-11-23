@@ -323,6 +323,8 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 }
 
 // commitGroups merges full into stored, assigns missing campaign numbers, checks links and streams, and saves.
+// A new campaign with an empty id or a sequential stub (flow_0000, flow_0001, flow plus digits) receives a
+// random slug before the merge. A campaign already in stored keeps its id. A restore keeps the id it had.
 // Shares above 100% are refused only for campaigns that differ from stored.
 // A non-admin save that adds or edits a link with a macro the caller may not write, or
 // rebinds a hidden keyword, Sub ID or price to another click parameter, is refused with 400.
@@ -335,6 +337,16 @@ func (s *Server) handleGroupDelete(w http.ResponseWriter, r *http.Request) {
 // When gw.fromSave is set, an empty full that would cause stored campaigns to disappear
 // returns 409 "empty list would delete campaigns; use DELETE /api/groups/{id}".
 func (s *Server) commitGroups(w http.ResponseWriter, r *http.Request, v viewer, stored, full []config.Group, gw groupWrite) bool {
+	if !gw.restore {
+		replaced, err := fillNewCampaignIDs(stored, full)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "an id cannot be generated")
+			return false
+		}
+		if next, ok := replaced[gw.id]; ok {
+			gw.id = next
+		}
+	}
 	groups, code, msg := mergeGroups(v, stored, full)
 	if code != 0 {
 		writeErr(w, code, msg)

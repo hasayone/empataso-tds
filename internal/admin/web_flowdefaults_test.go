@@ -35,12 +35,17 @@ const SRC_KEYS=['keyword','site','ad_campaign_id','creative_id','external_id',..
 const ME=null, sourceKeyLocked=()=>false, priceParamLocked=()=>false;
 let GROUPS=[], OPEN_SETTINGS=false, STAMP=0, CUR=null;
 const ensureNums=()=>{}, nextNum=()=>++STAMP, defaultGeo=()=>'db', markDirty=()=>{}, go=()=>{};
+async function takenCampaignIds(){ return new Set(); }
+function freshCampaignId(){ return 'L8ZCXCChy'; }
 `)
 	src.WriteString(strings.Join(consts, "\n") + "\n")
 	for _, name := range []string{"newFlow", "flowUniqBy", "flowAnswerType", "paramExample", "campaignParamHTML", "campaignParamDraft", "collectFlow"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
+		}
+		if name == "newFlow" {
+			fn = "async " + fn
 		}
 		for _, c := range consts {
 			fn = strings.Replace(fn, c, "", 1)
@@ -51,9 +56,13 @@ const ensureNums=()=>{}, nextNum=()=>++STAMP, defaultGeo=()=>'db', markDirty=()=
 let failed = 0;
 const ok = (cond, what) => { if (!cond) { failed++; console.log('FAIL ' + what); } };
 const eq = (a, b, what) => ok(JSON.stringify(a) === JSON.stringify(b), what + ': ' + JSON.stringify(a) + ' != ' + JSON.stringify(b));
+let q, qa;
 
-newFlow();
+(async () => {
+await newFlow();
 const fresh = GROUPS[0];
+ok(fresh.id === 'L8ZCXCChy', 'a new campaign takes the drawn id');
+ok(!/^flow_?\d+$/.test(fresh.id), 'a new campaign is not flow_0000');
 ok(fresh.redirect === '404_not_found', 'a new campaign answers 404, not text: ' + fresh.redirect);
 ok(fresh.uniq_by === 'ip_ua', 'a new campaign starts on address and user-agent: ' + fresh.uniq_by);
 ok(flowAnswerType(fresh) === '404_not_found' && flowUniqBy(fresh) === 'ip_ua', 'the form shows what a new campaign holds');
@@ -65,8 +74,8 @@ ok(flowUniqBy({uniq_by: 'ip_ua'}) === 'ip_ua', 'a saved user-agent mode is kept'
 
 const els = {};
 const drawer = {dataset: {}};
-let q = sel => (sel === '#gdrawer' ? drawer : (sel[0] === '#' ? els[sel.slice(1)] || null : null));
-let qa = () => [];
+q = sel => (sel === '#gdrawer' ? drawer : (sel[0] === '#' ? els[sel.slice(1)] || null : null));
+qa = () => [];
 const saved = {id: 'abc', name: 'old', redirect: 'show_text', header: 'text/html', out: 'hello', uniq_seconds: 7200};
 CUR = saved;
 Object.assign(els, {g_id: {value: 'abc'}, g_name: {value: 'old'}, g_redirect: {value: flowAnswerType(saved)}, g_header: {value: 'text/html'}, g_geo: {value: 'db'}, g_uniqby: {value: flowUniqBy(saved)}, g_uniqh: {value: '2'}, g_uniqck: {checked: false}});
@@ -107,6 +116,7 @@ const rows = [
 eq(campaignParamDraft(rows), {parameters: {}, tokens: {}}, 'a placeholder is never saved');
 eq(campaignParamDraft([{key: 'keyword', name: 'utm_term', base: '', token: '{keyword}', tokenHint: ''}]), {parameters: {keyword: 'utm_term'}, tokens: {keyword: '{keyword}'}}, 'a token typed like its sample is saved');
 if (failed) process.exit(1);
+})().catch(e => { console.log(String(e && e.stack || e)); process.exit(1); });
 `)
 	if flow := spaFunctionLine(html, "collectFlow"); !strings.Contains(flow, "tok.dataset.mask") || strings.Contains(flow, "getAttribute('placeholder')") {
 		t.Error("collectFlow must read the outgoing mask from data-mask, not from the placeholder")

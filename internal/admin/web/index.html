@@ -558,6 +558,29 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   body.has-pagehover main{padding-bottom:120px}
   body.has-pagehover .savebar{bottom:48px}
   body.has-pagehover{--edge-b:48px}
+  /* Up to 760px the totals and the pager share one low row and scroll sideways.
+     A focused campaign search hides the dock so the list stays above the keyboard. A wide screen keeps the wrapped totals. */
+  @media (max-width:760px){
+    .flowdock{display:flex;flex-wrap:nowrap;align-items:center;overflow-x:auto;scrollbar-width:none}
+    .flowdock::-webkit-scrollbar{height:0}
+    .flowsum{flex:none;flex-wrap:nowrap;gap:0 10px;align-items:center;padding:4px 10px;border-bottom:0;width:auto}
+    .flowsum .sumi{flex-direction:row;align-items:baseline;gap:4px;min-width:0;flex:none;white-space:nowrap}
+    .flowsum .sumi .hint{font-size:12px;line-height:1.2;max-width:none;white-space:nowrap}
+    .flowsum .sumi b{font-size:12px}
+    .flowdock .flowpage{flex:none;flex-wrap:nowrap;gap:6px;padding:4px 8px;width:auto}
+    .flowdock .flowpager{flex:none;flex-wrap:nowrap;gap:4px}
+    .flowdock .flowpage .spacer{flex:0 0 8px}
+    .flowdock .flowpage>button{flex:none}
+    .flowdock .flowpage button,.flowdock .flowpage select,.flowdock .flowpage input{height:26px;font-size:12px}
+    .flowdock .flowpage .hint{font-size:12px;line-height:1.2;white-space:nowrap}
+    body.has-flowdock main,body.has-pager main{padding-bottom:44px}
+    body.has-flowdock .savebar,body.has-pager .savebar{bottom:40px}
+    body.has-flowdock,body.has-pager{--edge-b:40px}
+    body.dock-search .flowdock{display:none}
+    body.dock-search.has-flowdock main{padding-bottom:16px}
+    body.dock-search.has-flowdock .savebar{bottom:12px}
+    body.dock-search.has-flowdock{--edge-b:12px}
+  }
   th .link{font:inherit;font-weight:650;color:inherit}
   .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow-1)}
   .pad{padding:16px 18px}
@@ -1644,6 +1667,13 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
     .legend .lg:nth-child(-n+2) .lg-name{left:0;transform:none}
     .legend .lg:nth-last-child(-n+2) .lg-name{left:auto;right:0;transform:none}
     .legend .lg:hover .lg-name,.legend .lg:active .lg-name,.legend .lg:focus-visible .lg-name{opacity:1}
+  }
+  /* Up to 760px the summary counters are one low row and scroll sideways. A wider screen keeps the grid. */
+  @media (max-width:760px){
+    .kpis{display:flex;flex-wrap:nowrap;gap:8px;overflow-x:auto;scrollbar-width:none;margin-bottom:10px}
+    .kpis::-webkit-scrollbar{height:0}
+    .kpis>.kpi{flex:0 0 auto;width:auto;min-width:96px;padding:6px 10px}
+    .kpis>.kpi .v{margin-top:2px}
   }
   @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -6579,7 +6609,7 @@ function holdPage(to){
 async function render(){
   if(location.pathname==='/docs') return;
   if(view()&&holdPage(route().page)) return;
-  document.body.classList.remove('has-flowdock','has-pagehover','has-pager');
+  document.body.classList.remove('has-flowdock','has-pagehover','has-pager','dock-search');
   closeForm();
   if(!view())return;
   closeMenu(); closeDrawer(); stopPolling(); kwsAbort();
@@ -14618,25 +14648,9 @@ function ensureNums(persist){
   if(!changed.length) return;
   if(persist) markDirty(changed); else settleGroups(changed);
 }
-/** newFlow appends a campaign and opens it.
- * folder is the group label when it is a string; a click event passed as the handler argument is ignored.
- * The label is stored on folder and saved with the campaign. It returns nothing.
- * @param {string} [folder]
- * @returns {void}
- */
-function newFlow(folder){
-  ensureNums(true);
-  const ids=GROUPS.map(g=>g.id); let n=GROUPS.length+1; while(ids.includes('flow'+n))n++;
-  const g={id:'flow'+n,num:nextNum(),name:'',status:true,redirect:DEFAULT_ANSWER,header:'text/html',out:'',geo:defaultGeo(),
-    uniq_by:DEFAULT_UNIQ_BY,uniq_method:'ip',uniq_seconds:86400,firewall:{enabled:false,queries:100,seconds:60},streams:[]};
-  const label=typeof folder==='string'?folder.trim():'';
-  if(label) g.folder=label;
-  GROUPS.push(g);
-  OPEN_SETTINGS=true; markDirty(g); go('flows/flow'+n);
-}
 /** CAMPAIGN_ID_ALPHABET is the characters of a new campaign id: letters and digits without 0, O, 1, l and I. */
 const CAMPAIGN_ID_ALPHABET='23456789abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ';
-/** CAMPAIGN_ID_LEN is the length of a campaign id created for a copy. */
+/** CAMPAIGN_ID_LEN is the length of a campaign id created or copied. */
 const CAMPAIGN_ID_LEN=9;
 /** CAMPAIGN_ID_BOARDS caches ids and aliases of sections other than the one open now. */
 let CAMPAIGN_ID_BOARDS=new Map();
@@ -14720,6 +14734,25 @@ async function takenCampaignIds(){
     set.forEach(x=>taken.add(x));
   }));
   return taken;
+}
+/** newFlow appends a campaign and opens it.
+ * folder is the group label when it is a string; a click event passed as the handler argument is ignored.
+ * The label is stored on folder and saved with the campaign.
+ * The campaign id is CAMPAIGN_ID_LEN characters from CAMPAIGN_ID_ALPHABET and is not an id or alias already used.
+ * It returns nothing.
+ * @param {string} [folder]
+ * @returns {Promise<void>}
+ */
+async function newFlow(folder){
+  ensureNums(true);
+  const taken=await takenCampaignIds();
+  const id=freshCampaignId(taken);
+  const g={id,num:nextNum(),name:'',status:true,redirect:DEFAULT_ANSWER,header:'text/html',out:'',geo:defaultGeo(),
+    uniq_by:DEFAULT_UNIQ_BY,uniq_method:'ip',uniq_seconds:86400,firewall:{enabled:false,queries:100,seconds:60},streams:[]};
+  const label=typeof folder==='string'?folder.trim():'';
+  if(label) g.folder=label;
+  GROUPS.push(g);
+  OPEN_SETTINGS=true; markDirty(g); go('flows/'+encodeURIComponent(id));
 }
 /** duplicateFlow copies a campaign into the section open in this tab.
  * g is the source campaign. stay leaves the list in place and returns the copy instead of opening it.
@@ -15089,6 +15122,7 @@ async function flows(arg,live){
   };
   q('#flowexport').onclick=e=>{e.stopPropagation(); if(MENU){closeMenu();return} menu(e.currentTarget,[{label:tr('Export CSV'),on:()=>exportFlows(false)},{label:tr('Export HTML'),on:()=>exportFlows(true)}], 'end')};
   bindSearch(q('#fq'), v=>{FQ=v; FLOW_PAGE_I=0; paintFlowCards(); touchPageViews()});
+  bindDockSearch(q('#fq'));
   bindSearchClear(q('#fq'));
   q('#fsource').onchange=e=>{FLOW_SOURCE=e.target.value; FLOW_PAGE_I=0; paintFlowCards(); touchPageViews()};
   q('#ffolder').onchange=e=>{FLOW_FOLDER=e.target.value; FLOW_PAGE_I=0; paintFlowCards(); touchPageViews()};
@@ -15371,6 +15405,17 @@ function groupHeadBtn(id){
 function createBtn(id){
   const label=esc(tr('Create'));
   return `<button type="button" class="primary mk" id="${id}" aria-label="${label}">${icon('plus')}<span class="mk-t">${label}</span></button>`;
+}
+/** bindDockSearch hides the bottom totals while the campaign search is focused.
+ * inp is the search field. The phone stylesheet is what hides the bar; a wide screen keeps it.
+ * Focus adds dock-search on the body, blur removes it.
+ * @param {HTMLInputElement|null} inp
+ * @returns {void}
+ */
+function bindDockSearch(inp){
+  if(!inp) return;
+  inp.addEventListener('focus', ()=>document.body.classList.add('dock-search'));
+  inp.addEventListener('blur', ()=>document.body.classList.remove('dock-search'));
 }
 /** searchField wraps a search input with a clear button that bindSearchClear drives.
  * @param {string} inputHTML markup of the text input
