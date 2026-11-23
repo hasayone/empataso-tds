@@ -132,7 +132,7 @@ func TestLandingEntryOriginHeaderAndRedirect(t *testing.T) {
 	srv.originOn = d.withOrigin
 	req := httptest.NewRequest(http.MethodGet, "/g1", nil)
 	rec := httptest.NewRecorder()
-	srv.serveEntry(rec, req, "7", render.MacroDeps{CID: "0123456789", Origin: "path-token"})
+	srv.serveEntry(rec, req, "7", render.MacroDeps{CID: "0123456789", Origin: "path-token"}, nil)
 	if gotOrigin != "path-token" {
 		t.Fatalf("X-Emtds-Origin %q", gotOrigin)
 	}

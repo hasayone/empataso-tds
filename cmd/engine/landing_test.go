@@ -117,7 +117,7 @@ func TestLandingPHPProxy(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.serveEntry(rec, req, "7", render.MacroDeps{
 		CID: "0123456789", IP: "203.0.113.8", Offer: "/g1/offer?cid=0123456789",
-	})
+	}, nil)
 	if gotPath != "/7/index.php" || gotQuery != "x=1" || gotCID != "0123456789" || gotIP != "203.0.113.8" {
 		t.Fatalf("php saw path %s query %s cid %s ip %s", gotPath, gotQuery, gotCID, gotIP)
 	}
@@ -146,7 +146,7 @@ func TestLandingPHPEntryRedirect(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.serveEntry(rec, req, "7", render.MacroDeps{
 		CID: "0123456789", Offer: "/g1/offer?cid=0123456789",
-	})
+	}, nil)
 	if rec.Code != http.StatusFound {
 		t.Fatalf("status %d", rec.Code)
 	}
@@ -211,7 +211,7 @@ func TestLandingPHPEntryHTML(t *testing.T) {
 	rec := httptest.NewRecorder()
 	srv.serveEntry(rec, req, "7", render.MacroDeps{
 		CID: "0123456789", Offer: "/g1/offer?cid=0123456789",
-	})
+	}, nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}

@@ -658,16 +658,7 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 			Operator: operator, Bot: bot, Uniq: b2yn(unique), Lang: v.Lang, Mac: mac})
 		if redirect == "http_redirect" {
 			res.Location = d.withOrigin(res.Location, originTok)
-			// Link names belong to the campaign that first collected the click.
-			// A path token already names that campaign; otherwise it is the one
-			// the visitor entered on this request.
-			named := entered
-			if originID != "" && entered != nil && originID != entered.ID && d.groups != nil {
-				if og, ok := d.groups.Get(originID); ok && og != nil && og.Status {
-					named = og
-				}
-			}
-			res.Location = d.carryClickParams(res.Location, named, v.Key, subs, extras)
+			res.Location = d.carryClickParams(res.Location, d.clickParamTarget(entered, originID), v.Key, subs, extras)
 		}
 	}
 
@@ -736,7 +727,9 @@ func (d *engineDeps) root(w http.ResponseWriter, r *http.Request) {
 	h.Set("X-Emtds-Stream", streamName)
 	h.Set("X-Emtds-Uniq", b2yn(unique))
 	if redirect == "landing" {
-		d.serveLocalLanding(w, r, strings.TrimSpace(outRaw), md)
+		d.serveLocalLanding(w, r, strings.TrimSpace(outRaw), md, func(loc string) string {
+			return d.carryClickParams(loc, d.clickParamTarget(entered, originID), v.Key, subs, extras)
+		})
 		return
 	}
 	res.Write(w)

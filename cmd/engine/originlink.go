@@ -214,6 +214,21 @@ func (d *engineDeps) carryClickParams(location string, grp *config.Group, keywor
 	return body + frag
 }
 
+// clickParamTarget is the campaign whose link names label a carried redirect.
+//
+// entered is the campaign the visitor opened on this request. originID is the
+// first campaign when a path token names one. A different enabled origin
+// campaign is returned; otherwise entered is returned, which may be nil.
+// There is no error.
+func (d *engineDeps) clickParamTarget(entered *config.Group, originID string) *config.Group {
+	if d != nil && originID != "" && entered != nil && originID != entered.ID && d.groups != nil {
+		if og, ok := d.groups.Get(originID); ok && og != nil && og.Status {
+			return og
+		}
+	}
+	return entered
+}
+
 // clickLinkName is the query key a campaign writes for one collected field.
 //
 // src is the campaign's effective traffic source and may be nil. field is

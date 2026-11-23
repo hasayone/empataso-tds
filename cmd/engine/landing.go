@@ -82,13 +82,14 @@ func landingsDir(explicit, groupsFile string) string {
 
 // serveLocalLanding writes the landing chosen for this click.
 // id is the catalog id. deps carries macros, the click id and the offer URL.
-// A nil server answers 503. serveEntry reports a missing file as 404.
-func (d *engineDeps) serveLocalLanding(w http.ResponseWriter, r *http.Request, id string, deps render.MacroDeps) {
+// paramsOn, when set, rewrites a redirect Location after the path token is
+// applied. A nil server answers 503. serveEntry reports a missing file as 404.
+func (d *engineDeps) serveLocalLanding(w http.ResponseWriter, r *http.Request, id string, deps render.MacroDeps, paramsOn func(string) string) {
 	if d == nil || d.landServe == nil {
 		http.Error(w, "landing unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	d.landServe.serveEntry(w, r, id, deps)
+	d.landServe.serveEntry(w, r, id, deps, paramsOn)
 }
 
 // serveLandingAsset is the /l/{id}/{path} route.
@@ -104,10 +105,11 @@ func (d *engineDeps) serveLandingAsset(w http.ResponseWriter, r *http.Request) {
 // serveEntry writes the landing HTML for landingID.
 // w is the visitor response. r is the click. landingID is the catalog id.
 // deps supplies macros, including the offer path and the click id.
+// paramsOn rewrites a 3xx Location after the path token and may be nil.
 // A 2xx body is expanded and gets a base href. A 3xx with Location is
 // returned as that redirect, without macros. Other statuses pass the body
 // through. A missing entry is 404. PHP disabled is 503. Other failures are 502.
-func (s *landingServer) serveEntry(w http.ResponseWriter, r *http.Request, landingID string, deps render.MacroDeps) {
+func (s *landingServer) serveEntry(w http.ResponseWriter, r *http.Request, landingID string, deps render.MacroDeps, paramsOn func(string) string) {
 	if s == nil || !safeLandingID(landingID) {
 		http.NotFound(w, r)
 		return
@@ -145,6 +147,9 @@ func (s *landingServer) serveEntry(w http.ResponseWriter, r *http.Request, landi
 			loc := resp.Location
 			if s.originOn != nil {
 				loc = s.originOn(loc, deps.Origin)
+			}
+			if paramsOn != nil {
+				loc = paramsOn(loc)
 			}
 			w.Header().Set("Location", loc)
 		}

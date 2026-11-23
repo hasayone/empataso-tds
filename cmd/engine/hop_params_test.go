@@ -1,12 +1,15 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/hasayone/empataso-tds/internal/config"
+	"github.com/hasayone/empataso-tds/internal/render"
 )
 
 // Two campaigns with different parameter names. The second campaign's
@@ -142,5 +145,54 @@ func TestCarryClickParamsLeavesSetAndEmpty(t *testing.T) {
 	foreign := "https://offer.example/go?s=1"
 	if d.carryClickParams(foreign, grp, "test1", subs, config.Extras{}) != foreign {
 		t.Fatalf("foreign host changed")
+	}
+}
+
+// A landing that redirects onto another campaign of this tracker keeps origin
+// and adds the collected values under the entry campaign's link names.
+func TestLandingRedirectCarriesClickParams(t *testing.T) {
+	php := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", "https://emaso.online/alloffers?sub_id_1=com.test.app#z")
+		w.WriteHeader(http.StatusFound)
+	}))
+	defer php.Close()
+	srv := newLandingServer(t.TempDir(), php.URL, func(id string) (config.Landing, bool) {
+		if id == "7" {
+			return config.Landing{ID: "7", Status: true, Local: true, Entry: "index.php"}, true
+		}
+		return config.Landing{}, false
+	}, discardLog())
+	d, signer := originLinkDeps(t, "emaso.online",
+		&config.Group{ID: "alloffers", Status: true},
+		&config.Group{ID: "a", Status: true, Parameters: map[string]string{"keyword": "keyword", "sub_id_1": "bundle_id"},
+			ParamTokens: map[string]string{"keyword": "test", "sub_id_1": "com.com.com"}},
+	)
+	srv.originOn = d.withOrigin
+	grp, _ := d.groups.Get("a")
+	var subs [config.MaxSubID]string
+	subs[0] = "com.test.app"
+	req := httptest.NewRequest(http.MethodGet, "/g1", nil)
+	rec := httptest.NewRecorder()
+	origin := signer.signPath("a", "rootclick01", time.Now())
+	srv.serveEntry(rec, req, "7", render.MacroDeps{CID: "0123456789", Origin: origin}, func(loc string) string {
+		return d.carryClickParams(loc, grp, "test1", subs, config.Extras{})
+	})
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status %d", rec.Code)
+	}
+	loc := rec.Header().Get("Location")
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("location %q: %v", loc, err)
+	}
+	q := u.Query()
+	if q.Get("sub_id_1") != "com.test.app" || q.Get("keyword") != "test1" || q.Get("bundle_id") != "com.test.app" {
+		t.Fatalf("location %q", loc)
+	}
+	if q.Get("origin") != origin || u.Fragment != "z" {
+		t.Fatalf("origin or fragment lost: %q", loc)
+	}
+	if strings.Contains(loc, "sub_id_1=&") || strings.Contains(loc, "sub_id_2=") {
+		t.Fatalf("empty parameter: %q", loc)
 	}
 }
