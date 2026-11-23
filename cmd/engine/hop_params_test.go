@@ -119,6 +119,40 @@ func TestOwnHostRedirectCarriesClickParams(t *testing.T) {
 	}
 }
 
+// The entry campaign reads sub_id_1 from bundle_id. A group hop into a campaign
+// that does not map that field keeps the value, and the redirect does not
+// write an empty sub_id_1.
+func TestBundleIDHopWithoutDestMapping(t *testing.T) {
+	gg := linked(
+		&config.Group{ID: "a", Status: true, Redirect: "group", Out: "b",
+			Parameters:  map[string]string{"keyword": "keyword", "sub_id_1": "bundle_id"},
+			ParamTokens: map[string]string{"keyword": "test", "sub_id_1": "{bundle_id}"}},
+		&config.Group{ID: "b", Status: true, Redirect: "http_redirect",
+			Out: "https://emaso.online/go?sub_id_1={sub_id_1}"},
+	)
+	h, ins, stop := withClickLog(t, gg, nil)
+	rec := do(t, h, "/a?bundle_id=com.test.app&keyword=test1", "9.9.9.9", chrome)
+	stop()
+	loc := rec.Header().Get("Location")
+	if strings.Contains(loc, "sub_id_1=&") || strings.HasSuffix(strings.Split(loc, "#")[0], "sub_id_1=") {
+		t.Fatalf("empty sub_id_1 in %q", loc)
+	}
+	u, err := url.Parse(loc)
+	if err != nil {
+		t.Fatalf("location %q: %v", loc, err)
+	}
+	if u.Query().Get("sub_id_1") != "com.test.app" {
+		t.Fatalf("location %q", loc)
+	}
+	if len(ins.events) != 1 {
+		t.Fatalf("%d events, want 1", len(ins.events))
+	}
+	ev := ins.events[0]
+	if ev.GroupID != "b" || ev.Subs[0] != "com.test.app" || ev.Keyword != "test1" {
+		t.Fatalf("event group=%s keyword=%q sub=%q", ev.GroupID, ev.Keyword, ev.Subs[0])
+	}
+}
+
 // carryClickParams leaves a key that is already present, skips empty values
 // and a foreign host, and does not replace origin.
 func TestCarryClickParamsLeavesSetAndEmpty(t *testing.T) {

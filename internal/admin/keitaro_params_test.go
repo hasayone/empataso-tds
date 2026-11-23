@@ -117,6 +117,56 @@ func TestKeitaroParametersOnly(t *testing.T) {
 	}
 }
 
+// A parameter key that is already stored stays, including sub_id_1=bundle_id and its token.
+// The tracker alias sub1 does not replace it. An empty keyword is still filled.
+func TestParametersOnlyKeepsManualBundle(t *testing.T) {
+	var rich atomic.Bool
+	rich.Store(true)
+	tracker, paths := paramsTracker(t, &rich)
+	groups := &memGroups{}
+	admin := newKeitaroAdmin(t, tracker.URL, "k-test", groups, nil, &keitaroFiles{dir: t.TempDir()})
+	postKeitaroImport(t, admin, map[string]any{"campaigns": true})
+	if job := waitKeitaroJob(t, admin); job.Error != "" || job.Counts["groups"] != 1 {
+		t.Fatalf("import = %+v", job)
+	}
+	for i := range groups.list {
+		if groups.list[i].ID != "keep" {
+			continue
+		}
+		groups.list[i].Parameters = map[string]string{"sub_id_1": "bundle_id"}
+		groups.list[i].ParamTokens = map[string]string{"sub_id_1": "com.com.com"}
+	}
+	before := len(paths())
+	postKeitaroImport(t, admin, map[string]any{"parameters_only": true, "all_imported": true})
+	job := waitKeitaroJob(t, admin)
+	if job.Error != "" || job.Counts["changed"] != 1 {
+		t.Fatalf("apply = %+v losses %+v", job.Counts, job.Losses)
+	}
+	g, _ := groupByID(groups.list, "keep")
+	if g.Parameters["sub_id_1"] != "bundle_id" || g.ParamTokens["sub_id_1"] != "com.com.com" {
+		t.Fatalf("manual bundle replaced: %+v %+v", g.Parameters, g.ParamTokens)
+	}
+	if g.Parameters["keyword"] != "utm_term" || g.ParamTokens["keyword"] != "{keyword}" {
+		t.Fatalf("empty keyword not filled: %+v %+v", g.Parameters, g.ParamTokens)
+	}
+	if g.Streams[0].Name != "keep-me" {
+		t.Fatalf("stream rewritten: %+v", g.Streams[0])
+	}
+	for _, p := range paths()[before:] {
+		if p != "/admin_api/v1/campaigns" && p != "/admin_api/v1/traffic_sources" {
+			t.Fatalf("parameters_only read %s", p)
+		}
+	}
+	postKeitaroImport(t, admin, map[string]any{"parameters_only": true, "all_imported": true})
+	if job = waitKeitaroJob(t, admin); job.Error != "" || job.Counts["changed"] != 0 {
+		t.Fatalf("second apply = %+v", job)
+	}
+	g, _ = groupByID(groups.list, "keep")
+	if g.Parameters["sub_id_1"] != "bundle_id" || g.ParamTokens["sub_id_1"] != "com.com.com" {
+		t.Fatalf("second pass replaced bundle: %+v %+v", g.Parameters, g.ParamTokens)
+	}
+}
+
 func TestKeitaroParametersBadBody(t *testing.T) {
 	tracker, _ := paramsTracker(t, &atomic.Bool{})
 	admin := newKeitaroAdmin(t, tracker.URL, "k-test", nil, nil, nil)

@@ -243,6 +243,30 @@ func TestStaticPlaceholderStaysToken(t *testing.T) {
 	}
 }
 
+// Alias bundle_id is the query name. The placeholder stays the token, braces included,
+// and is not rewritten to sub1.
+func TestBundleAliasMaskStaysToken(t *testing.T) {
+	raw := json.RawMessage(`{
+		"sub_id_1": {"name": "bundle_id", "placeholder": "{bundle_id}", "alias": "bundle_id"}
+	}`)
+	snap := Snapshot{
+		Campaigns: []Campaign{{ID: 3, Alias: "screen", State: "active", Parameters: raw}},
+		Streams: map[string][]KStream{
+			"3": {{ID: 3, State: "active", ActionType: "http", ActionPayload: "https://a.example/"}},
+		},
+	}
+	g, ok := findGroup(MapAll(snap).Groups, "screen")
+	if !ok {
+		t.Fatal("group missing")
+	}
+	if g.Parameters["sub_id_1"] != "bundle_id" || g.ParamTokens["sub_id_1"] != "{bundle_id}" {
+		t.Fatalf("sub %+v %+v", g.Parameters, g.ParamTokens)
+	}
+	if g.Parameters["sub_id_1"] == "sub1" || g.ParamTokens["sub_id_1"] == "{sub1}" || g.ParamTokens["sub_id_1"] == "sub1" {
+		t.Fatalf("mask rewritten %+v %+v", g.Parameters, g.ParamTokens)
+	}
+}
+
 func TestCampaignParametersArray(t *testing.T) {
 	snap := Snapshot{
 		Campaigns: []Campaign{{
