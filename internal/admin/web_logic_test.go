@@ -565,6 +565,7 @@ eq(serviceBadge('keitaro_sync', {keitaro_configured:true, status:{jobs:{keitaro_
 const cronIds=['telegram','ip_lists','geo_db','conversions'];
 eq(cronCardOrder(cronIds, ['geo_db','telegram']), ['geo_db','telegram','ip_lists','conversions'], 'cronCardOrder saved reorders known ids');
 eq(cronCardOrder(cronIds, ['nope','telegram']), ['telegram','ip_lists','geo_db','conversions'], 'cronCardOrder drops unknown saved ids');
+eq(cronCardOrder(cronIds, ['telegram','conv_keywords','ip_lists']), ['telegram','ip_lists','geo_db','conversions'], 'cronCardOrder skips the removed conv_keywords id');
 eq(cronCardOrder(cronIds, ['telegram','ip_lists','keitaro_sync']), ['telegram','ip_lists','geo_db','conversions'], 'cronCardOrder appends new default ids');
 eq(cronCardOrder(cronIds, null), cronIds, 'cronCardOrder null saved keeps default');
 eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram','ip_lists','conversions'], 'cronCardOrder collapses duplicate saved ids');
@@ -2113,7 +2114,7 @@ func TestFlowDestOfferStats(t *testing.T) {
 	if render == "" {
 		t.Fatal("renderFlow missing")
 	}
-	statsAt := strings.Index(render, "${destStats}")
+	statsAt := strings.Index(render, "destStats")
 	marksAt := strings.Index(render, "${isLink?'':flowDestMarks(o, flowDestNamed(")
 	if statsAt < 0 || marksAt < 0 || statsAt > marksAt {
 		t.Fatal("offer names must follow the numbers")
@@ -2162,6 +2163,8 @@ func TestFlowDestOfferStats(t *testing.T) {
 	}
 	var src strings.Builder
 	src.WriteString("const esc=(s)=>String(s==null?'':s);\n")
+	src.WriteString("function macroHTML(h){return h}\n")
+	src.WriteString("function firstLine(s){return String(s||'').split(/\\n/)[0]}\n")
 	src.WriteString("const tr=k=>({'dest.offer':'offer','dest.landing':'landing','HTTP redirect':'HTTP redirect'}[k]||k);\n")
 	src.WriteString("const typeLabel=t=>tr(t==='http_redirect'?'HTTP redirect':(t||'—'));\n")
 	src.WriteString("function streamHint(sp){const conv=+sp.conv||0;const bit=conv>0?'<span class=\"c-rev\">'+conv+'</span>':String(conv||0);const profit=+sp.profit||0;const rev=profit>0?'<span class=\"c-rev\">'+profit+'</span>':String(profit);return (sp.bots||0)+' bots · '+bit+' · '+rev}\n")
@@ -2182,7 +2185,7 @@ func TestFlowDestOfferStats(t *testing.T) {
 	line := html[mark:]
 	nl := strings.Index(line, "\n")
 	src.WriteString(line[:nl+1])
-	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowOfferStopped", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowOfferMark", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "flowCanvasOpen", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "streamsOnScreen", "watchStreamOfferScreen", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed"} {
+	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowOfferStopped", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowOfferMark", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "flowCanvasOpen", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "streamsOnScreen", "watchStreamOfferScreen", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed", "flowOfferAddress", "flowSplitHTML"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -2258,6 +2261,21 @@ const collapsedBadges = h.slice(h.indexOf('class="badges"'));
 eq(collapsedBadges.includes('>Alpha<') && collapsedBadges.includes('>+4 (0%)<'), true, 'the offer and the zero shares share the badge row');
 eq(collapsedBadges.indexOf('>Alpha<') < collapsedBadges.indexOf('>+4 (0%)<'), true, 'zero shares sit in the badge row, not on their own line');
 eq(collapsedBadges.includes('bots'), false, 'the collapsed badges have no conversions of their own');
+const savedSplit = OFFERS.slice();
+OFFERS = [{id:'o1', name:'Alpha', url:'https://a.example/land', status:true},{id:'o2', name:'Beta', url:'https://b.example/land', status:true}];
+eq(flowSplitHTML({redirect:'http_redirect', out:'https://stream.example', offers:[{id:'o1', share:100}]}, g, 'one', true), '', 'one offer stays one arrow');
+eq(flowSplitHTML({redirect:'http_redirect', out:'https://stream.example', offers:[{id:'o1', share:60},{id:'o2', share:40}]}, g, 'two', false), '', 'the collapsed card keeps one destination');
+let split = flowSplitHTML({redirect:'http_redirect', out:'https://stream.example', offers:[{id:'o1', share:60},{id:'o2', share:40}]}, g, 'two', true);
+eq((split.match(/class="osplit"/g)||[]).length, 2, 'two offers draw two targets');
+eq(split.includes('>60%<') && split.includes('>40%<'), true, 'each target shows its share');
+eq(split.includes('https://a.example/land') && split.includes('https://b.example/land'), true, 'each target uses that offer address');
+eq(split.includes('https://stream.example'), false, 'the stream address is not the split link');
+split = flowSplitHTML({redirect:'http_redirect', out:'https://stream.example', offers:[{id:'o1', share:100},{id:'o2', share:0}]}, g, 'zero', true);
+eq((split.match(/class="osplit"/g)||[]).length, 2, 'a zero share is still its own target');
+eq(split.includes('>0%<'), true, 'a zero share is written on its arrow');
+eq(split.includes('https://b.example/land'), true, 'the zero share keeps its own address');
+eq(split.includes('https://stream.example'), false, 'the stream address is not repeated for a zero share');
+OFFERS = savedSplit;
 const quiet = flowDestStatsHTML(offers, {hits:0,bots:0,conv:0,profit:0}, g, 'quiet', false, false) + flowDestMarks(offers, flowDestNamed(offers, g, 'quiet', false, false));
 eq(quiet.includes('0 bots'), true, 'before the total the collapsed line is zeros');
 eq(quiet.includes('olines'), false, 'badges are already a row before the total');

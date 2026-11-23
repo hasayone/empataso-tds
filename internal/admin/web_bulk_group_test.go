@@ -20,7 +20,7 @@ func TestSPACatalogBulkActions(t *testing.T) {
 		must(t, page.fn, "catalogPickCell('"+page.kind+"'", page.name+": row box")
 		must(t, page.fn, "catalogBulkBar('"+page.kind+"'", page.name+": bar of group actions")
 		must(t, page.fn, "bindCatalogPick(grid, '"+page.kind+"'", page.name+": checkboxes and buttons are wired")
-		must(t, page.fn, ".pick')", page.name+": a click in the box cell does not open the editor")
+		must(t, page.fn, ",.pick", page.name+": a click in the box cell does not open the editor")
 	}
 	must(t, spaFunctionLine(html, "catalogBulkBar"), "n=CAT_PICK[kind].size", "the bar needs a selection")
 	must(t, spaFunctionLine(html, "catalogBulkBar"), "if(!n) return ''", "no bar without a selection")

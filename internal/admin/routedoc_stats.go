@@ -265,6 +265,10 @@ func statsRouteDocs() map[string]routeDoc {
 			Description: "The answer is {ready, clicks, status}. clicks are the hits, uniques and click cost per campaign, stream, offer, " +
 				"landing and affiliate network; status are the conversion count, profit and depsum (the deposit) per offer, affiliate network, " +
 				"campaign and status. ready is false when the offer and network columns are not on the tables yet. " +
+				"Pass offer and countries together to read that one offer split by those countries: each row then carries country, " +
+				"only the named countries are read, the code is matched without letter case and returned in lower case, " +
+				"and an empty countries list returns an empty answer without a query. " +
+				"One of the two without the other is 400. " +
 				"For a caller who may not see the conversion status, the status rows keep only confirmed conversions summed into one row per key. " +
 				"Missing statistics give an empty answer with 200. A bad filter is 400 and a query stopped as too heavy is 504 \"query too heavy\".",
 			RU: docText{
@@ -272,6 +276,10 @@ func statsRouteDocs() map[string]routeDoc {
 				Description: "Ответ — {ready, clicks, status}. clicks — хиты, уникальные и цена кликов по кампании, потоку, офферу, " +
 					"лендингу и партнёрской сети; status — число конверсий, profit и depsum (депозит) по офферу, партнёрской сети, " +
 					"кампании и статусу. ready равен false, если колонок оффера и сети в таблицах ещё нет. " +
+					"offer и countries вместе читают один оффер в разрезе этих стран: у каждой строки есть country, " +
+					"читаются только названные страны, код сравнивается без учёта регистра и возвращается в нижнем регистре, " +
+					"пустой countries возвращает пустой ответ без запроса. " +
+					"Один из двух параметров без другого даёт 400. " +
 					"Для вызывающего, который не видит статус конверсии, в status остаются только подтверждённые конверсии, сложенные в одну строку на ключ. " +
 					"Без статистики ответ пустой с кодом 200. Неверный фильтр даёт 400, запрос, остановленный как слишком тяжёлый, — 504 «query too heavy».",
 			},
@@ -280,10 +288,21 @@ func statsRouteDocs() map[string]routeDoc {
 				Description: "Відповідь — {ready, clicks, status}. clicks — хіти, унікальні та ціна кліків за кампанією, потоком, офером, " +
 					"лендінгом і партнерською мережею; status — кількість конверсій, profit і depsum (депозит) за офером, партнерською мережею, " +
 					"кампанією та статусом. ready дорівнює false, якщо колонок офера й мережі в таблицях ще немає. " +
+					"offer і countries разом читають один офер у розрізі цих країн: у кожного рядка є country, " +
+					"читаються лише названі країни, код порівнюється без урахування регістру і повертається в нижньому регістрі, " +
+					"порожній countries повертає порожню відповідь без запиту. " +
+					"Один із двох параметрів без іншого дає 400. " +
 					"Для викликаючого, який не бачить статус конверсії, у status залишаються лише підтверджені конверсії, складені в один рядок на ключ. " +
 					"Без статистики відповідь порожня з кодом 200. Хибний фільтр дає 400, запит, зупинений як надто важкий, — 504 «query too heavy».",
 			},
-			Query: base,
+			Query: joinParams(base, []queryParam{
+				strQ("offer", "Offer id. Together with countries, returns that offer split by those countries instead of the catalog facts.").
+					loc("Идентификатор оффера. Вместе с countries возвращает этот оффер в разрезе стран вместо фактов каталога.",
+						"Ідентифікатор офера. Разом із countries повертає цей офер у розрізі країн замість фактів каталогу."),
+				strQ("countries", "Comma-separated country codes of that offer. Empty with offer returns an empty answer and does not query.").
+					loc("Коды стран этого оффера через запятую. Пустое значение вместе с offer возвращает пустой ответ и не делает запрос.",
+						"Коди країн цього офера через кому. Порожнє значення разом із offer повертає порожню відповідь і не робить запит."),
+			}),
 			Response: map[string]any{
 				"ready": true,
 				"clicks": []any{map[string]any{

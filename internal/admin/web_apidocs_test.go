@@ -7,7 +7,7 @@ import (
 )
 
 // TestRouteDocSPAPage checks that #/settings/docs is built from /api/openapi.json through the pure
-// helpers, with search, a method filter, a table of contents, anchors, copy buttons, the OpenAPI
+// helpers, with search, a method filter, a section sidebar, anchors, copy buttons, the OpenAPI
 // download and the page origin as the base address, and that every dictionary key it uses exists
 // once per language, including the label of each error status the registry may list.
 // t is the test handle. It returns nothing and fails on a missing marker or key.
@@ -35,8 +35,12 @@ func TestRouteDocSPAPage(t *testing.T) {
 		t.Error("the docs page must use location.origin, not a fixed address")
 	}
 	if strings.Contains(page, "apidoc-side") {
-		t.Error("the docs page has no route sidebar")
+		t.Error("the docs page lists sections, not every route")
 	}
+	must(t, page, `<div class="apidoc-layout"><nav class="apidoc-toc" id="docs-toc"`, "sections sit in a sidebar beside the text")
+	must(t, html, ".apidoc-layout{display:grid;grid-template-columns:248px minmax(0,1fr)", "docs sidebar column")
+	must(t, html, ".apidoc-toc{display:flex;flex-direction:column", "docs contents are a vertical list")
+	must(t, html, ".apidoc-layout{grid-template-columns:minmax(0,1fr)", "a narrow screen keeps the contents on one scrolling row")
 	must(t, spaFunctionLine(html, "profile"), "arg.startsWith('docs/')?arg.slice(5):''", "docs deep link passes the anchor")
 	for _, css := range []string{".apidoc-mt.ok{color:var(--ok)}", ".apidoc-mt.bad{color:var(--bad)}", "code.hl .hl-key{", "code.hl .hl-flag{", ".apidoc-share{", ".apidoc-op>.bt,.apidoc-share>.bt{font-weight:700"} {
 		must(t, html, css, "docs style "+css)
@@ -49,6 +53,7 @@ func TestRouteDocSPAPage(t *testing.T) {
 	for _, want := range []string{
 		"'/api/docs.md?lang='+encodeURIComponent(lang)", "apiDocsMarkdown(text)", `download="emtds-api-'+esc(lang)+'.md"`,
 		"location.hash==='#/settings/docs/md'", "location.pathname==='/docs'&&location.hash==='#md'", "data-mdjump", `id="docs-back"`,
+		`<div class="apidoc-layout"><nav class="apidoc-toc apidoc-mdtoc"`,
 		`download="emtds-openapi.json"`, `download="emtds.postman_collection.json"`,
 	} {
 		must(t, view, want, "apiDocsMarkdownView: "+want)

@@ -476,17 +476,32 @@ func (s *Server) handleBotPut(w http.ResponseWriter, r *http.Request) {
 
 // handleFacts writes the click and conversion breakdown of the catalog tables.
 //
-// Filters come from condsFrom. For a viewer who may not see the conversion status the
-// status rows are folded by foldConfirmed, so the totals match the report and no
-// status value leaks. Missing stats answers an empty body, a query error 500.
+// Filters come from condsFrom. offer and countries together switch the answer to
+// one offer split by those countries (writeOfferGeoFacts). For a viewer who may
+// not see the conversion status the status rows are folded by foldConfirmed, so
+// the totals match the report and no status value leaks. Missing stats answers
+// an empty body, a query error 500.
 func (s *Server) handleFacts(w http.ResponseWriter, r *http.Request) {
 	from, to := parseRange(r)
+	geo, offerID, countries, msg := parseOfferGeo(r.URL.Query())
+	if msg != "" {
+		writeErr(w, http.StatusBadRequest, msg)
+		return
+	}
+	if geo && fieldHidden(s.viewerFrom(r.Context()), "country") {
+		writeErr(w, http.StatusBadRequest, "bad filter: hidden field country")
+		return
+	}
 	if s.cfg.Stats == nil {
 		s.writeStats(w, r, http.StatusOK, store.Facts{Clicks: []store.ClickFact{}, Status: []store.StatusFact{}})
 		return
 	}
 	conds, ok := s.condsFrom(w, r, "events")
 	if !ok {
+		return
+	}
+	if geo {
+		s.writeOfferGeoFacts(w, r, from, to, offerID, countries, conds)
 		return
 	}
 	var facts store.Facts

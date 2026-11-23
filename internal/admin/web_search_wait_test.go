@@ -144,8 +144,8 @@ if (FAILED) process.exit(1);
 		t.Fatal("the offers table is not found")
 	}
 	table = strings.ReplaceAll(table, "\r\n", "\n")
-	must(t, table, "offerRowHTML(o, netName, offActs(o), true)", "the offers table asks for the switch")
-	must(t, table, "if(e.target.closest('[data-omore],[data-otoggle],.pick')) return;", "a click on the dot does not open the dialog")
+	must(t, table, "offerRowHTML(o, netName, offActs(o), true, true)", "the offers table asks for the switch and the country button")
+	must(t, table, "if(e.target.closest('[data-omore],[data-otoggle],.pick,[data-ogeo]')) return;", "a click on the dot does not open the dialog")
 	must(t, table, "qa('[data-otoggle]',grid).forEach(", "the dot has its own handler")
 	must(t, table, "if(o&&canEdit(ME,'offers',o)) toggleOffer(o);", "the dot saves through the same toggle as the menu, with the same right")
 	must(t, table, "e.stopPropagation();", "the dot click does not reach the row")

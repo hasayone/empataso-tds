@@ -142,7 +142,7 @@ func TestOfferRowActions(t *testing.T) {
 	must(t, table, `'<th class="acts"></th>'`, "the head has the actions cell")
 	must(t, table, `data-omore="${esc(o.id)}" title="${tr('More')}"`, "the row has the More button")
 	must(t, table, "canEdit(ME,'offers',o)", "the button is for those who may edit")
-	must(t, table, "offerRowHTML(o, netName, offActs(o), true)", "the cell is handed to the row")
+	must(t, table, "offerRowHTML(o, netName, offActs(o), true, true)", "the cell is handed to the row, with the country button")
 	mustNot(t, table, "icon('trash')", "no trash button in a cell")
 	click := spaBetween(html, "qa('[data-omore]',grid)", "const openOffer=(id)=>{")
 	must(t, click, "menu(e.currentTarget,[", "the same menu control as campaigns")
@@ -153,7 +153,7 @@ func TestOfferRowActions(t *testing.T) {
 	must(t, del, "ask(trFill('off.del.one',{n:o.id}),'',tr('Delete'),true)", "the confirmation stays")
 	must(t, del, "'DELETE','/api/offers/'+encodeURIComponent(o.id)", "the delete request")
 	must(t, spaBetween(html, "const toggleOffer=async(o)=>{", "const deleteOffer"), "Object.assign({}, o, {status:!o.status})", "the switch sends the whole offer")
-	must(t, spaFunctionLine(html, "offerRowHTML"), "${esc(o.name||'')}</span></span></td>${acts||''}", "the cell follows the name")
+	must(t, spaFunctionLine(html, "offerRowHTML"), "${esc(o.name||'')}</span>${geoBtn}</span></td>${acts||''}", "the cell follows the name")
 	must(t, spaFunctionLine(html, "offerRowHTML"), `<span class="dot ${offerDotClass(!!o.status)}"`, "the name has the status dot")
 	for _, want := range []string{"kind+'-bulk-on'", "kind+'-bulk-off'"} {
 		must(t, spaFunctionLine(html, "catalogBulkBar"), want, "the group bar of offers has "+want)

@@ -126,7 +126,7 @@ func (r *Runner) runVirusTotal(ctx context.Context, cfg Config) (string, error) 
 			msg += "; switched off: " + strings.Join(disabled, ", ")
 		}
 	}
-	if len(fresh) > 0 {
+	if len(fresh) > 0 && vt.alerts() {
 		text := "🛑 EmTDS: VirusTotal flags " + strings.Join(fresh, ", ") + "."
 		if len(disabled) > 0 {
 			text += "\nStreams switched off: " + strings.Join(disabled, ", ") + "."

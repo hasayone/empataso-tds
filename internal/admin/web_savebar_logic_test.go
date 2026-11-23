@@ -116,3 +116,102 @@ func TestSaveBarWiring(t *testing.T) {
 	must(t, cards, "page.forEach(g=>box.checked?FLOW_PICK.add(g.id):FLOW_PICK.delete(g.id))", "the header box picks the visible page")
 	must(t, cards, "const allOn=page.length>0&&page.every(", "the header box reflects the visible page")
 }
+
+// saveChordChecks are the assertions of TestSaveChord.
+const saveChordChecks = `
+const key = (extra) => {
+  const e = {ctrlKey:false, metaKey:false, altKey:false, shiftKey:false, repeat:false, key:'', code:'', prevented:false, preventDefault(){ this.prevented = true; }};
+  Object.assign(e, extra || {});
+  return e;
+};
+const field = () => ({value:'hello', closest(){ return null; }});
+eq(saveChord(key({ctrlKey:true, code:'KeyS', key:'s'})), true, 'ctrl+s');
+eq(saveChord(key({ctrlKey:true, code:'KeyS', key:'ы'})), true, 'ctrl+s on a layout that names the key another letter');
+eq(saveChord(key({ctrlKey:true, key:'S'})), true, 'ctrl+S without a code');
+eq(saveChord(key({metaKey:true, code:'KeyS', key:'s'})), true, 'cmd+s');
+eq(saveChord(key({code:'KeyS', key:'s'})), false, 's alone is typed');
+eq(saveChord(key({ctrlKey:true, altKey:true, code:'KeyS', key:'s'})), false, 'alt is not the shortcut');
+eq(saveChord(key({ctrlKey:true, shiftKey:true, code:'KeyS', key:'s'})), false, 'shift is not the shortcut');
+eq(saveChord(key({ctrlKey:true, code:'KeyA', key:'a'})), false, 'ctrl+a is not save');
+eq(saveChord(key({ctrlKey:true, repeat:true, code:'KeyS', key:'s'})), true, 'a repeat is still the shortcut');
+eq(saveKbd('Win32', 'Mozilla/5.0 (Windows NT 10.0)'), 'Ctrl+S', 'windows');
+eq(saveKbd('Windows', ''), 'Ctrl+S', 'windows platform name');
+eq(saveKbd('Linux x86_64', 'Mozilla/5.0 (X11; Linux x86_64)'), 'Ctrl+S', 'linux');
+eq(saveKbd('MacIntel', ''), '⌘S', 'mac');
+eq(saveKbd('macOS', ''), '⌘S', 'macos');
+eq(saveKbd('', 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)'), '⌘S', 'mac from the user agent');
+eq(saveKbd('iPhone', ''), '⌘S', 'iphone');
+eq(saveKbd('', ''), 'Ctrl+S', 'an unknown system is not a command mark');
+modal = null; bar = {id:'savebar'}; btn = {disabled:false, clicks:0, click(){ this.clicks++; this.disabled = true; }};
+let e = key({ctrlKey:true, code:'KeyS', key:'ы', target:field()});
+onSaveKey(e);
+eq(e.prevented, true, 'a field does not take the character');
+eq(e.target.value, 'hello', 'the field text stays');
+eq(btn.clicks, 1, 'a visible bar saves once');
+e = key({ctrlKey:true, code:'KeyS', key:'s', target:field()});
+onSaveKey(e);
+eq(btn.clicks, 1, 'a press during the request does not save again');
+eq(e.prevented, true, 'the browser still does not save the page');
+btn.disabled = false; btn.clicks = 0;
+e = key({ctrlKey:true, code:'KeyS', key:'s', repeat:true, target:field()});
+onSaveKey(e);
+eq(btn.clicks, 0, 'holding the keys does not start a save');
+eq(e.prevented, true, 'a repeat still does not type');
+eq(e.target.value, 'hello', 'a repeat leaves the field');
+bar = null; btn.disabled = false; btn.clicks = 0;
+e = key({ctrlKey:true, code:'KeyS', key:'s', target:field()});
+onSaveKey(e);
+eq(btn.clicks, 0, 'a hidden bar does not save');
+eq(e.prevented, true, 'a hidden bar does not type the character');
+eq(e.target.value, 'hello', 'a hidden bar does not change the field');
+e = key({code:'KeyS', key:'s', target:field()});
+onSaveKey(e);
+eq(e.prevented, false, 'a plain s is left to the field');
+modal = {}; bar = {id:'savebar'}; btn = {disabled:false, clicks:0, click(){ this.clicks++; }};
+e = key({ctrlKey:true, code:'KeyS', key:'s', target:field()});
+onSaveKey(e);
+eq(btn.clicks, 0, 'a dialog keeps the shortcut');
+eq(e.prevented, false, 'a dialog handles the key itself');
+modal = null; btn.disabled = true; btn.clicks = 0;
+e = key({metaKey:true, code:'KeyS', key:'s', target:field()});
+onSaveKey(e);
+eq(btn.clicks, 0, 'a disabled save does not run');
+btn.disabled = false;
+e = key({metaKey:true, code:'KeyS', key:'s', target:field()});
+onSaveKey(e);
+eq(btn.clicks, 1, 'cmd+s clicks save');
+if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
+`
+
+// TestSaveChord checks Ctrl+S and Cmd+S against the save bar.
+// The physical S key saves like the button while the bar is visible.
+// A hidden bar, a repeated key and a disabled button do not write. The hint follows the system.
+func TestSaveChord(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the save shortcut checks")
+	}
+	html := spaSource()
+	must(t, html, "document.addEventListener('keydown', onSaveKey, true)", "the shortcut is caught before a field")
+	mustNot(t, html, "if(anyDirty())saveAll()", "the shortcut is not the old dirty check")
+	var b strings.Builder
+	b.WriteString("let failed = 0; const eq = (got, want, what) => { const g = JSON.stringify(got), w = JSON.stringify(want); if (g !== w) { failed++; console.log('FAIL ' + what + '\\n  got  ' + g + '\\n  want ' + w); } };\n")
+	b.WriteString("let modal = null, bar = null, btn = {disabled:false, clicks:0, click(){}};\n")
+	b.WriteString("function q(sel){ if (sel === '.modal') return modal; if (sel === '#savebar') return bar; if (sel === '#saveall') return btn; return null; }\n")
+	for _, name := range []string{"saveChord", "saveKbd", "onSaveKey"} {
+		fn := spaFunctionLine(html, name)
+		if !strings.HasPrefix(fn, "function "+name+"(") {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		b.WriteString(fn)
+		b.WriteByte('\n')
+	}
+	b.WriteString(saveChordChecks)
+	f := filepath.Join(t.TempDir(), "save-chord.js")
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("save shortcut checks failed:\n%s", out)
+	}
+}

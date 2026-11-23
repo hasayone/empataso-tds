@@ -676,7 +676,7 @@ func TestConversions(t *testing.T) {
 	if msg, err := e.r.runConversions(context.Background(), cfg); err != nil || !strings.Contains(msg, "watching for new conversions") || len(e.messages()) != 1 {
 		t.Fatalf("first run: %q, %v, %q", msg, err, e.messages())
 	}
-	if m := e.messages(); m[0] != "Earned today\n9.00" || strings.Contains(m[0], "Profit for today") {
+	if m := e.messages(); m[0] != "Earned today\n9.00 $" || strings.Contains(m[0], "Profit for today") {
 		t.Fatalf("first summary: %q", m)
 	}
 
@@ -1032,7 +1032,7 @@ func TestConvPeriodMatchesReport(t *testing.T) {
 	if err := (Conversions{Period: "nope"}).validate(); err == nil {
 		t.Fatal("unknown period must be refused")
 	}
-	if got := profitSummaryText("today", from, to, 12.5, nil, "ru"); got != "Профит за сегодня\n12.50" || strings.Contains(got, "Profit for today") {
+	if got := profitSummaryText("today", from, to, 12.5, nil, "ru"); got != "Профит за сегодня\n12.50 $" || strings.Contains(got, "Profit for today") {
 		t.Fatalf("ru summary %q", got)
 	}
 }
@@ -1052,7 +1052,7 @@ func TestConversionsManualProfitOnce(t *testing.T) {
 		t.Fatalf("manual: %q %v", msg, err)
 	}
 	m := e.messages()
-	if len(m) != 1 || m[0] != "Earned today\n4.50" || strings.Contains(m[0], "Profit for today") {
+	if len(m) != 1 || m[0] != "Earned today\n4.50 $" || strings.Contains(m[0], "Profit for today") {
 		t.Fatalf("one summary, no replay: %q", m)
 	}
 	pb.rows = append(pb.rows, store.PostbackRow{TS: clock.Add(time.Minute), Profit: 1, CID: "new"})
@@ -1070,7 +1070,7 @@ func TestConversionsManualProfitOnce(t *testing.T) {
 			nProfit++
 		}
 	}
-	if nProfit != 1 || len(m) != 2 || m[1] != "Earned today\n5.50" || strings.Contains(strings.Join(m, "\n"), "Profit for today") {
+	if nProfit != 1 || len(m) != 2 || m[1] != "Earned today\n5.50 $" || strings.Contains(strings.Join(m, "\n"), "Profit for today") {
 		t.Fatalf("summary once beside the new line: %q", m)
 	}
 }
@@ -1101,7 +1101,7 @@ func TestConvSummaryFollowsRussianProfile(t *testing.T) {
 		t.Fatalf("summary: %q", m)
 	}
 	want := profitSummaryText("today", time.Time{}, time.Time{}, 12.5, pb.rows, "ru")
-	if m[0] != want || !strings.Contains(m[0], "Promo — 12.50") {
+	if m[0] != want || !strings.Contains(m[0], "Promo — 12.50 $") {
 		t.Fatalf("got\n%s\nwant\n%s", m[0], want)
 	}
 }

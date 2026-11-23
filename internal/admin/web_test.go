@@ -2390,13 +2390,53 @@ func TestDomainsCatalogAndPager(t *testing.T) {
 	mustNot(t, html, "function domainStatus(", "old status cell helper")
 	cell := spaFunctionLine(html, "domainCell")
 	must(t, cell, `<span class="dot ${domainDot(d)}" title="${esc(domainStatusText(d))}"></span> ${esc(d.host)}`, "dot before host")
-	must(t, cell, "if(id==='status') return `<td>${domainStateChip(d)}${domainPending(d)?'':`<span class=\"dom-verdict\">${esc(domainStatusText(d))}</span>`}</td>`", "state chip first, then the check verdict; a pending purchase has no verdict")
+	must(t, cell, "if(id==='status') return `<td><span class=\"dom-status\" data-dstat=\"${esc(d.id)}\">${domainStateChip(d)}${domainPending(d)?'':`<span class=\"dom-verdict\">${esc(domainStatusText(d))}</span>`}</span></td>`", "state chip and the check verdict are separate fields; a pending purchase has no verdict")
 	must(t, spaFunctionLine(html, "domainStateChip"), "tr('dom.state.pending')", "pending purchase chip")
 	ld := spaFunctionLine(html, "linkDomains")
 	must(t, ld, "disabled", "linkDomains hides disabled")
 	must(t, html, "return {id:n.id, host:n.host, group:n.group||'', role:n.role||'links', primary:!!n.primary, disabled:!!n.disabled, created_by:n.created_by||''};", "payload has writable fields only")
 	must(t, html, `'dom.edit':'Править домен'`, "ru edit domain")
 	must(t, html, `'dom.off.hint':'Выключенный домен`, "ru disabled hint")
+}
+
+// TestDomainStatusPop checks the domains status cell: the on/off badge and the check
+// note are separate elements, and the full check text lives in a popup the pointer can select.
+// t is the test handle. It returns nothing. A missing marker fails the test.
+func TestDomainStatusPop(t *testing.T) {
+	html := spaSource()
+	cell := spaFunctionLine(html, "domainCell")
+	must(t, cell, `class="dom-status"`, "status cell wraps the badge and the verdict")
+	must(t, cell, "domainStateChip(d)", "badge stays in the cell")
+	must(t, cell, `class="dom-verdict"`, "verdict is its own element")
+	must(t, cell, "domainPending(d)?'':", "pending purchase still has no verdict")
+	must(t, html, ".dom-status{display:flex;align-items:center;gap:8px", "gap between the badge and the verdict")
+	pop := spaFunctionLine(html, "domainCheckPopHTML")
+	must(t, pop, "domainCheckLines(d)", "popup is built from the check lines")
+	must(t, pop, `class="dom-pop-row"`, "each fact is a row")
+	must(t, pop, `class="v"`, "the value is a text node")
+	mustNot(t, pop, "title=", "popup is not a title attribute")
+	mustNot(t, pop, "disabled", "popup is not disabled")
+	lines := spaFunctionLine(html, "domainCheckLines")
+	must(t, lines, "domainStatusText(d)", "status phrase is in the popup")
+	must(t, lines, "when(d.checked)", "check time is in the popup")
+	must(t, lines, "domainCheckError(d)", "error is in the popup")
+	must(t, lines, "domainCheckDNS(d)", "DNS text is in the popup")
+	must(t, lines, "domainCheckSSL(d)", "SSL text is in the popup")
+	must(t, lines, "if(!k||!v) continue", "empty rows are skipped")
+	must(t, html, ".dom-pop{position:fixed;", "popup is taken out of the table so the edge does not clip it")
+	must(t, spaFunctionLine(html, "placeDomainPop"), "popLeft(", "popup stays inside the window")
+	must(t, html, "user-select:text", "popup text can be selected")
+	bind := spaFunctionLine(html, "bindDomainStatus")
+	must(t, bind, "pointerType!=='touch'", "a tap opens the block on touch")
+	must(t, bind, "openDomainPop(el, d)", "hover opens the block")
+	must(t, spaFunctionLine(html, "ensureDomainPopListeners"), "closeDomainPop()", "a press outside closes the block")
+	for _, lang := range []string{"en", "ru", "uk"} {
+		for _, key := range []string{"dom.err", "dom.dns", "dom.ssl"} {
+			if !trKeyDefined(html, lang, key) {
+				t.Errorf("missing %s in %s", key, lang)
+			}
+		}
+	}
 }
 
 // TestApiKeysMenu checks rotate, edit, remove and the key table.

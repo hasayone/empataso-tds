@@ -1630,7 +1630,7 @@ func TestSaveBusyAndFlowSkeleton(t *testing.T) {
 	mustNot(t, save, "toast(e.message", "the raw answer is not the toast text")
 	must(t, save, "finally{if(pending)SAVE_RUN=false; syncSaveBar()}", "the button returns when the request ends")
 	bar := spaFunctionLine(html, "syncSaveBar")
-	must(t, bar, "saveButtonFace(SAVE_RUN, !!block&&!scope.cron, tr('Save')+'<kbd>⌘S</kbd>', tr('save.busy'))", "the button uses the in-progress face")
+	must(t, bar, "saveButtonFace(SAVE_RUN, !!block&&!scope.cron, tr('Save')+'<kbd>'+saveKbd((navigator.userAgentData&&navigator.userAgentData.platform)||navigator.platform, navigator.userAgent)+'</kbd>', tr('save.busy'))", "the button uses the in-progress face")
 	must(t, bar, "saveBtn.disabled=face.disabled", "the in-progress button is disabled")
 	must(t, bar, "saveBtn.setAttribute('aria-busy','true')", "the in-progress button is marked busy")
 	face := spaFunctionLine(html, "saveButtonFace")
@@ -1856,4 +1856,44 @@ func TestListChromeSkeleton(t *testing.T) {
 	users := spaFunctionLine(html, "usersPage")
 	must(t, users, "barStrip(", "users keep the button row as strips while loading")
 	must(t, users, `id="users-new"`, "the users button returns after the load")
+}
+
+// TestSaveBarPhone checks the unsaved-changes bar: a wide screen keeps one centred row,
+// and up to 760px the label is the first row and the chips with Discard and Save
+// are the second, both centred, 32px tall, above the home indicator.
+// Discard is a filled secondary button, quieter than Save.
+func TestSaveBarPhone(t *testing.T) {
+	html := spaSource()
+	wide := spaBetween(html, ".savebar{position:fixed;", "}")
+	must(t, wide, "display:flex;align-items:center;", "a wide screen keeps the bar on one row")
+	must(t, wide, "justify-content:center", "a wide screen centres the row in the bar")
+	must(t, wide, "white-space:nowrap", "a wide screen does not wrap the bar")
+	mustNot(t, wide, "flex-wrap:wrap", "a wide screen does not put the buttons on a second row")
+	must(t, html, ".savebar .savehead,.savebar .saveacts{display:flex;align-items:center;justify-content:center;gap:12px;min-width:0}", "the label and the actions stay one centred row on a wide screen")
+	disc := spaBetween(html, ".savebar .discard{", "}")
+	must(t, disc, "background:var(--surface-2)", "discard uses a theme surface, not the primary fill")
+	must(t, disc, "color:var(--fg)", "discard text contrasts with its fill")
+	mustNot(t, disc, "background:transparent", "discard is not a bare label")
+	mark := "@media (max-width:760px){\n    .savebar{left:max(8px, env(safe-area-inset-left, 0px));"
+	i := strings.Index(html, mark)
+	if i < 0 {
+		t.Fatal("phone save bar rule not found")
+	}
+	phone := html[i:]
+	if j := strings.Index(phone, "\n  button.aifab{"); j > 0 {
+		phone = phone[:j]
+	}
+	must(t, phone, ".savebar .savehead{gap:8px;flex:1 0 100%;justify-content:center}", "the label takes the first row and stays centred")
+	must(t, phone, ".savebar .saveacts{flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;flex:1 0 100%}", "the buttons sit centred on the second row and wrap instead of clipping")
+	must(t, phone, ".savebar .saveacts button,.savebar .dchip{flex:0 0 auto;height:32px;min-height:32px;line-height:1}", "the buttons keep a 32px touch height on a phone")
+	must(t, phone, "bottom:calc(12px + env(safe-area-inset-bottom, 0px))", "the bar clears the home indicator")
+	must(t, phone, "env(safe-area-inset-bottom, 0px)", "the page can scroll clear of the bar")
+	if strings.Count(html, ".savebar .savehead{gap:8px;flex:1 0 100%;justify-content:center}") != 1 || strings.Count(html, ".savebar .saveacts{flex-wrap:wrap;align-items:center;justify-content:center;gap:8px;flex:1 0 100%}") != 1 {
+		t.Error("the second row belongs only to the phone rule")
+	}
+	bar := spaFunctionLine(html, "syncSaveBar")
+	must(t, bar, `class="savehead"`, "the label is its own row")
+	must(t, bar, `class="saveacts"`, "the buttons are their own row")
+	must(t, bar, `id="discard"`, "discard stays in the bar")
+	must(t, bar, `id="saveall"`, "save stays in the bar")
 }

@@ -38,6 +38,29 @@ func TestDefaultIPProxySources(t *testing.T) {
 	}
 }
 
+func TestLoadVirusTotalNotifyMissingMeansSend(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cron.json")
+	if err := os.WriteFile(path, []byte(`{"virustotal":{"api_key":"k","disable_streams":true}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.VirusTotal.alerts() {
+		t.Fatal("a file without notify must still alert")
+	}
+	if !c.VirusTotal.DisableStreams {
+		t.Fatal("disable_streams from the file was dropped")
+	}
+	off := false
+	c.VirusTotal.Notify = &off
+	if c.VirusTotal.alerts() {
+		t.Fatal("notify false must not alert")
+	}
+}
+
 func TestLoadConfigWithoutKeitaroSync(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "cron.json")
@@ -53,6 +76,42 @@ func TestLoadConfigWithoutKeitaroSync(t *testing.T) {
 	}
 	if c.KeitaroSync.Enabled {
 		t.Fatal("keitaro_sync must default to disabled")
+	}
+}
+
+// TestLoadIgnoresRemovedConvKeywordsSection checks that a cron.json that still has the
+// removed conv_keywords section loads, keeps the other jobs and saves without that section.
+func TestLoadIgnoresRemovedConvKeywordsSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "cron.json")
+	raw := `{"conv_keywords":{"enabled":true,"every_minutes":1440},"conversions":{"enabled":true,"every_minutes":5}}`
+	if err := os.WriteFile(path, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !c.Conversions.Enabled || c.Conversions.EveryMinutes != 5 {
+		t.Fatalf("conversions lost: %+v", c.Conversions)
+	}
+	if c.Enabled("conv_keywords") || c.Interval("conv_keywords") != 0 {
+		t.Fatal("the removed job must not be known")
+	}
+	for _, job := range append(append([]string{}, Jobs...), AdminJobs...) {
+		if job == "conv_keywords" {
+			t.Fatal("conv_keywords is still a job")
+		}
+	}
+	if err := Save(path, c); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "conv_keywords") {
+		t.Fatal("the saved file still carries conv_keywords")
 	}
 }
 

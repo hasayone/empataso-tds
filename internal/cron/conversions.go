@@ -149,10 +149,14 @@ func convSendSummary(r *Runner, cfg Config, summary int, to time.Time) bool {
 }
 
 // sendProfitSummary sends the period payout once.
-// cfg supplies the period and the Telegram chat. The amount is the payout
-// sum of the conversion journal for that window, the same sum the report
-// adds up, with no Keitaro-import host left out. Returns the status phrase
-// (profit and the period id) and a query or Telegram error. It notifies once.
+// cfg supplies the period, the optional daily template and the Telegram chat.
+// The amount is the payout sum of the conversion journal for that window, the
+// same sum the report adds up, with no Keitaro-import host left out. A daily
+// schedule with a summary template sends that text with its summary tokens
+// filled, instead of the built report. An empty template and an amount sample
+// keep the built report.
+// Returns the status phrase (profit and the period id) and a query or Telegram
+// error. It notifies once.
 func (r *Runner) sendProfitSummary(ctx context.Context, cfg Config) (string, error) {
 	from, to := convPeriod(cfg.Conversions, r.now())
 	// The store caps a page at 1000 rows. profit is the sum of the whole
@@ -161,11 +165,91 @@ func (r *Runner) sendProfitSummary(ctx context.Context, cfg Config) (string, err
 	if err != nil {
 		return "", err
 	}
-	text := profitSummaryText(cfg.Conversions.Period, from, to, profit, rows, summaryLang(r.paths.Groups))
+	lang := summaryLang(r.paths.Groups)
+	text := profitSummaryText(cfg.Conversions.Period, from, to, profit, rows, lang)
+	if tpl, ok := storedSummaryTemplate(cfg); ok {
+		text = fillConvSummary(tpl, cfg.Conversions.Period, from, to, profit, rows, lang)
+	}
 	if err := r.notify(ctx, cfg.Telegram, text); err != nil {
 		return "", err
 	}
 	return fmt.Sprintf("profit %.2f", profit), nil
+}
+
+// summaryBody picks the Telegram text of the profit summary before tokens are filled.
+// cfg is the cron configuration. report is the text profitSummaryText built.
+// In daily mode a non-empty summary template that is not an amount sample
+// replaces that report. Any other schedule, an empty template and a stored
+// amount sample keep report, so the per-conversion template is not used here.
+// It does not fail.
+func summaryBody(cfg Config, report string) string {
+	if text, ok := storedSummaryTemplate(cfg); ok {
+		return text
+	}
+	return report
+}
+
+// storedSummaryTemplate is the daily text the operator saved.
+// cfg is the cron configuration. The text is trimmed. ok is false when the
+// schedule is not daily, the text is empty, or it is an amount sample.
+// It does not fail.
+func storedSummaryTemplate(cfg Config) (string, bool) {
+	if !cfg.Conversions.Daily() {
+		return "", false
+	}
+	text := strings.TrimSpace(cfg.Conversions.SummaryTemplate)
+	if text == "" || convSummarySample(text) {
+		return "", false
+	}
+	return text, true
+}
+
+// convSummarySamples are amount placeholders, not a summary template.
+// A stored copy keeps the report the job builds.
+var convSummarySamples = []string{
+	"Earned today\n12.50 $\n\nCampaigns\n— 12.50 $\n\nStreams\n— 12.50 $\n\nCountries\n— 12.50 $\n\nDevices\n— 12.50 $\n\nKeywords\n— 12.50 $",
+	"Профит за сегодня\n12.50 $\n\nКампании\n— 12.50 $\n\nПотоки\n— 12.50 $\n\nСтраны\n— 12.50 $\n\nУстройства\n— 12.50 $\n\nКлючи\n— 12.50 $",
+	"Профіт за сьогодні\n12.50 $\n\nКампанії\n— 12.50 $\n\nПотоки\n— 12.50 $\n\nКраїни\n— 12.50 $\n\nПристрої\n— 12.50 $\n\nКлючі\n— 12.50 $",
+}
+
+// convSummarySample reports whether text is an amount placeholder.
+// Surrounding space and CR LF are ignored. An empty text is not a sample.
+// It does not fail.
+func convSummarySample(text string) bool {
+	text = strings.TrimSpace(strings.ReplaceAll(text, "\r\n", "\n"))
+	if text == "" {
+		return false
+	}
+	for _, sample := range convSummarySamples {
+		if text == sample {
+			return true
+		}
+	}
+	return false
+}
+
+// fillConvSummary substitutes the daily summary tokens in tpl.
+// period is the report period id. from and to label a custom range.
+// profit is the payout sum of the whole period. rows are the conversion page.
+// lang is ru, uk or en.
+// [PERIOD] is the period phrase. [PROFIT] is that sum written like report
+// revenue. [CAMPAIGNS], [STREAMS], [COUNTRIES], [DEVICES] and [KEYWORDS] are
+// the lines of those sections, without the section title. A token this report
+// does not fill is left as written. It does not fail.
+func fillConvSummary(tpl, period string, from, to time.Time, profit float64, rows []store.PostbackRow, lang string) string {
+	return strings.NewReplacer(
+		"[PERIOD]", convPeriodLabel(period, from, to, lang),
+		"[PROFIT]", convMoney(profit),
+		"[CAMPAIGNS]", convSectionLines(func(p store.PostbackRow) string { return strings.TrimSpace(p.Group) }, rows, lang),
+		"[STREAMS]", convSectionLines(func(p store.PostbackRow) string { return strings.TrimSpace(p.Stream) }, rows, lang),
+		"[COUNTRIES]", convSectionLines(func(p store.PostbackRow) string {
+			return strings.ToUpper(strings.TrimSpace(p.Country))
+		}, rows, lang),
+		"[DEVICES]", convSectionLines(func(p store.PostbackRow) string {
+			return convDeviceLabel(p.Device, langSlot(lang))
+		}, rows, lang),
+		"[KEYWORDS]", convSectionLines(func(p store.PostbackRow) string { return strings.TrimSpace(p.Keyword) }, rows, lang),
+	).Replace(tpl)
 }
 
 // advanceConvSince moves the conversion window past rows already announced.
@@ -548,6 +632,14 @@ func normLang(raw string) string {
 	}
 }
 
+// convMoney is a payout written the way the reports write revenue.
+// profit is the amount. A conversion has no currency column. An empty code
+// is USD, and the reports put `$` after the number. The result is two digits
+// and that sign. It does not fail.
+func convMoney(profit float64) string {
+	return strconv.FormatFloat(profit, 'f', 2, 64) + " $"
+}
+
 // convSummaryLines is how many values one section of the summary lists.
 // The rest of that section becomes one remainder line.
 const convSummaryLines = 5
@@ -558,7 +650,7 @@ const convSummaryLines = 5
 // rows are the conversions of the period page; a section is omitted when
 // every row lacks that field. lang is ru, uk or en. It does not fail.
 func profitSummaryText(period string, from, to time.Time, profit float64, rows []store.PostbackRow, lang string) string {
-	amount := strconv.FormatFloat(profit, 'f', 2, 64)
+	amount := convMoney(profit)
 	label := convPeriodLabel(period, from, to, lang)
 	var b strings.Builder
 	switch lang {
@@ -615,6 +707,19 @@ func convSummaryBlocks(rows []store.PostbackRow, lang string) []string {
 // largest amount first, and the rest is one line. An empty section is empty.
 // It does not fail.
 func convDimBlock(title string, pick func(store.PostbackRow) string, rows []store.PostbackRow, lang string) string {
+	body := convSectionLines(pick, rows, lang)
+	if body == "" {
+		return ""
+	}
+	return title + "\n" + body
+}
+
+// convSectionLines lists one summary section without its title.
+// pick reads one field; an empty value is skipped. rows are the conversion
+// page. lang chooses the remainder line. At most convSummaryLines names are
+// listed, largest amount first, and the rest is one line. An empty section
+// is an empty string. It does not fail.
+func convSectionLines(pick func(store.PostbackRow) string, rows []store.PostbackRow, lang string) string {
 	sums := map[string]float64{}
 	for _, row := range rows {
 		name := pick(row)
@@ -641,16 +746,17 @@ func convDimBlock(title string, pick func(store.PostbackRow) string, rows []stor
 		return lines[i].name < lines[j].name
 	})
 	var b strings.Builder
-	b.WriteString(title)
 	shown := lines
 	if len(shown) > convSummaryLines {
 		shown = lines[:convSummaryLines]
 	}
-	for _, ln := range shown {
-		b.WriteByte('\n')
+	for i, ln := range shown {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
 		b.WriteString(ln.name)
 		b.WriteString(" — ")
-		b.WriteString(strconv.FormatFloat(ln.sum, 'f', 2, 64))
+		b.WriteString(convMoney(ln.sum))
 	}
 	if rest := lines[len(shown):]; len(rest) > 0 {
 		sum := 0.0
@@ -667,7 +773,7 @@ func convDimBlock(title string, pick func(store.PostbackRow) string, rows []stor
 // n is how many names were left out. sum is their payout. lang is ru, uk or en.
 // It does not fail.
 func convMoreLine(n int, sum float64, lang string) string {
-	amount := strconv.FormatFloat(sum, 'f', 2, 64)
+	amount := convMoney(sum)
 	switch lang {
 	case "ru":
 		return fmt.Sprintf("ещё %d — %s", n, amount)

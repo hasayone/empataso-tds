@@ -763,7 +763,7 @@ func cronConfigSample() map[string]any {
 		"geo_db": map[string]any{"enabled": false, "every_minutes": 1440, "sources": []map[string]string{}},
 		"virustotal": map[string]any{
 			"enabled": false, "every_minutes": 720, "api_key": "********", "domains": []string{"example.com"},
-			"from_groups": true, "threshold": 1, "disable_streams": false,
+			"from_groups": true, "threshold": 1, "disable_streams": false, "notify": true,
 		},
 		"disk":    map[string]any{"enabled": true, "every_minutes": 10, "paths": []string{}, "min_free_percent": 10},
 		"cleanup": map[string]any{"enabled": true, "every_minutes": 1440, "keys_days": 30},
@@ -841,6 +841,8 @@ func cronRouteDocs() map[string]routeDoc {
 				"a source URL, a list name, a bot signature source name (unique, letters, digits, dots, dashes, underscores) " +
 				"or a period is not valid; the shortest periods are in floors of GET. " +
 				"conversions.schedule is interval (the default) or daily: daily sends the profit summary at at_hour:at_minute in timezone, and every_minutes still decides how often a new conversion is announced. " +
+				"conversions.summary_template, when schedule is daily and the text is not empty, is that daily message: [PERIOD], [PROFIT], [CAMPAIGNS], [STREAMS], [COUNTRIES], [DEVICES] and [KEYWORDS] are filled from the report the job builds, and any other token is left as written. Empty keeps that report. The per-conversion template stays conversions.template. " +
+				"virustotal.notify false does not send the Telegram line about a newly flagged domain; a missing notify still sends it, on the same chat as the other alerts. " +
 				"503 when the cron file is not set.",
 			RU: docOf("Сохранение настроек автоматизации.",
 				"Только для ключа администратора; нужна галочка ключа cron. Тело — вся конфигурация в форме config из GET: "+
@@ -849,6 +851,8 @@ func cronRouteDocs() map[string]routeDoc {
 					"имя списка, имя источника сигнатур ботов (уникальное: буквы, цифры, точка, дефис, подчёркивание) "+
 					"или период недопустимы; наименьшие периоды — в floors у GET. "+
 					"У conversions поле schedule — interval (по умолчанию) или daily: daily шлёт сводку профита в at_hour:at_minute пояса timezone, а every_minutes по-прежнему задаёт, как часто уходит новая конверсия. "+
+					"conversions.summary_template при schedule daily и непустом тексте — это суточное сообщение: [PERIOD], [PROFIT], [CAMPAIGNS], [STREAMS], [COUNTRIES], [DEVICES] и [KEYWORDS] подставляются из отчёта, который задача уже строит, а прочий токен остаётся как написан. Пустое поле оставляет этот отчёт. Шаблон одной конверсии остаётся conversions.template. "+
+					"virustotal.notify false не шлёт в Telegram строку о новом помеченном домене; без поля notify строка уходит, в тот же чат, что и остальные оповещения. "+
 					"503, если файл cron не задан."),
 			UK: docOf("Збереження налаштувань автоматизації.",
 				"Лише для ключа адміністратора; потрібна галочка ключа cron. Тіло — вся конфігурація у формі config із GET: "+
@@ -857,6 +861,8 @@ func cronRouteDocs() map[string]routeDoc {
 					"ім'я списку, ім'я джерела сигнатур ботів (унікальне: літери, цифри, крапка, дефіс, підкреслення) "+
 					"чи період недопустимі; найменші періоди — у floors у GET. "+
 					"У conversions поле schedule — interval (за замовчуванням) або daily: daily надсилає зведення профіту о at_hour:at_minute поясу timezone, а every_minutes як і раніше задає, як часто йде нова конверсія. "+
+					"conversions.summary_template при schedule daily і непорожньому тексті — це добове повідомлення: [PERIOD], [PROFIT], [CAMPAIGNS], [STREAMS], [COUNTRIES], [DEVICES] і [KEYWORDS] підставляються зі звіту, який завдання вже будує, а інший токен лишається як написаний. Порожнє поле лишає цей звіт. Шаблон однієї конверсії лишається conversions.template. "+
+					"virustotal.notify false не надсилає в Telegram рядок про новий позначений домен; без поля notify рядок іде, у той самий чат, що й інші сповіщення. "+
 					"503, якщо файл cron не заданий."),
 			Body: objectBody("The configuration sections telegram, ip_lists, bot_signatures, geo_db, virustotal, disk, cleanup, conversions " +
 				"and keitaro_sync, each with enabled and every_minutes plus its own fields."),

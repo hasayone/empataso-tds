@@ -26,6 +26,9 @@ type ClickFact struct {
 	CostCents int64   `json:"cost_cents"`
 	CostCur   string  `json:"cost_cur"`
 	Revenue   float64 `json:"revenue,omitempty"`
+	// Country is set when the facts are one offer split by the countries named
+	// on it. Catalog facts leave it empty.
+	Country string `json:"country,omitempty"`
 }
 
 // StatusFact is one conversion status for a period.
@@ -41,6 +44,9 @@ type StatusFact struct {
 	Profit    float64 `json:"profit"`
 	DepSum    float64 `json:"depsum"`
 	Dep2Sum   float64 `json:"dep2sum"`
+	// Country is set when the facts are one offer split by the countries named
+	// on it. Catalog facts leave it empty.
+	Country string `json:"country,omitempty"`
 }
 
 // Facts is the click and conversion breakdown used by the catalog tables.

@@ -450,11 +450,15 @@ func TestFoldConfirmed(t *testing.T) {
 		{OfferID: "o1", NetworkID: "n", GroupID: "c1", Status: "sale", N: 1, Profit: 2, DepSum: 2},
 		{OfferID: "o1", NetworkID: "n", GroupID: "c1", Status: "rejected", N: 4},
 		{OfferID: "", NetworkID: "", GroupID: "c1", Status: "lead", N: 3, Profit: 1.5, DepSum: 3},
+		{OfferID: "o1", Country: "ru", Status: "sale", N: 4, Profit: 8},
+		{OfferID: "o1", Country: "de", Status: "sale", N: 1, Profit: 2},
 	}
 	got := foldConfirmed(rows)
 	want := []store.StatusFact{
 		{OfferID: "o1", NetworkID: "n", GroupID: "c1", Status: "sale", N: 3, Profit: 7, DepSum: 3},
 		{GroupID: "c1", Status: "sale", N: 3, Profit: 1.5, DepSum: 3},
+		{OfferID: "o1", Country: "ru", Status: "sale", N: 4, Profit: 8},
+		{OfferID: "o1", Country: "de", Status: "sale", N: 1, Profit: 2},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v", got)

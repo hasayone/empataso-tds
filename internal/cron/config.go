@@ -182,6 +182,23 @@ type VirusTotal struct {
 	FromGroups     bool     `json:"from_groups"`     // plus every host found in group/stream outputs
 	Threshold      int      `json:"threshold"`       // malicious+suspicious verdicts that count as flagged (min 1)
 	DisableStreams bool     `json:"disable_streams"` // switch off streams that send to a flagged domain
+	// Notify, when non-nil, says whether a newly flagged domain is sent to the
+	// same Telegram chat as the other alerts. Nil means send: a file saved
+	// before the switch has no field, and the job already sent that line.
+	Notify *bool `json:"notify,omitempty"`
+}
+
+// boolPtr is a pointer to v for a JSON bool that must survive a missing key.
+// v is the stored value. The pointer is never nil. It does not fail.
+func boolPtr(v bool) *bool { return &v }
+
+// alerts reports whether a newly flagged domain is sent to Telegram.
+// v is the VirusTotal section. A nil Notify means send. It does not fail.
+func (v VirusTotal) alerts() bool {
+	if v.Notify == nil {
+		return true
+	}
+	return *v.Notify
 }
 
 // Disk — warn when free space runs low.
@@ -219,6 +236,12 @@ type Conversions struct {
 	Schedule     string `json:"schedule,omitempty"`
 	AtHour       int    `json:"at_hour,omitempty"`
 	AtMinute     int    `json:"at_minute,omitempty"`
+	// SummaryTemplate, when the schedule is daily and the text is not empty,
+	// is the daily Telegram message. [PERIOD], [PROFIT], [CAMPAIGNS],
+	// [STREAMS], [COUNTRIES], [DEVICES] and [KEYWORDS] are filled from the
+	// report the job builds; any other token is left as written. Empty keeps
+	// that report.
+	SummaryTemplate string `json:"summary_template,omitempty"`
 }
 
 // DefaultConversionTemplate is used when the template is empty.
@@ -264,7 +287,7 @@ func Default() Config {
 			{Kind: KindASN, URL: "https://download.maxmind.com/geoip/databases/GeoLite2-ASN/download?suffix=tar.gz"},
 			seedGeoSource,
 		}},
-		VirusTotal:  VirusTotal{EveryMinutes: 12 * 60, FromGroups: true, Threshold: 1},
+		VirusTotal:  VirusTotal{EveryMinutes: 12 * 60, FromGroups: true, Threshold: 1, Notify: boolPtr(true)},
 		Disk:        Disk{EveryMinutes: 10, MinFreePercent: 10},
 		Cleanup:     Cleanup{EveryMinutes: 24 * 60, KeysDays: 30},
 		Conversions: Conversions{EveryMinutes: 1, Template: DefaultConversionTemplate, Period: "today"},
