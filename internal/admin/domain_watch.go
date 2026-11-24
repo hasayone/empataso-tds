@@ -15,8 +15,9 @@ const (
 	domainWatchFirst = 30 * time.Second
 	// domainWatchEvery is the tick interval used when WatchDomains gets none.
 	domainWatchEvery = 5 * time.Minute
-	// domainWatchWindow is how long a purchased domain without Cloudflare stays in the watch.
-	domainWatchWindow = 7 * 24 * time.Hour
+	// domainWatchWindow is how long after the purchase a Namecheap domain is checked on every
+	// tick. After it only the manual check remains, unless the domain has a Cloudflare status.
+	domainWatchWindow = time.Hour
 	// domainWatchFast is how long a domain is checked on every tick; after it a domain is
 	// checked at most once per domainWatchSlow.
 	domainWatchFast = 48 * time.Hour
@@ -39,7 +40,7 @@ type watchReport struct {
 // every is the tick interval; zero or less uses five minutes. The first tick runs about thirty
 // seconds after the call, then one runs per interval. A tick that finds the previous one still
 // running does nothing. A domain is watched while it is enabled, not OK, and either has a
-// Cloudflare status or is a Namecheap purchase less than a week old. A watched domain is
+// Cloudflare status or is a Namecheap purchase less than an hour old. A watched domain is
 // connected when it is connect_pending, otherwise its zone is read and the domain is checked
 // again. WatchDomains returns at once without a domain store. The caller starts it once
 // after New: New itself never starts it.
@@ -116,14 +117,14 @@ func (s *Server) watchOnce(ctx context.Context) watchReport {
 // pickWatched chooses the domains a tick works on.
 // list is the stored domains and now the current time. A domain is picked when it is enabled,
 // not OK, and has a Cloudflare status or is a Namecheap purchase whose watch started less than
-// a week ago. A domain whose watch started more than two days ago, or has no start time, is
+// an hour ago (see namecheapAutoCheck). A domain whose watch started more than two days ago, or has no start time, is
 // skipped while its last check is less than an hour old. The result is ordered by the last
 // check, never checked first, and cut to domainWatchCap.
 func pickWatched(list []config.Domain, now time.Time) []config.Domain {
 	var out []config.Domain
 	for _, d := range list {
 		since, hasSince := parseRFC3339(d.WatchSince)
-		inWindow := d.Registrar == namecheapRegistrar && hasSince && now.Sub(since) < domainWatchWindow
+		inWindow := namecheapAutoCheck(d, now)
 		adminProbe := config.IsAdminDomain(d) && !d.AdminOK && d.CfZoneID != ""
 		if d.Disabled || (d.OK && !adminProbe) || (d.CfStatus == "" && !inWindow && !adminProbe) {
 			continue
@@ -138,6 +139,23 @@ func pickWatched(list []config.Domain, now time.Time) []config.Domain {
 		out = out[:domainWatchCap]
 	}
 	return out
+}
+
+// namecheapAutoCheck tells whether the automatic check of a new Namecheap purchase is still
+// running for d.
+// d is the stored row and now the current time. It is true when the domain was bought through
+// Namecheap, is enabled and not yet OK, and its purchase time WatchSince is less than
+// domainWatchWindow ago. A missing or damaged purchase time, another registrar and an
+// elapsed window give false, so such a domain is only checked by hand.
+func namecheapAutoCheck(d config.Domain, now time.Time) bool {
+	if d.Registrar != namecheapRegistrar || d.Disabled || d.OK {
+		return false
+	}
+	since, ok := parseRFC3339(d.WatchSince)
+	if !ok {
+		return false
+	}
+	return now.Sub(since) < domainWatchWindow
 }
 
 // parseRFC3339 reads a stored time. ok is false for an empty or damaged text.

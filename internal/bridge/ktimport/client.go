@@ -28,6 +28,12 @@ type Client struct {
 	extRejected bool
 	// idRejected — последнее чтение журнала откатилось с колонок идентификаторов версии.
 	idRejected bool
+	// StreamsKnown — потоки кампаний, уже прочитанные прошлым заходом: id кампании → потоки.
+	// Такие кампании не запрашиваются повторно, их потоки идут в снимок как есть.
+	StreamsKnown map[string][]KStream
+	// StreamsSaved, если не nil, получает id кампании и тело ответа потоков сразу после чтения.
+	// Вызывается из пула потоков, параллельно; обработчик сам сериализует запись.
+	StreamsSaved func(id string, raw []byte)
 }
 
 const (
@@ -36,6 +42,11 @@ const (
 	getBodyLimit        = 64 << 20
 	streamFetchParallel = 8
 )
+
+// streamRequestTimeout — предел одного запроса потоков кампании.
+// Оборванное соединение без ответа так не держит весь перенос до общего срока; сбой по сроку
+// продолжается следующим заходом, а прочитанные кампании уже сохранены.
+var streamRequestTimeout = 2 * time.Minute
 
 // logRetryDelays — паузы перед повторами страницы журнала после временного сбоя; длина задаёт число повторов.
 var logRetryDelays = []time.Duration{2 * time.Second, 10 * time.Second, 30 * time.Second}
@@ -243,11 +254,30 @@ func (c *Client) fetchSnapshot(ctx context.Context, pick func([]Campaign) ([]Cam
 //
 // Параметры: ctx — отмена; camps — кампании снимка.
 // Результат: карта id кампании → потоки. Порядок ключей не задан.
-// Ошибки: сеть, статус не 200, тело не массив. Первая ошибка отменяет остальные запросы.
+// Кампании из StreamsKnown берутся оттуда без запроса и сразу входят в счётчик done.
+// Ошибки: сеть, статус не 200, тело не массив. Первая ошибка отменяет остальные запросы;
+// всё, что к тому времени прочитано, уже отдано в StreamsSaved.
 func (c *Client) fetchCampaignStreams(ctx context.Context, camps []Campaign) (map[string][]KStream, error) {
 	out := make(map[string][]KStream, len(camps))
 	if len(camps) == 0 {
 		return out, nil
+	}
+	var todo []Campaign
+	for _, camp := range camps {
+		key := fmt.Sprint(int(camp.ID))
+		if known, ok := c.StreamsKnown[key]; ok {
+			out[key] = known
+			continue
+		}
+		todo = append(todo, camp)
+	}
+	total := len(camps)
+	if len(todo) == 0 {
+		c.report("streams", total, total)
+		return out, nil
+	}
+	if len(out) > 0 {
+		c.report("streams", len(out), total)
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -255,9 +285,8 @@ func (c *Client) fetchCampaignStreams(ctx context.Context, camps []Campaign) (ma
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var first error
-	done := 0
-	total := len(camps)
-	for _, camp := range camps {
+	done := len(out)
+	for _, camp := range todo {
 		if ctx.Err() != nil {
 			break
 		}
@@ -272,10 +301,15 @@ func (c *Client) fetchCampaignStreams(ctx context.Context, camps []Campaign) (ma
 			}
 			defer func() { <-sem }()
 			path := fmt.Sprintf("/admin_api/v1/campaigns/%d/streams", id)
-			body, err := c.Get(ctx, path)
+			reqCtx, reqCancel := context.WithTimeout(ctx, streamRequestTimeout)
+			body, err := c.Get(reqCtx, path)
+			reqCancel()
 			var streams []KStream
 			if err == nil && json.Unmarshal(body, &streams) != nil {
 				err = fmt.Errorf("keitaro: streams кампании %d не массив", id)
+			}
+			if err == nil && c.StreamsSaved != nil {
+				c.StreamsSaved(fmt.Sprint(id), body)
 			}
 			mu.Lock()
 			if err != nil {

@@ -28,6 +28,9 @@ func (s *Server) WatchUpdatePending(ctx context.Context) {
 	defer tick.Stop()
 	for {
 		s.checkPendingOnce()
+		if s.ktJob.pickupWaiting() {
+			s.pickupKeitaroResume()
+		}
 		select {
 		case <-ctx.Done():
 			return

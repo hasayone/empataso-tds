@@ -45,6 +45,8 @@ type keitaroJob struct {
 	warn func(string, ...any)
 	// deadlineHold is true after a timeout left this same import running.
 	deadlineHold bool
+	// pickupWait is true while a stopped import that admin may continue waits for the update gate.
+	pickupWait bool
 }
 
 // keitaroUpdatePendingMsg is the refusal of begin* and holdWrite while an update is pending.
@@ -186,6 +188,7 @@ func (j *keitaroJob) beginImport() string {
 	j.running = true
 	j.rec = idleJournal()
 	j.rec.StartedAt = time.Now().UTC().Format(time.RFC3339)
+	j.dropStreams()
 	return ""
 }
 
@@ -355,7 +358,11 @@ func (j *keitaroJob) finish(errMsg string, counts map[string]int, losses []ktimp
 	}
 	j.rec.Resumable = j.rec.canResume()
 	j.deadlineHold = false
+	resumable := j.rec.Resumable
 	j.mu.Unlock()
+	if !resumable {
+		j.dropStreams()
+	}
 	j.save(true)
 }
 
@@ -444,6 +451,11 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	board := importBoardFrom(req, r.Context())
+	req.Board = board
+	if s.ktJob.continuesLast(req) {
+		s.handleKeitaroResume(w, r, keitaroImportReq{Resume: true})
+		return
+	}
 	creds, manifestStore := s.keitaroImportBundle(board)
 	if req.needsTracker() && !creds.configured() {
 		writeErr(w, http.StatusServiceUnavailable, "keitaro not configured")
@@ -457,7 +469,6 @@ func (s *Server) handleKeitaroImport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, msg)
 		return
 	}
-	req.Board = board
 	s.ktJob.setRequest(req)
 	s.startKeitaroRun(r, keitaroResumeRun{req: req}, creds, board, manifestStore)
 	writeJSON(w, http.StatusAccepted, map[string]any{"started": true})
@@ -559,21 +570,24 @@ func (s *Server) driveKeitaroImport(parent context.Context, run keitaroResumeRun
 	}
 }
 
-// pickupKeitaroDeadline continues one import that a timeout already stopped, once, when admin starts.
-// The journal must be resumable, not interrupted, and its error must be a timeout or a deadline.
-// A cancel, an interrupted run and any other stop stay stopped. A second call finds the job
-// running and does nothing. It does not return an error.
-func (s *Server) pickupKeitaroDeadline() {
+// pickupKeitaroResume continues the import that the last process left unfinished, without a click.
+// It runs when admin starts and again from the update watcher while an update gate kept it waiting.
+// The journal must be resumable and stopped by a timeout, a deadline or an admin restart, with
+// keitaroPickupMax as the limit of restart pickups. A cancel and any other stop stay stopped.
+// The run goes on from the saved checkpoint: catalogs that passed are skipped, the campaign
+// streams already read come from the streams file and clicks continue from the last written batch.
+// A second call finds the job running and does nothing. It does not return an error.
+func (s *Server) pickupKeitaroResume() {
 	if s == nil || s.ktJob == nil {
 		return
 	}
-	run, ok := s.ktJob.claimDeadlineResume()
+	run, ok := s.ktJob.claimStartupResume()
 	if !ok {
 		return
 	}
 	creds, store := s.keitaroImportBundle(run.req.Board)
 	if (run.req.needsTracker() && !creds.configured()) || s.keitaroStoreMissing(run.req) != "" {
-		s.ktJob.finishRunningTimeout()
+		s.ktJob.finishRunning("keitaro not configured")
 		return
 	}
 	go s.driveKeitaroImport(context.Background(), run, "", creds, run.req.Board, store)
@@ -664,25 +678,43 @@ func (j *keitaroJob) deadlineContinuation() (keitaroResumeRun, bool) {
 	return j.rec.resumeRun(), true
 }
 
-// claimDeadlineResume takes a stopped import whose journal is a timeout and marks it running.
-// It returns the continuation and true when the journal is resumable, not interrupted, and the
-// error is a timeout or a deadline. The start time and the checkpoint stay.
-// It returns false for a cancel, an interrupted run, a run that is already going, and any other stop.
-// A second call returns false. It does not return an error.
-func (j *keitaroJob) claimDeadlineResume() (keitaroResumeRun, bool) {
+// claimStartupResume takes a stopped import that admin may continue by itself and marks it running.
+// It returns the continuation and true when the journal is resumable and the stop is either a timeout
+// or a deadline (not interrupted), or the cut of an admin restart (interrupted with
+// keitaroInterruptedMsg) that has not used keitaroPickupMax automatic continuations yet.
+// The start time and the checkpoint stay; a restart cut clears interrupted and the error, and
+// counts one pickup, so a run that kills the process again and again ends up stopped.
+// It returns false for a cancel, any other stop, a run already going, and while an update is
+// pending; in that case waiting is set when the run is otherwise eligible, so the update watcher
+// retries once the gate is released. A second call returns false. It does not return an error.
+func (j *keitaroJob) claimStartupResume() (keitaroResumeRun, bool) {
 	j.mu.Lock()
-	if j.running || j.purging || j.syncing || j.writers > 0 || j.updating {
+	if j.running || j.purging || j.syncing || j.writers > 0 {
 		j.mu.Unlock()
 		return keitaroResumeRun{}, false
 	}
-	if j.rec.Interrupted || !j.rec.canResume() || !keitaroTimeoutText(j.rec.Error) {
+	cut := j.rec.Interrupted && j.rec.Error == keitaroInterruptedMsg && j.rec.Pickups < keitaroPickupMax
+	timeout := !j.rec.Interrupted && keitaroTimeoutText(j.rec.Error)
+	if !j.rec.canResume() || !(cut || timeout) {
+		j.pickupWait = false
 		j.mu.Unlock()
 		return keitaroResumeRun{}, false
 	}
+	if j.updating {
+		j.pickupWait = true
+		j.mu.Unlock()
+		return keitaroResumeRun{}, false
+	}
+	j.pickupWait = false
 	run := j.rec.resumeRun()
 	j.running = true
 	if j.rec.LastStage != "" {
 		j.rec.Stage = j.rec.LastStage
+	}
+	if cut {
+		j.rec.Interrupted = false
+		j.rec.Error = ""
+		j.rec.Pickups++
 	}
 	j.rec.LastStage = ""
 	j.rec.Resumable = false
@@ -693,16 +725,34 @@ func (j *keitaroJob) claimDeadlineResume() (keitaroResumeRun, bool) {
 	return run, true
 }
 
+// pickupWaiting reports whether an eligible stopped import is waiting for the update gate to open.
+func (j *keitaroJob) pickupWaiting() bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return j.pickupWait
+}
+
 // finishRunningTimeout stops an import that was left running but cannot continue.
 // Work still left is stored as a failure with the timeout text. No work left is stored as done.
 // A job that is not running is left as it is. It does not return an error.
 func (j *keitaroJob) finishRunningTimeout() {
+	j.finishRunning("")
+}
+
+// finishRunning stops an import that was left running but cannot continue.
+// reason is the error to store when work is left; empty keeps the stored error, or the timeout
+// text when there is none. No work left is stored as done. A job that is not running is left
+// as it is. It does not return an error.
+func (j *keitaroJob) finishRunning(reason string) {
 	j.mu.Lock()
 	if !j.running {
 		j.mu.Unlock()
 		return
 	}
 	errMsg := j.rec.Error
+	if reason != "" {
+		errMsg = reason
+	}
 	if !j.rec.workLeft() {
 		errMsg = ""
 	} else if errMsg == "" {
@@ -909,11 +959,19 @@ func (st *importState) noteTrackerErr(err error, key string) {
 // fetchImportSnapshot reads the tracker snapshot of one import run.
 // creds is the copy the job took. campaignID is the Keitaro campaign of a dosync, or 0 for all.
 // It returns the full snapshot, or the snapshot of that campaign and the catalogs it uses.
+// The streams of a full snapshot are kept on the state volume as they are read, and an attempt
+// that continues an unfinished import takes them from there instead of asking the tracker again.
 // The error is a tracker failure or ktimport.ErrCampaignNotFound for an id the tracker lacks.
 func (s *Server) fetchImportSnapshot(ctx context.Context, creds ktCreds, campaignID int) (ktimport.Snapshot, error) {
 	client := s.keitaroClient(creds)
 	if campaignID > 0 {
 		return client.FetchCampaignSnapshot(ctx, campaignID)
+	}
+	if s.ktJob != nil {
+		store := openKeitaroStreams(keitaroStreamsPath(s.ktJob.file), creds.host(), time.Now(), s.ktJob.warnf)
+		defer store.close()
+		client.StreamsKnown = store.known
+		client.StreamsSaved = store.add
 	}
 	return client.FetchSnapshot(ctx)
 }

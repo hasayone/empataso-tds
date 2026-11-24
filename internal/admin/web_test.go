@@ -2426,11 +2426,18 @@ func TestDomainStatusPop(t *testing.T) {
 	must(t, spaFunctionLine(html, "domainStatusText"), "if(!d||!d.checked) return tr('dom.unchecked')", "unchecked phrase")
 	must(t, html, `'dom.unchecked':'не проверялся'`, "ru unchecked")
 	dom := spaFunctionLine(html, "domains")
-	must(t, dom, `class="icon sm ghost${!d.checked?' dom-pulse':''}" data-check=`, "the existing check button pulses until a check")
-	if strings.Count(dom, `data-check=`) != 1 {
-		t.Errorf("check button must stay one, found %d", strings.Count(dom, `data-check=`))
+	must(t, dom, "${domainCheckBtn(d)}", "the check button is drawn by its helper in the actions cell")
+	btn := spaFunctionLine(html, "domainCheckBtn")
+	must(t, btn, `class="icon sm ghost dom-pulse" data-check=`, "the existing check button always pulses when drawn")
+	must(t, btn, "icon('eye')", "the check button is the system eye")
+	mustNot(t, btn, "icon('check')", "the check button is not a tick")
+	must(t, btn, "domainPending(d)||(d.checked&&!domainAutoChecking(d))) return ''", "no button after a finished check, none for a pending purchase")
+	must(t, spaFunctionLine(html, "domainAutoChecking"), "d.registrar!=='namecheap'||d.ok||d.disabled", "only an enabled, not pointed Namecheap purchase is auto-checked")
+	must(t, html, "const DOM_AUTO_CHECK_MS=3600000;", "the client window is one hour")
+	if strings.Count(dom, `data-check=`) != 0 || strings.Count(btn, `data-check=`) != 1 {
+		t.Errorf("check button must stay one, in domainCheckBtn")
 	}
-	if i, j := strings.Index(dom, `data-check=`), strings.Index(dom, `data-more=`); i < 0 || j < 0 || i > j {
+	if i, j := strings.Index(dom, `${domainCheckBtn(d)}`), strings.Index(dom, `data-more=`); i < 0 || j < 0 || i > j {
 		t.Error("the check button must stay left of the row menu")
 	}
 	must(t, html, `#domains-grid td.acts>button.icon[data-check].dom-pulse{color:var(--ok)`, "pulse uses the theme green")

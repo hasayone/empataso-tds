@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"reflect"
 	"time"
 
 	"github.com/emtds/bridge/ktimport"
@@ -51,7 +52,13 @@ type keitaroJournal struct {
 	Logs         map[string]keitaroLogMark `json:"logs"`
 	Resumes      int                       `json:"resumes"`
 	Resumable    bool                      `json:"resumable"`
+	// Pickups counts the continuations admin made by itself after a restart cut; a click resets it.
+	Pickups int `json:"pickups,omitempty"`
 }
+
+// keitaroPickupMax is how many times admin continues a restart-cut import by itself.
+// A run that kills the process each time stops after this many and waits for the button.
+const keitaroPickupMax = 5
 
 // keitaroResumeRun is what a resumed import continues with.
 // req holds only the work still left: catalog flags are cleared once the catalogs passed,
@@ -235,6 +242,16 @@ func (j *keitaroJob) resumeRequest() (keitaroImportReq, bool) {
 	return j.rec.resumeRun().req, true
 }
 
+// continuesLast reports whether a new import body asks for the very import that stopped last.
+// req is the accepted body with board_id resolved. It is true when the last run can be resumed,
+// nothing is running and req equals the body of that run; starting it again then continues it
+// and does not read the tracker from the start. Any other body, and a run that finished, start anew.
+func (j *keitaroJob) continuesLast(req keitaroImportReq) bool {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return !j.running && j.rec.Resumable && reflect.DeepEqual(j.rec.Request, req)
+}
+
 // beginResume marks the resumed run of the last failed import running.
 // The counts, losses, catalog pass and log marks of the earlier attempts stay; the error is cleared.
 // It returns the continuation and an empty message, or the same refusals as beginImport, or
@@ -256,6 +273,7 @@ func (j *keitaroJob) beginResume() (keitaroResumeRun, string) {
 	j.rec.Done, j.rec.Total = 0, 0
 	j.rec.Error = ""
 	j.rec.Interrupted = false
+	j.rec.Pickups = 0
 	j.rec.Resumable = false
 	j.rec.FinishedAt = ""
 	j.rec.StartedAt = time.Now().UTC().Format(time.RFC3339)
@@ -277,6 +295,7 @@ func (j *keitaroJob) catalogsPassed() {
 	}
 	j.rec.CatalogsDone = true
 	j.mu.Unlock()
+	j.dropStreams()
 	j.save(true)
 }
 
@@ -307,6 +326,7 @@ func (j *keitaroJob) dropResume() {
 	changed := j.rec.Resumable
 	j.rec.Resumable = false
 	j.mu.Unlock()
+	j.dropStreams()
 	if changed {
 		j.save(true)
 	}

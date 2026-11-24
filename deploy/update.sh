@@ -913,10 +913,25 @@ do_build() {
 # Гейт Keitaro
 # ------------------------------------------------------------------
 
+# Назначение: проверить, что журнал переноса Keitaro на томе не помечен идущим.
+# Параметры: нет. Читает /v/keitaro-job.json тома состояния только на чтение, без симлинков.
+# Результат: 0, если в журнале running=true (перенос идёт); 1 — файла нет или перенос не идёт.
+# Ошибки: нет. Это проверка по файлу, независимая от ответа admin: живой admin при старте
+# сам переписывает чужой running=true в «оборван», так что true при работающем admin — живая задача.
+keitaro_journal_running() {
+	local body
+	body=$(docker run --rm --network none --user 10001:10001 \
+		-v "${VOL_NAME}:/v:ro" \
+		--entrypoint sh emtds:local \
+		-c 'f=/v/keitaro-job.json; [ -f "$f" ] && [ ! -L "$f" ] && head -c 262144 "$f" || true' 2>/dev/null || true)
+	printf '%s' "$body" | LC_ALL=C grep -qE '"running" *: *true'
+}
+
 # Назначение: записать pending и дождаться ready.json от admin.
 # Параметры: $1 — id прогона.
 # Результат: 0 при успехе; выставляет KEITARO_IDLE (true/false).
-# Ошибки: таймаут или admin недоступен без --keitaro-idle — код 1.
+# Ошибки: таймаут или admin недоступен без --keitaro-idle — код 1; журнал keitaro-job.json
+# с running=true до записи pending и после ready.json — код 1: admin не пересоздаётся под идущим переносом.
 KEITARO_IDLE_RESULT=false
 
 keitaro_gate() {
@@ -929,6 +944,9 @@ keitaro_gate() {
 	# Проверить, запущен ли admin.
 	if ! docker inspect --format '{{.State.Running}}' emtds-admin 2>/dev/null | grep -q true; then
 		die "emtds-admin не запущен; добавьте --keitaro-idle"
+	fi
+	if keitaro_journal_running; then
+		die "keitaro: keitaro-job.json running=true — перенос из Keitaro идёт; повторите позже"
 	fi
 	logbuf "keitaro: запись pending=${run_id}"
 	printf '%s\n' "$run_id" | vol_write pending
@@ -943,6 +961,9 @@ keitaro_gate() {
 			printf '%s' "$ready_json" | LC_ALL=C grep -qE '"keitaro_idle" *: *true' && KEITARO_IDLE_RESULT=true
 			logbuf "keitaro: получен ready (keitaro_idle=${KEITARO_IDLE_RESULT})"
 			[[ "$KEITARO_IDLE_RESULT" == true ]] || die "keitaro: перенос из Keitaro идёт; повторите позже"
+			if keitaro_journal_running; then
+				die "keitaro: keitaro-job.json running=true после ready — перенос из Keitaro идёт; повторите позже"
+			fi
 			return 0
 		fi
 		(( SECONDS < deadline )) || break

@@ -1025,6 +1025,28 @@ func TestUpdateKeitaroGate(t *testing.T) {
 	}
 }
 
+// TestUpdateKeitaroGateJournal: keitaro-job.json с running=true на томе останавливает прогон даже при
+// ready.json с keitaro_idle=true; pending не пишется, admin не пересоздаётся. Журнал без running идёт дальше.
+func TestUpdateKeitaroGateJournal(t *testing.T) {
+	te := newTestEnv(t)
+	te.writeUpdateEnv(t, "main")
+	te.advance(t, false, nil)
+	journal := filepath.Join(te.VolDir, "keitaro-job.json")
+	mustWrite(t, journal, "{\n  \"stage\": \"streams\",\n  \"running\": true,\n  \"request\": {\"offers\": true}\n}\n", 0o644)
+	te.mustFail(t, "keitaro-job.json", []string{"FAKE_ADMIN_READY=1"}, "--channel", "--unsigned")
+	if strings.Contains(te.journal(), "DOCKER_COMPOSE_UP") {
+		t.Fatal("compose up при идущем переносе")
+	}
+	if _, err := os.Stat(filepath.Join(te.VolDir, "update", "pending")); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatal("pending записан при идущем переносе")
+	}
+	mustWrite(t, journal, "{\n  \"stage\": \"failed\",\n  \"running\": false,\n  \"request\": {\"offers\": true}\n}\n", 0o644)
+	te.mustRun(t, []string{"FAKE_ADMIN_READY=1"}, "--channel", "--unsigned")
+	if sf := te.state(t); sf.Result != cron.StateOK {
+		t.Fatalf("state.json: %+v", sf)
+	}
+}
+
 // TestUpdateScenarioK: --rollback на версию из history; без истории или образа — отказ.
 func TestUpdateScenarioK(t *testing.T) {
 	te := newTestEnv(t)

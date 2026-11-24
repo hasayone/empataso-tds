@@ -68,7 +68,7 @@ func TestWatchConnectsThenMarksConnectedOnce(t *testing.T) {
 	e := newWatchEnv(t)
 	ctx := context.Background()
 	row := ncOwnedRow("example.com")
-	row.WatchSince = watchBase.Add(-time.Hour).Format(time.RFC3339)
+	row.WatchSince = watchBase.Add(-10 * time.Minute).Format(time.RFC3339)
 	e.seed(t, row)
 	e.live.setOwned("example.com")
 
@@ -140,7 +140,7 @@ func TestWatchRetriesConnectPendingAfterFailure(t *testing.T) {
 
 func TestWatchSkipsDisabledOkAndImportedDomains(t *testing.T) {
 	e := newWatchEnv(t)
-	recent := watchBase.Add(-24 * time.Hour).Format(time.RFC3339)
+	recent := watchBase.Add(-30 * time.Minute).Format(time.RFC3339)
 	old := watchBase.Add(-8 * 24 * time.Hour).Format(time.RFC3339)
 	e.seed(t,
 		config.Domain{ID: "1", Host: "disabled.example", Role: "links", Disabled: true, CfStatus: cfStatusPending, CfZoneID: "z1"},
@@ -159,6 +159,38 @@ func TestWatchSkipsDisabledOkAndImportedDomains(t *testing.T) {
 	for _, id := range []string{"1", "2", "3", "4"} {
 		if got := e.row(t, id); got.Checked != "" {
 			t.Fatalf("domain %s was checked: %+v", id, got)
+		}
+	}
+}
+
+// TestNamecheapAutoCheckRule covers the rule of the automatic check of a new purchase: only
+// a Namecheap domain that is enabled, not OK and bought less than an hour ago is checked.
+func TestNamecheapAutoCheckRule(t *testing.T) {
+	stamp := func(d time.Duration) string { return watchBase.Add(-d).Format(time.RFC3339) }
+	fresh := config.Domain{ID: "1", Host: "a.example", Registrar: namecheapRegistrar, WatchSince: stamp(5 * time.Minute)}
+	cases := []struct {
+		name string
+		edit func(d *config.Domain)
+		want bool
+	}{
+		{"new purchase", func(d *config.Domain) {}, true},
+		{"just before the hour", func(d *config.Domain) { d.WatchSince = stamp(59 * time.Minute) }, true},
+		{"after the hour", func(d *config.Domain) { d.WatchSince = stamp(61 * time.Minute) }, false},
+		{"exactly the hour", func(d *config.Domain) { d.WatchSince = stamp(time.Hour) }, false},
+		{"already pointed", func(d *config.Domain) { d.OK = true }, false},
+		{"disabled", func(d *config.Domain) { d.Disabled = true }, false},
+		{"foreign domain", func(d *config.Domain) { d.Registrar = "" }, false},
+		{"no purchase time", func(d *config.Domain) { d.WatchSince = "" }, false},
+		{"damaged purchase time", func(d *config.Domain) { d.WatchSince = "yesterday" }, false},
+	}
+	for _, c := range cases {
+		d := fresh
+		c.edit(&d)
+		if got := namecheapAutoCheck(d, watchBase); got != c.want {
+			t.Errorf("%s: got %v, want %v", c.name, got, c.want)
+		}
+		if picked := len(pickWatched([]config.Domain{d}, watchBase)) == 1; picked != c.want {
+			t.Errorf("%s: picked %v, want %v", c.name, picked, c.want)
 		}
 	}
 }

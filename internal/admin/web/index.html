@@ -27591,6 +27591,27 @@ function syncDomAdminHints(box, ids){
  * @returns {boolean} true when registrar_status is pending
  */
 function domainPending(d){ return !!d&&d.registrar_status==='pending'; }
+/** DOM_AUTO_CHECK_MS is how long after a Namecheap purchase the server checks the domain on its own; it matches domainWatchWindow in domain_watch.go. */
+const DOM_AUTO_CHECK_MS=3600000;
+/** domainAutoChecking tells whether the server is still checking a new Namecheap domain by itself.
+ * @param {object} d domain record; registrar, watch_since, ok and disabled decide
+ * @returns {boolean} true for an enabled, not yet pointed Namecheap purchase less than an hour old; false without a purchase time
+ */
+function domainAutoChecking(d){
+  if(!d||d.registrar!=='namecheap'||d.ok||d.disabled) return false;
+  const t=Date.parse(d.watch_since||'');
+  return !isNaN(t)&&Date.now()-t<DOM_AUTO_CHECK_MS;
+}
+/** domainCheckBtn is the eye button of the manual check in the actions cell.
+ * It is drawn, pulsing, only while the domain has no finished check or the automatic check is still running;
+ * a purchase that is pending payment and any checked domain get no button.
+ * @param {object} d domain record
+ * @returns {string} HTML of the button, or empty
+ */
+function domainCheckBtn(d){
+  if(!d||domainPending(d)||(d.checked&&!domainAutoChecking(d))) return '';
+  return `<button type="button" class="icon sm ghost dom-pulse" data-check="${esc(d.id)}" title="${tr('dom.check')}">${icon('eye')}</button>`;
+}
 /** domainOutcomeText is the text for a failed Namecheap action on a domain row.
  * @param {Error} e error from call, with status and body
  * @returns {string} translated text for a toast: the wait for 'too early', a fixed phrase for a settled state, else the server text
@@ -28244,7 +28265,7 @@ async function domains(_,live){
     const emptyMsg=catalogFiltered('domains')?tr('Nothing matches'):tr('dom.empty');
     const head=`<th class="pick"><input type="checkbox" data-dpick="*" ${allOn?'checked':''}></th>`+cols.map(c=>sortableHead('domains', DOM_SORT, [c], domMeta)+(c.id==='host'?'<th class="acts"></th>':'')).join('');
     const body=list.map(d=>{
-      const acts=`<td class="acts">${domainPending(d)?'':`<button type="button" class="icon sm ghost${!d.checked?' dom-pulse':''}" data-check="${esc(d.id)}" title="${tr('dom.check')}">${icon('check')}</button>`}<button type="button" class="icon sm ghost" data-more="${esc(d.id)}" title="${tr('More')}">${icon('more')}</button></td>`;
+      const acts=`<td class="acts">${domainCheckBtn(d)}<button type="button" class="icon sm ghost" data-more="${esc(d.id)}" title="${tr('More')}">${icon('more')}</button></td>`;
       return `<tr class="${d.disabled?'off':''}" data-group="${esc(d.group||'')}"><td class="pick"><input type="checkbox" data-dpick="${esc(d.id)}" ${DOM_PICK.has(String(d.id))?'checked':''}></td>${cols.map(c=>domainCell(d,c.id)+(c.id==='host'?acts:'')).join('')}</tr>`;
     }).join('');
     const bar=DOM_PICK.size?`<div class="bulkbar"><b>${DOM_PICK.size}/${all.length}</b> ${tr('flows.bulk.n')} ${bulkAct('dbulk-on','play',tr('flows.bulk.on'),false)}${bulkAct('dbulk-off','pause',tr('flows.bulk.off'),false)}${bulkAct('dbulk-check','check',tr('dom.check'),false)}${bulkAct('dbulk-group','lists',tr('dom.group.set'),false)}${bulkAct('dbulk-del','trash',tr('flows.bulk.del'),true)}</div>`:'';

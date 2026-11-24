@@ -569,7 +569,10 @@ func New(cfg Config) (*Server, error) {
 	}
 	s.aiRecoverChanges()
 	s.aiRecoverChats()
-	s.pickupKeitaroDeadline()
+	if cfg.UpdateDir != "" {
+		s.checkPendingOnce()
+	}
+	s.pickupKeitaroResume()
 	return s, nil
 }
 

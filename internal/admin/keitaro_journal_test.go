@@ -251,12 +251,12 @@ func TestKeitaroDeadlineIsNotCancel(t *testing.T) {
 	}
 	j := newKeitaroJob()
 	j.rec = failedClickJournal("context canceled")
-	if _, ok := j.claimDeadlineResume(); ok {
+	if _, ok := j.claimStartupResume(); ok {
 		t.Fatal("cancel claimed")
 	}
 	j.rec = failedClickJournal(prod)
 	j.rec.Interrupted = true
-	if _, ok := j.claimDeadlineResume(); ok {
+	if _, ok := j.claimStartupResume(); ok {
 		t.Fatal("interrupted claimed")
 	}
 	if msg := j.beginImport(); msg != "" {
@@ -303,7 +303,7 @@ func TestKeitaroDeadlineHoldStaysRunning(t *testing.T) {
 	if !ok || next.clicksFrom != "2026-10-01 00:11:06" || next.clicksRows != 1000 {
 		t.Fatalf("continuation %+v %v", next, ok)
 	}
-	if _, ok := j.claimDeadlineResume(); ok {
+	if _, ok := j.claimStartupResume(); ok {
 		t.Fatal("second claim while running")
 	}
 	if j.keepAfterDeadline("context canceled", false) {

@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 type denyTrip struct{}
@@ -326,5 +328,76 @@ func TestMaskURL(t *testing.T) {
 	}
 	if !strings.Contains(got, "offer.example") || !strings.Contains(got, "token=***") {
 		t.Fatal(got)
+	}
+}
+
+// TestFetchSnapshotReusesKnownStreams проверяет, что прочитанные потоки сохраняются сразу,
+// а следующий заход не запрашивает их снова и считает их в прогрессе.
+func TestFetchSnapshotReusesKnownStreams(t *testing.T) {
+	hits := map[string]int{}
+	failLast := true
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/admin_api/v1/campaigns/") {
+			mu.Lock()
+			hits[r.URL.Path]++
+			bad := failLast && strings.Contains(r.URL.Path, "/3/")
+			mu.Unlock()
+			if bad {
+				time.Sleep(100 * time.Millisecond)
+				http.Error(w, "gateway", http.StatusBadGateway)
+				return
+			}
+			_, _ = io.WriteString(w, `[{"id":9,"name":"s"}]`)
+			return
+		}
+		if r.URL.Path == "/admin_api/v1/campaigns" {
+			_, _ = io.WriteString(w, `[{"id":1},{"id":2},{"id":3}]`)
+			return
+		}
+		_, _ = io.WriteString(w, `[]`)
+	}))
+	defer srv.Close()
+
+	saved := map[string][]KStream{}
+	c := &Client{Base: srv.URL, Key: "k", HTTP: srv.Client()}
+	c.StreamsSaved = func(id string, raw []byte) {
+		var s []KStream
+		if err := json.Unmarshal(raw, &s); err != nil {
+			t.Error(err)
+		}
+		mu.Lock()
+		saved[id] = s
+		mu.Unlock()
+	}
+	if _, err := c.FetchSnapshot(context.Background()); err == nil {
+		t.Fatal("first pass must fail on campaign 3")
+	}
+	if len(saved) != 2 || saved["3"] != nil {
+		t.Fatalf("saved %v", saved)
+	}
+
+	mu.Lock()
+	failLast = false
+	mu.Unlock()
+	var last string
+	next := &Client{Base: srv.URL, Key: "k", HTTP: srv.Client(), StreamsKnown: saved}
+	next.Progress = func(stage string, done, total int) {
+		if stage == "streams" {
+			last = fmt.Sprintf("%d/%d", done, total)
+		}
+	}
+	snap, err := next.FetchSnapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Streams) != 3 || len(snap.Streams["1"]) != 1 || len(snap.Streams["3"]) != 1 {
+		t.Fatalf("streams %v", snap.Streams)
+	}
+	if hits["/admin_api/v1/campaigns/1/streams"] != 1 || hits["/admin_api/v1/campaigns/2/streams"] != 1 || hits["/admin_api/v1/campaigns/3/streams"] != 2 {
+		t.Fatalf("hits %v", hits)
+	}
+	if last != "3/3" {
+		t.Fatalf("progress %q", last)
 	}
 }

@@ -117,6 +117,8 @@ func keitaroRouteDocs() map[string]routeDoc {
 				"resume true alone continues the last failed transfer (resumable in GET /api/keitaro/job): nothing imported is removed, " +
 				"catalogs that already passed are skipped, clicks continue from the last written batch without doubling a cid, " +
 				"conversions are read again; 409 nothing to resume when there is no such run, 400 with any other field. " +
+				"A start with the very same body as that failed transfer continues it the same way, and the campaign streams already read are not requested again. " +
+				"An admin restart does not end a transfer: when the process starts, a transfer cut by the restart or by a timeout continues by itself from the saved place, at most five restart pickups in a row, and waits while an update is pending. " +
 				"409 while a transfer, a purge, a catch-up or an update is running; 503 when Keitaro or a store is not set up.",
 			RU: docOf("Запуск задачи переноса из Keitaro.",
 				"Работает в фоне; ход виден в GET /api/keitaro/job. Одновременно идёт одна задача, второй запуск вернёт 409. "+
@@ -133,6 +135,8 @@ func keitaroRouteDocs() map[string]routeDoc {
 					"Одно поле resume равным true продолжает последний оборванный перенос (resumable в GET /api/keitaro/job): "+
 					"импортированное не удаляется, пройденные каталоги пропускаются, клики дочитываются с последней записанной пачки "+
 					"без повторов cid, конверсии читаются заново; 409 nothing to resume, если продолжать нечего, 400 с другими полями. "+
+					"Запуск с тем же телом, что у оборванного переноса, продолжает его так же, а потоки кампаний, уже прочитанные, второй раз не запрашиваются. "+
+					"Перезапуск admin перенос не заканчивает: при старте процесса перенос, оборванный перезапуском или таймаутом, продолжается сам с сохранённого места, не больше пяти подхватов после перезапуска подряд, и ждёт, пока идёт обновление. "+
 					"409, пока идут перенос, чистка, догрузка или обновление; 503, если Keitaro или хранилище не настроены."),
 			UK: docOf("Запуск завдання перенесення з Keitaro.",
 				"Працює у фоні; перебіг видно в GET /api/keitaro/job. Одночасно йде одне завдання, другий запуск поверне 409. "+
@@ -149,6 +153,8 @@ func keitaroRouteDocs() map[string]routeDoc {
 					"Одне поле resume, рівне true, продовжує останнє обірване перенесення (resumable у GET /api/keitaro/job): "+
 					"імпортоване не видаляється, пройдені каталоги пропускаються, кліки дочитуються з останньої записаної пачки "+
 					"без повторів cid, конверсії читаються заново; 409 nothing to resume, якщо продовжувати нічого, 400 з іншими полями. "+
+					"Запуск із тим самим тілом, що в обірваного перенесення, продовжує його так само, а потоки кампаній, уже прочитані, вдруге не запитуються. "+
+					"Перезапуск admin перенесення не закінчує: під час старту процесу перенесення, обірване перезапуском або таймаутом, продовжується само зі збереженого місця, не більше п'яти підхоплень після перезапуску поспіль, і чекає, поки йде оновлення. "+
 					"409, поки йдуть перенесення, чистка, догрузка або оновлення; 503, якщо Keitaro чи сховище не налаштовані."),
 			Body: objectBody("Flags domains, networks, offers, landings, sources, campaigns, users, clicks, conversions (booleans); " +
 				"from and to (YYYY-MM-DD) for clicks and conversions; board_id; campaign_id (Keitaro campaign id, " +
