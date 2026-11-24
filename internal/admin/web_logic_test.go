@@ -942,8 +942,8 @@ eq([nsProblem([],true), nsProblem([],false), nsProblem(['a.com'],true), nsProble
   ['','nc.ns.few','nc.ns.few','','','nc.ns.many'], 'nameservers: 2 to 12, or none when optional');
 eq(thenMode({redirect:'group', offers:[{id:'a'}]}), 'action', 'group stays an action');
 eq(thenMode({redirect:'landing'}), 'offers', 'landing is the offers mode');
-eq(thenMode({redirect:'http_redirect'}), 'url', 'bare redirect is a url');
-eq(thenMode({redirect:'http_redirect', offers:[]}), 'url', 'empty offers stay a url');
+eq(thenMode({redirect:'http_redirect'}), 'action', 'a bare redirect is the action tab');
+eq(thenMode({redirect:'http_redirect', offers:[]}), 'action', 'empty offers stay the action tab');
 eq(thenMode({redirect:'http_redirect', offers:[{id:'a'}]}), 'offers', 'redirect with offers is offers');
 const left={redirect:'http_redirect', out:'https://x', out_shares:[50], offers:[]};
 switchThenMode(left, 'offers');
@@ -1581,9 +1581,10 @@ func TestLogIPFieldRepaintsChips(t *testing.T) {
 		t.Skip("node not found — skipping the IP field checks")
 	}
 	html := spaSource()
+	cond := spaFunctionLine(html, "syncLogCond")
 	fn := spaFunctionLine(html, "syncLogIpFromField")
-	if fn == "" {
-		t.Fatal("syncLogIpFromField not found in SPA")
+	if cond == "" || fn == "" {
+		t.Fatal("syncLogCond or syncLogIpFromField not found in SPA")
 	}
 	script := `
 let failed = 0;
@@ -1595,7 +1596,7 @@ let LOGF = {conds:[{f:'country', op:'eq', v:['US']}]};
 const field = {value:''};
 let present = true;
 const q = () => present ? field : null;
-` + fn + `
+` + cond + "\n" + fn + `
 field.value = ' 1.2.3.4 ';
 eq(syncLogIpFromField(), true, 'a typed IP changes the conditions');
 eq(LOGF.conds, [{f:'country', op:'eq', v:['US']}, {f:'ip', op:'eq', v:['1.2.3.4']}], 'the IP is trimmed and appended');
@@ -1631,6 +1632,80 @@ if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
 	if regexp.MustCompile(`(^|[^A-Za-z])loadLogs\(`).MatchString(wire) {
 		t.Error("the IP handlers must reload only through reloadLogs")
 	}
+}
+
+// TestLogQuickFilters checks the campaign choice and the subid search of the click log.
+// A typed fragment becomes a contains condition on cid, so the journal matches a part of the click id.
+// The campaign becomes campaign_id equals. Both sit in the same condition list the Filters counter reads.
+func TestLogQuickFilters(t *testing.T) {
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("node not found — skipping the click-log quick filter checks")
+	}
+	html := spaSource()
+	var b strings.Builder
+	for _, name := range []string{"syncLogCond", "syncLogSubidFromField", "syncLogCampaignFromField"} {
+		fn := spaFunctionLine(html, name)
+		if fn == "" {
+			t.Fatalf("%s not found in SPA", name)
+		}
+		b.WriteString(fn)
+		b.WriteByte('\n')
+	}
+	b.WriteString(`
+let failed = 0;
+const eq = (got, want, what) => {
+  const g = JSON.stringify(got), w = JSON.stringify(want);
+  if (g !== w) { failed++; console.log('FAIL ' + what + '\n  got  ' + g + '\n  want ' + w); }
+};
+const fields = {'#f-subid':{value:''}, '#f-camp':{value:''}};
+const q = (sel) => fields[sel] || null;
+let LOGF = {conds:[{f:'country', op:'eq', v:['US']}, {f:'cid', op:'eq', v:['full-id']}]};
+fields['#f-subid'].value = ' ab ';
+eq(syncLogSubidFromField(), true, 'a fragment changes the conditions');
+eq(LOGF.conds.find(c => c.f==='cid' && c.op==='contains'), {f:'cid', op:'contains', v:['ab']}, 'a part of the click id is contains, not a full match');
+eq(LOGF.conds.find(c => c.f==='cid' && c.op==='eq').v, ['full-id'], 'an exact cid condition stays');
+eq(syncLogSubidFromField(), false, 'the same fragment changes nothing');
+fields['#f-subid'].value = '';
+eq(syncLogSubidFromField(), true, 'clearing the search drops the contains condition');
+eq(LOGF.conds.some(c => c.op==='contains'), false, 'contains is gone');
+eq(LOGF.conds.some(c => c.f==='cid' && c.op==='eq'), true, 'the exact cid condition is still there');
+fields['#f-camp'].value = 'camp-1';
+eq(syncLogCampaignFromField(), true, 'a campaign changes the conditions');
+eq(LOGF.conds.find(c => c.f==='campaign_id'), {f:'campaign_id', op:'eq', v:['camp-1']}, 'the campaign is campaign_id equals');
+LOGF.conds.push({f:'ip', op:'eq', v:['1.2.3.4']});
+eq(LOGF.conds.length, 4, 'campaign, subid exact, country and IP are all in the list the counter reads');
+fields['#f-camp'].value = '';
+eq(syncLogCampaignFromField(), true, 'clearing the campaign drops only its equals condition');
+eq(LOGF.conds.some(c => c.f==='campaign_id'), false, 'no campaign condition');
+LOGF = {conds:[{f:'campaign_id', op:'in', v:['a','b']}]};
+fields['#f-camp'].value = '';
+eq(syncLogCampaignFromField(), false, 'an in condition is not the choice');
+eq(LOGF.conds.length, 1, 'the in condition stays');
+delete fields['#f-subid'];
+eq(syncLogSubidFromField(), false, 'no subid field, no change');
+if (failed) { console.log(failed + ' check(s) failed'); process.exit(1); }
+`)
+	f := filepath.Join(t.TempDir(), "log-quick.js")
+	if err := os.WriteFile(f, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command(node, f).CombinedOutput(); err != nil {
+		t.Errorf("click-log quick filter checks failed:\n%s", out)
+	}
+
+	logs := spaBetween(html, "async function logs(", "async function loadLogs(")
+	must(t, logs, `tr('nav.logs')`, "the click log heading names the click log")
+	must(t, logs, `id="f-camp"`, "the campaign choice is on the toolbar")
+	must(t, logs, `id="f-subid"`, "the subid search is on the toolbar")
+	must(t, logs, `id="log-filters"`, "filters stay next to the campaign and the subid")
+	must(t, logs, "syncLogSubidFromField()", "the subid search writes a journal condition")
+	must(t, logs, "syncLogCampaignFromField()", "the campaign choice writes a journal condition")
+	must(t, spaFunctionLine(html, "syncLogSubidFromField"), "'cid', 'contains'", "subid search is a partial cid match")
+	must(t, spaFunctionLine(html, "paintFilterBar"), "list.length", "Filters (N) counts every condition, including campaign, subid and IP")
+	conv := spaBetween(html, "async function conversions(", "function paintPbPage(")
+	mustNot(t, conv, `id="f-subid"`, "the conversion log has no click-log subid field")
+	mustNot(t, conv, `id="f-camp"`, "the conversion log has no click-log campaign choice")
 }
 
 // TestKeepUnknownFlowLogic runs flowPickOpts under node: a "send to campaign" select keeps a saved

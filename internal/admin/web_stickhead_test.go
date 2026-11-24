@@ -2,46 +2,36 @@ package admin
 
 import "testing"
 
-// TestListTablesScrollWithThePage checks that the long lists scroll with the document.
-// The column titles stick under the app bar. The list block is not its own vertical scroller.
-// t is the test handle. It returns nothing and fails when a listed table scrolls inside itself or loses the sticky title.
-func TestListTablesScrollWithThePage(t *testing.T) {
+// TestListTablesScrollInsideTheirBlock checks that a wide list table scrolls sideways inside its own block.
+// The .tw wrapper keeps the width of main and owns the horizontal bar, so the page never widens.
+// Column titles are not sticky: no .tw.stickhead rule, no locked document and no inner page scroller.
+// t is the test handle. It returns nothing and fails when the wrapper loses its bar, grows the page or a sticky head comes back.
+func TestListTablesScrollInsideTheirBlock(t *testing.T) {
 	html := spaSource()
-	wrap := cssRuleBodies(t, html, `^\.tw\.stickhead$`)
+	wrap := cssRuleBodies(t, html, `^\.tw$`)
 	if len(wrap) != 1 {
-		t.Fatalf("stickhead wrapper: found %d", len(wrap))
+		t.Fatalf("table wrapper: found %d", len(wrap))
 	}
-	must(t, wrap[0], "overflow:visible", "the list wrapper is not a scrollport")
-	head := cssRuleBodies(t, html, `^\.tw\.stickhead thead$`)
-	if len(head) != 1 {
-		t.Fatalf("sticky head rule: found %d", len(head))
+	must(t, wrap[0], "box-sizing:border-box", "the border stays inside the block width")
+	must(t, wrap[0], "max-width:100%", "the table block does not grow past main")
+	must(t, wrap[0], "min-width:0", "a wide table cannot force its block wider than main")
+	must(t, wrap[0], "overflow-x:auto", "a table wider than its block gets a horizontal bar inside the block")
+	mustNot(t, wrap[0], "overflow-x:clip", "extra columns are scrolled to, not cut")
+	mustNot(t, wrap[0], "overflow-x:hidden", "extra columns are scrolled to, not cut")
+	mustNot(t, wrap[0], "overflow:hidden", "extra columns are scrolled to, not cut")
+	mustNot(t, wrap[0], "overflow-y:auto", "the table block is not a vertical scroller")
+	mustNot(t, wrap[0], "max-height", "the table block is not a vertical scroller")
+	for _, sel := range []string{`^\.tw\.stickhead$`, `^\.tw\.stickhead thead$`, `^\.tw\.stickhead thead th$`} {
+		if n := len(cssRuleBodies(t, html, sel)); n != 0 {
+			t.Errorf("%s: found %d rules, want none", sel, n)
+		}
 	}
-	for _, needle := range []string{"position:sticky", "top:calc(var(--top) + env(safe-area-inset-top, 0px))", "z-index:6", "background:var(--surface-2)"} {
-		must(t, head[0], needle, "sticky head sits under the app bar")
-	}
-	th := cssRuleBodies(t, html, `^\.tw\.stickhead thead th$`)
-	if len(th) != 1 {
-		t.Fatalf("sticky cell rule: found %d", len(th))
-	}
-	must(t, th[0], "background:var(--surface-2)", "the header fill is the opaque theme surface")
+	mustNot(t, html, "overflow-x:clip", "no block clips a wide table")
+	mustNot(t, html, "body.stickpage", "the document is not locked to the window")
 	for _, body := range cssRuleBodies(t, html, `^main$`) {
 		mustNot(t, body, "overflow", "the page block does not scroll inside itself")
 	}
-	mustNot(t, html, "body.stickpage{height:100vh;overflow:hidden}", "the document is not locked to the window")
-	mustNot(t, html, "main{flex:1 1 auto;min-height:0;overflow:auto", "the view is not an inner scroller")
-	for _, needle := range []string{
-		`<div class="tw stickhead"><table class="ftable"><thead><tr><th class="pick">`,
-		`catalogBulkBar('offers', list.length)}<div class="tw stickhead">`,
-		`catalogBulkBar('networks', sorted.length)}<div class="tw stickhead">`,
-		`<div class="tw stickhead" id="net-offers">`,
-		`<div class="tw stickhead"><table class="ftable"><thead><tr>${head}`,
-		`<div class="tw stickhead"><table><thead><tr>${sortableHead('logs'`,
-		`<div class="tw stickhead"><table><thead><tr>${sortableHead('pblog'`,
-		`<div class="tw stickhead"><table><thead><tr><th>${tr('log.system')}`,
-		`<div class="tw stickhead"><table><thead><tr>${sortableHead('conv'`,
-		`<div class="tw stickhead" id="rep-tw"><table>`,
-		`<div class="tw stickhead" id="kws-tw">`,
-	} {
-		must(t, html, needle, "the table header is marked sticky")
+	for _, body := range cssRuleBodies(t, html, `^body$`) {
+		mustNot(t, body, "overflow", "the window keeps its own vertical scroll")
 	}
 }

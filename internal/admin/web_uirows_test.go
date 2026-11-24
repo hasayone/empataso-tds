@@ -32,9 +32,12 @@ func TestOfferPayoutRow(t *testing.T) {
 	must(t, form, "OFFER_CURRENCIES.map(c=>opt(c,c,payCur)).join('')", "the list of currencies is whole")
 	must(t, html, ".fld .pay-row select{width:auto;flex:none}", "the currency is as wide as its longest code")
 	must(t, html, ".fld .pay-row input.pay-amt[type=number]{width:120px;flex:none}", "the amount is narrow and beats the full-width field rule")
-	must(t, html, ".qh-up .qh-pop{top:auto;bottom:calc(100% + 6px);left:auto;right:-8px}", "the popup opens above and stays inside the dialog")
+	must(t, html, "function helpPopBox(", "the popup chooses the side that fits inside the block")
+	must(t, spaFunctionLine(html, "helpPopBox"), "const toRight=w<=roomRight||roomRight>=roomLeft;", "no room on the right opens the popup to the left")
+	must(t, spaFunctionLine(html, "helpPopBox"), "const down=h<=roomBelow||roomBelow>=roomAbove;", "no room below opens the popup upward")
+	mustNot(t, html, ".qh-up .qh-pop{", "the popup is not pinned to the bottom-right corner")
 	must(t, spaFunctionLine(html, "helpMark"), `role="note"`, "the mark is a note")
-	must(t, form, "helpMark(tr('off.payout.param'), esc(tr('off.payout.help')), 'qh-up')", "the tick has a question mark")
+	must(t, form, "helpMark(tr('off.payout.param'), esc(tr('off.payout.help')))", "the tick has a question mark")
 	for _, key := range []string{"off.payout.help"} {
 		if n := strings.Count(html, "'"+key+"':"); n != 3 {
 			t.Errorf("%s is translated %d times, want 3", key, n)

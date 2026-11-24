@@ -9,7 +9,11 @@ import (
 // not_contains: values stay placeholders, LowCardinality columns are used as is.
 func TestBuildWhereSubstring(t *testing.T) {
 	c := readyClient()
-	sql, args, skip, err := buildWhere(c, "events", []Cond{{Field: "sub_id_1", Op: OpContains, Values: []string{"ab%_'\\"}}})
+	sql, args, skip, err := buildJournalWhere(c, "events", []Cond{{Field: "cid", Op: OpContains, Values: []string{"ab"}}})
+	if err != nil || skip || sql != " AND (positionCaseInsensitiveUTF8(cid, ?) > 0)" || len(args) != 1 || args[0] != "ab" {
+		t.Fatalf("partial subid: %q %#v skip=%v err=%v", sql, args, skip, err)
+	}
+	sql, args, skip, err = buildWhere(c, "events", []Cond{{Field: "sub_id_1", Op: OpContains, Values: []string{"ab%_'\\"}}})
 	if err != nil || skip || sql != " AND (positionCaseInsensitiveUTF8(sub_id_1, ?) > 0)" || len(args) != 1 || args[0] != "ab%_'\\" {
 		t.Fatalf("contains: %q %#v skip=%v err=%v", sql, args, skip, err)
 	}

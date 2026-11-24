@@ -12,7 +12,8 @@ import "testing"
 // drawn, a macro click writes key={macro} at the end of the address once (? or & as needed, text kept, the fragment
 // last) and marks the macros the address already has, the status word sits left of the switch and the switch is on when the offer is enabled, the
 // country chips are read as lowercase codes, the macros in braces of the address field are coloured on a layer
-// while its value stays plain, and the row puts the actions cell after the name (first when the name column is off).
+// while its value stays plain, a square key such as [PAR-1] takes the same accent when the offer URL asks for it,
+// and the row puts the actions cell after the name (first when the name column is off).
 func TestOfferDialogLogic(t *testing.T) {
 	html := spaSource()
 	prelude := nodeEq + `
@@ -122,6 +123,12 @@ inp.scrollLeft=40; inp.value=inp.value+'x';
 eq(backEl.scrollLeft, 40, 'the layer scrolls with the text');
 bindMacroOverlay(inp);
 eq(made.length, 2, 'binding twice does nothing');
+const ourl=Object.assign(new HTMLInputElement(), {tagName:'INPUT', dataset:{}, scrollLeft:0, parentNode:{insertBefore(){}}, addEventListener(){}});
+bindMacroOverlay(ourl, true);
+ourl.value='https://click-game.com/l/6aea037462cbf17d7f0570d2?sub_id=[PAR-1]&k={keyword}';
+eq(ourl.value, 'https://click-game.com/l/6aea037462cbf17d7f0570d2?sub_id=[PAR-1]&k={keyword}', 'the offer URL value stays plain text');
+eq(made[made.length-1].innerHTML, 'https://click-game.com/l/6aea037462cbf17d7f0570d2?sub_id=<span class="hl-v">[PAR-1]</span>&amp;k=<span class="hl-v">{keyword}</span>', 'a square key and a brace key in the offer URL take the accent');
+eq(braceMacroHTML('https://x.example/?sub_id=[PAR-1]&k={subid}', true), 'https://x.example/?sub_id=<span class="hl-v">[PAR-1]</span>&amp;k=<span class="hl-v">{subid}</span>', 'the offer URL colours both key shapes');
 if (failed) process.exit(1);
 `)
 }

@@ -6,7 +6,7 @@ import (
 )
 
 // TestOfferDialogTabs checks the structure of the offer dialog: five tabs in the order Main, Action, Settings, Values,
-// Notes; the redirect URL, the group and the network on the first one, with the status switch last; the action list on the
+// Notes; the group and the network on the first one, with the status switch last; the action list above the redirect URL and the braces button on the
 // second; the payout row and the daily limit on Settings; the values and the notes on their own tabs; the macro picker behind a button instead of a wall of chips;
 // no stub of a local HTML offer; and the notes, values, action and limit sent with the offer.
 func TestOfferDialogTabs(t *testing.T) {
@@ -28,10 +28,10 @@ func TestOfferDialogTabs(t *testing.T) {
 		return rest
 	}
 	main, action, settings, values, notes := pane("main"), pane("action"), pane("settings"), pane("values"), pane("notes")
-	for _, want := range []string{`id="oname"`, "groupFieldBlock('ogroup'", "offerStatusHTML(", `id="onet"`, `id="ourl"`, `id="omacro-btn"`} {
+	for _, want := range []string{`id="oname"`, "groupFieldBlock('ogroup'", "offerStatusHTML(", `id="onet"`} {
 		must(t, main, want, "the Main tab has "+want)
 	}
-	mainOrder := []string{`id="oname"`, "groupFieldBlock('ogroup'", `id="onet"`, `id="ourl"`, `id="omacro-btn"`, "guardHint(true)", "offerStatusHTML("}
+	mainOrder := []string{`id="oname"`, "groupFieldBlock('ogroup'", `id="onet"`, "guardHint(true)", "offerStatusHTML("}
 	for i := 1; i < len(mainOrder); i++ {
 		if strings.Index(main, mainOrder[i-1]) > strings.Index(main, mainOrder[i]) {
 			t.Errorf("the Main tab puts the status switch last: %s must come before %s", mainOrder[i-1], mainOrder[i])
@@ -63,9 +63,21 @@ func TestOfferDialogTabs(t *testing.T) {
 	mustNot(t, lims, `id="ocaptz"`, "the time zone stays under the limit row")
 	must(t, html, `.off-lims{display:grid;grid-template-columns:50% 50%`, "each limit takes half the row")
 	mustNot(t, main, `id="opayout"`, "the payout is not on the Main tab")
-	must(t, action, "offerActionHTML(cur)", "the Action tab draws the answer")
+	mustNot(t, main, `id="ourl"`, "the offer URL is not on the Main tab")
+	mustNot(t, main, `id="omacro-btn"`, "the braces button is not on the Main tab")
+	must(t, action, "offerActionHTML(cur)", "the Action tab draws the answer and the URL")
+	mustNot(t, action, `id="ourl"`, "the URL is not drawn a second time beside the action list")
+	if n := strings.Count(html, `id="ourl"`); n != 1 {
+		t.Errorf("the offer URL is drawn once, got %d", n)
+	}
 	act := spaFunctionLine(html, "offerActionHTML")
 	must(t, act, `id="oaction"`, "the Action tab has the list")
+	actionOrder := []string{`id="oaction"`, `id="ourl"`, `id="omacro-btn"`, `id="oabody"`}
+	for i := 1; i < len(actionOrder); i++ {
+		if strings.Index(act, actionOrder[i-1]) < 0 || strings.Index(act, actionOrder[i-1]) > strings.Index(act, actionOrder[i]) {
+			t.Errorf("the Action tab puts the list above the URL: %s must come before %s", actionOrder[i-1], actionOrder[i])
+		}
+	}
 	for _, kind := range []string{"'404'", "'text'", "'html'", "'none'"} {
 		must(t, act, kind, "the list has "+kind)
 	}
@@ -90,8 +102,9 @@ func TestOfferDialogTabs(t *testing.T) {
 	must(t, form, "menu(macroBtn,[{node}],'macro-menu')", "the picker opens as a menu under the button")
 	must(t, form, "token=>{urlIn.value=appendOfferMacro(urlIn.value,token)}", "a click writes key={macro} at the end of the address")
 	must(t, form, "offerMacroNode(readOfferValues(m), ()=>urlIn.value,", "the picker reads the address to mark what is in it")
-	must(t, form, "bindMacroOverlay(urlIn);", "the macros of the address are coloured")
-	mustNot(t, form, `id="ourl" class="mono" style=`, "the address field is not stretched by its own style")
+	must(t, form, "bindMacroOverlay(urlIn, true);", "square keys in the offer URL use the same overlay")
+	must(t, html, ".hl-v{color:var(--accent)}", "a key in the offer URL takes the theme accent")
+	mustNot(t, act, `id="ourl" class="mono" style=`, "the address field is not stretched by its own style")
 	must(t, form, `class="icon" id="onet-add"`, "the plus is as tall as the network field")
 	mustNot(t, form, `class="icon sm" id="onet-add"`, "the plus is not the small button")
 	must(t, form, "${offerStatusHTML(!cur||!!cur.status)}", "the status is the switch with the word on its left")
@@ -109,10 +122,12 @@ func TestOfferDialogTabs(t *testing.T) {
 	must(t, form, "bindLimit('ocap')", "the daily switch shows its number")
 	must(t, form, "bindLimit('ototal')", "the total switch shows its number")
 	must(t, form, "capSet.hidden=!q('#ocapyes',m).checked", "cap no hides the limits, the zone and the alternative")
-	must(t, html, ".opane{min-height:260px}", "the short Main tab keeps a little empty band")
+	must(t, html, ".opane{min-height:260px;padding-bottom:14px}", "the short Main tab keeps a little empty band, and the last control stays 14px clear of the buttons")
+	must(t, html, ".opane>.fld:not(:has(~:not([hidden]))){margin-bottom:0}", "a tab that already ends on a field does not gain a second gap")
+	must(t, html, ".modal:has(.opane)>.tog{margin-bottom:14px}", "the create-another tick stays clear of the buttons")
 	for _, key := range []string{
 		"off.tabs", "off.tab.main", "off.tab.action", "off.tab.settings", "off.tab.values", "off.tab.notes",
-		"off.action", "off.action.help", "off.action.url", "off.action.404", "off.action.text", "off.action.html", "off.action.none", "off.action.body", "off.action.empty",
+		"off.action", "off.action.url", "off.action.404", "off.action.text", "off.action.html", "off.action.none", "off.action.body", "off.action.empty",
 		"off.macro.open", "off.macro.search", "off.macro.none", "off.macro.main", "off.macro.sub", "off.macro.values",
 		"off.values.hint", "off.values.name", "off.values.value", "off.values.add", "off.values.del", "off.notes.ph",
 		"off.countries", "off.countries.ph", "off.countries.help", "off.cap", "off.cap.on", "off.cap.n", "off.cap.help", "off.cap.bad", "off.cap.offer", "off.cap.skip",
@@ -131,6 +146,38 @@ func TestOfferDialogTabs(t *testing.T) {
 			t.Errorf("%s is still in a dictionary", key)
 		}
 	}
+}
+
+// TestOfferActionRedirectURL checks that Redirect to URL is the real default: an empty action stays an empty
+// string, the list sits above the address, and the address is shown only for that choice.
+func TestOfferActionRedirectURL(t *testing.T) {
+	html := spaSource()
+	val := spaFunctionLine(html, "offerActionValue")
+	if val == "" {
+		t.Fatal("offerActionValue not found")
+	}
+	must(t, val, "return a==='404'||a==='text'||a==='html'||a==='none'?a:''", "an empty action stays the URL redirect")
+	red := spaFunctionLine(html, "offerActionRedirect")
+	must(t, red, "return offerActionValue(action)===''", "the redirect is the empty token")
+	act := spaFunctionLine(html, "offerActionHTML")
+	must(t, act, "const action=offerActionValue(cur&&cur.action)", "a new offer and an empty action use that token")
+	must(t, act, `['','off.action.url']`, "redirect to URL is a real choice and the default")
+	if strings.Index(act, `id="oaction"`) < 0 || strings.Index(act, `id="oaction"`) > strings.Index(act, `id="ourl"`) {
+		t.Error("the action list sits above the URL")
+	}
+	must(t, act, `id="ourl-box"${urlHidden?' hidden':''}`, "the URL block can be hidden")
+	must(t, act, "const urlHidden=!redirect||!!(cur&&cur.local)", "the URL is hidden unless the choice is the redirect")
+	must(t, act, "const redirect=offerActionRedirect(action)", "visibility follows the redirect choice")
+	must(t, act, `id="omacro-btn"`, "the braces button stays with the URL")
+	mustNot(t, act, "off.action.help", "the empty-means-redirect hint is gone")
+	form := spaBetween(html, "const openOffer=(id)=>{", "const mkOff=canCreate")
+	must(t, form, "const redirect=offerActionRedirect(actSel.value)", "changing the choice updates visibility at once")
+	must(t, form, "urlBox.hidden=!redirect||!!(cur&&cur.local)", "the URL shows only for the redirect")
+	must(t, form, "box.hidden=actSel.value!=='text'&&actSel.value!=='html'", "text and HTML keep their field")
+	must(t, form, "const actionNow=q('#oaction',box).value", "save reads the same list")
+	must(t, form, "action:actionNow", "save writes that value, empty for the redirect")
+	mustNot(t, form, "action:'redirect'", "the engine does not have a redirect token")
+	mustNot(t, html, "'off.action.help':", "the empty-means-redirect hint is not translated")
 }
 
 // TestOfferRowActions checks that the offers list has the same «More» button as campaigns and networks right

@@ -8,7 +8,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
-- Tables: column titles on campaigns, offers, affiliate networks, domains, the click log (including Traffic, postbacks and system), conversions, the report and keywords stay under the app bar while the window scrolls. Those lists have no inner vertical bar. A wide table scrolls with the page only when the columns do not fit the window.
+- Offer dialog: the Action list sits above the URL. Redirect to URL is the choice shown for a new offer and for an offer with an empty action, and saving it still writes an empty action, which the engine already answers as a URL redirect. The URL, its key highlight and the braces button show only for that choice. 404, text, HTML and do nothing hide the URL and keep the fields they already had.
+- Click log: the heading is the click log in the interface language. A campaign choice and a subid search sit beside Filters. The chosen campaign, the typed subid and the IP are the same journal filters, so Filters (N) counts them. A subid matches when the click id contains the typed text.
+- Stream editor: the direct URL (HTTP redirect) and its braces button are on the Action tab of Then. The address is still saved as the stream output. It is not also shown on a separate Direct URL tab.
+- Offer dialog: the offer URL and its braces button are on the Action tab. Name, group, network and the on/off switch stay on Main. The address is still saved as the offer URL.
+- Tables: a table stays inside its block and never widens the page. When the columns do not fit, only that table gets a horizontal bar inside the block, and no column is cut by the page edge. The window keeps vertical scroll.
+- Country column (click log, conversions, IP history, details): flag, two-letter code and the full country name in the interface language, for example flag, FR, France. An empty value draws nothing.
 - Save bar: Ctrl+S on Windows and Linux, and ⌘S on Mac, saves the same way as the Save button while the bar is visible. The button shows Ctrl+S or ⌘S for that system.
 - Automation: job cards can be reordered by the handle on the left. The order is the account's saved card list and stays after a reload. A card missing from that list is appended in the default order.
 - Automation: the drag handle sits in the card's left margin, so the fields in a job card use the full card width.
@@ -151,6 +156,8 @@ otes field (up to 10000 characters) saved with the offer; the engine ignores it.
 
 ### Fixed
 
+- Offer dialog: a key in the offer URL on the Action tab, such as `[PAR-1]` or `{keyword}`, takes the same accent colour as a key in the other highlighted fields. The rest of the address stays plain text. The value, the caret and the braces button are unchanged.
+- Domains: until a check has passed, the status cell shows the check text (for example «не проверялся») and no enabled badge. The check button stays on the left of the actions cell and pulses in the theme green until that check has run.
 - Campaign canvas: a stream is one line to its destination, with the share and the traffic on the stream, not one line or card per offer. Offers with a share above zero are named as text beside that line; offers at 0% fold into one `+N (0%)` badge with their count, with no addresses and no zero numbers.
 - Domains: the status cell keeps the on/off badge and the check note in separate fields with a gap. A hover, or a tap on a touch screen, opens the check details already stored for that domain (status, time, error, DNS, SSL) in a block by the cell. The text can be selected and copied; a click outside closes it.
 - Conversion alerts: the profit summary writes each amount as the reports write revenue, two digits and `$`, because a conversion has no currency and an empty code is USD. The per-conversion card is unchanged.

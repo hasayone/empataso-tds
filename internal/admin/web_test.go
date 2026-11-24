@@ -1449,6 +1449,14 @@ func TestStreamThen(t *testing.T) {
 	mustNot(t, html, `+'/postbacks'`, "campaign postback route is not used by the SPA")
 	must(t, html, `class="types"`, "then modes keep the type tabs")
 	must(t, html, `data-then=`, "then mode switch")
+	fields := spaFunctionLine(html, "thenFieldsHTML")
+	must(t, fields, "if(mode==='url') mode='action';", "a direct URL is drawn as the action tab")
+	must(t, fields, "if(mode==='action') return pick(actionKeys())+thenActionField(o, red, others, s);", "the action tab draws the answer")
+	mustNot(t, fields, "+thenURLField(", "the address field is not drawn on a second tab")
+	must(t, spaFunctionLine(html, "thenActionField"), "return thenURLField(o, red, s);", "a direct URL is the address on the action tab")
+	must(t, spaFunctionLine(html, "actionKeys"), "thenURL().filter(t=>TYPES[t])", "HTTP redirect stays in the action list")
+	must(t, spaFunctionLine(html, "paintStream"), "const thenTabs=['offers','action']", "the address is not its own tab")
+	must(t, spaFunctionLine(html, "thenMode"), "return 'action';", "a bare URL redirect opens the action tab")
 }
 
 // TestSPAFlowCompact checks compact flow canvas toggle, i18n, breakdown label tooltips.
@@ -2399,16 +2407,34 @@ func TestDomainsCatalogAndPager(t *testing.T) {
 	must(t, html, `'dom.off.hint':'Выключенный домен`, "ru disabled hint")
 }
 
-// TestDomainStatusPop checks the domains status cell: the on/off badge and the check
-// note are separate elements, and the full check text lives in a popup the pointer can select.
+// TestDomainStatusPop checks the domains status cell and the check button.
+// Until a check has passed the cell shows the check phrase and no enabled badge.
+// The same check button stays left of the row menu and carries the pulse class
+// until a check has run. The full check text lives in a popup the pointer can select.
 // t is the test handle. It returns nothing. A missing marker fails the test.
 func TestDomainStatusPop(t *testing.T) {
 	html := spaSource()
 	cell := spaFunctionLine(html, "domainCell")
-	must(t, cell, `class="dom-status"`, "status cell wraps the badge and the verdict")
-	must(t, cell, "domainStateChip(d)", "badge stays in the cell")
+	must(t, cell, `class="dom-status"`, "status cell wraps the verdict")
+	must(t, cell, "domainStateChip(d)", "state chip is still the badge helper")
 	must(t, cell, `class="dom-verdict"`, "verdict is its own element")
+	must(t, cell, "domainStatusText(d)", "the check phrase is the status text")
 	must(t, cell, "domainPending(d)?'':", "pending purchase still has no verdict")
+	chip := spaFunctionLine(html, "domainStateChip")
+	must(t, chip, "if(!d||!d.checked||!d.ok) return ''", "no enabled badge until the check has passed")
+	must(t, chip, "tr('dom.state.on')", "enabled badge remains after a passed check")
+	must(t, spaFunctionLine(html, "domainStatusText"), "if(!d||!d.checked) return tr('dom.unchecked')", "unchecked phrase")
+	must(t, html, `'dom.unchecked':'не проверялся'`, "ru unchecked")
+	dom := spaFunctionLine(html, "domains")
+	must(t, dom, `class="icon sm ghost${!d.checked?' dom-pulse':''}" data-check=`, "the existing check button pulses until a check")
+	if strings.Count(dom, `data-check=`) != 1 {
+		t.Errorf("check button must stay one, found %d", strings.Count(dom, `data-check=`))
+	}
+	if i, j := strings.Index(dom, `data-check=`), strings.Index(dom, `data-more=`); i < 0 || j < 0 || i > j {
+		t.Error("the check button must stay left of the row menu")
+	}
+	must(t, html, `#domains-grid td.acts>button.icon[data-check].dom-pulse{color:var(--ok)`, "pulse uses the theme green")
+	must(t, html, "animation:dom-pulse ", "the check button pulses")
 	must(t, html, ".dom-status{display:flex;align-items:center;gap:8px", "gap between the badge and the verdict")
 	pop := spaFunctionLine(html, "domainCheckPopHTML")
 	must(t, pop, "domainCheckLines(d)", "popup is built from the check lines")
