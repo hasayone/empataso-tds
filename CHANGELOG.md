@@ -151,6 +151,7 @@ otes field (up to 10000 characters) saved with the offer; the engine ignores it.
 
 ### Fixed
 
+- Campaign canvas: a stream is one line to its destination, with the share and the traffic on the stream, not one line or card per offer. Offers with a share above zero are named as text beside that line; offers at 0% fold into one `+N (0%)` badge with their count, with no addresses and no zero numbers.
 - Domains: the status cell keeps the on/off badge and the check note in separate fields with a gap. A hover, or a tap on a touch screen, opens the check details already stored for that domain (status, time, error, DNS, SSL) in a block by the cell. The text can be selected and copied; a click outside closes it.
 - Conversion alerts: the profit summary writes each amount as the reports write revenue, two digits and `$`, because a conversion has no currency and an empty code is USD. The per-conversion card is unchanged.
 - Unsaved-changes bar: on a screen up to 760px the label stays on the first row and the chips, Discard and Save sit on the second, at least 40px tall, above the home indicator. A wide screen keeps the single row.

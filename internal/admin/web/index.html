@@ -1424,13 +1424,6 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   .dest .olines .oline .pill{flex:0 1 14em;width:auto;min-width:5.5em}
   .dest .olines .hint{flex:none;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:1.25}
   .dest .olines .oline .skel-bar{width:7.5em;height:8px;margin:0}
-  .osplits{display:flex;flex-direction:column;gap:8px;min-width:0}
-  .osplit{display:flex;flex-direction:column;gap:2px;min-width:0}
-  .osplit .oline{display:flex;align-items:center;gap:8px;min-width:0;max-width:100%;line-height:1.25}
-  .osplit .oline .pill{flex:0 1 14em;width:auto;min-width:5.5em;max-width:14em}
-  .osplit .splitw{flex:none;min-width:2.8em;font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;color:var(--fg)}
-  .osplit .hint{flex:none;min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .osplit .oline .skel-bar{width:7.5em;height:8px;margin:0}
   .canvas.compact .flowlbl{font-size:11px;padding:1px 7px}
   .skel-bar{display:block;height:10px;max-width:100%;border-radius:999px;background:var(--surface-3);position:relative;overflow:hidden}
   .skel-bar.bar-strip{height:32px;border-radius:var(--r-sm);flex:none}
@@ -14361,49 +14354,6 @@ function flowDestURL(o){
   if(flowDestItems(o).some(it=>it.pct>0)) return '';
   return outHTML(red,o&&o.out,o&&o.landings);
 }
-/** flowOfferAddress is the catalog URL of one offer.
- * id is the offer id stored on the stream. A missing offer or an empty address is ''.
- * @param {string} id offer id
- * @returns {string}
- */
-function flowOfferAddress(id){
-  const list=typeof OFFERS!=='undefined'?OFFERS:[];
-  const hit=(list||[]).find(x=>x&&String(x.id)===String(id));
-  return hit&&hit.url?String(hit.url):'';
-}
-/** flowSplitHTML is one arrow target per offer when a stream names several offers.
- * o is the stream output. g is the campaign, stream its name. expanded is false
- * on the collapsed card, which keeps one destination. One offer returns '', so
- * that row stays a single arrow. Each offer keeps its share, its name and its
- * own address. A zero share is still a target. The stream address is not reused.
- * @param {object|null} o stream output
- * @param {object} g campaign
- * @param {string} stream stream name
- * @param {boolean} expanded false on the collapsed card
- * @returns {string} HTML, or '' when the row stays one destination
- */
-function flowSplitHTML(o, g, stream, expanded){
-  if(!expanded) return '';
-  const items=flowDestItems(o).filter(it=>it.kind==='offer');
-  if(items.length<2) return '';
-  let aliases=null;
-  if(typeof campaignQueryAliases==='function'){
-    aliases=campaignQueryAliases(typeof CUR!=='undefined'?CUR:null, typeof SOURCES!=='undefined'?SOURCES:[]);
-  }
-  const paint=v=>macroHTML(esc(firstLine(v)), aliases);
-  const folded=flowStreamOfferMap(g, stream);
-  const rows=items.map(it=>{
-    const url=flowOfferAddress(it.id);
-    const tip=it.name+' — '+it.pct+'%'+(it.stopped?' · '+tr('flow.offer.stopped'):'');
-    const pill=`<span class="pill${it.stopped?' bad':''}" title="${esc(tip)}"><span class="nm">${esc(it.name)}</span></span>`;
-    const stats=!folded
-      ? `<span class="hint num" aria-busy="true"><i class="skel-bar bar-strip n" role="status" aria-label="${esc(tr('table.loading'))}"></i></span>`
-      : `<span class="hint num">${streamHint(flowOfferLine(folded.get(String(it.id))), false)}</span>`;
-    const link=url?`<div class="out" title="${esc(url)}">${paint(url)}</div>`:`<div class="out"><span class="subtle">${esc(tr('out.empty'))}</span></div>`;
-    return `<div class="osplit" data-pct="${it.pct}">${flowOfferMark(it)}<div class="oline"><span class="splitw">${it.pct}%</span>${pill}${stats}</div>${link}</div>`;
-  }).join('');
-  return `<div class="osplits">${rows}</div>`;
-}
 /** flowDestKinds lists offer and landing when that side receives traffic.
  * out is the stream output. A direct URL and a share the engine skips add nothing.
  * @param {object|null} out stream output
@@ -14741,23 +14691,18 @@ function flowDestStatsHTML(o, sp, g, stream, expanded, isLink){
  * false on the collapsed card, which has no offer row, so every offer stays in the
  * badge row with +N (0%). On the detailed row an offer with a share above zero is
  * named, so that chip is not badged again, and zero shares stay +N (0%) under the
- * rows. all names every offer, including a zero share, so a split that draws
- * each offer is not badged again. g, stream and sp are kept so the canvas call
- * does not change.
+ * rows. g, stream and sp are kept so the canvas call does not change.
  * @param {object} o stream output
  * @param {object} g campaign
  * @param {string} stream stream name
  * @param {boolean} expanded false on the collapsed card
  * @param {boolean} isLink true when the stream sends the visitor to another campaign
  * @param {object} [sp] stream totals
- * @param {boolean} [all] true to name every offer
  * @returns {string[]} offer ids
  */
-function flowDestNamed(o, g, stream, expanded, isLink, sp, all){
+function flowDestNamed(o, g, stream, expanded, isLink, sp){
   if(isLink||!expanded) return [];
-  const offers=flowDestItems(o).filter(it=>it.kind==='offer');
-  if(all) return offers.map(it=>String(it.id));
-  return offers.filter(it=>it.pct>0).map(it=>String(it.id));
+  return flowDestItems(o).filter(it=>it.kind==='offer'&&it.pct>0).map(it=>String(it.id));
 }
 const linkTargets=(g)=>{const t=new Set();if(g.redirect==='group'&&g.out)t.add(g.out.trim());(g.streams||[]).forEach(s=>{if((s.out||{}).redirect==='group'&&s.out.out)t.add(s.out.out.trim())});return [...t]};
 const groupById=(id)=>(GROUPS||[]).find(g=>g.id===id||(g.aliases||[]).includes(id))||null;
@@ -16886,7 +16831,6 @@ function renderFlow(){
     }
     const nv=variantsOf(o.out), isLink=o.redirect==='group', tip=isLink?'':flowDestTip(o);
     const destStats=flowDestStatsHTML(o, sp, g, s.name, !FLOW_COMPACT, isLink);
-    const split=isLink?'':flowSplitHTML(o, g, s.name, !FLOW_COMPACT);
     return `<div class="frow srow" data-s="${i}">
       <div class="node ${s.status?'':'off'} ${EDIT===i?'sel':''}${flowStreamStopped(s)?' stopped':''}" data-node="${i}"${s.comment?` title="${esc(streamNote(s))}"`:''}>
         ${flowEdit?(orderMode?`<span class="grip lock" title="${esc(tr('flow.traffic.lock'))}">${icon('grip')}</span>`:`<span class="grip" data-grip title="${tr('Drag to reorder')}">${icon('grip')}</span>`):''}
@@ -16902,9 +16846,9 @@ function renderFlow(){
         <div class="meta"><span class="pill acc">${esc(flowDestTypeLabel(o))}</span>${nv>1&&!isLink?`<span class="pill">${nv} ${tr('variants')} · ${esc(tr(DIST[o.distribution]||DIST.random))}</span>`:''}
           ${bt.redirect&&bt.redirect!=='skip'?`<span class="pill warn">${icon('bot')}${tr('bots')} → ${esc(typeLabel(bt.redirect))}</span>`:''}</div>
         ${isLink?`<div class="row"><b>${esc(o.out||'—')}</b>${groupById((o.out||'').trim())?`<button class="link" data-goto="${esc((o.out||'').trim())}">${tr('open flow')} ${icon('arrow')}</button>`:'<span class="pill bad">'+tr('no such flow')+'</span>'}</div>`
-          :split?split:flowDestURL(o)}
-        ${split?'':destStats}
-        ${isLink?'':flowDestMarks(o, flowDestNamed(o, g, s.name, !FLOW_COMPACT, isLink, sp, !!split))}
+          :flowDestURL(o)}
+        ${destStats}
+        ${isLink?'':flowDestMarks(o, flowDestNamed(o, g, s.name, !FLOW_COMPACT, isLink, sp))}
       </div></div>`});
   const rows=flowTrafficOrder(st.map(s=>flowCanvasValue(perfOf(g,s.name),orderMode)),orderMode).map(i=>rowHTML[i]).join('');
   const dflt=step&&step.selected==='-'?`<span class="verdict y">${icon('check')}${tr('default')}</span>`:'';
@@ -17204,26 +17148,13 @@ function drawWires(){
     const s=g.streams[i], hits=s.status?perfOf(g,s.name).hits:0, dashed=s.status?'':'stroke-dasharray="2 7"';
     parts.push(line(`M${X},${prevY} L${X},${n.y}`,w(rem),kind(rem)));
     if(step&&reached)top.push(line(`M${X},${prevY} L${X},${n.y-14}`,3,'--wire-ok'));
-    // side: the destination sits beside the node (wide layout), not under it.
-    // A split draws one arrow from the node to each offer, not one arrow to the card.
+    // side: the destination sits beside the node (wide layout), not under it
     const side=d.l>n.r;
-    const splits=qa('.osplit', row);
-    const fan=side&&splits.length>1;
-    const toDest=(bucket,width,cls,extra)=>{
-      if(fan){
-        splits.forEach(el=>{
-          const b=box(el);
-          bucket.push(line(`M${n.r},${n.y} L${b.l-4},${b.y}`,width,cls,extra),arrow(b.l-2,b.y,cls));
-        });
-        return;
-      }
-      if(side) bucket.push(line(`M${n.r},${n.y} L${d.l-4},${n.y}`,width,cls,extra),arrow(d.l-2,n.y,cls));
-    };
     parts.push(line(elbow(n.y,n.l),w(hits),kind(hits),dashed));
-    toDest(parts,w(hits),kind(hits),dashed);
+    if(side)parts.push(line(`M${n.r},${n.y} L${d.l-4},${n.y}`,w(hits),kind(hits),dashed),arrow(d.l-2,n.y,kind(hits)));
     if(step&&reached&&winner===i){
       top.push(line(elbow(n.y,n.l),3,'--wire-ok'));
-      toDest(top,3,'--wire-ok','');
+      if(side)top.push(line(`M${n.r},${n.y} L${d.l-4},${n.y}`,3,'--wire-ok'),arrow(d.l-2,n.y,'--wire-ok'));
       reached=false;
     }
     if(step&&reached)top.push(line(`M${X},${n.y-14} L${X},${n.y}`,3,'--wire-ok'));

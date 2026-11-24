@@ -2185,7 +2185,7 @@ func TestFlowDestOfferStats(t *testing.T) {
 	line := html[mark:]
 	nl := strings.Index(line, "\n")
 	src.WriteString(line[:nl+1])
-	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowOfferStopped", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowOfferMark", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "flowCanvasOpen", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "streamsOnScreen", "watchStreamOfferScreen", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed", "flowOfferAddress", "flowSplitHTML"} {
+	for _, name := range []string{"thenURL", "thenLive", "thenMode", "nameOf", "flowSharePcts", "flowDestLabel", "flowOfferStopped", "flowDestItems", "flowDestTip", "flowDestOfferBadge", "flowOfferMark", "flowDestMarks", "flowDestKinds", "flowDestTypeLabel", "condEscapeFilterValue", "condsQS", "reportData", "streamOfferPeriod", "streamOfferKey", "streamOffersFresh", "foldStreamOffers", "flowOfferLine", "flowStreamOfferMap", "flowStreamReportQS", "flowDestWantsReport", "flowCanvasOpen", "stopStreamOfferQueue", "scheduleStreamOfferPaint", "loadFlowStreamOffers", "pumpStreamOffers", "queueStreamOffers", "streamsOnScreen", "watchStreamOfferScreen", "queueOpenStreamOffers", "streamOffersReady", "flowDestStatsHTML", "flowDestNamed"} {
 		fn := spaFunctionLine(html, name)
 		if fn == "" {
 			t.Fatalf("%s not found in SPA", name)
@@ -2262,19 +2262,20 @@ eq(collapsedBadges.includes('>Alpha<') && collapsedBadges.includes('>+4 (0%)<'),
 eq(collapsedBadges.indexOf('>Alpha<') < collapsedBadges.indexOf('>+4 (0%)<'), true, 'zero shares sit in the badge row, not on their own line');
 eq(collapsedBadges.includes('bots'), false, 'the collapsed badges have no conversions of their own');
 const savedSplit = OFFERS.slice();
-OFFERS = [{id:'o1', name:'Alpha', url:'https://a.example/land', status:true},{id:'o2', name:'Beta', url:'https://b.example/land', status:true}];
-eq(flowSplitHTML({redirect:'http_redirect', out:'https://stream.example', offers:[{id:'o1', share:100}]}, g, 'one', true), '', 'one offer stays one arrow');
-eq(flowSplitHTML({redirect:'http_redirect', out:'https://stream.example', offers:[{id:'o1', share:60},{id:'o2', share:40}]}, g, 'two', false), '', 'the collapsed card keeps one destination');
-let split = flowSplitHTML({redirect:'http_redirect', out:'https://stream.example', offers:[{id:'o1', share:60},{id:'o2', share:40}]}, g, 'two', true);
-eq((split.match(/class="osplit"/g)||[]).length, 2, 'two offers draw two targets');
-eq(split.includes('>60%<') && split.includes('>40%<'), true, 'each target shows its share');
-eq(split.includes('https://a.example/land') && split.includes('https://b.example/land'), true, 'each target uses that offer address');
-eq(split.includes('https://stream.example'), false, 'the stream address is not the split link');
-split = flowSplitHTML({redirect:'http_redirect', out:'https://stream.example', offers:[{id:'o1', share:100},{id:'o2', share:0}]}, g, 'zero', true);
-eq((split.match(/class="osplit"/g)||[]).length, 2, 'a zero share is still its own target');
-eq(split.includes('>0%<'), true, 'a zero share is written on its arrow');
-eq(split.includes('https://b.example/land'), true, 'the zero share keeps its own address');
-eq(split.includes('https://stream.example'), false, 'the stream address is not repeated for a zero share');
+OFFERS = [{id:'o1', name:'Alpha', url:'https://a.example/land', status:true},{id:'o2', name:'Beta', url:'https://b.example/land', status:true},{id:'o3', name:'Gamma', url:'https://c.example/land', status:true},{id:'o4', name:'Delta', url:'https://d.example/land', status:true},{id:'o5', name:'Epsilon', url:'https://e.example/land', status:true}];
+const foldedOut = {redirect:'http_redirect', out:'https://stream.example', offers:[{id:'o1', share:50},{id:'o2', share:0},{id:'o3', share:50},{id:'o4', share:0},{id:'o5', share:0}]};
+put('fold', [{offer:'o1', country:'US', source:'a', bots:0, conv:3, profit:30},{offer:'o3', country:'US', source:'a', bots:0, conv:1, profit:10}]);
+const foldedHTML = flowDestStatsHTML(foldedOut, sp, g, 'fold', true, false) + flowDestMarks(foldedOut, flowDestNamed(foldedOut, g, 'fold', true, false, sp));
+eq(typeof flowSplitHTML, 'undefined', 'the canvas has no per-offer fan');
+eq(foldedHTML.includes('osplit'), false, 'no card or arrow target per offer');
+eq((foldedHTML.match(/class="oline"/g) || []).length, 2, 'only the two active offers are written beside the one line');
+eq(foldedHTML.includes('>Alpha<') && foldedHTML.includes('>Gamma<'), true, 'active offers are named as text');
+eq((foldedHTML.match(/>50%</g) || []).length, 2, 'each active offer keeps its own share inside the one card');
+eq(/Beta|Delta|Epsilon/.test(foldedHTML.replace(/title="[^"]*"/g, '')), false, 'a zero offer is not named in the markup');
+eq(/https?:\/\//.test(foldedHTML.replace(/title="[^"]*"/g, '')), false, 'no address is written for any offer or for the stream');
+eq(foldedHTML.includes('>+3 (0%)<'), true, 'the number of zero offers is on the folded badge');
+eq((foldedHTML.match(/\+\d+ \(0%\)/g) || []).length, 1, 'the zeros are one badge, not one per offer');
+eq(/0\s*(conv|конв)/.test(foldedHTML.slice(foldedHTML.indexOf('+3 (0%)'))), false, 'the folded zeros carry no zero numbers');
 OFFERS = savedSplit;
 const quiet = flowDestStatsHTML(offers, {hits:0,bots:0,conv:0,profit:0}, g, 'quiet', false, false) + flowDestMarks(offers, flowDestNamed(offers, g, 'quiet', false, false));
 eq(quiet.includes('0 bots'), true, 'before the total the collapsed line is zeros');
