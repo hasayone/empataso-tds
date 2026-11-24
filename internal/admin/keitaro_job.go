@@ -292,11 +292,20 @@ func (j *keitaroJob) endPurge() {
 // progress records a tracker stage while an import is running.
 // stage is snapshot, streams, conversions or clicks. done and total are the
 // page or campaign counters from the client. Reports after the import
-// finished are ignored. It does not return an error.
+// finished are ignored. A snapshot probe of 0 of 0 does not wipe a cursor
+// already stored: the campaign write and the stream read continue from it.
+// It does not return an error.
 func (j *keitaroJob) progress(stage string, done, total int) {
 	j.mu.Lock()
 	if !j.running {
 		j.mu.Unlock()
+		return
+	}
+	if stage == "snapshot" && done == 0 && total == 0 && (j.rec.Done > 0 || j.rec.Total > 0) {
+		moved := j.rec.Stage != stage
+		j.rec.Stage = stage
+		j.mu.Unlock()
+		j.save(moved)
 		return
 	}
 	moved := j.rec.Stage != stage
@@ -305,6 +314,57 @@ func (j *keitaroJob) progress(stage string, done, total int) {
 	j.rec.Total = total
 	j.mu.Unlock()
 	j.save(moved)
+}
+
+// noteGroupsSaved records campaigns the running import has written and moves the stage cursor.
+// ids are the group ids saved by the last batch; empty only publishes done and total.
+// done is how many campaigns of this run are already written. total is how many the run has.
+// The journal is written at once. A call after the import finished does nothing.
+// It does not return an error.
+func (j *keitaroJob) noteGroupsSaved(ids []string, done, total int) {
+	j.mu.Lock()
+	if !j.running {
+		j.mu.Unlock()
+		return
+	}
+	have := make(map[string]bool, len(j.rec.GroupsSaved))
+	for _, id := range j.rec.GroupsSaved {
+		have[id] = true
+	}
+	for _, id := range ids {
+		if id == "" || have[id] {
+			continue
+		}
+		have[id] = true
+		j.rec.GroupsSaved = append(j.rec.GroupsSaved, id)
+	}
+	j.rec.Stage = "groups"
+	j.rec.Done = done
+	j.rec.Total = total
+	j.mu.Unlock()
+	j.save(true)
+}
+
+// savedGroupIDs copies the campaign ids this run has already written.
+// The result is never backed by the journal slice. It does not return an error.
+func (j *keitaroJob) savedGroupIDs() []string {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	return append([]string{}, j.rec.GroupsSaved...)
+}
+
+// dropRewrittenLosses clears the loss report of a running import whose catalog map will build it again.
+// The journal is written at once, so a restart does not keep the stacked copy.
+// A job that is not running is left as it is. It does not return an error.
+func (j *keitaroJob) dropRewrittenLosses() {
+	j.mu.Lock()
+	if !j.running || len(j.rec.Losses) == 0 {
+		j.mu.Unlock()
+		return
+	}
+	j.rec.Losses = []ktimport.Loss{}
+	j.mu.Unlock()
+	j.save(true)
 }
 
 // setStage sets the stage name without touching the counters.
@@ -797,14 +857,20 @@ type importState struct {
 // step returns the number saved, the losses of this stage, and a save error.
 // Step losses are appended before the error is checked. counts[key] is set
 // only when step returns nil. A manifest save then runs on st.prev and st.res.
-// It returns false when step or the manifest save fails, and st.fail is
-// "save error". It returns true after the job is published.
+// A timeout or a context deadline is stored on the run so the same import continues.
+// Any other step error sets st.fail to "save error".
+// It returns false when step or the manifest save fails.
+// It returns true after the job is published.
 // It does not return an error value.
 func (s *Server) runStage(st *importState, name, key string, step func() (int, []ktimport.Loss, error)) bool {
 	s.ktJob.setStage(name)
 	n, extra, err := step()
 	st.losses = append(st.losses, extra...)
 	if err != nil {
+		if keitaroDeadlineErr(err) {
+			st.noteTrackerErr(err, "")
+			return false
+		}
 		st.fail = "save error"
 		return false
 	}
@@ -839,8 +905,11 @@ func (s *Server) runKeitaroImport(ctx context.Context, req keitaroImportReq, own
 func (s *Server) runKeitaroImportFrom(ctx context.Context, run keitaroResumeRun, owner string, creds ktCreds, board string, manifestStore ManifestStore) (again bool) {
 	req := run.req
 	started := time.Now()
+	if req.catalog() && s.ktJob != nil {
+		s.ktJob.dropRewrittenLosses()
+	}
 	counts := copyCounts(run.counts)
-	losses := append([]ktimport.Loss{}, run.losses...)
+	losses := carriedImportLosses(req, run.losses)
 	st := &importState{
 		counts: counts, losses: losses, owner: owner, creds: creds,
 		board: board, manifestStore: manifestStore,
@@ -908,7 +977,7 @@ func (s *Server) runKeitaroImportFrom(ctx context.Context, run keitaroResumeRun,
 			}) && s.runStage(st, "pages", "pages", func() (int, []ktimport.Loss, error) {
 				return s.importPages(&st.res)
 			}) && s.runStage(st, "groups", "groups", func() (int, []ktimport.Loss, error) {
-				return s.importGroups(ctx, st.res.Groups, st.prev, owner, &st.res.Manifest, st.creds.host(), st.board, st.manifestStore)
+				return s.writeImportedGroups(ctx, st.res.Groups, st.prev, owner, &st.res.Manifest, st.creds.host(), st.board, st.manifestStore, run.groupsSaved)
 			})
 			if !ok {
 				return

@@ -150,10 +150,34 @@ func TestNamecheapUI(t *testing.T) {
 		`data-nctab="account"`,
 		`data-nctab="contacts"`,
 		"nc.tab.account",
+		`<div class="g2"><div class="fld"><label for="nc-username">`,
+		`<label for="nc-key">`,
+		`calloutHTML('warn',tr('nc.contacts.match'),{id:'nc-contacts-match'})`,
+		`id="nc-contacts"`,
 	} {
 		must(t, panel, needle, "Namecheap account card")
 	}
+	accountAt := strings.Index(panel, `data-ncpanel="account"`)
+	contactsAt := strings.Index(panel, `data-ncpanel="contacts"`)
+	pairAt := strings.Index(panel, `<div class="g2"><div class="fld"><label for="nc-username">`)
+	keyAt := strings.Index(panel, `<label for="nc-key">`)
+	if accountAt < 0 || pairAt <= accountAt || keyAt <= pairAt || contactsAt <= keyAt {
+		t.Errorf("user name and API key must share one row on the account tab")
+	}
+	matchAt := strings.Index(panel, `tr('nc.contacts.match')`)
+	fieldsAt := strings.Index(panel, `id="nc-contacts"`)
+	if contactsAt < 0 || matchAt < contactsAt || fieldsAt < matchAt {
+		t.Errorf("the owner-match warning must sit on the contacts tab above the contact fields")
+	}
 	mustNot(t, panel, "cur.api_key", "the key is never read back into the page")
+	must(t, panel, "api_user:name, username:name", "one user name is sent as api_user and username")
+	must(t, panel, "copyField(", "the server IP is a copy field")
+	must(t, panel, "setCopyField(q('#nc-ip',host)", "detect fills the copy field")
+	mustNot(t, panel, `id="nc-name"`, "the account name is not on the form")
+	mustNot(t, panel, `id="nc-apiuser"`, "there is no separate API user field")
+	mustNot(t, html, "оставить NS регистратора", "an empty name-server list no longer claims to keep the registrar NS")
+	must(t, html, "направить на IP этого сервера", "the purchase hint points an empty list at this server")
+	must(t, spaFunctionLine(html, "registerDomainModal"), "trFill('nc.reg.nshint'", "the purchase hint can name the server IP")
 	must(t, html, "const NC_CONTACT_FIELDS=", "contact fields")
 
 	reg := spaFunctionLine(html, "registerDomainModal")
@@ -168,6 +192,28 @@ func TestNamecheapUI(t *testing.T) {
 		"checked=false",
 	} {
 		must(t, reg, needle, "purchase window")
+	}
+	for _, needle := range []string{
+		"regs.length>1", `id="nr-reg-mark"`, "INT_LOGOS.namecheap", "const term=1",
+		`class="chk" id="nr-confirm-row"`, `type="checkbox" id="nr-confirm"`,
+		`data-nrtab="ns"`, `data-nrpane="buy"`, `id="nr-ns-box"`,
+		"setAttribute('aria-invalid','true')", "tr('nc.reg.https')", "tr('nc.reg.admin')", "tr('nc.reg.robots')",
+		"else if(ns.length) body.nameservers=ns",
+	} {
+		must(t, reg, needle, "purchase window layout")
+	}
+	mustNot(t, reg, `id="nr-years"`, "the term is not a field")
+	mustNot(t, reg, `class="tog"><input type="checkbox" id="nr-confirm"`, "payment consent is not a pill")
+	mustNot(t, reg, "nr-index", "there is no index page field")
+	if strings.Count(reg, "INT_LOGOS.namecheap") != 1 {
+		t.Errorf("the Namecheap mark is drawn once, next to the registrar")
+	}
+	buyAt := strings.Index(reg, `data-nrpane="buy"`)
+	nsAt := strings.Index(reg, `data-nrpane="ns"`)
+	nsBox := strings.Index(reg, `id="nr-ns"`)
+	confirmAt := strings.Index(reg, `id="nr-confirm"`)
+	if buyAt < 0 || nsAt < buyAt || confirmAt < 0 || confirmAt > nsAt || nsBox < nsAt {
+		t.Errorf("consent stays on the purchase tab and name servers sit on theirs")
 	}
 	rec := spaFunctionLine(html, "reconcileDomain")
 	must(t, rec, "/api/registrars/namecheap/register", "reconcile uses the register route")
@@ -206,8 +252,9 @@ func TestSpaNewKeysAreTranslated(t *testing.T) {
 		"err.shares", "err.save", "kt.base", "kt.key", "kt.key.saved", "kt.check.hint", "kt.src.file", "kt.src.env",
 		"kt.src.none", "kt.err.keyhost", "kt.err.keyreq", "kt.err.keybad", "kt.err.base", "kt.err.manifest",
 		"kt.err.unavailable", "kt.err.purgebusy", "dom.pending", "nc.intro", "nc.name", "nc.apiuser", "nc.key",
-		"nc.ip", "nc.sandbox", "nc.contacts", "nc.test", "nc.detect", "nc.test.ok", "nc.detect.found",
+		"nc.ip", "nc.ip.hint", "nc.sandbox", "nc.contacts", "nc.contacts.match", "nc.test", "nc.detect", "nc.test.ok", "nc.detect.found",
 		"nc.detect.mismatch", "nc.reg.btn", "nc.reg.title", "nc.reg.check", "nc.reg.price", "nc.reg.confirm",
+		"nc.reg.https", "nc.reg.admin", "nc.reg.robots", "nc.reg.nscf",
 		"nc.reg.pricechanged", "nc.reg.buy", "nc.reconcile", "nc.force", "nc.force.ask", "nc.ns.change",
 		"nc.ns.confirm", "nc.ns.few", "nc.ns.many", "nc.err.early", "nc.err.pending", "nc.err.released",
 		"nc.err.owned", "nc.err.premium", "nc.err.progress", "nc.err.config", "nc.err.nofile",
@@ -223,7 +270,7 @@ func TestSpaNewKeysAreTranslated(t *testing.T) {
 		"cf.file.err", "cf.err.load", "cf.reg.use", "cf.reg.err", "cf.reg.hosterr", "cf.reg.manual", "cf.buy.title",
 		"cf.buy.sum", "cf.dns.cf", "cf.dns.ns", "cf.dns.a", "cf.dns.none", "dom.state.on", "dom.state.off",
 		"dom.state.pending", "dom.elsewhere", "dom.elsewhere.short", "dom.cfpending", "dom.cfpending.short",
-		"dom.tls", "cf.connecting", "cf.connect", "cf.connect.title", "cf.connect.ask", "cf.connect.ask.nc",
+		"dom.tls", "dom.untrusted", "cf.connecting", "cf.connect", "cf.connect.title", "cf.connect.ask", "cf.connect.ask.nc",
 		"cf.connect.done", "cf.connect.set", "cf.ns.title", "cf.ns.hint", "cf.ns.copy", "cf.ns.copied",
 		"cf.ns.select", "dom.conn.title", "dom.conn.title.many", "dom.conn.text", "dom.conn.ok", "dom.conn.go",
 	}
@@ -862,8 +909,8 @@ func TestDomainStatusTexts(t *testing.T) {
 	html := spaSource()
 	text := spaFunctionLine(html, "domainStatusText")
 	for _, needle := range []string{
-		"d.reason==='tls'", "d.reason==='cf_pending'", "d.reason==='elsewhere'", "d.cf_status==='connect_pending'",
-		"tr('cf.connecting')", "tr('dom.tls')", "dom.cfpending", "dom.elsewhere", "CF_INFO.public_ip", "d.reason_detail",
+		"d.reason==='tls'", "d.reason==='untrusted'", "d.reason==='cf_pending'", "d.reason==='elsewhere'", "d.cf_status==='connect_pending'",
+		"tr('cf.connecting')", "tr('dom.tls')", "tr('dom.untrusted')", "dom.cfpending", "dom.elsewhere", "CF_INFO.public_ip", "d.reason_detail",
 	} {
 		must(t, text, needle, "domain verdict")
 	}
@@ -876,6 +923,10 @@ func TestDomainStatusTexts(t *testing.T) {
 	must(t, html, `'dom.elsewhere':'Не направлен: A указывает на {ips}, нужен {ip}'`, "ru elsewhere text")
 	must(t, html, `'dom.cfpending':'Ждём Cloudflare: NS {ns}'`, "ru Cloudflare wait text")
 	must(t, html, `'dom.tls':'Сертификат сервера отклонён'`, "ru certificate text")
+	must(t, html, `'dom.untrusted':'Сертификат сервера не доверенный'`, "ru untrusted certificate text")
+	must(t, html, `'dom.untrusted':'Server certificate is not trusted'`, "en untrusted certificate text")
+	must(t, html, `'dom.untrusted':'Сертифікат сервера не довірений'`, "uk untrusted certificate text")
+	must(t, html, ".dom-status .dom-verdict.warn{color:var(--warn)}", "untrusted verdict is yellow")
 }
 
 // TestSpaAdminHost checks the admin.<domain> badge, DNS action, form hints and the links default role.

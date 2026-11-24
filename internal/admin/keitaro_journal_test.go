@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/emtds/bridge/ktimport"
 )
 
 // TestKeitaroJournalMissingFileStaysIdle checks that a job without a journal file shows no run and writes nothing.
@@ -472,6 +474,44 @@ func TestKeitaroDeadlinePickup(t *testing.T) {
 	v := cut.ktJob.snapshot()
 	if v.Running || v.Stage != "failed" || !v.Interrupted || len(cutSink.events) != 0 {
 		t.Fatalf("interrupted started %+v events %d", v, len(cutSink.events))
+	}
+}
+
+// TestCarriedImportLossesDropsCatalogCopies checks that a resumed catalog map does not keep the
+// previous loss report, and that a click continuation does.
+func TestCarriedImportLossesDropsCatalogCopies(t *testing.T) {
+	prev := []ktimport.Loss{{Kind: "approximated", Ref: "a", Detail: "фильтр isp перенесён приближённо"}}
+	if got := carriedImportLosses(keitaroImportReq{Campaigns: true, Offers: true}, prev); got != nil {
+		t.Fatalf("catalog resume kept %v", got)
+	}
+	got := carriedImportLosses(keitaroImportReq{Clicks: true}, prev)
+	if len(got) != 1 || got[0].Ref != "a" {
+		t.Fatalf("click resume %v", got)
+	}
+}
+
+// TestProgressSnapshotKeepsGroupCursor checks that a snapshot probe of 0 of 0 does not wipe
+// the campaign-write cursor, and that a resumed run keeps the ids already written.
+func TestProgressSnapshotKeepsGroupCursor(t *testing.T) {
+	j := newKeitaroJob()
+	j.running = true
+	j.progress("groups", 4, 10)
+	j.progress("snapshot", 0, 0)
+	if v := j.snapshot(); v.Stage != "snapshot" || v.Done != 4 || v.Total != 10 {
+		t.Fatalf("cursor reset %+v", v)
+	}
+	j.noteGroupsSaved([]string{"a"}, 5, 10)
+	j.mu.Lock()
+	j.rec.Request.Campaigns = true
+	j.rec.Losses = []ktimport.Loss{{Kind: "approximated", Detail: "снова"}}
+	run := j.rec.resumeRun()
+	j.mu.Unlock()
+	if v := j.snapshot(); v.Done != 5 || v.Total != 10 || v.Stage != "groups" {
+		t.Fatalf("after save %+v", v)
+	}
+	ids := j.savedGroupIDs()
+	if len(ids) != 1 || ids[0] != "a" || len(run.groupsSaved) != 1 || run.groupsSaved[0] != "a" || run.losses != nil {
+		t.Fatalf("resume ids %v losses %v", run.groupsSaved, run.losses)
 	}
 }
 

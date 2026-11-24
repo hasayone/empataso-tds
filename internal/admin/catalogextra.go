@@ -32,8 +32,13 @@ var errPrivateAddr = security.ErrPrivateAddr
 
 // Reason codes a domain check adds to dns, private, connect and foreign.
 const (
-	// reasonTLS means the server certificate of the host was refused.
+	// reasonTLS means the server certificate of the host was refused for a cause
+	// other than an untrusted chain on this server.
 	reasonTLS = "tls"
+	// reasonUntrusted means the name resolves to this server, or the engine answered
+	// with the same Host, and the only failure is a server certificate the client
+	// does not trust. It is not a direction failure.
+	reasonUntrusted = "untrusted"
 	// reasonElsewhere means the host resolves to addresses that are not Config.PublicIP.
 	reasonElsewhere = "elsewhere"
 	// reasonCFPending means the Cloudflare zone of the host is not active yet.
@@ -95,8 +100,10 @@ type probeResult struct {
 // checkDomain reports whether host answers as this tracker over HTTPS.
 // host is the parked host. A port stays in the request URL and the Host header.
 // ok is true only when name resolution and the probe both succeed.
-// reason is dns, private, connect, tls or foreign when ok is false, and empty when ok is true.
-// connect means the HTTPS call did not complete. tls means the certificate was refused.
+// reason is dns, private, connect, tls, untrusted or foreign when ok is false, and empty when ok is true.
+// connect means the HTTPS call did not complete. tls means the certificate was refused
+// for a cause other than an untrusted chain on this server. untrusted means this engine
+// answered and the only failure is a server certificate the client does not trust.
 // foreign means some server answered, but it was not this tracker.
 // A resolver failure is dns. checkDomain does not return an error.
 func (s *Server) checkDomain(ctx context.Context, host string) (ok bool, reason string) {
@@ -120,7 +127,9 @@ func (s *Server) probeHost(ctx context.Context, host string) probeResult {
 // d is the stored row. A successful probe returns true with no reason. After a failure a row
 // with a Cloudflare zone that is not active gets cf_pending with its name servers as the
 // detail. A row without a zone whose resolved addresses lack Config.PublicIP gets elsewhere
-// with the resolved addresses as the detail. Any other failure keeps the probe reason.
+// with the resolved addresses as the detail, including when the probe reason is untrusted.
+// Any other failure keeps the probe reason. untrusted is that reason only after the engine
+// answered with the same Host and the certificate chain is not trusted.
 func (s *Server) judgeDomain(ctx context.Context, d config.Domain) (ok bool, reason, detail string) {
 	r := s.probeHost(ctx, d.Host)
 	switch {
@@ -278,10 +287,13 @@ func (s *Server) checkAdminHost(ctx context.Context, d config.Domain) (bool, str
 // host is the full parked host, including a port when one is stored.
 // service is the expected X-Emtds-Service value: engine allows a missing header, admin requires it.
 // It returns ok when the status is 200 and X-Emtds-Probe and X-Emtds-Host match.
-// reason is tls when the server certificate was refused, and connect when client.Do fails
-// for another cause (network, TLS handshake, timeout, or guardDial).
+// reason is untrusted when service is engine, the server certificate chain is not trusted,
+// and a second request that does not check the certificate shows this engine answered
+// with the same Host. reason is tls when the certificate was refused for another cause,
+// or when that second request does not show this engine. reason is connect when client.Do
+// fails for another cause (network, TLS handshake, timeout, or guardDial).
 // Any HTTP response whose status is not 200, or whose probe headers do not match, is foreign.
-// The body is discarded. Only HTTPS is requested.
+// The body is discarded. Only HTTPS is requested. A matching unverified answer is not ok.
 func (s *Server) probePhase(ctx context.Context, host, service string) (bool, string) {
 	probe, err := newProbe()
 	if err != nil {
@@ -300,6 +312,9 @@ func (s *Server) probePhase(ctx context.Context, host, service string) (bool, st
 	}
 	resp, err := client.Do(req)
 	if err != nil {
+		if service == "engine" && untrustedServerCert(err) && s.engineConfirms(ctx, client, host, probe) {
+			return false, reasonUntrusted
+		}
 		if isCertError(err) {
 			return false, reasonTLS
 		}
@@ -337,6 +352,103 @@ func healthzServiceOK(h http.Header, expect string) bool {
 	default:
 		return strings.EqualFold(got, expect)
 	}
+}
+
+// untrustedServerCert reports whether err is a server certificate the client does not trust.
+// err is the error of an HTTPS request. A wrapped unknown authority is untrusted.
+// When the handshake error carries the presented certificates, the chain is checked again
+// without the host name: an unknown authority there is untrusted too, which covers a
+// self-signed certificate whose name does not match. A chain that verifies, including a
+// trusted certificate with the wrong name or an expired trusted certificate, is not untrusted.
+// It returns false when err is nil or the certificates are not available.
+func untrustedServerCert(err error) bool {
+	if err == nil {
+		return false
+	}
+	var unknown x509.UnknownAuthorityError
+	if errors.As(err, &unknown) {
+		return true
+	}
+	var verify *tls.CertificateVerificationError
+	if errors.As(err, &verify) && len(verify.UnverifiedCertificates) > 0 {
+		return chainUntrusted(verify.UnverifiedCertificates)
+	}
+	return false
+}
+
+// chainUntrusted reports whether certs do not chain to a trusted root.
+// certs[0] is the leaf and the rest are intermediates presented with it.
+// The host name is not checked. It returns false when certs is empty or the chain verifies.
+// A verification error that is not an unknown authority, such as an expired certificate, returns false.
+func chainUntrusted(certs []*x509.Certificate) bool {
+	if len(certs) == 0 {
+		return false
+	}
+	pool := x509.NewCertPool()
+	for _, c := range certs[1:] {
+		pool.AddCert(c)
+	}
+	_, err := certs[0].Verify(x509.VerifyOptions{Intermediates: pool})
+	var unknown x509.UnknownAuthorityError
+	return errors.As(err, &unknown)
+}
+
+// engineConfirms repeats the healthz probe without verifying the server certificate.
+// ctx bounds the call. base is the probe client, host is the parked host, including a port
+// when one is stored, and probe is the token the engine must echo.
+// It returns true only when the status is 200 and the probe, host and service headers match
+// this engine. It returns false when the client cannot be copied, the request fails, or the
+// answer is not this engine. The match is not a passing check.
+func (s *Server) engineConfirms(ctx context.Context, base *http.Client, host, probe string) bool {
+	client := insecureClient(base)
+	if client == nil {
+		return false
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+host+"/healthz?probe="+probe, nil)
+	if err != nil {
+		return false
+	}
+	req.Host = host
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64))
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	if healthzHeader(resp.Header, "Probe") != probe || !strings.EqualFold(healthzHeader(resp.Header, "Host"), host) {
+		return false
+	}
+	return healthzServiceOK(resp.Header, "engine")
+}
+
+// insecureClient returns a copy of base that does not verify the server certificate.
+// base is the probe client. A nil base uses the shared check client. The dialer, the timeout
+// and the redirect policy are kept. It returns nil when the transport is not an *http.Transport
+// and cannot be copied. The copy is only for engineConfirms.
+func insecureClient(base *http.Client) *http.Client {
+	if base == nil {
+		base = defaultCheckClient()
+	}
+	next := *base
+	switch tr := base.Transport.(type) {
+	case *http.Transport:
+		cloned := tr.Clone()
+		cfg := &tls.Config{InsecureSkipVerify: true}
+		if cloned.TLSClientConfig != nil {
+			cfg = cloned.TLSClientConfig.Clone()
+			cfg.InsecureSkipVerify = true
+		}
+		cloned.TLSClientConfig = cfg
+		next.Transport = cloned
+	case nil:
+		next.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	default:
+		return nil
+	}
+	return &next
 }
 
 // isCertError reports whether err is a refused server certificate: an unknown authority, a

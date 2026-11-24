@@ -498,6 +498,55 @@ func TestCheckDomainTLS(t *testing.T) {
 	}
 }
 
+// engineTLS is an untrusted client whose server answers as this engine.
+func engineTLS(t *testing.T) *http.Client {
+	t.Helper()
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Emtds-Probe", r.URL.Query().Get("probe"))
+		w.Header().Set("X-Emtds-Host", r.Host)
+		w.Header().Set("X-Emtds-Service", "engine")
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(ts.Close)
+	return untrustedClient(t, ts)
+}
+
+// TestJudgeDomainUntrustedCert checks the yellow status for a self-signed certificate on this server.
+// A foreign address stays elsewhere and a name without DNS stays dns.
+// t is the test handle. It returns nothing. A changed reason fails the test.
+func TestJudgeDomainUntrustedCert(t *testing.T) {
+	ctx := context.Background()
+	client := engineTLS(t)
+	d := config.Domain{ID: "1", Host: "example.com"}
+	ours := &Server{cfg: Config{PublicIP: "203.0.113.10", LookupIP: lookupPublic, CheckClient: client}}
+	ok, reason, detail := ours.judgeDomain(ctx, d)
+	if ok || reason != "untrusted" || detail != "" {
+		t.Fatalf("our ip: ok=%v reason=%s detail=%q", ok, reason, detail)
+	}
+	foreign := &Server{cfg: Config{PublicIP: "203.0.113.50", LookupIP: lookupPublic, CheckClient: client}}
+	if ok, reason, detail = foreign.judgeDomain(ctx, d); ok || reason != "elsewhere" || detail != "203.0.113.10" {
+		t.Fatalf("foreign: ok=%v reason=%s detail=%q", ok, reason, detail)
+	}
+	nodns := &Server{cfg: Config{
+		PublicIP: "203.0.113.10",
+		LookupIP: func(context.Context, string) ([]net.IPAddr, error) {
+			return nil, errors.New("no such host")
+		},
+		CheckClient: client,
+	}}
+	if ok, reason, detail = nodns.judgeDomain(ctx, d); ok || reason != "dns" || detail != "" {
+		t.Fatalf("not pointed: ok=%v reason=%s detail=%q", ok, reason, detail)
+	}
+	other := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(other.Close)
+	stranger := &Server{cfg: Config{PublicIP: "203.0.113.10", LookupIP: lookupPublic, CheckClient: untrustedClient(t, other)}}
+	if ok, reason, detail = stranger.judgeDomain(ctx, d); ok || reason != "tls" || detail != "" {
+		t.Fatalf("other service: ok=%v reason=%s detail=%q", ok, reason, detail)
+	}
+}
+
 func TestJudgeDomainElsewhere(t *testing.T) {
 	ctx := context.Background()
 	d := config.Domain{ID: "1", Host: "example.com"}

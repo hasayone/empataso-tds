@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -83,18 +84,15 @@ func (f *FileGroups) List(context.Context) ([]config.Group, error) {
 	return append([]config.Group(nil), f.cache...), nil
 }
 
-// Save writes groups to the JSON file as one compact JSON value.
+// Save writes groups to the JSON file as one JSON array.
 // The context is accepted for the GroupsStore signature and is not used.
-// groups is the full document to store.
+// groups is the full document to store. Each group is encoded on its own, so a large
+// campaign list does not build a second copy of the whole file in memory.
 // It returns nil after the temporary file is renamed into place.
 // It returns an error when groups cannot be encoded or the disk write fails.
 // After a successful rename it increments the generation and drops the cache.
 func (f *FileGroups) Save(_ context.Context, groups []config.Group) error {
-	b, err := json.Marshal(groups)
-	if err != nil {
-		return err
-	}
-	if err := f.write(b); err != nil {
+	if err := f.writeGroups(groups); err != nil {
 		return err
 	}
 	if f.onSave != nil {
@@ -103,22 +101,59 @@ func (f *FileGroups) Save(_ context.Context, groups []config.Group) error {
 	return nil
 }
 
-// write replaces the groups file with b through a temporary file and drops the list cache.
-// b is the encoded document. It returns an error when the temporary file cannot be written
-// or renamed into place.
-func (f *FileGroups) write(b []byte) error {
+// writeGroups replaces the groups file with groups through a temporary file.
+// groups is the full document. A nil or empty list is written as [].
+// It returns an error when the temporary file cannot be written or renamed into place.
+func (f *FileGroups) writeGroups(groups []config.Group) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	tmp := f.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o644); err != nil {
+	fh, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	err = encodeGroupList(fh, groups)
+	cerr := fh.Close()
+	if err == nil {
+		err = cerr
+	}
+	if err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	if err := os.Rename(tmp, f.path); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	f.cache = nil
 	f.gen++
 	return nil
+}
+
+// encodeGroupList writes groups as one JSON array.
+// w receives the bytes. groups may be nil. Each group is encoded separately.
+// It returns an error when a group cannot be encoded or w cannot be written.
+func encodeGroupList(w io.Writer, groups []config.Group) error {
+	if len(groups) == 0 {
+		_, err := w.Write([]byte("[]"))
+		return err
+	}
+	if _, err := w.Write([]byte("[")); err != nil {
+		return err
+	}
+	enc := json.NewEncoder(w)
+	for i := range groups {
+		if i > 0 {
+			if _, err := w.Write([]byte(",")); err != nil {
+				return err
+			}
+		}
+		if err := enc.Encode(groups[i]); err != nil {
+			return err
+		}
+	}
+	_, err := w.Write([]byte("]"))
+	return err
 }
 
 // OnSave sets the function Save calls after the file is in place and the lock is released.

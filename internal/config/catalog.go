@@ -306,8 +306,9 @@ func (o Offer) ReservePayout() (float64, bool) {
 // Role is admin, links or both. Primary marks the default base for campaign links.
 // Disabled is a catalog mark only.
 // OK is set only after a check received this tracker's own answer on that host.
-// Reason is the code of the last failed check (dns, private, connect, tls, foreign,
-// elsewhere, cf_pending). ReasonDetail explains it: the resolved addresses for elsewhere,
+// Reason is the code of the last failed check (dns, private, connect, tls, untrusted, foreign,
+// elsewhere, cf_pending). untrusted means this server answered and the certificate is not trusted.
+// ReasonDetail explains it: the resolved addresses for elsewhere,
 // the Cloudflare name servers for cf_pending. Both are empty when OK is true.
 type Domain struct {
 	ID      string `json:"id"`

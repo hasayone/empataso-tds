@@ -465,3 +465,60 @@ func TestImportGroupsExtractsGlobalS2S(t *testing.T) {
 		}
 	}
 }
+
+// saveCountGroups counts Save calls around an in-memory campaign list.
+type saveCountGroups struct {
+	memGroups
+	saves int
+}
+
+// Save stores the list and counts the call.
+func (g *saveCountGroups) Save(ctx context.Context, list []config.Group) error {
+	g.saves++
+	return g.memGroups.Save(ctx, list)
+}
+
+// TestWriteImportedGroupsResumeNoSecondCopy checks that a second entry of the campaign write
+// does not save the campaigns again and does not start the cursor at zero.
+func TestWriteImportedGroupsResumeNoSecondCopy(t *testing.T) {
+	s, _ := newKeitaroServers(t, "", "", nil, nil, nil)
+	store := &saveCountGroups{}
+	s.cfg.Groups = store
+	if msg := s.ktJob.beginImport(); msg != "" {
+		t.Fatal(msg)
+	}
+	incoming := []ktimport.Group{
+		{ID: "a", Name: "A", Num: 1, Streams: []ktimport.Stream{{Name: "s", Status: true}}},
+		{ID: "b", Name: "B", Num: 2, Streams: []ktimport.Stream{{Name: "s", Status: true}}},
+	}
+	n, _, err := s.writeImportedGroups(context.Background(), incoming, ktimport.Manifest{}, "", nil, "", config.MainBoardID, nil, nil)
+	if err != nil || n != 2 || len(store.list) != 2 || store.saves != 1 {
+		t.Fatalf("first n=%d saves=%d groups=%d err=%v", n, store.saves, len(store.list), err)
+	}
+	if v := s.ktJob.snapshot(); v.Done != 2 || v.Total != 2 || v.Stage != "groups" {
+		t.Fatalf("cursor %+v", v)
+	}
+	saves := store.saves
+	n, _, err = s.writeImportedGroups(context.Background(), incoming, ktimport.Manifest{}, "", nil, "", config.MainBoardID, nil, s.ktJob.savedGroupIDs())
+	if err != nil || n != 2 || len(store.list) != 2 || store.saves != saves {
+		t.Fatalf("second n=%d saves=%d groups=%d err=%v list=%+v", n, store.saves, len(store.list), err, store.list)
+	}
+	if v := s.ktJob.snapshot(); v.Done != 2 || v.Total != 2 {
+		t.Fatalf("cursor reset %+v", v)
+	}
+	incoming = append(incoming, ktimport.Group{ID: "c", Name: "C", Num: 3, Streams: []ktimport.Stream{{Name: "s", Status: true}}})
+	n, _, err = s.writeImportedGroups(context.Background(), incoming, ktimport.Manifest{}, "", nil, "", config.MainBoardID, nil, s.ktJob.savedGroupIDs())
+	if err != nil || n != 3 || store.saves != saves+1 {
+		t.Fatalf("third n=%d saves=%d err=%v", n, store.saves, err)
+	}
+	copies := map[string]int{}
+	for _, g := range store.list {
+		copies[g.ID]++
+	}
+	if copies["a"] != 1 || copies["b"] != 1 || copies["c"] != 1 || len(store.list) != 3 {
+		t.Fatalf("copies %v list %d", copies, len(store.list))
+	}
+	if v := s.ktJob.snapshot(); v.Done != 3 || v.Total != 3 {
+		t.Fatalf("cursor after new %+v", v)
+	}
+}

@@ -54,6 +54,9 @@ type keitaroJournal struct {
 	Resumable    bool                      `json:"resumable"`
 	// Pickups counts the continuations admin made by itself after a restart cut; a click resets it.
 	Pickups int `json:"pickups,omitempty"`
+	// GroupsSaved are the campaign ids this run has already written.
+	// A resumed campaign write skips them and counts them as done, so the same campaigns are not saved again.
+	GroupsSaved []string `json:"groups_saved,omitempty"`
 }
 
 // keitaroPickupMax is how many times admin continues a restart-cut import by itself.
@@ -65,12 +68,14 @@ const keitaroPickupMax = 5
 // and a finished log is cleared. clicksFrom is the tracker time the click log continues from,
 // empty to read the window from its start. clicksRows is the click rows already counted.
 // counts and losses are those of the earlier attempts.
+// groupsSaved are the campaign ids already written; the campaign write continues after them.
 type keitaroResumeRun struct {
-	req        keitaroImportReq
-	clicksFrom string
-	clicksRows int
-	counts     map[string]int
-	losses     []ktimport.Loss
+	req         keitaroImportReq
+	clicksFrom  string
+	clicksRows  int
+	counts      map[string]int
+	losses      []ktimport.Loss
+	groupsSaved []string
 }
 
 // idleJournal returns the journal of a job that never ran: stage idle, empty counts, losses and log marks.
@@ -118,7 +123,10 @@ func (r keitaroJournal) resumeRun() keitaroResumeRun {
 	if r.Logs["conversions"].Done {
 		req.Conversions = false
 	}
-	out := keitaroResumeRun{req: req, counts: copyCounts(r.Counts), losses: append([]ktimport.Loss{}, r.Losses...)}
+	out := keitaroResumeRun{
+		req: req, counts: copyCounts(r.Counts), losses: carriedImportLosses(req, r.Losses),
+		groupsSaved: append([]string{}, r.GroupsSaved...),
+	}
 	if req.Clicks {
 		out.clicksFrom = r.Logs["clicks"].Through
 		if out.clicksFrom != "" {
@@ -126,6 +134,19 @@ func (r keitaroJournal) resumeRun() keitaroResumeRun {
 		}
 	}
 	return out
+}
+
+// carriedImportLosses returns the losses a resumed attempt keeps.
+// req is the work still left. previous are the losses stored on the journal.
+// A catalog map builds its report again, so the stored copy is dropped: keeping it
+// stacked the same approximation on every restart of the campaign write.
+// A click or conversion continuation keeps the report, because that map does not run.
+// It does not return an error.
+func carriedImportLosses(req keitaroImportReq, previous []ktimport.Loss) []ktimport.Loss {
+	if req.catalog() {
+		return nil
+	}
+	return append([]ktimport.Loss{}, previous...)
 }
 
 // normalize fills nil maps and slices of a journal read from disk.

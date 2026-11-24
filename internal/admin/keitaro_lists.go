@@ -61,6 +61,109 @@ func stripMissingIPLists(groups []ktimport.Group) ([]ktimport.Group, []ktimport.
 	return groups, losses
 }
 
+// keitaroGroupBatch is how many campaigns one save of the campaign-write stage stores.
+// The next save continues after the campaigns already in the file, so a restart does not
+// write the whole list again from the first campaign.
+const keitaroGroupBatch = 40
+
+// writeImportedGroups saves campaigns in batches and continues after ids already written.
+// incoming is the mapper output. prev is the manifest from before this run.
+// savedIDs are the group ids this run already stored; they are not written again and
+// the stage cursor starts at their number, not at zero.
+// The most common postback is lifted once, before the batches.
+// It returns how many incoming groups are saved, including those saved on an earlier attempt,
+// and the skip report of this attempt. An error means a batch could not be read or saved.
+// Campaigns saved before the error stay in the file and in savedIDs.
+func (s *Server) writeImportedGroups(ctx context.Context, incoming []ktimport.Group, prev ktimport.Manifest, owner string, runManifest *ktimport.Manifest, host string, board string, manifestStore ManifestStore, savedIDs []string) (int, []ktimport.Loss, error) {
+	saved := make(map[string]bool, len(savedIDs))
+	for _, id := range savedIDs {
+		if id != "" {
+			saved[id] = true
+		}
+	}
+	unique, losses := keepFirstGroups(incoming)
+	var pending []ktimport.Group
+	for _, g := range unique {
+		if g.ID != "" && saved[g.ID] {
+			continue
+		}
+		pending = append(pending, g)
+	}
+	total := len(unique)
+	done := countHandledGroups(unique, saved)
+	if s.ktJob != nil {
+		s.ktJob.noteGroupsSaved(nil, done, total)
+	}
+	if len(pending) == 0 {
+		return done, losses, nil
+	}
+	pending, err := s.extractGlobalS2S(ctx, board, pending)
+	if err != nil {
+		return done, losses, err
+	}
+	for start := 0; start < len(pending); start += keitaroGroupBatch {
+		if err := ctx.Err(); err != nil {
+			return done, losses, err
+		}
+		end := start + keitaroGroupBatch
+		if end > len(pending) {
+			end = len(pending)
+		}
+		batch := pending[start:end]
+		_, extra, err := s.importGroups(ctx, batch, prev, owner, runManifest, host, board, manifestStore)
+		losses = append(losses, extra...)
+		if err != nil {
+			return done, losses, err
+		}
+		wrote, err := s.groupsNowSaved(ctx, batch, saved)
+		if err != nil {
+			return done, losses, err
+		}
+		done = countHandledGroups(unique, saved)
+		if s.ktJob != nil {
+			s.ktJob.noteGroupsSaved(wrote, done, total)
+		}
+	}
+	return done, losses, nil
+}
+
+// groupsNowSaved marks batch ids that are in the groups file after a save.
+// batch is the campaigns just passed to importGroups. saved is updated in place.
+// It returns the ids that were not marked before this batch and are now in the file.
+// An error means the file could not be read.
+func (s *Server) groupsNowSaved(ctx context.Context, batch []ktimport.Group, saved map[string]bool) ([]string, error) {
+	stored, err := s.cfg.Groups.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	have := make(map[string]bool, len(stored))
+	for _, g := range stored {
+		have[g.ID] = true
+	}
+	var wrote []string
+	for _, g := range batch {
+		if g.ID == "" || saved[g.ID] || !have[g.ID] {
+			continue
+		}
+		saved[g.ID] = true
+		wrote = append(wrote, g.ID)
+	}
+	return wrote, nil
+}
+
+// countHandledGroups counts incoming campaigns whose id is already saved.
+// unique is the deduped mapper output. saved is the set of written ids.
+// It returns that count. It does not return an error.
+func countHandledGroups(unique []ktimport.Group, saved map[string]bool) int {
+	n := 0
+	for _, g := range unique {
+		if g.ID != "" && saved[g.ID] {
+			n++
+		}
+	}
+	return n
+}
+
 // importGroups merges campaigns and saves the groups that pass the checks.
 // incoming is the mapper output. prev is the manifest from before this run.
 // The first copy of a repeated id is kept. The most common postback is lifted

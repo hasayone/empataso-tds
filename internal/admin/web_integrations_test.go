@@ -219,18 +219,27 @@ func TestIntegrationsFormLayout(t *testing.T) {
 		`<label class="sw"><input type="checkbox" id="nc-sandbox"`, `role="switch"`, `<i></i></label><label for="nc-sandbox">`,
 		"cur.local?calloutHTML('warn',tr('nc.local'),{id:'nc-local-hint'}):''",
 		"calloutHTML('info',tr('nc.intro'))",
-		`<div class="g2"><div class="fld"><label for="nc-name">`,
+		"calloutHTML('info',tr('nc.ip.hint'))",
 		`<div class="g2"><div class="fld"><label for="nc-username">`,
+		`<label for="nc-key">`,
+		`copyField('id="nc-ip" class="mono"'`,
+		`calloutHTML('warn',tr('nc.contacts.match'),{id:'nc-contacts-match'})`,
+		`id="nc-contacts"`,
 		"q('#nc-sandbox',host).checked",
 		"calloutSet(q('#nc-status',host),text,bad?'err':'ok')",
+		"api_user:name, username:name",
+		"name:accountName()",
 	} {
 		must(t, nc, needle, "Namecheap card")
 	}
+	mustNot(t, nc, `id="nc-name"`, "the account name is not an input")
+	mustNot(t, nc, `id="nc-apiuser"`, "the API user is not a second input")
+	mustNot(t, nc, "203.0.113.10", "the server IP is not a typed example")
 	mustNot(t, nc, `class="tog"><input type="checkbox" id="nc-sandbox"`, "sandbox pill")
 	mustNot(t, nc, `class="hint`, "Namecheap hints are callouts")
 	account := strings.Index(nc, `data-ncpanel="account"`)
 	contacts := strings.Index(nc, `data-ncpanel="contacts"`)
-	for _, needle := range []string{"{id:'nc-local-hint'}", `id="nc-sandbox"`, `for="nc-name"`, `for="nc-ip"`} {
+	for _, needle := range []string{"{id:'nc-local-hint'}", `id="nc-sandbox"`, `for="nc-username"`, `for="nc-ip"`} {
 		at := strings.Index(nc, needle)
 		if account < 0 || contacts < account || at < account || at > contacts {
 			t.Errorf("%s must sit in the account tab of the Namecheap card", needle)
