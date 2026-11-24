@@ -1114,6 +1114,12 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
 
   /* ---- tables ---- */
   .tw{overflow-x:auto;border:1px solid var(--border);border-radius:var(--r);background:var(--surface)}
+  /* Long lists scroll with the document. The wrapper is not a scrollport, so the
+     column titles stick under the app bar and the block has no vertical bar.
+     A table wider than the window scrolls with the page. */
+  .tw.stickhead{overflow:visible}
+  .tw.stickhead thead{position:sticky;top:calc(var(--top) + env(safe-area-inset-top, 0px));z-index:6;background:var(--surface-2)}
+  .tw.stickhead thead th{background:var(--surface-2)}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th,td{text-align:left;padding:9px 12px;border-bottom:1px solid var(--border);white-space:nowrap}
   th{position:relative;font-size:12px;font-weight:650;color:var(--muted);background:var(--surface-2)}
@@ -1615,13 +1621,13 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
 
   /* automation */
   .jobs{column-width:460px;column-gap:14px}
-  .job{padding:16px 0 16px 18px;display:flex;flex-direction:row;align-items:flex-start;gap:8px;min-width:0;break-inside:avoid;margin-bottom:14px}
+  .job{position:relative;padding:16px;display:flex;flex-direction:row;align-items:flex-start;min-width:0;break-inside:avoid;margin-bottom:14px}
   .job-in{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px}
-  button.icon.job-grip{display:inline-flex;touch-action:none;cursor:grab;flex:none;align-self:flex-start;margin-top:0;user-select:none;-webkit-user-drag:none;width:32px;height:32px}
+  button.icon.job-grip{position:absolute;left:0;top:16px;z-index:1;display:inline-flex;touch-action:none;cursor:grab;margin:0;user-select:none;-webkit-user-drag:none;width:32px;height:32px}
   button.icon.job-grip:active{cursor:grabbing}
   .job.cron-drag{position:fixed;z-index:90;box-shadow:var(--shadow-3);opacity:.98;pointer-events:none}
   .job-ph{background:var(--surface-2);border:2px dashed var(--border);box-shadow:none;min-height:48px;padding:0}
-  .job .hd{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px}
+  .job .hd{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding-left:24px}
   .job .hd b{font-size:15px;flex:1 1 10em;min-width:8em;line-height:1.3}
   .job .hd-act{display:flex;align-items:center;gap:8px;margin-left:auto;flex:none;flex-shrink:0}
   .job .hd-act .pill{max-width:100%}
@@ -16709,7 +16715,7 @@ function paintFlowCards(){
     const importBtn=!boardIsMain()&&canCreate(ME,'campaigns')?`<div style="margin-top:12px"><button type="button" class="primary" id="flow-board-import">${icon('download')}${tr('board.import')}</button></div>`:'';
     grid.innerHTML=empty
       ?`<div class="state">${tr('No flows yet')}${importBtn}</div>`
-      :`${bar}<div class="tw"><table class="ftable"><thead><tr><th class="pick"><input type="checkbox" data-pick="*" ${allOn?'checked':''} aria-label="${page.length}"></th>${cols.map(c=>headFor(c)+(c.id==='name'?'<th class="acts"></th>':'')).join('')}</tr></thead><tbody>${body||`<tr><td colspan="${span}">${miss}</td></tr>`}</tbody></table></div>`;
+      :`${bar}<div class="tw stickhead"><table class="ftable"><thead><tr><th class="pick"><input type="checkbox" data-pick="*" ${allOn?'checked':''} aria-label="${page.length}"></th>${cols.map(c=>headFor(c)+(c.id==='name'?'<th class="acts"></th>':'')).join('')}</tr></thead><tbody>${body||`<tr><td colspan="${span}">${miss}</td></tr>`}</tbody></table></div>`;
     bind(grid);
     const fbi=q('#flow-board-import',grid);
     if(fbi) fbi.onclick=()=>openBoardImport();
@@ -21688,7 +21694,7 @@ async function loadLogs(unsorted){
   const logFields=fieldsFor('events');
   const logMeta={text:new Set(['campaign','stream','country','device','keyword','domain','cid','site','city','region','lang','operator','redirect','se','via','timezone','bot','external_id','ad_campaign_id','creative_id','xrw']), date:new Set(['ts']), field:(id)=>logSortField('events', id, logFields)};
   const rows=r.rows.map((x,i)=>`<tr class="click" data-i="${i}">${cols.map(c=>`<td class="${cellClass(c.id)}">${logCell(x,c.id)}</td>`).join('')}</tr>`).join('');
-  wrap.innerHTML=`<div class="tw"><table><thead><tr>${sortableHead('logs', LOG_SORT, cols, logMeta)}</tr></thead><tbody>${rows}</tbody></table></div>`;
+  wrap.innerHTML=`<div class="tw stickhead"><table><thead><tr>${sortableHead('logs', LOG_SORT, cols, logMeta)}</tr></thead><tbody>${rows}</tbody></table></div>`;
   bindSort(wrap, LOG_SORT, ()=>{LOG_PAGE_I=0; loadLogs()});
   qa('tr[data-i]', wrap).forEach(row=>row.onclick=e=>{if(!e.target.closest('a')) logDetail(LOGROWS[+row.dataset.i])});
   paintLogDock(LOG_TOTAL);
@@ -21818,7 +21824,7 @@ async function loadPostbackLog(){
     return r[k]==null?'':r[k];
   };
   const sorted=PB_LOG_SORT.k?applySort(rows.slice(), PB_LOG_SORT, pbVal, pbMeta):rows;
-  wrap.innerHTML=`<div class="tw"><table><thead><tr>${sortableHead('pblog', PB_LOG_SORT, pbCols, pbMeta)}</tr></thead><tbody>${
+  wrap.innerHTML=`<div class="tw stickhead"><table><thead><tr>${sortableHead('pblog', PB_LOG_SORT, pbCols, pbMeta)}</tr></thead><tbody>${
     sorted.map(r=>{const st=String(r.status||'').toLowerCase(); const stLabel=st==='lead'?tr('conv.lead'):st==='sale'?tr('conv.sale'):st==='rejected'?tr('conv.rejected'):(r.status||''); return `<tr><td class="mono">${when(r.ts)}</td><td class="mono">${esc(r.subid||'')}</td><td>${esc(stLabel)}</td><td class="num">${moneyText(r.payout||0,'USD',2)}</td><td>${esc(r.outcome||'')}</td><td>${esc(r.direction||'')}</td></tr>`}).join('')
   }</tbody></table></div>`;
   bindSort(wrap, PB_LOG_SORT, ()=>loadPostbackLog());
@@ -21829,7 +21835,7 @@ async function loadSystemLog(){
   const rows=await get('/api/notices',[]);
   if(!q('#logwrap')) return;
   if(!rows||!rows.length){wrap.innerHTML=`<div class="card">${stateHTML(tr('rep.empty'))}</div>`; return}
-  wrap.innerHTML=`<div class="tw"><table><thead><tr><th>${tr('log.system')}</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="mono">${esc(r)}</td></tr>`).join('')}</tbody></table></div>`;
+  wrap.innerHTML=`<div class="tw stickhead"><table><thead><tr><th>${tr('log.system')}</th></tr></thead><tbody>${rows.map(r=>`<tr><td class="mono">${esc(r)}</td></tr>`).join('')}</tbody></table></div>`;
 }
 async function conversions(arg, live){
   showPageWait(tr('nav.conversions'), '#pb-wrap');
@@ -21940,7 +21946,7 @@ async function loadPostbacks(unsorted){
     if(c.id==='depsum') cls=['num', moneyCellCls('rev',{amount:+x.depsum||0,ready:true})].filter(Boolean).join(' ');
     return `<td class="${cls}">${convCell(x,c.id)}</td>`;
   }).join('')}</tr>`).join('');
-  wrap.innerHTML=`<div class="tw"><table><thead><tr>${sortableHead('conv', PB_SORT, cols, convMeta)}</tr></thead><tbody>${body}</tbody></table></div>`;
+  wrap.innerHTML=`<div class="tw stickhead"><table><thead><tr>${sortableHead('conv', PB_SORT, cols, convMeta)}</tr></thead><tbody>${body}</tbody></table></div>`;
   bindSort(wrap, PB_SORT, ()=>{PB_PAGE_I=0; loadPostbacks()});
 }
 
@@ -22364,7 +22370,7 @@ function paintKwStats(){
   const body=shown.map(r=>`<tr>${cols.map(c=>`<td class="${tdCls(r,c.id)}${c.id==='keyword'?' kws-key':''}">${cell(r,c.id)}</td>`).join('')}</tr>`).join('');
   const tot=KWS_DATA.totals;
   const foot=total>0?`<tfoot><tr>${cols.map((c,i)=>`<td class="${tdCls(tot,c.id)}">${c.id==='trend'?'':esc(i===0?trFill('rep.total',{n:fmt(total)}):kwsCellText(tot,c.id,false))}</td>`).join('')}</tr></tfoot>`:'';
-  wrap.innerHTML=`<div id="kwspage-top" class="flowpager"></div><div class="tw" id="kws-tw"><table><thead><tr>${sortableHead('', KWS_SORT, cols, meta)}</tr></thead><tbody>${body||`<tr><td colspan="${cols.length}">${esc(tr('rep.empty'))}</td></tr>`}</tbody>${foot}</table></div><div id="kwspage" class="flowpager"></div>`;
+  wrap.innerHTML=`<div id="kwspage-top" class="flowpager"></div><div class="tw stickhead" id="kws-tw"><table><thead><tr>${sortableHead('', KWS_SORT, cols, meta)}</tr></thead><tbody>${body||`<tr><td colspan="${cols.length}">${esc(tr('rep.empty'))}</td></tr>`}</tbody>${foot}</table></div><div id="kwspage" class="flowpager"></div>`;
   const pager={total, pageSize:KWS_PAGE, pageIndex:KWS_PAGE_I, sizes:TABLE_PAGE_SIZES, numbers:true,
     setPageIndex:i=>{KWS_PAGE_I=i}, setPageSize:n=>{KWS_PAGE=n}, onReload:()=>loadKwStats(true)};
   paintServerPager(q('#kwspage-top',wrap), Object.assign({prefix:'kwspt-'}, pager));
@@ -26508,7 +26514,7 @@ async function networks(arg,live){
     const emptyMsg=catalogFiltered('networks')?tr('Nothing matches'):tr('net.empty');
     const netHead=cols.filter(c=>c.on).map(c=>sortableHead('networks', NET_SORT, [c], textIds)+(c.id==='name'?'<th class="acts"></th>':'')).join('');
     const netActs=n=>`<td class="acts">${canEdit(ME,'networks',n)?`<button type="button" class="icon sm ghost" data-nmore="${esc(n.id)}" title="${tr('More')}" aria-label="${tr('More')}">${icon('more')}</button>`:''}</td>`;
-    grid.innerHTML=`${catalogBulkBar('networks', sorted.length)}<div class="tw"><table><thead><tr>${catalogPickHead('networks', sliced.page)}${netHead}</tr></thead><tbody>${
+    grid.innerHTML=`${catalogBulkBar('networks', sorted.length)}<div class="tw stickhead"><table><thead><tr>${catalogPickHead('networks', sliced.page)}${netHead}</tr></thead><tbody>${
       sliced.page.map(n=>`<tr class="click" data-nedit="${esc(n.id)}">${catalogPickCell('networks', n)}${networkRowHTML(n, metrics.get(n.id), netActs(n))}</tr>`).join('')||`<tr><td colspan="${ncols+1}">${emptyMsg}</td></tr>`
     }</tbody></table></div>
     ${edit?(()=>{
@@ -26516,7 +26522,7 @@ async function networks(arg,live){
       const nMetrics=new Map();
       netOffers.forEach(o=>nMetrics.set(o.id, offerMetrics(o.id)));
       if(NET_OFF_SORT.k) netOffers=applySort(netOffers, NET_OFF_SORT, (o,k)=>offerSortValue(o,k,nMetrics.get(o.id), cur?cur.name:''), offMeta);
-      return `<h2 style="margin-top:18px">${esc(cur?cur.name:'')}</h2><div class="tw" id="net-offers"><table><thead><tr>${sortableHead('offers', NET_OFF_SORT, loadCols('offers'), offMeta)}</tr></thead><tbody>${
+      return `<h2 style="margin-top:18px">${esc(cur?cur.name:'')}</h2><div class="tw stickhead" id="net-offers"><table><thead><tr>${sortableHead('offers', NET_OFF_SORT, loadCols('offers'), offMeta)}</tr></thead><tbody>${
         netOffers.map(o=>`<tr>${offerRowHTML(o, cur?cur.name:'')}</tr>`).join('')||`<tr><td colspan="${ocols}">${tr('off.empty')}</td></tr>`
       }</tbody></table></div>`;
     })():''}`;
@@ -26978,7 +26984,7 @@ async function offers(arg,live){
     const offHead=(cols.some(c=>c.id==='name')?'':offActsTh)+cols.map(c=>sortableHead('offers', OFF_SORT, [c], offMeta)+(c.id==='name'?offActsTh:'')).join('');
     const offActs=o=>`<td class="acts">${canEdit(ME,'offers',o)?`<button type="button" class="icon sm ghost" data-omore="${esc(o.id)}" title="${tr('More')}" aria-label="${tr('More')}">${icon('more')}</button>`:''}</td>`;
     const geoSpan=Math.max(cols.length,1)+2;
-    grid.innerHTML=`${catalogBulkBar('offers', list.length)}<div class="tw"><table><thead><tr>${catalogPickHead('offers', sliced.page)}${offHead}</tr></thead><tbody>${
+    grid.innerHTML=`${catalogBulkBar('offers', list.length)}<div class="tw stickhead"><table><thead><tr>${catalogPickHead('offers', sliced.page)}${offHead}</tr></thead><tbody>${
       sliced.page.map(o=>`<tr class="click" data-oedit="${esc(o.id)}">${catalogPickCell('offers', o)}${offerRowHTML(o, netName, offActs(o), true, true)}</tr>${offerGeoHTML(o, geoSpan)}`).join('')||`<tr><td colspan="${geoSpan}">${emptyMsg}</td></tr>`
     }</tbody></table></div>`;
     bindSort(grid, OFF_SORT, ()=>{OFF_PAGE_I=0; if(live()) paintTable()});
@@ -28028,7 +28034,7 @@ async function domains(_,live){
     }).join('');
     const bar=DOM_PICK.size?`<div class="bulkbar"><b>${DOM_PICK.size}/${all.length}</b> ${tr('flows.bulk.n')} ${bulkAct('dbulk-on','play',tr('flows.bulk.on'),false)}${bulkAct('dbulk-off','pause',tr('flows.bulk.off'),false)}${bulkAct('dbulk-check','check',tr('dom.check'),false)}${bulkAct('dbulk-group','lists',tr('dom.group.set'),false)}${bulkAct('dbulk-del','trash',tr('flows.bulk.del'),true)}</div>`:'';
     closeDomainPop();
-    grid.innerHTML=`${bar}<div class="tw"><table class="ftable"><thead><tr>${head}</tr></thead><tbody>${body||`<tr><td colspan="${cols.length+2}">${emptyMsg}</td></tr>`}</tbody></table></div>`;
+    grid.innerHTML=`${bar}<div class="tw stickhead"><table class="ftable"><thead><tr>${head}</tr></thead><tbody>${body||`<tr><td colspan="${cols.length+2}">${emptyMsg}</td></tr>`}</tbody></table></div>`;
     bindSort(grid, DOM_SORT, ()=>{DOM_PAGE_I=0; paintTable()});
     bindDomainStatus(grid);
     qa('[data-dpick]',grid).forEach(box=>{
@@ -28316,7 +28322,7 @@ function paintReport(live){
     <div class="chips" id="rep-chips"></div>
     ${cutNote}
     <div id="reppage-top" class="flowpager"></div>
-    <div class="tw" id="rep-tw"><table><thead><tr>${sortableHead('report', REP_SORT, cols, repMeta)}</tr></thead><tbody>${body||`<tr><td colspan="${cols.length}">${tr('rep.empty')}</td></tr>`}</tbody>${foot}</table></div>
+    <div class="tw stickhead" id="rep-tw"><table><thead><tr>${sortableHead('report', REP_SORT, cols, repMeta)}</tr></thead><tbody>${body||`<tr><td colspan="${cols.length}">${tr('rep.empty')}</td></tr>`}</tbody>${foot}</table></div>
     <div id="reppage" class="flowpager"></div>`;
   const costHead=view().querySelector('th[data-col="cost"]');
   if(costHead) costHead.title=trFill('rep.cost.sort',{cur:reportCostCur(tot)});

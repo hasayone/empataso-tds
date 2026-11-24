@@ -8,8 +8,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Tables: column titles on campaigns, offers, affiliate networks, domains, the click log (including Traffic, postbacks and system), conversions, the report and keywords stay under the app bar while the window scrolls. Those lists have no inner vertical bar. A wide table scrolls with the page only when the columns do not fit the window.
 - Save bar: Ctrl+S on Windows and Linux, and ⌘S on Mac, saves the same way as the Save button while the bar is visible. The button shows Ctrl+S or ⌘S for that system.
 - Automation: job cards can be reordered by the handle on the left. The order is the account's saved card list and stays after a reload. A card missing from that list is appended in the default order.
+- Automation: the drag handle sits in the card's left margin, so the fields in a job card use the full card width.
 - Automation: source lists on the IP, geo and bot-signature cards sit in a collapsed tab above the last-run line. Opening it keeps the same source fields.
 - Domains: «Check live domains» walks every enabled domain with the same check as one row. Disabled and pending rows are left out. There is no second scheduler.
 - VirusTotal: «Notify when a flagged domain is found» turns the existing Telegram line on or off. The same chat is used. A saved config without the switch still sends the line.
