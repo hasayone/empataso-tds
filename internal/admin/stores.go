@@ -130,8 +130,11 @@ func (f *FileGroups) writeGroups(groups []config.Group) error {
 	return nil
 }
 
-// encodeGroupList writes groups as one JSON array.
-// w receives the bytes. groups may be nil. Each group is encoded separately.
+// encodeGroupList writes groups as one compact JSON array.
+// w receives the bytes. groups may be nil; a nil or empty list is written as [].
+// A non-empty list is the same bytes as json.Marshal of that slice, with no
+// newline between groups. Each group is encoded on its own, so a large campaign
+// list does not build a second copy of the whole file in memory.
 // It returns an error when a group cannot be encoded or w cannot be written.
 func encodeGroupList(w io.Writer, groups []config.Group) error {
 	if len(groups) == 0 {
@@ -141,14 +144,17 @@ func encodeGroupList(w io.Writer, groups []config.Group) error {
 	if _, err := w.Write([]byte("[")); err != nil {
 		return err
 	}
-	enc := json.NewEncoder(w)
 	for i := range groups {
 		if i > 0 {
 			if _, err := w.Write([]byte(",")); err != nil {
 				return err
 			}
 		}
-		if err := enc.Encode(groups[i]); err != nil {
+		raw, err := json.Marshal(groups[i])
+		if err != nil {
+			return err
+		}
+		if _, err := w.Write(raw); err != nil {
 			return err
 		}
 	}
