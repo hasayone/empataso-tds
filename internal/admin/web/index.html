@@ -1695,10 +1695,17 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
 
   .upd-page .upd-kv td:first-child{width:200px}
   .upd-page .upd-notes-h{font-size:13px;font-weight:650;margin:14px 0 6px}
-  .upd-page pre.notes{margin:0;white-space:pre-wrap;max-height:280px;overflow:auto}
+  .upd-page pre.notes{margin:0;white-space:pre-wrap;max-height:280px;max-width:100%;min-width:0;overflow-x:hidden;overflow-y:auto;overflow-wrap:anywhere;word-break:break-word}
   .upd-page .steps{margin:6px 0 8px;padding-left:20px}
-  .upd-page{display:flex;flex-direction:column;gap:12px;max-width:var(--read-w)}
-  .upd-page .upd-card{margin:0;min-width:0}
+  .upd-page{display:flex;flex-direction:column;gap:12px;width:100%;max-width:min(100%,var(--read-w));min-width:0}
+  .upd-page .upd-card{margin:0;min-width:0;max-width:100%;overflow-wrap:anywhere;word-break:break-word}
+  /* Commit rows: the message takes the leftover width and wraps, even with no spaces. The hash and the author stay one line in their own columns and are not drawn over the message. */
+  .upd-page .upd-clist{min-width:0;max-width:100%}
+  .upd-page .upd-commit{display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:24px;align-items:start;max-width:100%;min-width:0;padding:9px 12px;border-bottom:1px solid var(--border);font-size:13px}
+  .upd-page .upd-clist .upd-commit:last-child{border-bottom:none}
+  .upd-page .upd-commit:hover{background:var(--accent-soft)}
+  .upd-page .upd-csha,.upd-page .upd-cauthor{white-space:nowrap}
+  .upd-page .upd-cmsg{min-width:0;overflow-wrap:anywhere;word-break:break-word}
   .upd-page .upd-hd{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px}
   .upd-page .upd-hd .bt{flex:1;min-width:0;margin:0}
   .upd-page .upd-tools{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:8px;margin-left:auto}
@@ -1706,7 +1713,7 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   .upd-page #upd-apply-why{margin:0 0 10px;text-align:right}
   .upd-page .upd-card>.banner:first-of-type{margin-top:0}
   .upd-page .banner{margin-top:12px}
-  .upd-page .upd-check,.upd-page .upd-state{margin-top:12px}
+  .upd-page .upd-check,.upd-page .upd-state{margin-top:12px;min-width:0;max-width:100%}
   .upd-page .upd-prog{border:1px solid var(--border);border-radius:var(--r-sm);background:var(--surface-2);padding:10px 12px;margin:0 0 12px}
   .upd-page .upd-prog .upd-hd{margin-bottom:4px}
   .upd-page .upd-prog .upd-hd b{flex:1}
@@ -24043,7 +24050,7 @@ async function aboutPage(){
         const tdate=t.date?` &mdash; ${esc(t.date)}`:'';
         let commitRows='';
         if(Array.isArray(ch.commits)&&ch.commits.length>0){
-          commitRows=ch.commits.map(c=>`<tr><td class="mono small">${esc(c.sha?c.sha.slice(0,12):'')}</td><td>${esc(c.subject)}</td><td class="muted">${esc(c.author)}</td></tr>`).join('');
+          commitRows=ch.commits.map(c=>`<div class="upd-commit"><span class="mono small upd-csha">${esc(c.sha?c.sha.slice(0,12):'')}</span><span class="upd-cmsg">${esc(c.subject)}</span><span class="muted upd-cauthor">${esc(c.author)}</span></div>`).join('');
         }
         const signBadge=updSignBadge(ch.signed,ch.signer,!!(ag&&ag.signing));
         const steps=Array.isArray(ch.manual_steps)?ch.manual_steps:[];
@@ -24055,7 +24062,7 @@ async function aboutPage(){
 <tr><td>${esc(tr('upd.commits'))}</td><td>${esc(String(ch.ahead))}</td></tr>
 ${signBadge?`<tr><td></td><td>${signBadge}</td></tr>`:''}
 </table>
-${commitRows?`<table class="table">${commitRows}</table>`:''}
+${commitRows?`<div class="upd-clist">${commitRows}</div>`:''}
 ${stepsHtml}
 ${ch.notes?`<h3 class="upd-notes-h">${esc(tr('upd.notes'))}</h3><pre class="notes">${esc(ch.notes)}</pre>`:''}
 <p class="muted small">${esc(checkedAt)}</p>

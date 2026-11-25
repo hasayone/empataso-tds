@@ -48,40 +48,78 @@ func TestCloudflareIPsValidCIDR(t *testing.T) {
 	}
 }
 
-// TestNginxEngineTemplate проверяет шаблон default_server для движка.
+// TestNginxEngineTemplate проверяет шаблон default_server для движка. Тело vhost (location и
+// заголовки) вынесено в emtds-engine-site.conf, чтобы vhost доменов с сертификатом по имени
+// (emtds-sni.conf) отдавали движок теми же правилами; поэтому фрагменты ищутся в обоих файлах.
 func TestNginxEngineTemplate(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("nginx", "emtds-engine.conf"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	s := string(data)
+	engine := readEdgeFile(t, filepath.Join("nginx", "emtds-engine.conf"))
+	site := strings.ReplaceAll(readEdgeFile(t, filepath.Join("nginx", "emtds-engine-site.conf")), "\r\n", "\n")
 	for _, frag := range []string{
 		"default_server",
 		"upstream emtds_engine {",
 		"server __ENGINE_UPSTREAM__;",
 		"keepalive 32;",
+		"server_name _",
+		"include /etc/nginx/emtds/engine-site.conf;",
+	} {
+		if !strings.Contains(engine, frag) {
+			t.Fatalf("emtds-engine.conf: нет %q", frag)
+		}
+	}
+	for _, frag := range []string{
 		"proxy_pass http://emtds_engine;",
 		`proxy_set_header Connection "";`,
 		"proxy_set_header X-Forwarded-For $remote_addr",
 		"proxy_set_header CF-Connecting-IP $emtds_cf_ip",
 		"proxy_set_header CF-IPCountry $emtds_cf_country",
 		"real_ip_header CF-Connecting-IP",
-		"server_name _",
 	} {
-		if !strings.Contains(s, frag) {
-			t.Fatalf("emtds-engine.conf: нет %q", frag)
+		if !strings.Contains(site, frag) {
+			t.Fatalf("emtds-engine-site.conf: нет %q", frag)
 		}
 	}
-	if strings.Contains(s, "$proxy_add_x_forwarded_for") {
-		t.Fatal("emtds-engine.conf: не должно быть $proxy_add_x_forwarded_for")
+	for name, s := range map[string]string{"emtds-engine.conf": engine, "emtds-engine-site.conf": site} {
+		if strings.Contains(s, "$proxy_add_x_forwarded_for") {
+			t.Fatalf("%s: не должно быть $proxy_add_x_forwarded_for", name)
+		}
 	}
-	if !strings.Contains(s, "location ^~ /internal/") || !strings.Contains(s, "return 404") {
-		t.Fatal("emtds-engine.conf: ожидали location ^~ /internal/ { return 404; }")
+	if regexp.MustCompile(`(?m)^\s*(server|upstream|listen|ssl_certificate)\b`).MatchString(site) {
+		t.Fatal("emtds-engine-site.conf: только тело vhost, без server, upstream, listen и сертификата")
 	}
-	internalIdx := strings.Index(s, "location ^~ /internal/")
-	rootLocIdx := strings.Index(s, "\n    location / {")
+	if !strings.Contains(site, "location ^~ /internal/") || !strings.Contains(site, "return 404") {
+		t.Fatal("emtds-engine-site.conf: ожидали location ^~ /internal/ { return 404; }")
+	}
+	internalIdx := strings.Index(site, "location ^~ /internal/")
+	rootLocIdx := strings.Index(site, "\nlocation / {")
 	if internalIdx < 0 || rootLocIdx < 0 || internalIdx > rootLocIdx {
-		t.Fatal("emtds-engine.conf: /internal/ должен быть до location /")
+		t.Fatal("emtds-engine-site.conf: /internal/ должен быть до location /")
+	}
+	acmeAt := strings.Index(site, "location ^~ /.well-known/acme-challenge/ {")
+	if acmeAt < 0 || acmeAt > rootLocIdx || !strings.Contains(site[acmeAt:rootLocIdx], "proxy_pass http://emtds_admin;") {
+		t.Fatal("emtds-engine-site.conf: /.well-known/acme-challenge/ должен идти в админку до location /")
+	}
+}
+
+// TestNginxSNITemplate проверяет vhost домена с выпущенным сертификатом: выбор по имени, без
+// default_server, сертификат из каталога состояния и то же тело, что у default_server движка.
+func TestNginxSNITemplate(t *testing.T) {
+	s := readEdgeFile(t, filepath.Join("nginx", "emtds-sni-server.conf"))
+	for _, frag := range []string{
+		"listen 443 ssl;",
+		"listen [::]:443 ssl;",
+		"server_name __DOMAIN__;",
+		"ssl_certificate __STATE_DIR__/tls/domains/__DOMAIN__/fullchain.pem;",
+		"ssl_certificate_key __STATE_DIR__/tls/domains/__DOMAIN__/privkey.pem;",
+		"include /etc/nginx/emtds/engine-site.conf;",
+	} {
+		if !strings.Contains(s, frag) {
+			t.Fatalf("emtds-sni-server.conf: нет %q", frag)
+		}
+	}
+	for _, bad := range []string{"default_server", "listen 80", "proxy_pass", "upstream"} {
+		if strings.Contains(s, bad) {
+			t.Fatalf("emtds-sni-server.conf: не ждали %q", bad)
+		}
 	}
 }
 
@@ -187,7 +225,7 @@ func TestNginxAdminHostTemplate(t *testing.T) {
 func TestNginxUpstreamsKeepalive(t *testing.T) {
 	declared := map[string]int{}
 	upstreamRe := regexp.MustCompile(`(?m)^upstream\s+(\S+)\s*\{`)
-	for _, name := range []string{"emtds.conf", "emtds-admin-host.conf", "emtds-engine.conf"} {
+	for _, name := range []string{"emtds.conf", "emtds-admin-host.conf", "emtds-engine.conf", "emtds-engine-site.conf", "emtds-http.conf", "emtds-sni-server.conf"} {
 		data, err := os.ReadFile(filepath.Join("nginx", name))
 		if err != nil {
 			t.Fatal(err)
@@ -249,19 +287,28 @@ func TestApplyEdgeScriptGuards(t *testing.T) {
 	}
 }
 
-// TestNginxHTTPTemplate проверяет шаблон порта 80: только редирект на https того же хоста, без
-// default_server (чужой сервер с ним не конфликтует) и без проксирования.
+// TestNginxHTTPTemplate проверяет шаблон порта 80: редирект на https того же хоста, без
+// default_server (чужой сервер с ним не конфликтует). Проксируется только проверка владения
+// /.well-known/acme-challenge/ — в админку, которая отвечает на свои токены заказа сертификата.
 func TestNginxHTTPTemplate(t *testing.T) {
-	s := readEdgeFile(t, filepath.Join("nginx", "emtds-http.conf"))
+	s := strings.ReplaceAll(readEdgeFile(t, filepath.Join("nginx", "emtds-http.conf")), "\r\n", "\n")
 	for _, frag := range []string{"listen 80;", "listen [::]:80;", "server_name _;", "return 301 https://$host$request_uri;"} {
 		if !strings.Contains(s, frag) {
 			t.Fatalf("emtds-http.conf: нет %q", frag)
 		}
 	}
-	for _, bad := range []string{"default_server", "proxy_pass", "__", "listen 443"} {
+	for _, bad := range []string{"default_server", "__", "listen 443", "emtds_engine"} {
 		if strings.Contains(s, bad) {
 			t.Fatalf("emtds-http.conf: не ждали %q", bad)
 		}
+	}
+	acmeAt := strings.Index(s, "location ^~ /.well-known/acme-challenge/ {")
+	rootAt := strings.Index(s, "location / {")
+	if acmeAt < 0 || rootAt < acmeAt || strings.Count(s, "proxy_pass ") != 1 || !strings.Contains(s[acmeAt:rootAt], "proxy_pass http://emtds_admin;") {
+		t.Fatal("emtds-http.conf: проксируется только /.well-known/acme-challenge/ в emtds_admin")
+	}
+	if !strings.Contains(s[rootAt:], "return 301 https://$host$request_uri;") {
+		t.Fatal("emtds-http.conf: остальное — редирект на https")
 	}
 }
 
@@ -470,6 +517,8 @@ func TestApplyEdgeCheckMode(t *testing.T) {
 		"===== emtds.conf =====",
 		"===== emtds-admin-host.conf =====",
 		"===== emtds-engine.conf =====",
+		"===== engine-site.conf =====",
+		"===== emtds-sni.conf =====",
 	} {
 		if !strings.Contains(outS, block) {
 			t.Fatalf("--check: нет блока %q:\n%s", block, out)
@@ -807,7 +856,7 @@ func TestApplyEdgeInstallRestoreConfigs(t *testing.T) {
 	}
 	confD := filepath.Join(tmp, "conf.d")
 	rendered := filepath.Join(tmp, "rendered")
-	for _, name := range []string{"emtds.conf", "emtds-admin-host.conf", "emtds-engine.conf", "cloudflare-realip.conf", "cloudflare-geo.conf"} {
+	for _, name := range []string{"emtds.conf", "emtds-admin-host.conf", "emtds-engine.conf", "emtds-sni.conf", "engine-site.conf", "cloudflare-realip.conf", "cloudflare-geo.conf"} {
 		write(filepath.Join(rendered, name), "new "+name+"\n")
 	}
 	write(filepath.Join(confD, "emtds.conf"), "old server_name\n")
@@ -835,7 +884,7 @@ cat "$EDGE_CONF_D/emtds.conf"
 	if len(lines) != 4 {
 		t.Fatalf("неожиданный вывод:\n%s", out)
 	}
-	if got, want := strings.Fields(lines[0]), []string{"emtds-admin-host.conf", "emtds-engine.conf", "emtds.conf", "other.conf"}; strings.Join(got, " ") != strings.Join(want, " ") {
+	if got, want := strings.Fields(lines[0]), []string{"emtds-admin-host.conf", "emtds-engine.conf", "emtds-sni.conf", "emtds.conf", "other.conf"}; strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Fatalf("после установки в conf.d %v, ждали %v", got, want)
 	}
 	if got, want := strings.Fields(lines[1]), []string{"emtds.conf"}; strings.Join(got, " ") != strings.Join(want, " ") {

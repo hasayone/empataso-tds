@@ -11,6 +11,23 @@ import (
 	"github.com/hasayone/empataso-tds/internal/admin"
 )
 
+// TestCertDir: certificates are ordered only in production unless EMTDS_ACME says on or off.
+func TestCertDir(t *testing.T) {
+	cases := []struct{ env, toggle, want string }{
+		{"production", "", "/d"},
+		{"production", "off", ""},
+		{"production", " OFF ", ""},
+		{"development", "", ""},
+		{"development", "on", "/d"},
+		{"development", "yes", ""},
+	}
+	for _, c := range cases {
+		if got := certDir(c.env, c.toggle, "/d"); got != c.want {
+			t.Fatalf("certDir(%q, %q) = %q, want %q", c.env, c.toggle, got, c.want)
+		}
+	}
+}
+
 func TestDomainWatchInterval(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	cases := map[string]time.Duration{

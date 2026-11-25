@@ -2248,6 +2248,20 @@ do_timer() {
 		( do_check ) || log "check по расписанию не удался" >&2
 	fi
 	handle_request
+	sync_domain_certs
+}
+
+# Назначение: перенести выпущенные админкой сертификаты доменов из тома в nginx (apply-edge.sh --sync-certs).
+#   Заказ и продление делает только admin; таймер лишь копирует готовые файлы и перечитывает nginx.
+# Параметры: нет (TDS_DIR, VOL_NAME).
+# Результат: 0; без nginx, без apply-edge.sh, в песочнице или без тома — ничего не делает.
+# Ошибки: нет (отказ apply-edge.sh пишется в лог, таймер продолжает работу).
+sync_domain_certs() {
+	[[ -z "$SBX" && -n "${VOL_NAME:-}" ]] || return 0
+	command -v nginx >/dev/null 2>&1 || return 0
+	[[ -f "${TDS_DIR}/deploy/apply-edge.sh" ]] || return 0
+	EMTDS_STATE_VOLUME_NAME="$VOL_NAME" bash "${TDS_DIR}/deploy/apply-edge.sh" --sync-certs 2>&1 | \
+		while IFS= read -r l; do log "$l"; done || true
 }
 
 # ------------------------------------------------------------------

@@ -102,7 +102,7 @@ func TestLayoutWiring(t *testing.T) {
 	must(t, html, `:root[data-layout="wide"]{--main-w:100%;`, "the full width changes the one main width variable")
 	must(t, html, "main{max-width:var(--main-w);", "main follows the width variable")
 	must(t, html, ".sysnote{max-width:var(--main-w);", "notices follow the width variable")
-	must(t, html, ".upd-page{display:flex;flex-direction:column;gap:12px;max-width:var(--read-w)}", "the update page uses the shared reading width")
+	must(t, html, ".upd-page{display:flex;flex-direction:column;gap:12px;width:100%;max-width:min(100%,var(--read-w));min-width:0}", "the update page uses the shared reading width and stays inside the window")
 	set := spaFunctionLine(html, "settings")
 	if set == "" {
 		t.Fatal("settings not found in SPA")

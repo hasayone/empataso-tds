@@ -215,6 +215,17 @@ type Config struct {
 	CloudflareURL  string
 	CloudflareHTTP *http.Client
 
+	// TLSDir is the certificate directory on the state volume: account.key, state.json and
+	// live/<domain>/fullchain.pem and privkey.pem, which the host update agent mirrors into nginx.
+	// Empty disables ordering certificates; so does an empty PublicIP.
+	// ACMEDirectory is the ACME directory URL; empty uses Let's Encrypt production.
+	// ACMEEmail is the optional contact of the ACME account. ACMEHTTP replaces the ACME HTTP client
+	// (tests only); nil keeps the default.
+	TLSDir        string
+	ACMEDirectory string
+	ACMEEmail     string
+	ACMEHTTP      *http.Client
+
 	// NetTemplatesFile is net-templates.json on the data volume: the edits and the added templates
 	// of the network template catalog; empty disables saving them. The embedded catalog never
 	// lives there, so an image update cannot erase an edit.
@@ -386,6 +397,12 @@ type Server struct {
 	watchBusy atomic.Bool
 	// watchFirst is the wait before the first watch tick; zero means thirty seconds. Tests set it.
 	watchFirst time.Duration
+
+	// certBusy is set while a certificate tick runs, so ticks never overlap.
+	certBusy atomic.Bool
+	// acmeMu guards acmeTokens, the HTTP-01 key authorizations by token of the orders running now.
+	acmeMu     sync.Mutex
+	acmeTokens map[string]string
 
 	// checker is the state of the checker integration: its settings, the applications of the
 	// campaigns, the queue and the request gate. loadChecker fills it in New.
@@ -789,6 +806,9 @@ func (s *Server) Handler() http.Handler {
 	s.handle(mux, "POST /api/update/apply", http.HandlerFunc(s.handleUpdateApply))
 	s.handle(mux, "POST /api/update/rollback", http.HandlerFunc(s.handleUpdateRollback))
 	s.handle(mux, "POST /api/update/check", http.HandlerFunc(s.handleUpdateCheck))
+
+	// HTTP-01 answers of certificate orders; not part of the API and open to every caller.
+	mux.HandleFunc("GET /.well-known/acme-challenge/{token}", s.handleACMEChallenge)
 
 	// Embedded web interface (SPA).
 	mux.Handle("GET /assets/", serveAssets())

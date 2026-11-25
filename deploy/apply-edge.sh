@@ -17,6 +17,39 @@ EDGE_TEMPLATE_ADMIN="${EDGE_NGINX_SRC}/emtds.conf"
 EDGE_TEMPLATE_ADMIN_HOST="${EDGE_NGINX_SRC}/emtds-admin-host.conf"
 EDGE_TEMPLATE_ENGINE="${EDGE_NGINX_SRC}/emtds-engine.conf"
 EDGE_TEMPLATE_HTTP="${EDGE_NGINX_SRC}/emtds-http.conf"
+EDGE_TEMPLATE_ENGINE_SITE="${EDGE_NGINX_SRC}/emtds-engine-site.conf"
+EDGE_TEMPLATE_SNI="${EDGE_NGINX_SRC}/emtds-sni-server.conf"
+# Issued domain certificates nginx serves by name: <dir>/<domain>/fullchain.pem and privkey.pem.
+# The admin process keeps the source copy on the state volume (tls/live); --sync-certs mirrors it here.
+EDGE_TLS_DOMAINS="${EDGE_STATE_DIR}/tls/domains"
+# Image and uid that read the state volume, the same as update.sh uses for its volume files.
+EDGE_VOLUME_IMAGE="${EMTDS_VOLUME_IMAGE:-emtds:local}"
+EDGE_VOLUME_UID=10001
+# Certificate backups kept by --sync-certs; older ones are removed.
+EDGE_CERT_BACKUPS_KEEP=5
+EDGE_SYNC_CERTS=0
+# Domains --sync-certs refused in the current run, space separated.
+EDGE_SYNC_REFUSED=
+# A certificate set nginx -t refused is not tried again for this many minutes.
+EDGE_SYNC_REFUSED_MINUTES=60
+# sh script run inside the volume reader container: $1 is the live directory, $2 the output directory.
+# Copies <domain>/fullchain.pem (at most 64 KiB) and privkey.pem (at most 16 KiB); a symlinked live
+# directory, domain directory or file and anything that is not a regular file is skipped.
+EDGE_EXPORT_SCRIPT='
+src=$1
+out=$2
+[ -d "$src" ] && [ ! -L "$src" ] && [ ! -L "${src%/*}" ] || exit 0
+for d in "$src"/*; do
+	n=${d##*/}
+	[ -d "$d" ] && [ ! -L "$d" ] || continue
+	c="$d/fullchain.pem"
+	k="$d/privkey.pem"
+	[ -f "$c" ] && [ ! -L "$c" ] && [ -f "$k" ] && [ ! -L "$k" ] || continue
+	mkdir "$out/$n"
+	head -c 65536 "$c" >"$out/$n/fullchain.pem"
+	head -c 16384 "$k" >"$out/$n/privkey.pem"
+done
+'
 # Package welcome-page configs on port 80; disabled only while unmodified and only when EmTDS takes port 80.
 EDGE_STOCK_DEFAULTS="${EMTDS_NGINX_STOCK_DEFAULTS:-/etc/nginx/conf.d/default.conf /etc/nginx/sites-enabled/default}"
 EDGE_NGINX_EMTDS_DIR=/etc/nginx/emtds
@@ -34,8 +67,9 @@ EDGE_WORKER_RLIMIT_NOFILE_MIN=16384
 
 # Print usage to stderr.
 usage() {
-	printf 'usage: apply-edge.sh [--check] [--tune-events] [public-ipv4]\n' >&2
+	printf 'usage: apply-edge.sh [--check] [--tune-events] [--sync-certs] [public-ipv4]\n' >&2
 	printf '  --check        показать отрендеренные конфиги и текущие worker_connections / worker_rlimit_nofile, ничего не записывать\n' >&2
+	printf '  --sync-certs   перенести выпущенные сертификаты доменов из тома состояния в nginx (SNI), с бэкапом и nginx -t\n' >&2
 	printf '  --tune-events  поднять в /etc/nginx/nginx.conf worker_connections до %s и worker_rlimit_nofile до %s (не меньше, существующие большие значения не трогать)\n' "$EDGE_WORKER_CONNECTIONS_MIN" "$EDGE_WORKER_RLIMIT_NOFILE_MIN" >&2
 }
 
@@ -279,6 +313,50 @@ render_nginx_configs() {
 	sed -e "s/__PUBLIC_IP__/${public_ip}/g" -e "s|__STATE_DIR__|${EDGE_STATE_DIR}|g" "$EDGE_TEMPLATE_ADMIN" >"${dest}/emtds.conf"
 	sed -e "s/__ENGINE_UPSTREAM__/${upstream}/g" -e "s|__STATE_DIR__|${EDGE_STATE_DIR}|g" "$EDGE_TEMPLATE_ADMIN_HOST" >"${dest}/emtds-admin-host.conf"
 	sed -e "s/__ENGINE_UPSTREAM__/${upstream}/g" -e "s|__STATE_DIR__|${EDGE_STATE_DIR}|g" "$EDGE_TEMPLATE_ENGINE" >"${dest}/emtds-engine.conf"
+	cp "$EDGE_TEMPLATE_ENGINE_SITE" "${dest}/engine-site.conf"
+}
+
+# Check a domain name that may get its own certificate vhost.
+# Args: name. Returns 0 for a lowercase DNS name of at most 253 characters with at least two labels,
+# a top label that starts with a letter (so never an IP address) and no admin. prefix (admin.* stays
+# behind the Cloudflare-only vhost); 1 otherwise. No output.
+edge_cert_name_ok() {
+	local n=$1
+	(( ${#n} <= 253 )) || return 1
+	[[ "$n" =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || return 1
+	[[ "$n" != admin.* ]]
+}
+
+# Check one issued domain certificate directory.
+# Args: domain name, directory with fullchain.pem and privkey.pem. Returns 0 when the directory and
+# both files are regular (no symlinks), the pair matches (ip_cert_pair_valid), the certificate has not
+# expired and names the domain; 1 otherwise. No output.
+edge_domain_cert_valid() {
+	local name=$1 dir=$2 crt key match
+	crt="${dir}/fullchain.pem"
+	key="${dir}/privkey.pem"
+	[[ -d "$dir" && ! -L "$dir" && -f "$crt" && ! -L "$crt" && -f "$key" && ! -L "$key" ]] || return 1
+	ip_cert_pair_valid "$crt" "$key" || return 1
+	openssl x509 -in "$crt" -noout -checkend 0 >/dev/null 2>&1 || return 1
+	match=$(openssl x509 -in "$crt" -noout -checkhost "$name" 2>/dev/null) || return 1
+	[[ "$match" == *" does match certificate"* ]]
+}
+
+# Render emtds-sni.conf into DEST: one engine vhost (template emtds-sni-server.conf) per valid
+# certificate directory of SRC. The vhosts always point at EDGE_TLS_DOMAINS, where SRC is installed.
+# Args: dest dir, source dir of <domain>/ directories (a missing one gives a file with the header only).
+# A directory with a bad name or a pair edge_domain_cert_valid refuses is left out.
+render_sni_config() {
+	local dest=$1 src=$2 d n
+	printf '# EmTDS: written by apply-edge.sh from %s, do not edit.\n' "$EDGE_TLS_DOMAINS" >"${dest}/emtds-sni.conf"
+	[[ -d "$src" ]] || return 0
+	for d in "$src"/*; do
+		[[ -d "$d" && ! -L "$d" ]] || continue
+		n=${d##*/}
+		edge_cert_name_ok "$n" || continue
+		edge_domain_cert_valid "$n" "$d" || continue
+		sed -e "s/__DOMAIN__/${n}/g" -e "s|__STATE_DIR__|${EDGE_STATE_DIR}|g" "$EDGE_TEMPLATE_SNI" >>"${dest}/emtds-sni.conf"
+	done
 }
 
 # Render all edge artifacts into DEST_DIR; print paths on success.
@@ -292,6 +370,7 @@ render_all() {
 	upstream=$(engine_upstream_from_publish "$publish")
 	render_cloudflare_snippets "$dest"
 	render_nginx_configs "$dest" "$public_ip" "$upstream"
+	render_sni_config "$dest" "$EDGE_TLS_DOMAINS"
 	render_http_redirect "$dest"
 }
 
@@ -642,9 +721,11 @@ install_rendered() {
 	install -d -m 0755 "$EDGE_NGINX_EMTDS_DIR"
 	install -m 0644 "${src}/cloudflare-realip.conf" "${EDGE_NGINX_EMTDS_DIR}/cloudflare-realip.conf"
 	install -m 0644 "${src}/cloudflare-geo.conf" "${EDGE_NGINX_EMTDS_DIR}/cloudflare-geo.conf"
+	install -m 0644 "${src}/engine-site.conf" "${EDGE_NGINX_EMTDS_DIR}/engine-site.conf"
 	install -m 0644 "${src}/emtds.conf" "${EDGE_CONF_D}/emtds.conf"
 	install -m 0644 "${src}/emtds-admin-host.conf" "${EDGE_CONF_D}/emtds-admin-host.conf"
 	install -m 0644 "${src}/emtds-engine.conf" "${EDGE_CONF_D}/emtds-engine.conf"
+	install -m 0644 "${src}/emtds-sni.conf" "${EDGE_CONF_D}/emtds-sni.conf"
 	install_http_redirect "$src" "$backup_dir"
 }
 
@@ -729,7 +810,7 @@ run_check() {
 	tp=$(env_value "$EDGE_SERVER_ENV" EMTDS_TRUSTED_PROXIES)
 	admin_tp=$(env_value "$EDGE_SERVER_ENV" EMTDS_ADMIN_TRUSTED_PROXIES)
 	edge_msg "check mode: public_ip=${public_ip} trusted_proxies=${tp} admin_trusted_proxies=${admin_tp}"
-	for f in cloudflare-realip.conf cloudflare-geo.conf emtds.conf emtds-admin-host.conf emtds-engine.conf; do
+	for f in cloudflare-realip.conf cloudflare-geo.conf emtds.conf emtds-admin-host.conf emtds-engine.conf engine-site.conf emtds-sni.conf; do
 		printf '===== %s =====\n' "$f"
 		cat "${tmp}/${f}"
 	done
@@ -753,7 +834,7 @@ run_apply() {
 		edge_msg "нужны права root" >&2
 		return 1
 	fi
-	for f in "$EDGE_CF_IPS" "$EDGE_TEMPLATE_ADMIN" "$EDGE_TEMPLATE_ADMIN_HOST" "$EDGE_TEMPLATE_ENGINE" "$EDGE_TEMPLATE_HTTP"; do
+	for f in "$EDGE_CF_IPS" "$EDGE_TEMPLATE_ADMIN" "$EDGE_TEMPLATE_ADMIN_HOST" "$EDGE_TEMPLATE_ENGINE" "$EDGE_TEMPLATE_HTTP" "$EDGE_TEMPLATE_ENGINE_SITE" "$EDGE_TEMPLATE_SNI"; do
 		if [[ ! -f "$f" ]]; then
 			edge_msg "не найден шаблон: ${f}" >&2
 			return 1
@@ -790,6 +871,174 @@ run_apply() {
 	edge_msg "ok: public_ip=${public_ip} trusted_proxies=${tp} admin_trusted_proxies=${admin_tp} backup=${backup_dir}"
 }
 
+# Print the name of the docker volume mounted at /var/lib/emtds in emtds-admin, the same lookup
+# update.sh uses; EMTDS_STATE_VOLUME_NAME replaces it. Prints nothing when there is no such container.
+edge_state_volume() {
+	if [[ -n "${EMTDS_STATE_VOLUME_NAME:-}" ]]; then
+		printf '%s' "$EMTDS_STATE_VOLUME_NAME"
+		return 0
+	fi
+	docker inspect emtds-admin \
+		--format '{{range .Mounts}}{{if eq .Destination "/var/lib/emtds"}}{{.Name}}{{end}}{{end}}' \
+		2>/dev/null | head -n 1 || true
+}
+
+# Copy the issued certificates from the state volume into OUT as <domain>/fullchain.pem and privkey.pem.
+# Args: volume name, empty output directory. The volume is read in a throwaway container without network
+# as the admin uid (EDGE_EXPORT_SCRIPT with /v/tls/live and /out), so the host never follows a link the
+# container side could plant. Returns the docker exit code.
+edge_export_certs() {
+	local vol=$1 out=$2
+	chown "${EDGE_VOLUME_UID}:${EDGE_VOLUME_UID}" "$out"
+	docker run --rm --network none --user "${EDGE_VOLUME_UID}:${EDGE_VOLUME_UID}" \
+		-v "${vol}:/v:ro" -v "${out}:/out" --entrypoint sh "$EDGE_VOLUME_IMAGE" \
+		-c "$EDGE_EXPORT_SCRIPT" sh /v/tls/live /out
+}
+
+# Build the certificate set nginx should serve into STAGED from the exported set INCOMING.
+# Args: incoming dir, empty staged dir. A domain whose exported pair passes edge_domain_cert_valid is
+# taken from INCOMING; one whose exported pair fails (a renewal caught between its two file writes)
+# keeps the installed pair from EDGE_TLS_DOMAINS when that one is still valid. A domain missing from
+# INCOMING is dropped. Refused names are appended to EDGE_SYNC_REFUSED.
+edge_stage_certs() {
+	local incoming=$1 staged=$2 d n src
+	EDGE_SYNC_REFUSED=
+	for d in "$incoming"/*; do
+		[[ -d "$d" && ! -L "$d" ]] || continue
+		n=${d##*/}
+		if ! edge_cert_name_ok "$n"; then
+			EDGE_SYNC_REFUSED+=" ${n//[^a-zA-Z0-9.-]/?}"
+			continue
+		fi
+		if edge_domain_cert_valid "$n" "$d"; then
+			src=$d
+		elif edge_domain_cert_valid "$n" "${EDGE_TLS_DOMAINS}/${n}"; then
+			src="${EDGE_TLS_DOMAINS}/${n}"
+		else
+			EDGE_SYNC_REFUSED+=" ${n}"
+			continue
+		fi
+		install -d -m 0755 "${staged}/${n}"
+		install -m 0644 "${src}/fullchain.pem" "${staged}/${n}/fullchain.pem"
+		install -m 0600 "${src}/privkey.pem" "${staged}/${n}/privkey.pem"
+	done
+}
+
+# Print a digest of the files under DIR (names and contents); an absent or empty DIR prints the empty digest.
+edge_tree_digest() {
+	local dir=$1
+	if [[ -d "$dir" ]]; then
+		(cd "$dir" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 -r sha256sum) | sha256sum | cut -d' ' -f1
+	else
+		printf '' | sha256sum | cut -d' ' -f1
+	fi
+}
+
+# Return 0 when FILE holds DIGEST and was written less than EDGE_SYNC_REFUSED_MINUTES ago; 1 otherwise.
+edge_recently_refused() {
+	local file=$1 digest=$2
+	[[ -f "$file" && "$(cat "$file")" == "$digest" ]] || return 1
+	[[ -n "$(find "$file" -mmin "-${EDGE_SYNC_REFUSED_MINUTES}" 2>/dev/null)" ]]
+}
+
+# Put back the certificate directory and conf.d/emtds-sni.conf from a --sync-certs backup.
+# Args: backup dir. A part missing from the backup did not exist before and is removed.
+edge_restore_certs() {
+	local backup_dir=$1
+	[[ -n "$backup_dir" && -d "$backup_dir" ]] || return 0
+	rm -rf "$EDGE_TLS_DOMAINS" "${EDGE_TLS_DOMAINS}.new"
+	if [[ -d "${backup_dir}/domains" ]]; then
+		cp -a "${backup_dir}/domains" "$EDGE_TLS_DOMAINS"
+	fi
+	if [[ -f "${backup_dir}/conf.d/emtds-sni.conf" ]]; then
+		install -m 0644 "${backup_dir}/conf.d/emtds-sni.conf" "${EDGE_CONF_D}/emtds-sni.conf"
+	else
+		rm -f "${EDGE_CONF_D}/emtds-sni.conf"
+	fi
+}
+
+# Remove --sync-certs backups beyond the newest EDGE_CERT_BACKUPS_KEEP.
+edge_prune_cert_backups() {
+	local old
+	[[ -d "$EDGE_BACKUP_ROOT" ]] || return 0
+	while IFS= read -r old; do
+		[[ -n "$old" ]] && rm -rf "$old"
+	done < <(find "$EDGE_BACKUP_ROOT" -mindepth 1 -maxdepth 1 -type d -name '*-certs' | LC_ALL=C sort | head -n "-${EDGE_CERT_BACKUPS_KEEP}")
+}
+
+# --sync-certs: mirror the issued domain certificates of the state volume into EDGE_TLS_DOMAINS and
+# serve each by name through conf.d/emtds-sni.conf. Called by the update agent timer every minute.
+# Nothing is written and nginx is not reloaded when the validated set equals the installed one, or
+# equals a set nginx -t refused less than EDGE_SYNC_REFUSED_MINUTES ago (its digest is kept in
+# tls/sync-refused). Otherwise the
+# certificate directory and emtds-sni.conf are backed up (<backup root>/<time>-<random>-certs, mode 0700),
+# replaced, checked with nginx -t and reloaded; a failed check restores the backup.
+# Returns 1 without root, without engine-site.conf (the full apply-edge.sh has not run yet),
+# when the volume cannot be read or nginx -t fails; 0 when there is no admin container.
+run_sync_certs() {
+	local vol work staged digest refused_file backup_dir
+	if ! edge_is_root; then
+		edge_msg "нужны права root" >&2
+		return 1
+	fi
+	if [[ ! -f "${EDGE_NGINX_EMTDS_DIR}/engine-site.conf" || ! -f "$EDGE_TEMPLATE_SNI" ]]; then
+		edge_msg "нет ${EDGE_NGINX_EMTDS_DIR}/engine-site.conf: сначала примените apply-edge.sh" >&2
+		return 1
+	fi
+	vol=$(edge_state_volume)
+	[[ -n "$vol" ]] || return 0
+	work=$(mktemp -d)
+	mkdir -p "${work}/in" "${work}/staged" "${work}/rendered"
+	if ! edge_export_certs "$vol" "${work}/in" >/dev/null 2>&1; then
+		rm -rf "$work"
+		edge_msg "не удалось прочитать сертификаты из тома ${vol}" >&2
+		return 1
+	fi
+	staged="${work}/staged"
+	edge_stage_certs "${work}/in" "$staged"
+	digest=$(edge_tree_digest "$staged")
+	refused_file="${EDGE_STATE_DIR}/tls/sync-refused"
+	if [[ "$digest" == "$(edge_tree_digest "$EDGE_TLS_DOMAINS")" ]] || edge_recently_refused "$refused_file" "$digest"; then
+		rm -rf "$work"
+		return 0
+	fi
+	if [[ -n "$EDGE_SYNC_REFUSED" ]]; then
+		edge_msg "не приняты сертификаты:${EDGE_SYNC_REFUSED}"
+	fi
+	render_sni_config "${work}/rendered" "$staged"
+	mkdir -p "$EDGE_BACKUP_ROOT"
+	backup_dir=$(mktemp -d --suffix=-certs "${EDGE_BACKUP_ROOT}/$(date -u +%Y%m%dT%H%M%SZ)-XXXXXX")
+	install -d -m 0700 "${backup_dir}/conf.d"
+	if [[ -f "${EDGE_CONF_D}/emtds-sni.conf" ]]; then
+		cp -a "${EDGE_CONF_D}/emtds-sni.conf" "${backup_dir}/conf.d/"
+	fi
+	if [[ -d "$EDGE_TLS_DOMAINS" ]]; then
+		cp -a "$EDGE_TLS_DOMAINS" "${backup_dir}/domains"
+	fi
+	trap 'edge_restore_certs "$backup_dir"; rm -rf "$work"' ERR
+	install -d -m 0755 "$(dirname "$EDGE_TLS_DOMAINS")"
+	rm -rf "${EDGE_TLS_DOMAINS}.new"
+	cp -a "$staged" "${EDGE_TLS_DOMAINS}.new"
+	chmod 0755 "${EDGE_TLS_DOMAINS}.new"
+	rm -rf "$EDGE_TLS_DOMAINS"
+	mv "${EDGE_TLS_DOMAINS}.new" "$EDGE_TLS_DOMAINS"
+	install -m 0644 "${work}/rendered/emtds-sni.conf" "${EDGE_CONF_D}/emtds-sni.conf"
+	if ! nginx -t; then
+		edge_msg "nginx -t failed; restoring backup ${backup_dir}" >&2
+		edge_restore_certs "$backup_dir"
+		printf '%s\n' "$digest" >"$refused_file"
+		rm -rf "$work"
+		trap - ERR
+		return 1
+	fi
+	systemctl reload nginx
+	trap - ERR
+	rm -f "$refused_file"
+	rm -rf "$work"
+	edge_prune_cert_backups
+	edge_msg "сертификаты доменов: $(find "$EDGE_TLS_DOMAINS" -mindepth 1 -maxdepth 1 -type d -printf '%f ' | sed 's/ $//') backup=${backup_dir}"
+}
+
 main() {
 	local public_arg=
 	while [[ $# -gt 0 ]]; do
@@ -800,6 +1049,10 @@ main() {
 				;;
 			--tune-events)
 				EDGE_TUNE_EVENTS=1
+				shift
+				;;
+			--sync-certs)
+				EDGE_SYNC_CERTS=1
 				shift
 				;;
 			-h | --help)
@@ -816,7 +1069,9 @@ main() {
 				;;
 		esac
 	done
-	if [[ "$EDGE_CHECK_MODE" -eq 1 ]]; then
+	if [[ "$EDGE_SYNC_CERTS" -eq 1 ]]; then
+		run_sync_certs
+	elif [[ "$EDGE_CHECK_MODE" -eq 1 ]]; then
 		run_check "$public_arg"
 	else
 		run_apply "$public_arg"

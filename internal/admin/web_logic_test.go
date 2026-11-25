@@ -3085,6 +3085,7 @@ aboutPage = async () => { opened.push('about'); };
   yes(!html.includes('upd.unsigned'), 'no red badge without a signature policy');
   yes(html.includes('<span class="pill">upd.sign.off</span>'), 'the neutral signature-off plate');
   yes(html.includes('<pre class="notes">&lt;img src=x onerror=alert(1)&gt;'), 'what is new goes through esc');
+  yes(html.includes('<span class="upd-cmsg">subject &lt;i&gt;</span>') && html.includes('<span class="mono small upd-csha">') && html.includes('<span class="muted upd-cauthor">a</span>'), 'the commit message is the wrapping cell and the hash and the author keep their columns');
   yes(!html.includes('<img') && !html.includes('<i>') && !html.includes('<b>x</b>'), 'no raw markup from the check data');
   yes(html.includes('&lt;b&gt;x&lt;/b&gt;'), 'a manual step goes through esc');
   yes(html.includes('<code>' + U + ' --to ' + cur.slice(0, 12) + ' --schema-ok</code>'), 'the exact command with --schema-ok');

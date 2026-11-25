@@ -101,6 +101,7 @@ func main() {
 	}
 
 	go app.WatchDomains(ctx, domainWatchInterval(config.Env("EMTDS_DOMAIN_WATCH"), log))
+	go app.WatchCertificates(ctx, 0)
 	go app.WatchKeitaroSync(ctx)
 	go app.WatchChecker(ctx)
 	go app.WatchAudit(ctx)
@@ -164,6 +165,23 @@ func cidKeyFile(override, groupsFile string) string {
 		return ""
 	}
 	return filepath.Join(filepath.Dir(groupsFile), "cid.key")
+}
+
+// certDir returns the certificate directory the admin process orders certificates into, or "" to
+// keep ordering off. env is config.Environment(), toggle the EMTDS_ACME value and dir the directory.
+// toggle "off" turns ordering off and "on" turns it on; otherwise only production orders, so a
+// local stack never asks a public CA for a certificate.
+func certDir(env, toggle, dir string) string {
+	switch strings.ToLower(strings.TrimSpace(toggle)) {
+	case "off":
+		return ""
+	case "on":
+		return dir
+	}
+	if env != config.EnvProduction {
+		return ""
+	}
+	return dir
 }
 
 // startupFlags parses -hash and -recovery. stop true means the process should
@@ -231,6 +249,12 @@ func applyDataFiles(cfg *admin.Config, groupsFile string, log *slog.Logger) {
 	cfg.NamecheapURL = config.Env("EMTDS_NAMECHEAP_URL")
 	cfg.NamecheapSandboxURL = config.Env("EMTDS_NAMECHEAP_SANDBOX_URL")
 	cfg.CloudflareFile = getenv("EMTDS_CLOUDFLARE_FILE", filepath.Join(dir, "cloudflare.json"))
+	cfg.TLSDir = certDir(config.Environment(), config.Env("EMTDS_ACME"), getenv("EMTDS_TLS_DIR", filepath.Join(dir, "tls")))
+	cfg.ACMEDirectory = config.Env("EMTDS_ACME_DIRECTORY")
+	cfg.ACMEEmail = config.Env("EMTDS_ACME_EMAIL")
+	if cfg.TLSDir != "" {
+		log.Info("certificates dir", "path", cfg.TLSDir)
+	}
 	cfg.NetTemplatesFile = getenv("EMTDS_NET_TEMPLATES_FILE", filepath.Join(dir, "net-templates.json"))
 	cfg.CheckerFile = getenv("EMTDS_CHECKER_FILE", filepath.Join(dir, "checker.json"))
 	cfg.CheckerAppsFile = getenv("EMTDS_CHECKER_APPS_FILE", filepath.Join(dir, "checker-apps.json"))
