@@ -250,6 +250,44 @@ func TestNoDedupSentBatchIsNotRepeated(t *testing.T) {
 	}
 }
 
+// A replay that does not reach the storage clears the sent flag it set for that
+// attempt. Without deduplication the batch is written once the storage answers,
+// because nothing was stored.
+func TestNeverSentReplayIsTriedAgainWithoutDedup(t *testing.T) {
+	_, q := newPair(t, t.TempDir(), "engine")
+	putSegment(t, q, "t-miss", false, Event{CID: "n0", Stream: "s"})
+	ins := newStoreInserter()
+	ins.dedup.Store(false)
+	ins.notConnected.Store(true)
+	b := newSpoolBuffer(t, ins, q, func() bool { return false })
+
+	waitLong(t, "an attempt that did not reach the storage", func() bool {
+		if len(ins.tokenLog()) < 1 {
+			return false
+		}
+		seg, ok := q.Oldest(nil)
+		return ok && !seg.Sent
+	})
+	seg, ok := q.Oldest(nil)
+	if !ok {
+		t.Fatal("the segment is gone")
+	}
+	meta, err := readHeaderFile(filepath.Join(q.dir, seg.Name))
+	if err != nil || meta.Sent {
+		t.Fatalf("on disk %+v err=%v, want the sent flag clear", meta, err)
+	}
+	if rows, _ := ins.distinct(); rows != 0 {
+		t.Fatalf("rows=%d, nothing was stored", rows)
+	}
+
+	ins.notConnected.Store(false)
+	waitLong(t, "the batch written", func() bool { r, _ := ins.distinct(); return r == 1 })
+	waitLong(t, "segment removed", func() bool { return b.Stats().Spool.Segments == 0 })
+	if _, dups := ins.distinct(); dups != 0 {
+		t.Fatalf("%d duplicates", dups)
+	}
+}
+
 // A segment marked as possibly stored stays on disk while the table cannot
 // deduplicate, and is written once it can.
 func TestNoDedupHoldsSentSegments(t *testing.T) {

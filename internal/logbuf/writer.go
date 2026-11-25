@@ -416,7 +416,9 @@ func (b *Buffer) deliver(bt batch) {
 // Before the first attempt the header is rewritten with the sent flag, so a
 // crash during the attempt leaves a segment that says it may be stored; where
 // the table cannot deduplicate such a segment is held, never repeated blindly
-// and never set aside for that reason.
+// and never set aside for that reason. An attempt that certainly did not reach
+// the storage clears that flag: the rows are not there, so the segment stays
+// unsent and is tried later even when the table cannot deduplicate.
 //
 // Only failures that come from the data itself (see BadData) count toward
 // poisonAfter, and only while the storage accepts other inserts; the segment is
@@ -449,7 +451,8 @@ func (b *Buffer) replaySegment(seg Segment) {
 		return
 	}
 	n := int64(len(events))
-	if !seg.Sent && b.canReachStorage() {
+	fresh := !seg.Sent
+	if fresh && b.canReachStorage() {
 		// The attempt may write the rows. If the process dies in the middle, the
 		// next start must know the segment may be stored already.
 		if merr := b.spool.MarkSent(seg); merr != nil {
@@ -476,6 +479,11 @@ func (b *Buffer) replaySegment(seg Segment) {
 	}
 	b.markFail(err, len(events))
 	if neverSent(err) {
+		if fresh {
+			if cerr := b.spool.ClearSent(seg.Name); cerr != nil {
+				b.log.Error("logbuf: cannot clear the sent flag after an attempt that did not reach the storage", "segment", seg.Name, "err", cerr)
+			}
+		}
 		b.cooldown(seg.Name)
 		b.enterDown()
 		return

@@ -505,6 +505,47 @@ func (q *SpoolQueue) NoteSent(name string) {
 	}
 }
 
+// ClearSent records that an attempt to deliver the named segment did not reach
+// the storage. name is the segment file. The sent flag is cleared on disk
+// first and then in the index, so the batch can be tried again when the table
+// cannot deduplicate a repeat.
+// It returns an error when the file cannot be read or rewritten. A missing
+// file is dropped from the index and reported as fs.ErrNotExist. A header that
+// cannot be parsed is returned as that error and the flag is left as it is.
+func (q *SpoolQueue) ClearSent(name string) error {
+	path := filepath.Join(q.dir, name)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			q.drop(name)
+		}
+		return err
+	}
+	if _, perr := parseHeader(bytes.NewReader(data)); perr != nil {
+		return perr
+	}
+	if data[flagsOffset]&segmentSent != 0 {
+		data[flagsOffset] &^= segmentSent
+		if err := atomicfile.WriteDurable(path, data, spoolFileMode); err != nil && !errors.Is(err, atomicfile.ErrSyncDir) {
+			return fmt.Errorf("spool: clear sent on %s: %w", name, err)
+		}
+	}
+	q.noteUnsent(name)
+	return nil
+}
+
+// noteUnsent clears the sent flag of the named segment in the index only.
+func (q *SpoolQueue) noteUnsent(name string) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	for i := range q.segs {
+		if q.segs[i].Name == name {
+			q.segs[i].Sent = false
+			return
+		}
+	}
+}
+
 // drop takes the named segment off the index.
 func (q *SpoolQueue) drop(name string) {
 	q.mu.Lock()

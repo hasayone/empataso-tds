@@ -163,6 +163,7 @@ otes field (up to 10000 characters) saved with the offer; the engine ignores it.
 
 ### Fixed
 
+- Click spool: a batch parked while the storage is not connected is written when the connection comes back, including while the events table cannot deduplicate yet. A probe during that outage no longer leaves the batch marked as already stored.
 - Keitaro import: a stream action `404`, `status404` or `404_not_found` is stored as 404 Not found. The HTML body of that action is not saved as an HTML page or an `@page` file. `show_html` and `html` stay an HTML page. A redirect, an offer, a landing and do nothing stay as they were. Campaigns already saved are not rewritten.
 - Device model: a known phone token from the User-Agent or from Sec-CH-UA-Model is stored as one trade name. SM-A055F and Galaxy A05 are both Samsung Galaxy A05; 2409BRN2CY and Redmi 14C are both Xiaomi Redmi 14C; the same applies to the Galaxy A13, A14, A16, A16 5G, Honor X8c, Honor X8b, Honor 400, REVVL V+ 5G, Infinix Hot 50 Pro+, Camon 17P, Realme 12 Pro 5G, Redmi Note 12 and Aquos S3 Basic tokens. SM-A075F stays Samsung SM-A075F and is not the Galaxy A05. An unknown code is unchanged. An empty User-Agent still has no model. The Instagram and Facebook app tuple now yields its model field instead of an empty one.
 
