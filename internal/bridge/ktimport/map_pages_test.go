@@ -87,7 +87,7 @@ func TestPagesSharedAndThreshold(t *testing.T) {
 	if p.Streams[2].Out.Out != "@page:"+jsName || p.Streams[2].Out.Redirect != "javascript" {
 		t.Fatalf("js = %+v", p.Streams[2].Out)
 	}
-	if q.Streams[0].Out.Out != "@page:"+name || q.Streams[1].Out.Redirect != "show_html_404" || q.Streams[1].Out.Out != "@page:"+name {
+	if q.Streams[0].Out.Out != "@page:"+name || q.Streams[0].Out.Redirect != "show_page_html" || q.Streams[1].Out.Redirect != "404_not_found" || q.Streams[1].Out.Out != "" {
 		t.Fatalf("shared = %+v %+v", q.Streams[0].Out, q.Streams[1].Out)
 	}
 	if !carriesOut("group") {

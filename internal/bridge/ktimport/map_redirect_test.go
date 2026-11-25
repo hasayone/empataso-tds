@@ -24,8 +24,9 @@ func TestRedirectMappings(t *testing.T) {
 		{"blank", "", "stop", "", ""},
 		{"do_nothing", "", "stop", "", ""},
 		{"status404", "", "404_not_found", "", ""},
-		{"status404", "<html><body>white</body></html>", "show_html_404", "<html><body>white</body></html>", ""},
-		{"status404", "<b>{subid}</b>", "show_html_404", "<b>[SUBID]</b>", ""},
+		{"status404", "<html><body>white</body></html>", "404_not_found", "", ""},
+		{"status404", "<b>{subid}</b>", "404_not_found", "", ""},
+		{"404", "<html><body>gone</body></html>", "404_not_found", "", ""},
 		{"curl", "https://a.example/x", "stop", "", "action_type curl нет соответствия, поток остановлен"},
 		{"campaign", "", "stop", "", "целевая кампания не задана"},
 		{"campaign", "   ", "stop", "", "целевая кампания не задана"},
@@ -107,10 +108,10 @@ func TestBotProtectionStatus404Import(t *testing.T) {
 		ID: 2, Name: "white", Type: "regular", State: "active",
 		ActionType: "status404", ActionPayload: html,
 	}, false)
-	if !white.Status || white.Out.Redirect != "show_html_404" || !strings.HasPrefix(white.Out.Out, "@page:") {
+	if !white.Status || white.Out.Redirect != "404_not_found" || white.Out.Out != "" {
 		t.Fatalf("white stream %+v", white.Out)
 	}
-	if len(pages) != 1 {
+	if len(pages) != 0 {
 		t.Fatalf("page bag = %+v", pages)
 	}
 
@@ -129,7 +130,7 @@ func TestBotProtectionStatus404Import(t *testing.T) {
 	if !closing.Status || closing.Out.Redirect != "404_not_found" || closing.Out.Out != "" {
 		t.Fatalf("closing stream %+v", closing.Out)
 	}
-	if len(pages) != 1 {
+	if len(pages) != 0 {
 		t.Fatalf("page bag after closing = %+v", pages)
 	}
 	closingTail := ctx.buildStream(KStream{
@@ -138,5 +139,47 @@ func TestBotProtectionStatus404Import(t *testing.T) {
 	}, false)
 	if !closingTail.Status || closingTail.Out.Redirect != "404_not_found" || closingTail.Out.Out != "" {
 		t.Fatalf("closing tail stream %+v", closingTail.Out)
+	}
+}
+
+// TestStatus404IsNotFoundAndTypeOrder проверяет, что действие 404 становится 404_not_found,
+// HTML-действие остаётся HTML-страницей, редирект не меняется, а тип потока задаёт порядок.
+func TestStatus404IsNotFoundAndTypeOrder(t *testing.T) {
+	body404 := strings.Repeat("<p>404</p>", 80)
+	real := "<html><body>" + strings.Repeat("z", 600) + "</body></html>"
+	var pages pageBag
+	var losses []Loss
+	ctx := &mapCtx{losses: &losses, pages: &pages}
+	got := ctx.mapStreams([]KStream{
+		{ID: 1, Type: "forced", Name: "Bot Protection", Position: 2, State: "active", ActionType: "status404", ActionPayload: body404},
+		{ID: 2, Type: "regular", Name: "SEO OFFERS", Position: 1, State: "active", ActionType: "http", ActionPayload: "https://winaso.online/costfors/?subid={subid}"},
+		{ID: 4, Type: "regular", Name: "page", Position: 2, State: "active", ActionType: "show_html", ActionPayload: real},
+		{ID: 5, Type: "regular", Name: "nothing", Position: 3, State: "active", ActionType: "do_nothing"},
+		{ID: 3, Type: "default", Name: "Замыкающий", Position: 1, State: "active", ActionType: "404", ActionPayload: body404},
+	}, false)
+	if len(got) != 5 {
+		t.Fatalf("streams %d", len(got))
+	}
+	if got[0].Name != "Bot Protection" || got[0].Out.Redirect != "404_not_found" || got[0].Out.Out != "" {
+		t.Fatalf("forced %+v", got[0])
+	}
+	if got[1].Name != "SEO OFFERS" || got[1].Out.Redirect != "http_redirect" || got[1].Out.Out != "https://winaso.online/costfors/?subid=[SUBID]" {
+		t.Fatalf("redirect %+v", got[1].Out)
+	}
+	htmlOut := got[2].Out
+	if got[2].Name != "page" || htmlOut.Redirect != "show_page_html" || !strings.HasPrefix(htmlOut.Out, "@page:page-") || !strings.HasSuffix(htmlOut.Out, ".html") {
+		t.Fatalf("html %+v", htmlOut)
+	}
+	if strings.Contains(htmlOut.Out, ".xml") {
+		t.Fatalf("html stored as xml %+v", htmlOut)
+	}
+	if got[3].Name != "nothing" || got[3].Out.Redirect != "stop" || got[3].Out.Out != "" {
+		t.Fatalf("do nothing %+v", got[3].Out)
+	}
+	if got[4].Name != "Замыкающий" || got[4].Out.Redirect != "404_not_found" || got[4].Out.Out != "" {
+		t.Fatalf("default %+v", got[4])
+	}
+	if _, ok := pages[PageName(body404)]; ok || pages[PageName(real)] != real {
+		t.Fatalf("pages %+v", pages)
 	}
 }

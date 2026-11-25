@@ -36,6 +36,72 @@ func TestModelOf(t *testing.T) {
 	}
 }
 
+func TestTradeNames(t *testing.T) {
+	ua := func(model string) string {
+		return "Mozilla/5.0 (Linux; Android 14; " + model + ") AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36"
+	}
+	a05 := "Samsung Galaxy A05"
+	note := "Xiaomi Redmi Note 12"
+	cases := []struct{ name, in, want string }{
+		{"a05 code", ua("SM-A055F Build/UP1A.231005.007"), a05},
+		{"a05 words", ua("Galaxy A05"), a05},
+		{"a05 samsung internet", ua("SAMSUNG SM-A055F"), a05},
+		{"a05 latin america", ua("SM-A055M"), a05},
+		{"a05 hint", `"SM-A055F"`, a05},
+		{"a13", ua("SM-A135F"), "Samsung Galaxy A13"},
+		{"a13 revision", ua("SM-A137F"), "Samsung Galaxy A13"},
+		{"a14", ua("SM-A145R"), "Samsung Galaxy A14"},
+		{"a14 5g stays a code", ua("SM-A146B"), "SM-A146B"},
+		{"a16", ua("SM-A165F"), "Samsung Galaxy A16"},
+		{"a16 words", ua("Galaxy A16"), "Samsung Galaxy A16"},
+		{"a16 5g", ua("SM-A166U"), "Samsung Galaxy A16 5G"},
+		{"a16 5g words", ua("Galaxy A16 5G"), "Samsung Galaxy A16 5G"},
+		{"a075 is not a05", ua("SM-A075F"), "Samsung SM-A075F"},
+		{"a175 stays the code", ua("SM-A175F"), "Samsung SM-A175F"},
+		{"redmi 14c code", ua("2409BRN2CY"), "Xiaomi Redmi 14C"},
+		{"redmi 14c words", ua("Redmi 14C"), "Xiaomi Redmi 14C"},
+		{"note 12 code", ua("23021RAAEG"), note},
+		{"note 12 words", ua("Redmi Note 12"), note},
+		{"note 12 4g words", ua("Redmi Note 12 4G"), note},
+		{"note 12 5g is another phone", ua("Redmi Note 12 5G"), "Redmi Note 12 5G"},
+		{"note 12 5g code", ua("22111317G"), "22111317G"},
+		{"honor x8c code", ua("ABR-LX1"), "Huawei Honor X8c"},
+		{"honor x8c words", ua("Honor X8c"), "Huawei Honor X8c"},
+		{"honor x8b", ua("LLY-LX1"), "Huawei Honor X8b"},
+		{"honor 400", ua("DNY-NX9"), "Huawei Honor 400"},
+		{"huawei only", ua("HUAWEI"), "Huawei"},
+		{"revvl", ua("REVVL V+ 5G Build/SP1A.210812.016"), "T-Mobile REVVL V+ 5G"},
+		{"infinix code", ua("Infinix X6880"), "Infinix Hot 50 Pro+"},
+		{"infinix words", ua("Infinix Hot 50 Pro+"), "Infinix Hot 50 Pro+"},
+		{"camon code", ua("TECNO CG7"), "Tecno Mobile Camon 17P"},
+		{"camon n", ua("TECNO CG7n"), "Tecno Mobile Camon 17P"},
+		{"camon words", ua("TECNO Camon 17P"), "Tecno Mobile Camon 17P"},
+		{"realme code", ua("RMX3842"), "Realme 12 Pro 5G"},
+		{"realme plus stays", ua("RMX3840"), "RMX3840"},
+		{"sharp code", ua("SHV48"), "Sharp Aquos S3 Basic"},
+		{"sharp words", ua("AQUOS sense3 basic"), "Sharp Aquos S3 Basic"},
+		{"instagram app tuple", "Instagram 295.0.0.32.109 Android (34/14; 480dpi; 720x1600; samsung; SM-A055F; a05; mt6768; en_US; 1)", a05},
+		{"instagram unknown code", "Instagram 295.0.0.32.109 Android (33/13; 420dpi; 1080x2220; samsung; SM-G991B; o1s; exynos2100; en_US; 486631846)", "SM-G991B"},
+		{"empty", "", ""},
+		{"reduced chrome", ua("K"), ""},
+	}
+	for _, c := range cases {
+		got := Parse(c.in).Model
+		if strings.HasPrefix(c.in, `"`) {
+			got = HintModel(c.in)
+		}
+		if got != c.want {
+			t.Errorf("%s: got %q, want %q", c.name, got, c.want)
+		}
+	}
+	if Parse(ua("SM-A075F")).Model == a05 {
+		t.Error("SM-A075F must not be reported as the Galaxy A05")
+	}
+	if Parse(ua("SM-A165F")).Model == Parse(ua("SM-A166B")).Model {
+		t.Error("Galaxy A16 and Galaxy A16 5G must stay different")
+	}
+}
+
 func TestHintModel(t *testing.T) {
 	cases := map[string]string{
 		`"Pixel 8"`:                         "Pixel 8",

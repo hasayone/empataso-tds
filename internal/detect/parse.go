@@ -60,8 +60,11 @@ var nonModels = map[string]bool{
 // modelOf extracts the device model from an Android User-Agent: the token
 // after the "Android <version>" token of the first parenthesized group, as in
 // "(Linux; Android 13; SM-S918B Build/TP1A)". Locale tokens ("ru-ru") are
-// skipped. A User-Agent without an Android token, or whose model is hidden
-// (the single letter K of reduced Chrome strings), returns "".
+// skipped. When that group is the app tuple
+// "Android (sdk/release; dpi; resolution; maker; model; ...)", the model field
+// of the tuple is used. A User-Agent without either shape, or whose model is
+// hidden (the single letter K of reduced Chrome strings), returns "".
+// A known token is replaced by one trade name (see tradeModel).
 func modelOf(uaStr string) string {
 	open := strings.IndexByte(uaStr, '(')
 	if open < 0 {
@@ -84,7 +87,27 @@ func modelOf(uaStr string) string {
 		}
 		return ""
 	}
-	return ""
+	return appDeviceModel(uaStr[:open], parts)
+}
+
+// appDeviceModel reads the model field of an Instagram or Facebook app
+// User-Agent, "Android (sdk/release; dpi; resolution; maker; model; ...)".
+//
+// before is the text before the parenthesis and parts are the semicolon fields
+// inside it. It returns "" when before does not mention Android or the fields
+// are not that tuple. The model is passed through cleanModel.
+func appDeviceModel(before string, parts []string) string {
+	if len(parts) < 5 || !strings.Contains(strings.ToLower(before), "android") {
+		return ""
+	}
+	head := strings.TrimSpace(parts[0])
+	if head == "" || head[0] < '0' || head[0] > '9' || !strings.Contains(head, "/") {
+		return ""
+	}
+	if !strings.Contains(strings.ToLower(parts[1]), "dpi") {
+		return ""
+	}
+	return cleanModel(parts[4])
 }
 
 // isLocaleToken reports whether s looks like a locale such as "ru", "ru-ru"
@@ -109,8 +132,8 @@ func isLocaleToken(s string) bool {
 
 // cleanModel normalizes a model string: trims spaces and quotes, cuts a
 // " Build/..." suffix, drops control characters and invalid UTF-8, and cuts the
-// result to maxModelLen characters. It returns "" for an empty result and for
-// the placeholders in nonModels.
+// result to maxModelLen characters. A known token is then replaced by its trade
+// name. It returns "" for an empty result and for the placeholders in nonModels.
 func cleanModel(s string) string {
 	s = strings.Trim(strings.TrimSpace(s), `"`)
 	for _, marker := range []string{" Build/", " build/"} {
@@ -130,6 +153,9 @@ func cleanModel(s string) string {
 	}
 	if s == "" || nonModels[strings.ToLower(s)] {
 		return ""
+	}
+	if name := tradeModel(s); name != "" {
+		return name
 	}
 	return s
 }

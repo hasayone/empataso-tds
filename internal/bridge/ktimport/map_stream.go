@@ -400,6 +400,7 @@ func (c *mapCtx) buildStream(st KStream, forceOff bool) Stream {
 //
 // Параметры: st — поток. Справочники, отчёт, файлы страниц, alias кампаний и маски placeholder лежат в получателе.
 // Результат: поток без правил и текст причины. Пустая причина значит, что выход годится.
+// Действие 404, status404 и 404_not_found даёт redirect 404_not_found и пустой out: текст action_payload не пишется.
 // Ошибки: нет.
 func (c *mapCtx) streamOutput(st KStream) (Stream, string) {
 	offers, landings, losses, pages, aliases, swaps := c.offers, c.landings, c.losses, c.pages, c.aliases, c.swaps
@@ -424,15 +425,9 @@ func (c *mapCtx) streamOutput(st KStream) (Stream, string) {
 		return s, ""
 	}
 	if status404Action(st.ActionType) {
-		payload := strings.TrimSpace(st.ActionPayload)
+		s.Out.Redirect = "404_not_found"
+		s.Out.Out = ""
 		s.Out.Chance = 100
-		if payload == "" || botProtectionStream(st) {
-			s.Out.Redirect = "404_not_found"
-			s.Out.Out = ""
-			return s, ""
-		}
-		s.Out.Redirect = "show_html_404"
-		s.Out.Out = pageRef("show_html_404", finishMacros(payload, swaps), pages)
 		return s, ""
 	}
 	if strings.EqualFold(strings.TrimSpace(st.ActionType), "campaign") {
@@ -467,15 +462,6 @@ func (c *mapCtx) streamOutput(st KStream) (Stream, string) {
 		*losses = append(*losses, Loss{Kind: "approximated", Ref: ref, Detail: approx})
 	}
 	return s, ""
-}
-
-// botProtectionStream сообщает, что поток Keitaro — Bot Protection или «Замыкающий».
-//
-// Параметры: st — поток.
-// Результат: true для имён по правилу BotProtectionStreamName.
-// Ошибки: нет.
-func botProtectionStream(st KStream) bool {
-	return BotProtectionStreamName(st.Name)
 }
 
 // streamTitle берёт имя потока Keitaro.

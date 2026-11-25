@@ -637,6 +637,10 @@ eq(cronCardOrder(cronIds, ['geo_db','geo_db','telegram']), ['geo_db','telegram',
   eq([put.flows.page, put.flows.view, put.flows.compact, put.logs.page, put.conversions.page, put.domains.page], [250, 'grid', true, 500, 20, 5000], 'page sizes and flow view are collected');
   const bad = applyPageViews({ flows: { page: 5001, view: 'list', compact: 'yes' }, logs: { page: 1001 }, conversions: { page: 0 }, domains: { page: 1.5 } }, def);
   eq([bad.flows.page, bad.flows.view, bad.flows.compact, bad.logs.page, bad.conversions.page, bad.domains.page], [1000, 'table', false, 100, 50, 50], 'a size out of range or a bad view falls back');
+  eq(def.domains.buy, false, 'domain purchase consent starts off');
+  eq(applyPageViews({ domains: { buy: true } }, def).domains.buy, true, 'domain purchase consent is read');
+  eq(collectPageViews(applyPageViews({ domains: { buy: true } }, def)).domains.buy, true, 'domain purchase consent is stored');
+  eq(applyPageViews({ domains: { buy: 'yes' } }, def).domains.buy, false, 'a non-boolean consent is ignored');
   eq(collectPageViews({ flows: { page: '12', view: 'list', compact: 1 }, logs: { page: -3 } }).flows, { sort: { k: '', dir: -1 }, q: '', state: 'all', source: '', folder: '', view: 'table', compact: false, traffic: '', page: 1000 }, 'collect falls back on bad values');
   eq(collectPageViews(applyPageViews({ flows: { traffic: 'desc' } }, def)).flows.traffic, 'desc', 'the canvas traffic order is read and collected');
   eq(collectPageViews(applyPageViews({ flows: { traffic: 'rev-asc' } }, def)).flows.traffic, 'rev-asc', 'the canvas revenue order is read and collected');

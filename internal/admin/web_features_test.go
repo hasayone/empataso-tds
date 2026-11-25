@@ -189,7 +189,10 @@ func TestNamecheapUI(t *testing.T) {
 		`id="nr-confirm"`,
 		"nc.reg.pricechanged",
 		"ncOutcome(e.status,e.body)",
-		"checked=false",
+		"tr('nc.reg.agree')",
+		"DOM_BUY",
+		"touchPageViews()",
+		"st.domain.toLowerCase()===typed&&st.price>0",
 	} {
 		must(t, reg, needle, "purchase window")
 	}
@@ -203,8 +206,14 @@ func TestNamecheapUI(t *testing.T) {
 		must(t, reg, needle, "purchase window layout")
 	}
 	mustNot(t, reg, `id="nr-years"`, "the term is not a field")
+	mustNot(t, reg, `id="nr-confirm" disabled`, "consent does not wait for a price")
+	mustNot(t, reg, "nc.reg.needcheck", "the checkbox is not a prompt to check the price")
 	mustNot(t, reg, `class="tog"><input type="checkbox" id="nr-confirm"`, "payment consent is not a pill")
 	mustNot(t, reg, "nr-index", "there is no index page field")
+	must(t, spaFunctionLine(html, "collectPageViews"), "out.domains.buy=page('domains').buy===true", "consent is stored with the domains page")
+	must(t, spaFunctionLine(html, "applyPageViews"), "out.domains.buy=domBuy.buy", "consent is read back from the domains page")
+	must(t, spaFunctionLine(html, "pageViewFromGlobals"), "buy:DOM_BUY===true", "consent leaves the account snapshot")
+	must(t, spaFunctionLine(html, "applyPageViewSnapshot"), "DOM_BUY=dom.buy===true", "opening the window restores the saved consent")
 	if strings.Count(reg, "INT_LOGOS.namecheap") != 1 {
 		t.Errorf("the Namecheap mark is drawn once, next to the registrar")
 	}
@@ -233,6 +242,15 @@ func TestNamecheapUI(t *testing.T) {
 	must(t, dom, "tr('nc.reconcile')", "reconcile action")
 	must(t, dom, "tr('nc.force')", "forced delete action")
 	must(t, dom, `id="dom-register"`, "register button")
+	createAt := strings.Index(dom, `createBtn('dom-new')`)
+	regAt := strings.Index(dom, `class="primary mk" id="dom-register"`)
+	liveAt := strings.Index(dom, `id="dom-check-live"`)
+	if createAt < 0 || regAt < createAt || liveAt < regAt {
+		t.Errorf("domain toolbar order create=%d register=%d live=%d", createAt, regAt, liveAt)
+	}
+	must(t, dom[regAt:liveAt], `icon('domains')`, "register uses the domain mark")
+	mustNot(t, dom[regAt:liveAt], `icon('plus')`, "register is not a second plus")
+	must(t, dom[liveAt:liveAt+120], `icon('eye')`, "live check uses the domain check mark")
 	must(t, dom, "meIsAdmin()", "purchase actions are for administrators")
 	must(t, html, "registrar_status==='pending'", "pending status from the domain row")
 	must(t, spaFunctionLine(html, "call"), "apiError(msg,r.status,j,path,", "the error body reaches the caller")
@@ -254,7 +272,7 @@ func TestSpaNewKeysAreTranslated(t *testing.T) {
 		"kt.err.unavailable", "kt.err.purgebusy", "dom.pending", "nc.intro", "nc.name", "nc.apiuser", "nc.key",
 		"nc.ip", "nc.ip.hint", "nc.sandbox", "nc.contacts", "nc.contacts.match", "nc.test", "nc.detect", "nc.test.ok", "nc.detect.found",
 		"nc.detect.mismatch", "nc.reg.btn", "nc.reg.title", "nc.reg.check", "nc.reg.price", "nc.reg.confirm",
-		"nc.reg.https", "nc.reg.admin", "nc.reg.robots", "nc.reg.nscf",
+		"nc.reg.https", "nc.reg.admin", "nc.reg.robots", "nc.reg.nscf", "nc.reg.agree",
 		"nc.reg.pricechanged", "nc.reg.buy", "nc.reconcile", "nc.force", "nc.force.ask", "nc.ns.change",
 		"nc.ns.confirm", "nc.ns.few", "nc.ns.many", "nc.err.early", "nc.err.pending", "nc.err.released",
 		"nc.err.owned", "nc.err.premium", "nc.err.progress", "nc.err.config", "nc.err.nofile",

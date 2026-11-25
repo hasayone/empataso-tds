@@ -124,7 +124,7 @@ func TestMapFixture(t *testing.T) {
 	}
 
 	white, _ := findGroup(res.Groups, "white")
-	if len(white.Streams) != 1 || !white.Streams[0].Status || white.Streams[0].Out.Redirect != "show_html_404" || white.Streams[0].Out.Out != "<html><body>white</body></html>" {
+	if len(white.Streams) != 1 || !white.Streams[0].Status || white.Streams[0].Out.Redirect != "404_not_found" || white.Streams[0].Out.Out != "" {
 		t.Fatalf("white = %+v", white.Streams)
 	}
 	macros, _ := findGroup(res.Groups, "macros")
