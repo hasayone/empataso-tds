@@ -175,3 +175,49 @@ func TestDatepickerStyles(t *testing.T) {
 		}
 	}
 }
+
+// TestPeriodRangeAndSpendGrid checks the header period and the cost dialog.
+// Today is not a calendar button: the library only moves the visible month and does not select a day.
+// Clear stays because it drops the selected dates. A custom time range uses hour and minute fields, not the slider clock.
+// The cost dialog keeps start/end, amount/currency and the saved rows in a column so Delete cannot cover Cancel and Save.
+func TestPeriodRangeAndSpendGrid(t *testing.T) {
+	html := spaSource()
+	must(t, html, "buttons:['clear']", "Clear stays: it drops the selected dates")
+	mustNot(t, html, "buttons:['today','clear']", "Today only moves the visible month and is not a period")
+	mustNot(t, html, "if(times){dpBind(a); dpBind(b); return}", "a time range does not open the slider clock")
+	must(t, spaFunctionLine(html, "rangeSeed"), "return periodSpan(id, now||new Date(), tz);", "today and the other presets become that span, from 00:00")
+	must(t, spaFunctionLine(html, "rangeSeed"), "prev==='dates'||prev==='times'", "a saved custom range is kept")
+	must(t, html, `id="period-tabs"`, "header period tabs")
+	must(t, html, `data-period="${id}"`, "tabs use the existing period ids")
+	for _, id := range []string{"range-ah", "range-am", "range-bh", "range-bm"} {
+		must(t, html, `id="`+id+`"`, "clock field "+id)
+	}
+	must(t, html, `.spend-when{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px;min-width:0}`, "start and end share one row")
+	must(t, html, `@media(max-width:560px){.spend-when{grid-template-columns:minmax(0,1fr)}}`, "the row wraps when the dialog is narrow")
+	must(t, html, `.modal.spend-dlg{display:flex;flex-direction:column;`, "the dialog is a column")
+	must(t, html, `.spend-foot{flex:none;display:flex;`, "Cancel and Save are the dialog footer")
+	dlg := spaFunctionLine(html, "spendDialog")
+	rows := spaFunctionLine(html, "spendRowsHTML")
+	for _, want := range []string{
+		`class="spend-when"`, `class="spend-amt"`, `class="spend-foot"`,
+		`id="sp-zone">${esc(tzLabel(cur))}`, "data-sp-period=",
+	} {
+		must(t, dlg, want, "cost dialog grid")
+	}
+	must(t, rows, `class="spend-saved"`, "saved costs have their own block")
+	must(t, rows, `class="spend-row"`, "a saved cost is its own row")
+	mustNot(t, dlg, `type="datetime-local"`, "the cost dialog does not open the slider calendar")
+	must(t, dlg, "spendPointOpen(", "clicking a cost date opens the shared calendar")
+	must(t, dlg, `id="sp-from" type="text" readonly`, "the start field shows a readable date and time")
+	mustNot(t, dlg, "sp-from-h", "the hour is not a box beside the date")
+	point := spaFunctionLine(html, "spendPointOpen")
+	must(t, point, "dpInline(", "the cost point uses the one inline calendar")
+	must(t, point, `class="sp-h"`, "the hour is a field")
+	must(t, point, `class="sp-m"`, "the minute is a field")
+	must(t, spaFunctionLine(html, "dpInline"), "new AirDatepicker(cal,", "one inline calendar")
+	must(t, spaFunctionLine(html, "dpInline"), "dpOptions(false)", "the cost calendar has no time slider")
+	must(t, spaFunctionLine(html, "spendFace"), "getMinutes()", "the field shows the clock")
+	if saved, foot := strings.Index(dlg, "spendRowsHTML"), strings.Index(dlg, `class="spend-foot"`); saved < 0 || foot < 0 || saved > foot {
+		t.Error("saved costs must sit above Cancel and Save")
+	}
+}

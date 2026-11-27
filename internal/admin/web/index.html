@@ -746,12 +746,43 @@ try{var t=localStorage.getItem('emtds-theme');if(t)document.documentElement.setA
   .ic.tone-warn{color:var(--warn)}
   .menu .cap{font-size:11px;font-weight:700;color:var(--subtle);text-transform:uppercase;letter-spacing:.04em;padding:6px 10px 3px}
   .menu svg.ic.ok{color:var(--ok)}
-  .rangepop{position:fixed;z-index:85;width:340px;max-width:calc(100vw - 16px);box-sizing:border-box;display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow-2)}
+  .rangepop{position:fixed;z-index:85;width:min(560px,calc(100vw - 16px));max-width:calc(100vw - 16px);box-sizing:border-box;display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);box-shadow:var(--shadow-2)}
   .rangepop[hidden]{display:none!important}
   .rangepop .fld{margin:0}
   .rangepop .rangerow{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:8px}
   .rangepop input{width:100%;min-width:0}
   .rangepop .row{justify-content:flex-end;margin:0}
+  .period-tabs{display:flex;flex-wrap:wrap;gap:6px;min-width:0}
+  .period-tabs button{height:28px;padding:0 10px;border-radius:999px;background:var(--surface);color:var(--muted);font-size:12.5px;font-weight:600;box-shadow:none}
+  .period-tabs button.on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+  .when{display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0}
+  .when>input{flex:1 1 8em;width:auto;min-width:0}
+  .when-clock{display:inline-flex;align-items:center;gap:4px;flex:none}
+  .when-clock[hidden]{display:none!important}
+  .when-clock input{width:3em;flex:none;text-align:center;padding:0 4px}
+  .when-colon{color:var(--muted);font-weight:600}
+  .rangepop .fld .when>input,.spend-dlg .fld .when>input{width:auto;flex:1 1 8em}
+  .rangepop .fld .when-clock input,.spend-dlg .fld .when-clock input{width:3em;flex:none}
+  .modal.spend-dlg{display:flex;flex-direction:column;width:min(560px,calc(100vw - 32px));max-height:min(86vh,760px);overflow:hidden;padding:0}
+  .spend-dlg h3{margin:0;padding:16px 16px 0;min-width:0;overflow-wrap:anywhere}
+  .spend-body{flex:1 1 auto;min-height:0;min-width:0;overflow:auto;padding:12px 16px 8px}
+  .spend-foot{flex:none;display:flex;align-items:center;gap:8px;margin-top:0;padding:12px 16px 16px;border-top:1px solid var(--border);background:var(--surface)}
+  .spend-when{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 14px;min-width:0}
+  .spend-dlg .fld{min-width:0}
+  .spend-dlg .period-tabs{margin:0 0 12px}
+  .spend-amt{display:flex;align-items:center;gap:8px;min-width:0}
+  .spend-dlg .fld .spend-amt input{flex:1 1 auto;width:auto;min-width:0;height:32px}
+  .spend-dlg .fld .spend-amt select{flex:none;width:calc(4ch + 36px);height:32px}
+  .spend-saved{display:flex;flex-direction:column;gap:8px;margin:4px 0 12px;min-width:0}
+  .spend-row{display:flex;align-items:center;flex-wrap:wrap;gap:8px;min-width:0}
+  .spend-row .spend-span{flex:1 1 160px;min-width:0;overflow-wrap:anywhere}
+  .spend-row b,.spend-row button,.spend-row .pill{flex:none}
+  .spend-dlg .tzpick>button{display:flex;align-items:center;justify-content:flex-start;width:100%;min-height:32px;height:32px;padding:0 10px;background:var(--surface);color:var(--fg);border:1px solid var(--border-strong);border-radius:var(--r-sm);box-shadow:none;font-weight:500;line-height:1.2;text-align:left}
+  .spend-dlg .spend-when input[readonly]{color:var(--fg);cursor:pointer;background:var(--surface)}
+  .spend-point{width:min(320px,calc(100vw - 16px));z-index:90}
+  .spend-point-time{display:flex;justify-content:center;align-items:center;gap:4px}
+  .spend-point-time input{width:3em;flex:none;text-align:center;padding:0 4px}
+  @media(max-width:560px){.spend-when{grid-template-columns:minmax(0,1fr)}}
   .air-datepicker.adp-app{--adp-font-family:var(--font);--adp-font-size:13px;--adp-width:268px;--adp-z-index:95;--adp-background-color:var(--surface);--adp-background-color-hover:var(--surface-3);--adp-background-color-active:var(--border-strong);--adp-background-color-in-range:var(--accent-soft);--adp-background-color-in-range-focused:var(--accent-soft);--adp-background-color-selected-other-month:var(--accent-fill);--adp-background-color-selected-other-month-focused:var(--accent-fill-h);--adp-color:var(--fg);--adp-color-secondary:var(--muted);--adp-accent-color:var(--accent);--adp-color-other-month:var(--subtle);--adp-color-other-month-hover:var(--muted);--adp-color-disabled:var(--subtle);--adp-color-disabled-in-range:var(--subtle);--adp-border-color:var(--border);--adp-border-color-inner:var(--border);--adp-border-color-inline:var(--border);--adp-border-radius:var(--r-sm);--adp-cell-border-radius:var(--r-sm);--adp-nav-arrow-color:var(--fg);--adp-day-name-color:var(--muted);--adp-day-name-color-hover:var(--accent);--adp-cell-background-color-selected:var(--accent-fill);--adp-cell-background-color-selected-hover:var(--accent-fill-h);--adp-cell-background-color-in-range:var(--accent-soft);--adp-cell-background-color-in-range-hover:var(--accent-soft);--adp-time-track-color:var(--subtle);--adp-time-track-color-hover:var(--muted);--adp-cell-background-color-hover:var(--surface-3);--adp-nav-color-secondary:var(--muted);--adp-btn-color:var(--fg);--adp-btn-color-hover:var(--fg);--adp-btn-background-color-hover:var(--surface-3);--adp-btn-background-color-active:var(--border-strong);--adp-time-track-height:3px;--adp-time-day-period-color:var(--muted);box-shadow:var(--shadow-2)}
   .adp-app .air-datepicker-cell.-selected-,.adp-app .air-datepicker-cell.-selected-.-current-,.adp-app .air-datepicker-cell.-selected-.-other-month-{color:var(--accent-fill-fg)}
   .adp-app .air-datepicker--pointer{display:none}
@@ -2204,11 +2235,53 @@ function closeRange(){
   box.hidden=true;
   if(RANGE_HOLD){ RANGE.id=RANGE_HOLD; RANGE_HOLD=null; }
 }
+/** paintPeriodTabs draws the header period tabs from the same ids the period button used.
+ * It returns nothing. A missing box does nothing.
+ * @returns {void}
+ */
+function paintPeriodTabs(){
+  const box=q('#period-tabs'); if(!box) return;
+  const cur=RANGE.id||'today';
+  box.innerHTML=PERIOD_IDS.map(id=>`<button type="button" data-period="${id}" class="${id===cur?'on':''}">${esc(tr('period.'+id))}</button>`).join('');
+  qa('[data-period]', box).forEach(b=>b.onclick=ev=>{
+    ev.stopPropagation();
+    const id=b.dataset.period;
+    if(id==='dates'||id==='times') openCustom(id);
+    else { RANGE_HOLD=null; const pop=q('#range-fields'); if(pop) pop.hidden=true; applyRange(id); }
+  });
+}
+/** paintPeriodOn marks the open period tab.
+ * It returns nothing.
+ * @returns {void}
+ */
+function paintPeriodOn(){
+  const id=RANGE.id||'today';
+  qa('#period-tabs [data-period]').forEach(b=>b.classList.toggle('on', b.dataset.period===id));
+}
+/** openPeriod toggles the header period popover.
+ * A closed popover remembers the current period and, when that period is already a custom range, shows its days.
+ * It returns nothing.
+ * @returns {void}
+ */
+function openPeriod(){
+  const box=q('#range-fields'); if(!box) return;
+  if(!box.hidden){ closeRange(); return; }
+  RANGE_HOLD=RANGE.id;
+  box.hidden=false;
+  paintPeriodTabs();
+  const custom=RANGE.id==='dates'||RANGE.id==='times';
+  const pane=q('#range-custom'); if(pane) pane.hidden=!custom;
+  if(custom){ seedRangeFields(RANGE.id); dpBindRange(RANGE.id).then(placeRange); }
+  placeRange();
+}
 function openCustom(id){
   const box=q('#range-fields'); if(!box) return;
   if(box.hidden) RANGE_HOLD=RANGE.id;
   RANGE.id=id;
   box.hidden=false;
+  const pane=q('#range-custom'); if(pane) pane.hidden=false;
+  paintPeriodOn();
+  seedRangeFields(id);
   placeRange();
   dpBindRange(id).then(placeRange);
 }
@@ -5017,39 +5090,89 @@ function spendWhen(iso, zone){
 }
 function spendRowsHTML(groupId){
   const rows=(SPEND||[]).filter(e=>e.group_id===groupId);
-  if(!rows.length) return `<p class="hint" id="sp-saved">${tr('spend.empty')}</p>`;
-  return `<div id="sp-saved">${rows.map(e=>`<div class="row wrap" style="margin-top:8px"><span>${esc(spendWhen(e.from,e.zone))} – ${esc(spendWhen(e.to,e.zone))}</span><b>${esc(moneyText((e.cents||0)/100, e.currency||'', 2))}</b>${e.unique?`<span class="pill">${tr('spend.byuniq')}</span>`:''}<button type="button" data-delspend="${esc(e.id)}">${tr('Delete')}</button></div>`).join('')}</div>`;
+  if(!rows.length) return `<div class="spend-saved" id="sp-saved"><p class="hint">${tr('spend.empty')}</p></div>`;
+  return `<div class="spend-saved" id="sp-saved">${rows.map(e=>`<div class="spend-row"><span class="spend-span">${esc(spendWhen(e.from,e.zone))} – ${esc(spendWhen(e.to,e.zone))}</span><b>${esc(moneyText((e.cents||0)/100, e.currency||'', 2))}</b>${e.unique?`<span class="pill">${tr('spend.byuniq')}</span>`:''}<button type="button" data-delspend="${esc(e.id)}">${tr('Delete')}</button></div>`).join('')}</div>`;
 }
+/** spendDialog records a campaign cost for the page period.
+ * The start and end are that period: the header tabs and these fields are one range. A custom edit is a time range and the header shows it.
+ * groupId is the campaign id. It returns nothing. Save still posts the same cost body.
+ * @param {string} groupId campaign id
+ * @returns {void}
+ */
 function spendDialog(groupId){
+  closeRange();
   const g=(GROUPS||[]).find(x=>x.id===groupId);
   const cur=uiTz();
+  const tabs=PERIOD_IDS.map(id=>`<button type="button" data-sp-period="${id}">${esc(tr('period.'+id))}</button>`).join('');
   const sc=$('<div class="scrim" style="z-index:74"></div>');
-  const m=$(`<div class="modal" role="dialog" style="width:min(560px,92vw)"><h3>${esc(tr('col.spend'))}: ${esc(g?g.name:groupId)}</h3>
-    <div class="g2"><div class="fld"><label>${tr('spend.from')}</label><input id="sp-from" type="datetime-local"></div><div class="fld"><label>${tr('spend.to')}</label><input id="sp-to" type="datetime-local"></div></div>
-    <div class="fld"><label>${tr('settings.tz')}</label><div class="tzpick"><button type="button" id="sp-zone"></button><div class="tzlist" id="sp-zone-list" hidden></div></div></div>
-    <div class="g2"><div class="fld"><label>${tr('col.cost')}</label><input id="sp-amount" inputmode="decimal" placeholder="0.00" autocomplete="off"></div><div class="fld"><label></label><select id="sp-cur">${['USD','EUR','GBP','RUB','UAH'].map(c=>opt(c,c,'USD')).join('')}</select></div></div>
-    <label class="tog"><input type="checkbox" id="sp-uniq"> ${tr('spend.byuniq')}</label>
-    <label class="tog"><input type="checkbox" id="sp-bots"> ${tr('Include bots')}</label>
-    ${spendRowsHTML(groupId)}
-    <div class="row"><div class="spacer"></div><button data-no>${tr('Cancel')}</button><button data-yes class="primary">${tr('net.save')}</button></div></div>`);
-  let zone=cur;
-  const tzPick=bindTzPick(q('#sp-zone',m), q('#sp-zone-list',m), ()=>zone, z=>{zone=z});
-  const close=()=>{tzPick.close(); sc.remove(); m.remove()};
+  const m=$(`<div class="modal spend-dlg" role="dialog"><h3>${esc(tr('col.spend'))}: ${esc(g?g.name:groupId)}</h3>
+    <div class="spend-body">
+      <div class="period-tabs" role="tablist">${tabs}</div>
+      <div class="spend-when">
+        <div class="fld"><label for="sp-from">${tr('spend.from')}</label><input id="sp-from" type="text" readonly autocomplete="off" aria-haspopup="dialog"></div>
+        <div class="fld"><label for="sp-to">${tr('spend.to')}</label><input id="sp-to" type="text" readonly autocomplete="off" aria-haspopup="dialog"></div>
+      </div>
+      <div class="fld"><label>${tr('settings.tz')}</label><div class="tzpick"><button type="button" id="sp-zone">${esc(tzLabel(cur))}</button><div class="tzlist" id="sp-zone-list" hidden></div></div></div>
+      <div class="fld"><label>${tr('col.cost')}</label><div class="spend-amt"><input id="sp-amount" inputmode="decimal" placeholder="0.00" autocomplete="off"><select id="sp-cur">${['USD','EUR','GBP','RUB','UAH'].map(c=>opt(c,c,'USD')).join('')}</select></div></div>
+      <div class="togs"><label class="tog"><input type="checkbox" id="sp-uniq"> ${tr('spend.byuniq')}</label><label class="tog"><input type="checkbox" id="sp-bots"> ${tr('Include bots')}</label></div>
+      ${spendRowsHTML(groupId)}
+    </div>
+    <div class="spend-foot"><div class="spacer"></div><button type="button" data-no>${tr('Cancel')}</button><button type="button" data-yes class="primary">${tr('net.save')}</button></div></div>`);
+  let zone=cur, touched=false;
+  const stamp=p=>q('#'+p,m).dataset.wall||'';
+  const paintWall=(el, wall)=>{el.dataset.wall=wall||''; el.value=wall?spendFace(wall):''};
+  const fill=()=>{
+    const s=rangeBounds();
+    const a=wallParts(s.from, zone), b=wallParts(s.to, zone);
+    paintWall(q('#sp-from',m), a.date+'T'+a.h+':'+a.min);
+    paintWall(q('#sp-to',m), b.date+'T'+b.h+':'+b.min);
+    const id=RANGE.id||'today';
+    qa('[data-sp-period]',m).forEach(b=>b.classList.toggle('on', b.dataset.spPeriod===id));
+  };
+  const tzPick=bindTzPick(q('#sp-zone',m), q('#sp-zone-list',m), ()=>zone, z=>{zone=z; fill()});
+  const close=()=>{spendPointClose(); tzPick.close(); sc.remove(); m.remove(); if(touched) render()};
   const refresh=async()=>{await loadMoney(); const box=q('#sp-saved',m); if(!box) return; const neu=$(`<div>${spendRowsHTML(groupId)}</div>`); box.replaceWith(neu.firstElementChild); bindDel()};
   const bindDel=()=>{qa('[data-delspend]',m).forEach(b=>b.onclick=async()=>{
     try{await call('DELETE','/api/spend/'+encodeURIComponent(b.dataset.delspend)); await refresh()}
     catch(e){toast(e.message,true)}
   })};
   bindDel();
+  qa('[data-sp-period]',m).forEach(b=>b.onclick=()=>{
+    spendPointClose();
+    const id=b.dataset.spPeriod;
+    if(id==='dates'||id==='times'){
+      const prev=RANGE.id||'today';
+      const stored=(prev==='dates'||prev==='times')?{from:RANGE.from,to:RANGE.to}:null;
+      const span=rangeSeed(prev, stored, new Date(), zone);
+      applyRange(id,{from:span.from.toISOString(),to:span.to.toISOString()});
+    }else applyRange(id);
+    fill();
+  });
+  ['#sp-from','#sp-to'].forEach(sel=>{
+    const el=q(sel,m);
+    el.addEventListener('change',()=>{
+      const from=wallToDate(stamp('sp-from'), zone, false), to=wallToDate(stamp('sp-to'), zone, false);
+      if(!from||!to||!(+to>+from)) return;
+      touched=true;
+      RANGE_HOLD=null;
+      RANGE={id:'times', from:from.toISOString(), to:to.toISOString()};
+      syncHours(); paintChrome(); fill();
+    });
+    el.addEventListener('click',ev=>{
+      ev.stopPropagation();
+      spendPointOpen(el, ()=>el.dataset.wall||'', wall=>{paintWall(el, wall); el.dispatchEvent(new Event('change'))});
+    });
+  });
   sc.onclick=close; q('[data-no]',m).onclick=close;
   q('[data-yes]',m).onclick=async()=>{
     const amount=q('#sp-amount',m).value.trim().replace(',','.');
     if(!(Number(amount)>0)){toast(tr('amount must be positive'),true); return}
-    const body={group_id:groupId, zone:zone, from:q('#sp-from',m).value, to:q('#sp-to',m).value, amount, currency:q('#sp-cur',m).value, unique:q('#sp-uniq',m).checked, include_bots:q('#sp-bots',m).checked};
+    const body={group_id:groupId, zone:zone, from:stamp('sp-from'), to:stamp('sp-to'), amount, currency:q('#sp-cur',m).value, unique:q('#sp-uniq',m).checked, include_bots:q('#sp-bots',m).checked};
     try{await call('POST','/api/spend', body); toast(tr('Saved')); q('#sp-amount',m).value=''; await refresh(); if(typeof paintFlowCards==='function'&&q('#fgrid')) paintFlowCards()}
     catch(e){toast(e.message,true)}
   };
   document.body.append(sc,m);
+  fill();
 }
 function stackedPrompt(title, label, onOk){
   const sc=$('<div class="scrim" style="z-index:80"></div>');
@@ -6649,25 +6772,31 @@ function app(user){
       </div>
     </header>
     <div id="range-fields" class="rangepop" hidden>
-      <div id="range-cal" hidden></div>
-      <div class="rangerow">
-        <div class="fld"><label>${tr('spend.from')}</label><input id="range-a"></div>
-        <div class="fld"><label>${tr('spend.to')}</label><input id="range-b"></div>
+      <div class="period-tabs" id="period-tabs" role="tablist"></div>
+      <div id="range-custom" hidden>
+        <div id="range-cal" hidden></div>
+        <div class="rangerow">
+          <div class="fld"><label>${tr('spend.from')}</label><div class="when"><input id="range-a" autocomplete="off"><span class="when-clock" id="range-a-clock" hidden><input id="range-ah" inputmode="numeric" maxlength="2" aria-label="HH"><span class="when-colon">:</span><input id="range-am" inputmode="numeric" maxlength="2" aria-label="MM"></span></div></div>
+          <div class="fld"><label>${tr('spend.to')}</label><div class="when"><input id="range-b" autocomplete="off"><span class="when-clock" id="range-b-clock" hidden><input id="range-bh" inputmode="numeric" maxlength="2" aria-label="HH"><span class="when-colon">:</span><input id="range-bm" inputmode="numeric" maxlength="2" aria-label="MM"></span></div></div>
+        </div>
+        <div class="row"><div class="spacer"></div><button type="button" class="primary" id="range-ok">OK</button></div>
       </div>
-      <div class="row"><div class="spacer"></div><button type="button" class="primary" id="range-ok">OK</button></div>
     </div>
     <div id="sysnote" class="sysnote"></div>
     <main id="view"></main></div>`);
   q('#period',root).onclick=e=>{
     e.stopPropagation();
-    menu(e.currentTarget, PERIOD_IDS.map(id=>({label:tr('period.'+id), on:()=>id==='dates'||id==='times'?openCustom(id):applyRange(id)})));
+    openPeriod();
   };
   q('#range-ok',root).onclick=()=>{
-    const a=q('#range-a',root).value, b=q('#range-b',root).value;
-    if(!a||!b){toast(tr('period.need'),true);return}
+    const times=RANGE.id==='times';
+    const dayA=q('#range-a',root).value.trim(), dayB=q('#range-b',root).value.trim();
+    if(!dayA||!dayB){toast(tr('period.need'),true);return}
+    const a=times?dayA+'T'+clampClock(q('#range-ah',root).value,23)+':'+clampClock(q('#range-am',root).value,59):dayA;
+    const b=times?dayB+'T'+clampClock(q('#range-bh',root).value,23)+':'+clampClock(q('#range-bm',root).value,59):dayB;
     const from=wallToDate(a, uiTz(), false);
-    const to=wallToDate(b, uiTz(), RANGE.id==='dates');
-    if(!(+to>+from)){toast(tr('period.need'),true);return}
+    const to=wallToDate(b, uiTz(), !times);
+    if(!from||!to||!(+to>+from)){toast(tr('period.need'),true);return}
     RANGE_HOLD=null;
     q('#range-fields',root).hidden=true;
     applyRange(RANGE.id,{from:from.toISOString(),to:to.toISOString()});
@@ -10683,6 +10812,66 @@ function periodSpan(id, now, tz){
     case 'all': return {from:new Date('2000-01-01T00:00:00Z'), to:end};
     default: return {from:new Date(+end-24*3600000), to:end};
   }
+}
+function pad2(n){return String(Math.max(0, n|0)).padStart(2,'0')}
+/** clampClock keeps a typed hour or minute inside 0..max as two digits.
+ * v is the field text. max is 23 for hours and 59 for minutes. A blank field is 00.
+ * @param {string} v field text
+ * @param {number} max upper bound
+ * @returns {string} two digits
+ */
+function clampClock(v, max){
+  let n=parseInt(v,10);
+  if(!isFinite(n)) n=0;
+  n=Math.max(0, Math.min(max, n));
+  return pad2(n);
+}
+/** wallParts splits an instant into the calendar day and the clock in one zone.
+ * date is the instant. tz is the IANA zone; an empty zone is UTC.
+ * @param {Date} date instant
+ * @param {string} tz IANA zone
+ * @returns {{date:string,h:string,min:string}} yyyy-mm-dd and two-digit hour and minute
+ */
+function wallParts(date, tz){
+  const p=zonedParts(date, tz||'UTC');
+  return {date:p.y+'-'+pad2(p.m)+'-'+pad2(p.d), h:pad2(p.h), min:pad2(p.min)};
+}
+/** rangeSeed is the custom range the period tabs open with.
+ * prev is the period that was selected. stored holds from and to when prev is already a custom range.
+ * A preset becomes that preset's span, so today runs from 00:00 to now. A saved custom range is kept.
+ * @param {string} prev period id before the custom tab
+ * @param {{from?:string,to?:string}|null} stored saved custom ends
+ * @param {Date} now clock
+ * @param {string} tz statistics zone
+ * @returns {{from:Date,to:Date}} the range to show
+ */
+function rangeSeed(prev, stored, now, tz){
+  if((prev==='dates'||prev==='times') && stored && stored.from && stored.to){
+    const from=new Date(stored.from), to=new Date(stored.to);
+    if(+to>+from) return {from,to};
+  }
+  const id=prev && prev!=='dates' && prev!=='times' ? prev : 'today';
+  return periodSpan(id, now||new Date(), tz);
+}
+/** seedRangeFields fills the custom range from rangeSeed and shows the clock only for a time range.
+ * id is dates or times. It returns nothing. Missing fields are skipped.
+ * @param {string} id custom period id
+ * @returns {void}
+ */
+function seedRangeFields(id){
+  const span=rangeSeed(RANGE_HOLD, {from:RANGE.from, to:RANGE.to}, new Date(), uiTz());
+  const a=wallParts(span.from, uiTz()), b=wallParts(span.to, uiTz());
+  const times=id==='times';
+  const set=(sel,v)=>{const el=q(sel); if(el) el.value=v};
+  set('#range-a', a.date);
+  set('#range-b', b.date);
+  set('#range-ah', times?a.h:'00');
+  set('#range-am', times?a.min:'00');
+  set('#range-bh', times?b.h:'00');
+  set('#range-bm', times?b.min:'00');
+  const ac=q('#range-a-clock'), bc=q('#range-b-clock');
+  if(ac) ac.hidden=!times;
+  if(bc) bc.hidden=!times;
 }
 
 /**
@@ -18769,7 +18958,7 @@ function dpLocale(){
  * @returns {object} air-datepicker options
  */
 function dpOptions(timepicker){
-  return {locale:dpLocale(), dateFormat:timepicker?dpIso:'yyyy-MM-dd', timeFormat:'HH:mm', timepicker, autoClose:!timepicker, keyboardNav:true, toggleSelected:false, classes:'adp-app', buttons:['today','clear']};
+  return {locale:dpLocale(), dateFormat:timepicker?dpIso:'yyyy-MM-dd', timeFormat:'HH:mm', timepicker, autoClose:!timepicker, keyboardNav:true, toggleSelected:false, classes:'adp-app', buttons:['clear']};
 }
 
 /** dpIso formats a Date as YYYY-MM-DDTHH:mm in local time, the datetime-local value format.
@@ -18823,23 +19012,31 @@ async function dpBind(el){
   });
 }
 
-/** dpBindRange prepares the header range popover. Dates use one inline range calendar synced with #range-a and #range-b;
- * times use a popup picker with time on each input. A failed library load keeps the native inputs.
+/** dpBindRange prepares the header range popover. Dates and times share one inline range calendar on #range-a and #range-b.
+ * A time range keeps its hour and minute in the clock fields beside those days. A failed library load keeps the fields for typing.
  * @param {string} id 'dates' or 'times'
  * @returns {Promise<void>} never rejects
  */
 async function dpBindRange(id){
   const a=q('#range-a'), b=q('#range-b'), cal=q('#range-cal');
   if(!a||!b||!cal) return;
-  const times=id==='times';
   if(DP_RANGE){DP_RANGE.destroy(); DP_RANGE=null}
-  [a,b].forEach(el=>{dpUnbind(el); el.onchange=null; el.type=times?'datetime-local':'date'});
+  [a,b].forEach(el=>{dpUnbind(el); el.onchange=null; el.type='text'});
   cal.hidden=true;
-  if(times){dpBind(a); dpBind(b); return}
   const dp=await dpRangeCal(a,b,cal,()=>RANGE.id===id);
   if(!dp) return;
   if(DP_RANGE) DP_RANGE.destroy();
   DP_RANGE=dp;
+}
+
+/** dpInline builds the one inline calendar. opts are added to the date-only skin: no time slider and no Today button.
+ * cal is the host element. opts may set range, selected dates and onSelect.
+ * @param {Element} cal host
+ * @param {object} opts extra air-datepicker options
+ * @returns {object} the picker
+ */
+function dpInline(cal, opts){
+  return new AirDatepicker(cal,{...dpOptions(false), inline:true, classes:'adp-app adp-inline', ...opts});
 }
 
 /** dpRangeCal draws one inline range calendar into cal and keeps it in sync with the start input a and the end input b.
@@ -18856,7 +19053,7 @@ async function dpRangeCal(a,b,cal,alive){
   [a,b].forEach(el=>{el.type='text'; el.autocomplete='off'; el.placeholder='yyyy-mm-dd'});
   let sync=false;
   const sel=[a.value,b.value].map(dpParse).filter(Boolean);
-  const dp=new AirDatepicker(cal,{...dpOptions(false), inline:true, range:true, classes:'adp-app adp-inline', selectedDates:sel,
+  const dp=dpInline(cal,{range:true, selectedDates:sel,
     onSelect:({formattedDate})=>{
       if(sync) return;
       const f=[].concat(formattedDate||[]);
@@ -18916,6 +19113,92 @@ function rangePopClose(cancel){
   pop.cal.hidden=true;
   pop.box.hidden=true;
   pop.anchor.setAttribute('aria-expanded','false');
+}
+
+/** SPEND_PT is the open cost-field calendar, or null. Start and end share it. */
+let SPEND_PT=null;
+
+/** spendFace writes a wall time YYYY-MM-DDTHH:mm as a short date and a clock.
+ * The numbers stay that wall time: they are not shifted into another zone.
+ * @param {string} wall YYYY-MM-DDTHH:mm
+ * @returns {string} empty when wall is empty or malformed
+ */
+function spendFace(wall){
+  const d=dpParse(wall);
+  if(!d) return '';
+  const p=n=>String(n).padStart(2,'0');
+  let date;
+  try{date=new Intl.DateTimeFormat(uiLang(),{year:'numeric',month:'2-digit',day:'2-digit'}).format(d)}
+  catch(e){date=p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()}
+  return date+', '+p(d.getHours())+':'+p(d.getMinutes());
+}
+
+/** spendPointOpen opens the shared day calendar on one cost field, with hour and minute fields under it.
+ * anchor is the start or end field. getWall reads YYYY-MM-DDTHH:mm. setWall writes that string and the readable face.
+ * A second call on the same field closes it. There is no Today button and no time slider.
+ * @param {HTMLElement} anchor field
+ * @param {function(): string} getWall current wall time
+ * @param {function(string): void} setWall stores the wall time, or empty when the day is cleared
+ * @returns {void}
+ */
+function spendPointOpen(anchor, getWall, setWall){
+  if(SPEND_PT&&SPEND_PT.anchor===anchor){spendPointClose(); return}
+  spendPointClose();
+  const wall=getWall()||'';
+  const parsed=dpParse(wall);
+  const box=document.createElement('div');
+  box.className='rangepop spend-point';
+  box.innerHTML=`<div class="spend-point-cal"></div>
+    <div class="when-clock spend-point-time">
+      <input class="sp-h" inputmode="numeric" maxlength="2" aria-label="HH" value="${parsed?pad2(parsed.getHours()):'00'}">
+      <span class="when-colon">:</span>
+      <input class="sp-m" inputmode="numeric" maxlength="2" aria-label="MM" value="${parsed?pad2(parsed.getMinutes()):'00'}">
+    </div>`;
+  document.body.append(box);
+  const h=q('.sp-h', box), mi=q('.sp-m', box);
+  const commit=()=>{
+    const dp=SPEND_PT&&SPEND_PT.dp;
+    if(!dp) return;
+    const d=dp.selectedDates&&dp.selectedDates[0];
+    if(!d){setWall(''); return}
+    const x=new Date(d.getFullYear(), d.getMonth(), d.getDate(), +clampClock(h.value,23), +clampClock(mi.value,59));
+    setWall(dpIso(x));
+  };
+  const pop={box, anchor, dp:null, armed:false};
+  pop.key=e=>{if(e.key!=='Escape') return; e.preventDefault(); e.stopImmediatePropagation(); spendPointClose()};
+  pop.click=e=>{if(!dpHit(e, box)&&!anchor.contains(e.target)) spendPointClose()};
+  pop.place=()=>{if(anchor.isConnected) placeBoardIconPop(box, anchor); else spendPointClose()};
+  SPEND_PT=pop;
+  box.addEventListener('pointerdown', e=>{if(e.target.closest&&e.target.closest('.spend-point-cal')) pop.armed=true}, true);
+  h.addEventListener('input', ()=>{pop.armed=true; commit()});
+  mi.addEventListener('input', ()=>{pop.armed=true; commit()});
+  h.addEventListener('change', ()=>{h.value=clampClock(h.value,23); pop.armed=true; commit()});
+  mi.addEventListener('change', ()=>{mi.value=clampClock(mi.value,59); pop.armed=true; commit()});
+  window.addEventListener('keydown', pop.key, true);
+  document.addEventListener('click', pop.click, true);
+  window.addEventListener('scroll', pop.place, true);
+  window.addEventListener('resize', pop.place);
+  pop.place();
+  dpLoad().then(()=>{
+    if(SPEND_PT!==pop||!box.isConnected) return;
+    pop.dp=dpInline(q('.spend-point-cal', box),{selectedDates:parsed?[parsed]:[], onSelect:()=>{if(pop.armed) commit()}});
+    pop.place();
+  }).catch(()=>{if(SPEND_PT===pop) spendPointClose()});
+}
+
+/** spendPointClose removes the cost-field calendar.
+ * @returns {void}
+ */
+function spendPointClose(){
+  const pop=SPEND_PT;
+  if(!pop) return;
+  SPEND_PT=null;
+  window.removeEventListener('keydown', pop.key, true);
+  document.removeEventListener('click', pop.click, true);
+  window.removeEventListener('scroll', pop.place, true);
+  window.removeEventListener('resize', pop.place);
+  if(pop.dp) pop.dp.destroy();
+  pop.box.remove();
 }
 
 /** dpHit reports whether a click landed in the box or in a picker popup. composedPath is read at dispatch time,

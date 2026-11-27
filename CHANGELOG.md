@@ -164,6 +164,8 @@ otes field (up to 10000 characters) saved with the offer; the engine ignores it.
 
 ### Fixed
 
+- Spend dialog: start and end sit on one row, the amount and its currency share one row of the same height, the time zone shows its value, and a saved cost with Delete stays above Cancel and Save. The page period is the header’s own periods. A custom range starts at 00:00 and ends at the current time, set with hour and minute fields. The calendar has no time sliders and no Today button. Clear still clears the chosen dates.
+- Spend dialog: clicking Start or End opens that same calendar for one date, with hour and minute fields. The field shows the chosen date and time. There is no separate hour box and no Today button.
 - «Settings → About»: a long commit subject and the «What’s new» text wrap inside the card, including a line with no spaces. The commit hash and the author stay visible in their own columns. That block does not widen the page.
 - Click spool: a batch parked while the storage is not connected is written when the connection comes back, including while the events table cannot deduplicate yet. A probe during that outage no longer leaves the batch marked as already stored.
 - Keitaro import: a stream action `404`, `status404` or `404_not_found` is stored as 404 Not found. The HTML body of that action is not saved as an HTML page or an `@page` file. `show_html` and `html` stay an HTML page. A redirect, an offer, a landing and do nothing stay as they were. Campaigns already saved are not rewritten.
